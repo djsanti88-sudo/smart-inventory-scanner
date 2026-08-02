@@ -5,18 +5,18 @@ import { isLiveAuth } from "@/services/auth/authMode";
 import { verifySignedPreviewChunks, type PreviewVersions } from "@/services/identity/preview";
 import { identityPluginVersions } from "@/services/identity/plugins";
 import type { ScopedIdentifier } from "@/services/identity/types";
-import { createFileAtomicLocalStorage, type AtomicLocalStorage } from "./atomicLocalStorage";
+import { createFileAtomicLocalStorage, type AtomicLocalStorage, type AtomicTransaction } from "./atomicLocalStorage";
 import { applyIdentityImport, type ApplyActor, type ApplyIdentityImportInput, type ApplyResult } from "./applyService";
 import { createLocalAggregateLedger } from "./localAggregateLedger";
 import { createLocalRepository } from "./localRepository";
 import { createLocalPreviewSigner } from "./previewSigner";
-import { loadAuthoritativeLocalIdentityReadModel, deriveAuthoritativeLinkSnapshotHash } from "./localIdentityReadModel";
+import { loadAuthoritativeLocalIdentityReadModel, loadConfiguredLocalIdentityReadModel, deriveAuthoritativeLinkSnapshotHash } from "./localIdentityReadModel";
 import { createLocalAtomicCountedApply } from "./localAtomicCountedApply";
 
 export interface LocalIdentityApplyComposition {
   storage: AtomicLocalStorage; signingKey: () => string | undefined; versions: PreviewVersions; now?: () => Date;
   authenticate(request: Request, businessId: string): Promise<ApplyActor | undefined>;
-  revalidateCountableTarget?: (input: { businessId: string; sourceSystem: string; sourceSignature: string; vendorId: string; targetProductId: string; identifiers: ScopedIdentifier[]; row: Record<string, unknown>; decision: import("@/services/identity/types").IdentityDecision; corrected: boolean }) => Promise<boolean>;
+  revalidateCountableTarget?: (input: { businessId: string; sourceSystem: string; sourceSignature: string; vendorId: string; targetProductId: string; identifiers: ScopedIdentifier[]; row: Record<string, unknown>; decision: import("@/services/identity/types").IdentityDecision; corrected: boolean }, transaction?: AtomicTransaction) => Promise<boolean>;
 }
 let injected: LocalIdentityApplyComposition | undefined;
 type Membership = ApplyActor;
@@ -37,10 +37,20 @@ async function configured(): Promise<LocalIdentityApplyComposition | undefined> 
   const root = localIdentityStorageRoot();
   const storage = createFileAtomicLocalStorage({ root });
   const repository = createLocalRepository(storage);
-  const model = await loadAuthoritativeLocalIdentityReadModel(repository); if (!model) return undefined;
+  const model = await loadAuthoritativeLocalIdentityReadModel(repository); const configuredModel = await loadConfiguredLocalIdentityReadModel(); if (!model || !configuredModel) return undefined;
   const catalogVersion = model.snapshot.catalogVersion, catalogSnapshotHash = model.snapshot.catalogSnapshotHash;
   const linkVersion = "local-snapshot-links-v1", linkSnapshotHash = model.linkSnapshotHash;
-  return { storage, signingKey: () => process.env.IDENTITY_PREVIEW_SIGNING_KEY, versions: { engineVersion: "identity-engine-v2", pluginVersions: [...identityPluginVersions], catalogVersion, catalogSnapshotHash, linkVersion, linkSnapshotHash }, revalidateCountableTarget: async (input) => {
+  return { storage, signingKey: () => process.env.IDENTITY_PREVIEW_SIGNING_KEY, versions: { engineVersion: "identity-engine-v2", pluginVersions: [...identityPluginVersions], catalogVersion, catalogSnapshotHash, linkVersion, linkSnapshotHash }, revalidateCountableTarget: async (input, transaction) => {
+    // Atomic callers already own the storage mutex. Use the immutable configured snapshot
+    // plus their transaction state; never recursively open the repository here.
+    if (await configuredModel.hasCurrentTarget({ businessId: input.businessId, sourceSystem: input.sourceSystem, sourceSignature: input.sourceSignature, vendorId: input.vendorId, targetProductId: input.targetProductId, identifiers: input.identifiers })) return true;
+    if (transaction) {
+      const links = await transaction.get<Array<{ businessId: string; sourceSystem: string; sourceSignature: string; vendorId: string; identifierType: string; namespace: string; normalizedValue: string; targetProductId: string; status: string; version: number }>>("identity-links") ?? [];
+      const products = await transaction.get<Array<{ businessId: string; productId: string }>>("identity-tenant-products") ?? [];
+      const product = products.some((item) => item.businessId === input.businessId && item.productId === input.targetProductId);
+      const current = links.filter((link) => link.businessId === input.businessId && link.sourceSystem === input.sourceSystem && link.sourceSignature === input.sourceSignature && link.vendorId === input.vendorId && input.identifiers.some((identifier) => identifier.type === link.identifierType && (identifier.namespace ?? "") === link.namespace && identifier.normalized === link.normalizedValue)).sort((left, right) => right.version - left.version)[0];
+      return Boolean(product && current?.status === "approved" && current.targetProductId === input.targetProductId);
+    }
     const current = await loadAuthoritativeLocalIdentityReadModel(repository);
     return Boolean(current && await current.hasCurrentTarget({ businessId: input.businessId, sourceSystem: input.sourceSystem, sourceSignature: input.sourceSignature, vendorId: input.vendorId, targetProductId: input.targetProductId, identifiers: input.identifiers }));
   }, authenticate: async (_request, businessId) => { const actorId = process.env.SCANBIN_LOCAL_ACTOR_ID; if (!actorId) return undefined; const member = configuredMemberships.find((membership) => membership.actorId === actorId && membership.businessId === businessId); if (!member) throw new Error("apply_nonmember"); return member; } };

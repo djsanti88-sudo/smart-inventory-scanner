@@ -61,7 +61,7 @@ function ledgerKey(businessId: string, idempotencyKey: string): string {
  */
 export function createLocalAtomicCountedApply(
   storage: AtomicLocalStorage,
-  revalidate: (input: LocalAtomicCountedApplyInput["validation"]) => Promise<boolean>,
+  revalidate: (input: LocalAtomicCountedApplyInput["validation"], transaction?: AtomicTransaction) => Promise<boolean>,
   { now = Date.now, allowedRunStates = ["applying"], writeProjection = defaultProjectionWriter }: { now?: () => number; allowedRunStates?: readonly string[]; writeProjection?: ProjectionWriter } = {},
 ): (input: LocalAtomicCountedApplyInput) => Promise<LocalAtomicCountedApplyResult> {
   return (input) => storage.transaction(async (transaction) => {
@@ -81,7 +81,7 @@ export function createLocalAtomicCountedApply(
     }
     if (existing?.state === "failed_terminal") return { kind: "idempotency_conflict" };
     if (existing?.state === "pending" && (existing.leaseExpiresAt ?? 0) > now()) return { kind: "in_progress" };
-    if (input.validation.businessId !== input.operation.businessId || input.event.businessId !== input.operation.businessId || !await revalidate(input.validation)) return { kind: "stale" };
+    if (input.validation.businessId !== input.operation.businessId || input.event.businessId !== input.operation.businessId || !await revalidate(input.validation, transaction)) return { kind: "stale" };
 
     const entries = (await transaction.get<Record<string, StoredLedgerResult>>("aggregate-ledger")) ?? {};
     const eventKey = ledgerKey(input.event.businessId, input.event.idempotencyKey), stored = entries[eventKey];

@@ -9,11 +9,12 @@ const ledgerKey = "aggregate-ledger";
 
 type StoredLedger = { event: AggregateImportEvent; idempotencyKey: string; fingerprint: string; operationFingerprint?: string };
 type StoredOperation = { businessId: string; importId: string; rowId: string; idempotencyKey: string; payloadFingerprint: string; state: "applied"; result: unknown };
-type CountPlan = { event: AggregateImportEvent; operationFingerprint: string; result: unknown };
+type CountPlan = { event: AggregateImportEvent; operationFingerprint: string; result: unknown; operationIdempotencyKey: string };
+type ConfiguredCurrentLink = Pick<IdentityLink, "businessId" | "sourceSystem" | "vendorId" | "sourceSignature" | "identifierType" | "namespace" | "normalizedValue" | "targetProductId" | "status" | "version">;
 export type LocalAtomicReviewCountedApplyInput = {
   businessId: string; reviewId: string; actionId: string; payloadFingerprint: string;
   action: ReviewAction["action"]; resolution: NonNullable<IdentityReview["resolution"]>; resolvedBy: string;
-  targetProductId?: string; link?: IdentityLink; product?: TenantIdentityProduct; count?: CountPlan;
+  targetProductId?: string; link?: IdentityLink; product?: TenantIdentityProduct; count?: CountPlan; configuredCurrentLink?: ConfiguredCurrentLink;
   /** Runs only for a new action while the same storage transaction owns the state. */
   revalidate?: (transaction: AtomicTransaction, review: IdentityReview) => Promise<boolean>;
 };
@@ -48,6 +49,24 @@ export function createLocalAtomicReviewCountedApply(storage: AtomicLocalStorage,
     if (current.resolution) return { kind: "idempotency_conflict" };
     if (input.revalidate && !await input.revalidate(transaction, current)) return { kind: "stale" };
 
+    // Every caller-supplied mutation is bound to this tenant review before any write.
+    if ((input.targetProductId && input.link && input.link.targetProductId !== input.targetProductId)
+      || (input.product && (input.product.businessId !== input.businessId || input.targetProductId !== input.product.productId))
+      || (input.link && (input.link.businessId !== input.businessId || input.link.targetProductId !== input.targetProductId))
+      || (input.action === "create_tenant_product" && (!input.product || !input.link || input.targetProductId !== input.product.productId))
+      || (input.action === "confirm_candidate" && (!input.targetProductId || !input.link))
+      || (input.action === "reject" && (input.targetProductId || input.link || input.product))) return { kind: "idempotency_conflict" };
+    if (input.count) {
+      const context = current.signedRowContext;
+      const event = input.count.event;
+      if (!context || context.mode !== "physical_count" || !input.targetProductId
+        || event.businessId !== input.businessId || event.importId !== current.importId || event.rowId !== `review-count:${current.reviewId}`
+        || event.sessionId !== context.sessionId || event.productId !== input.targetProductId || event.quantity !== context.quantity
+        || event.unitOfMeasure !== context.unitOfMeasure || event.sourceFileOrdinal !== context.sourceFileOrdinal || event.sheetName !== context.sheetName
+        || event.sourceRowNumber !== context.sourceRowNumber || event.createdAt !== context.eventCreatedAt
+        || input.count.operationIdempotencyKey !== `identity-review-count:${current.reviewId}`) return { kind: "idempotency_conflict" };
+    }
+
     let product = input.product;
     if (product) {
       const products = (await transaction.get<TenantIdentityProduct[]>(productsKey)) ?? [];
@@ -59,7 +78,15 @@ export function createLocalAtomicReviewCountedApply(storage: AtomicLocalStorage,
     if (link) {
       const links = (await transaction.get<IdentityLink[]>(linksKey)) ?? [];
       const family = links.filter((item) => item.businessId === link!.businessId && item.sourceSystem === link!.sourceSystem && item.vendorId === link!.vendorId && item.sourceSignature === link!.sourceSignature && item.identifierType === link!.identifierType && item.namespace === link!.namespace && item.normalizedValue === link!.normalizedValue);
-      const old = latest(family); previousTargetProductId = old?.status === "approved" ? old.targetProductId : undefined;
+      const durable = latest(family);
+      const configured = input.configuredCurrentLink && input.configuredCurrentLink.businessId === input.businessId
+        && input.configuredCurrentLink.sourceSystem === link.sourceSystem && input.configuredCurrentLink.vendorId === link.vendorId
+        && input.configuredCurrentLink.sourceSignature === link.sourceSignature && input.configuredCurrentLink.identifierType === link.identifierType
+        && input.configuredCurrentLink.namespace === link.namespace && input.configuredCurrentLink.normalizedValue === link.normalizedValue
+        ? input.configuredCurrentLink : undefined;
+      // A durable tombstone or approval is authoritative for its family; otherwise the immutable configured predecessor applies.
+      const old = durable ?? configured;
+      previousTargetProductId = old?.status === "approved" ? old.targetProductId : undefined;
       if ((input.action === "revoke_link" && (!old || old.status !== "approved" || old.targetProductId !== link.targetProductId)) || (input.action !== "revoke_link" && old?.status === "approved" && old.targetProductId !== link.targetProductId)) return { kind: "stale" };
       link = { ...link, version: (old?.version ?? 0) + 1, status: input.action === "revoke_link" ? "revoked" : "approved" };
       links.push(link); await transaction.set(linksKey, links);
@@ -72,14 +99,14 @@ export function createLocalAtomicReviewCountedApply(storage: AtomicLocalStorage,
       const event = stored?.event ?? input.count.event;
       if (!stored) entries[key] = { event, idempotencyKey: event.idempotencyKey, fingerprint: event.fingerprint, operationFingerprint: input.count.operationFingerprint };
       const operations = (await transaction.get<Record<string, StoredOperation>>(operationsKey)) ?? {};
-      const operation: StoredOperation = { businessId: event.businessId, importId: event.importId, rowId: event.rowId, idempotencyKey: event.idempotencyKey, payloadFingerprint: input.payloadFingerprint, state: "applied", result: input.count.result };
+      const operation: StoredOperation = { businessId: event.businessId, importId: event.importId, rowId: event.rowId, idempotencyKey: input.count.operationIdempotencyKey, payloadFingerprint: input.payloadFingerprint, state: "applied", result: input.count.result };
       const existing = operations[operationKey(operation)];
       if (existing && (existing.idempotencyKey !== operation.idempotencyKey || existing.payloadFingerprint !== operation.payloadFingerprint)) return { kind: "idempotency_conflict" };
       operations[operationKey(operation)] = existing ?? operation;
       await transaction.set(ledgerKey, entries);
       await transaction.set(operationsKey, operations);
       await writeProjection(transaction, entries, event.businessId, event.sessionId);
-      countResult = { kind: stored ? "completed" : "applied", eventId: event.eventId, quantity: event.quantity };
+      countResult = { kind: stored ? "completed" : "applied", eventId: event.eventId, quantity: event.quantity, result: existing?.result ?? input.count.result };
     }
     const resolvedAt = new Date(now()).toISOString();
     const outcome: ReviewAction["outcome"] = input.action === "confirm_candidate" ? "confirmed" : input.action === "create_tenant_product" ? "create_product" : input.action === "revoke_link" ? "revoked" : "rejected";

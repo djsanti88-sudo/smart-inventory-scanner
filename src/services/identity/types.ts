@@ -265,7 +265,7 @@ export interface ReviewAction {
   resolvedBy: string;
   resolvedAt: string;
   /** Immutable response material for an exact later-count replay. */
-  countResult?: { kind: "applied" | "completed"; eventId: string; quantity: number };
+  countResult?: { kind: "applied" | "completed"; eventId: string; quantity: number; /** Exact immutable API result for an idempotent replay. */ result: unknown };
 }
 
 export interface TenantIdentityProduct { productId: string; businessId: string; name: string; createdBy: string; createdAt: string; }

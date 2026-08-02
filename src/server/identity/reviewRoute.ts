@@ -5,9 +5,10 @@ import { NextResponse } from "next/server";
 import { isLocalIdentityApplyEnabled, localIdentityStorageRoot } from "@/server/identity/applyComposition";
 import { createFileAtomicLocalStorage } from "@/server/identity/atomicLocalStorage";
 import { createLocalRepository, type LocalIdentityRepository } from "@/server/identity/localRepository";
-import { deriveAuthoritativeLinkSnapshotHash, loadAuthoritativeLocalIdentityReadModel, type CurrentApprovedIdentityLink } from "@/server/identity/localIdentityReadModel";
+import { deriveAuthoritativeLinkSnapshotHash, loadAuthoritativeLocalIdentityReadModel, loadConfiguredLocalIdentityReadModel, type CurrentApprovedIdentityLink } from "@/server/identity/localIdentityReadModel";
 import type { ApplyActor } from "@/server/identity/applyService";
 import { createLocalAtomicCountedApply, type LocalAtomicCountedApplyInput, type LocalAtomicCountedApplyResult } from "@/server/identity/localAtomicCountedApply";
+import { createLocalAtomicReviewCountedApply, type LocalAtomicReviewCountedApplyInput, type LocalAtomicReviewCountedApplyResult } from "@/server/identity/localAtomicReviewCountedApply";
 import { createAggregateImportEvent } from "@/services/identity/importLedger";
 import type { IdentityLink, IdentityReview, TenantIdentityProduct } from "@/services/identity/types";
 import { canonicalSha256, isValidIdentityNamespace } from "@/services/identity/canonical";
@@ -36,8 +37,9 @@ const defaultAtomicCountedRow = createLocalAtomicCountedApply(defaultStorage, as
     targetProductId: validation.targetProductId, identifiers: validation.identifiers,
   }));
 }, { allowedRunStates: ["completed"] });
+const defaultAtomicReviewApply = createLocalAtomicReviewCountedApply(defaultStorage);
 
-type Dependencies = { enabled: () => boolean; authorize: (request: Request, businessId: string) => Promise<ApplyActor | undefined>; repository: ReviewRepository; currentVersions: (businessId?: string) => Promise<Versions>; currentModel?: () => ReturnType<typeof loadAuthoritativeLocalIdentityReadModel>; currentApprovedLinks?: (businessId: string) => Promise<CurrentApprovedIdentityLink[]>; pageCurrentApprovedLinks?: (businessId: string, input: { page: number; pageSize: number }) => Promise<{ items: CurrentApprovedIdentityLink[]; total: number }>; atomicCountedRow?: (input: LocalAtomicCountedApplyInput) => Promise<LocalAtomicCountedApplyResult> };
+type Dependencies = { enabled: () => boolean; authorize: (request: Request, businessId: string) => Promise<ApplyActor | undefined>; repository: ReviewRepository; currentVersions: (businessId?: string) => Promise<Versions>; currentModel?: () => ReturnType<typeof loadAuthoritativeLocalIdentityReadModel>; configuredModel?: () => ReturnType<typeof loadConfiguredLocalIdentityReadModel>; currentApprovedLinks?: (businessId: string) => Promise<CurrentApprovedIdentityLink[]>; pageCurrentApprovedLinks?: (businessId: string, input: { page: number; pageSize: number }) => Promise<{ items: CurrentApprovedIdentityLink[]; total: number }>; atomicCountedRow?: (input: LocalAtomicCountedApplyInput) => Promise<LocalAtomicCountedApplyResult>; atomicReviewApply?: (input: LocalAtomicReviewCountedApplyInput) => Promise<LocalAtomicReviewCountedApplyResult> };
 type Action = "confirm_candidate" | "reject" | "create_tenant_product" | "revoke_link";
 type Bucket = "automatic" | "review" | "abstain" | "non_product" | "invalid";
 const bucketValues = new Set<Bucket>(["automatic", "review", "abstain", "non_product", "invalid"]);
@@ -166,12 +168,30 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
       if (atomic.kind === "idempotency_conflict") return json({ error: "The approved row count conflicts with an earlier action." }, 409);
       return json({ ...applied, laterCount: { kind: atomic.kind, eventId: atomic.event.eventId, quantity: atomic.event.quantity } });
     };
-    if (body.action === "reject") return json(await apply("rejected"));
+    const applyAtomically = async (resolution: NonNullable<IdentityReview["resolution"]>, targetProductId?: string, link?: IdentityLink, product?: TenantIdentityProduct, configuredCurrentLink?: LocalAtomicReviewCountedApplyInput["configuredCurrentLink"]): Promise<NextResponse | undefined> => {
+      if (!dependencies.atomicReviewApply) return undefined;
+      let count: LocalAtomicReviewCountedApplyInput["count"];
+      const context = review.signedRowContext;
+      if (targetProductId && context?.mode === "physical_count") {
+        if (!review.scope) throw new Error("review_counting_unavailable");
+        const countRowId = `review-count:${review.reviewId}`;
+        const event = await createAggregateImportEvent({ businessId: scope, importId: review.importId, rowId: countRowId, sessionId: context.sessionId, quantity: context.quantity, sourceFileOrdinal: context.sourceFileOrdinal, sheetName: context.sheetName, sourceRowNumber: context.sourceRowNumber, createdAt: context.eventCreatedAt, mode: "physical_count", decision: { kind: "review", approvedProductId: targetProductId } });
+        const operationFingerprint = await canonicalSha256({ reviewId: review.reviewId, payloadFingerprint, eventFingerprint: event.fingerprint });
+        count = { event, operationFingerprint, operationIdempotencyKey: `identity-review-count:${review.reviewId}`, result: { row: { rowId: review.rowId, status: "counted", eventId: event.eventId, audit: { action: "counted", sourceQuantity: context.quantity, targetProductId, decisionKind: "review", decisionFingerprint: review.decision.decisionFingerprint, evidenceSnapshot: review.decision.decisionBasis, constraintSnapshot: review.decision.constraintOutcomes } } } };
+      }
+      const atomic = await dependencies.atomicReviewApply({ businessId: scope, reviewId: review.reviewId, actionId, payloadFingerprint, action: body!.action, resolution, resolvedBy: actor.actorId, ...(targetProductId ? { targetProductId } : {}), ...(link ? { link } : {}), ...(product ? { product } : {}), ...(count ? { count } : {}), ...(configuredCurrentLink ? { configuredCurrentLink } : {}) });
+      if (atomic.kind === "stale") return json({ error: "The selected target is stale or no longer supported by its exact identifier." }, 409);
+      if (atomic.kind === "idempotency_conflict") return json({ error: "The identity review changed before this action could be applied." }, 409);
+      if (atomic.kind !== "applied" && atomic.kind !== "replayed") throw new Error("invalid_atomic_review_result");
+      return json({ review: atomic.review, ...(atomic.link ? { link: atomic.link } : {}), ...(atomic.product ? { product: atomic.product } : {}), action: atomic.action, ...(atomic.action.countResult ? { laterCount: atomic.action.countResult } : {}) });
+    };
+    if (body.action === "reject") return (await applyAtomically("rejected")) ?? json(await apply("rejected"));
     if (body.action === "create_tenant_product") {
       const name = body.name?.trim(); if (!name || name.length > 200) return json({ error: "A tenant product name is required." }, 400);
       const product: TenantIdentityProduct = { productId: `tenant:${randomUUID()}`, businessId: scope, name, createdBy: actor.actorId, createdAt: new Date().toISOString() };
       const key = creationIdentifierFamily(review); if (!key || !review.scope) return json({ error: "The review has no durable identifier." }, 409);
       const versions = await dependencies.currentVersions(scope); const link: IdentityLink = { businessId: scope, sourceSystem: review.scope.sourceSystem, vendorId: review.scope.vendorId, sourceSignature: review.scope.sourceSignature, identifierType: key.type, namespace: key.namespace ?? "", rawValue: key.value, normalizedValue: key.value, targetProductId: product.productId, status: "approved", evidence: [...review.decision.decisionBasis.map((basis) => basis.evidenceId), `catalog:${versions.catalogVersion}`, `links:${versions.linkVersion}`, `review:${review.reviewId}`], createdBy: actor.actorId, createdAt: new Date().toISOString(), approvedBy: actor.actorId, approvedAt: new Date().toISOString(), version: 1 };
+      const atomic = await applyAtomically("create_product", product.productId, link, product); if (atomic) return atomic;
       const applied = await apply("create_product", link, product);
       return countLaterApproval(product.productId, applied as Record<string, unknown>);
     }
@@ -179,18 +199,21 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
     if (!candidate || !review.scope) return json({ error: "The selected candidate is not available for this review." }, 409);
     const targetProductId = candidate.productId;
     const key = candidate.identifierFamily; if (!key) return json({ error: "The review has no durable candidate identifier." }, 409);
-    const model = dependencies.currentModel ? await dependencies.currentModel() : undefined;
-    if (dependencies.currentModel && (!model || !await model.hasCurrentTarget({ businessId: scope, sourceSystem: review.scope.sourceSystem, sourceSignature: review.scope.sourceSignature, vendorId: review.scope.vendorId, targetProductId, identifiers: [{ type: key.type, raw: key.value, normalized: key.value, namespace: key.namespace, source: "review", evidenceAuthority: "vendor_import", evidenceId: review.reviewId, evidenceVersion: review.decision.decisionFingerprint }] }))) return json({ error: "The selected target is stale or no longer supported by its exact identifier." }, 409);
+    const model = dependencies.configuredModel ? await dependencies.configuredModel() : dependencies.currentModel ? await dependencies.currentModel() : undefined;
+    if ((dependencies.configuredModel || dependencies.currentModel) && (!model || !await model.hasCurrentTarget({ businessId: scope, sourceSystem: review.scope.sourceSystem, sourceSignature: review.scope.sourceSignature, vendorId: review.scope.vendorId, targetProductId, identifiers: [{ type: key.type, raw: key.value, normalized: key.value, namespace: key.namespace, source: "review", evidenceAuthority: "vendor_import", evidenceId: review.reviewId, evidenceVersion: review.decision.decisionFingerprint }] }))) return json({ error: "The selected target is stale or no longer supported by its exact identifier." }, 409);
     const versions = await dependencies.currentVersions(scope);
-    if (body.action !== "revoke_link" && dependencies.repository.listCurrentIdentityLinks) {
+    if (!dependencies.atomicReviewApply && body.action !== "revoke_link" && dependencies.repository.listCurrentIdentityLinks) {
       const current = (await dependencies.repository.listCurrentIdentityLinks(scope)).find((link) => link.sourceSystem === review.scope!.sourceSystem && link.vendorId === review.scope!.vendorId && link.sourceSignature === review.scope!.sourceSignature && link.identifierType === key.type && link.namespace === (key.namespace ?? "") && link.normalizedValue === key.value);
       if (current?.status === "approved" && current.targetProductId !== targetProductId) return json({ error: "The approved identity link is no longer current." }, 409);
     }
-    if (body.action === "revoke_link" && dependencies.repository.listCurrentIdentityLinks) {
+    if (!dependencies.atomicReviewApply && body.action === "revoke_link" && dependencies.repository.listCurrentIdentityLinks) {
       const current = (await dependencies.repository.listCurrentIdentityLinks(scope)).find((link) => link.sourceSystem === review.scope!.sourceSystem && link.vendorId === review.scope!.vendorId && link.sourceSignature === review.scope!.sourceSignature && link.identifierType === key.type && link.namespace === (key.namespace ?? "") && link.normalizedValue === key.value);
       if (!current || current.status !== "approved" || current.targetProductId !== targetProductId) return json({ error: "The approved identity link is no longer current." }, 409);
     }
     const link: IdentityLink = { businessId: scope, sourceSystem: review.scope.sourceSystem, vendorId: review.scope.vendorId, sourceSignature: review.scope.sourceSignature, identifierType: key.type, namespace: key.namespace ?? "", rawValue: key.value, normalizedValue: key.value, targetProductId, status: body.action === "revoke_link" ? "revoked" : "approved", evidence: [...review.decision.decisionBasis.map((basis) => basis.evidenceId), `catalog:${versions.catalogVersion}`, `links:${versions.linkVersion}`, `review:${review.reviewId}`], createdBy: actor.actorId, createdAt: new Date().toISOString(), ...(body.action === "confirm_candidate" ? { approvedBy: actor.actorId, approvedAt: new Date().toISOString() } : {}), version: 0 };
+    const configuredMatches = model ? await model.lookupApprovedLinks({ businessId: scope, sourceSystem: review.scope.sourceSystem, sourceSignature: review.scope.sourceSignature, vendorId: review.scope.vendorId, identifiers: [{ type: key.type, raw: key.value, normalized: key.value, ...(key.namespace ? { namespace: key.namespace } : {}), source: "review", evidenceAuthority: "vendor_import", evidenceId: review.reviewId, evidenceVersion: review.decision.decisionFingerprint }] }) : [];
+    const configuredCurrentLink = configuredMatches.find((item) => item.status === "approved" && item.identifierType === key.type && item.namespace === (key.namespace ?? "") && item.normalizedValue === key.value);
+    const atomic = await applyAtomically(body.action === "revoke_link" ? "rejected" : "confirmed", targetProductId, link, undefined, configuredCurrentLink); if (atomic) return atomic;
     const applied = await apply(body.action === "revoke_link" ? "rejected" : "confirmed", link);
     return body.action === "confirm_candidate" ? countLaterApproval(targetProductId, applied as Record<string, unknown>) : json(applied);
     } catch (error) { if (error instanceof Error && /identity_(?:review_(?:action_conflict|terminal|revoke_conflict|target_conflict)|link_revoke_conflict)/.test(error.message)) return json({ error: "The identity review changed before this action could be applied." }, 409); return json({ error: "Unable to update identity review." }, 500); }
@@ -199,4 +222,4 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
 
 async function defaultCurrentApprovedLinks(businessId: string): Promise<CurrentApprovedIdentityLink[]> { const model = await defaultModel(); return model?.listCurrentApprovedLinks ? model.listCurrentApprovedLinks(businessId) : []; }
 async function defaultPageCurrentApprovedLinks(businessId: string, input: { page: number; pageSize: number }) { const model = await defaultModel(); if (!model?.pageCurrentApprovedLinks) return { items: [] as CurrentApprovedIdentityLink[], total: 0 }; return model.pageCurrentApprovedLinks(businessId, input); }
-export const defaultIdentityReviewRoute = createIdentityReviewRoute({ enabled: isLocalIdentityApplyEnabled, authorize: async (_request, businessId) => actorFromEnvironment(businessId), repository: defaultRepository, currentVersions: defaultVersions, currentModel: defaultModel, currentApprovedLinks: defaultCurrentApprovedLinks, pageCurrentApprovedLinks: defaultPageCurrentApprovedLinks, atomicCountedRow: defaultAtomicCountedRow });
+export const defaultIdentityReviewRoute = createIdentityReviewRoute({ enabled: isLocalIdentityApplyEnabled, authorize: async (_request, businessId) => actorFromEnvironment(businessId), repository: defaultRepository, currentVersions: defaultVersions, currentModel: defaultModel, configuredModel: loadConfiguredLocalIdentityReadModel, currentApprovedLinks: defaultCurrentApprovedLinks, pageCurrentApprovedLinks: defaultPageCurrentApprovedLinks, atomicCountedRow: defaultAtomicCountedRow, atomicReviewApply: defaultAtomicReviewApply });

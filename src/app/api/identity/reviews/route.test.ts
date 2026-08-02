@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { createIdentityReviewRoute } from "@/server/identity/reviewRoute";
 import { canonicalSha256 } from "@/services/identity/canonical";
+import { createMemoryAtomicLocalStorage } from "@/server/identity/atomicLocalStorage";
+import { createLocalAtomicReviewCountedApply } from "@/server/identity/localAtomicReviewCountedApply";
 
 const review = {
   reviewId: "review-1", businessId: "shop-a", importId: "import-1", rowId: "row-1",
@@ -76,6 +78,30 @@ describe("identity review route", () => {
       event: expect.objectContaining({ kind: "aggregate_import", quantity: 7, productId: "tire-a", sessionId: "identity-import:import-1" }),
       operation: expect.objectContaining({ idempotencyKey: "identity-review-count:review-1" }),
     }));
+  });
+
+  it("uses the atomic review coordinator for a counted approval instead of split legacy mutations", async () => {
+    const storage = createMemoryAtomicLocalStorage();
+    const countedReview = {
+      ...review,
+      signedRowContext: { mode: "physical_count" as const, quantity: 7, unitOfMeasure: "each" as const, sourceFileOrdinal: 0, sheetName: "Stock", sourceRowNumber: 2, sessionId: "identity-import:import-1", eventCreatedAt: "2026-07-31T00:01:00.000Z", identifiers: [] },
+    };
+    await storage.transaction(async (tx) => {
+      await tx.set("identity-reviews", [countedReview]);
+      await tx.set("identity-runs", [{ businessId: "shop-a", importId: "import-1", state: "completed" }]);
+    });
+    const applyReviewAction = vi.fn();
+    const atomicReviewApply = createLocalAtomicReviewCountedApply(storage, { writeProjection: async () => {} });
+    const { handler } = route({
+      repository: { listIdentityReviews: vi.fn().mockResolvedValue([countedReview]), applyReviewAction } as never,
+      atomicReviewApply,
+    } as never);
+
+    const response = await handler(new Request("http://local/api/identity/reviews", { method: "POST", headers: { "Idempotency-Key": "atomic-confirm" }, body: JSON.stringify({ businessId: "shop-a", action: "confirm_candidate", reviewId: "review-1", targetProductId: "tire-a" }) }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ action: { actionId: "atomic-confirm", targetProductId: "tire-a" }, laterCount: { eventId: expect.any(String), quantity: 7 } });
+    expect(applyReviewAction).not.toHaveBeenCalled();
   });
 
   it("returns an exact durable replay before calling current-model freshness", async () => {
