@@ -12,6 +12,10 @@ on:
   pull_request:
     branches: [master]
 
+# The mock E2E job only reads the checkout and uploads an artifact.
+permissions:
+  contents: read
+
 # One run per ref; a new push cancels the previous in-flight run.
 concurrency:
   group: playwright-${{ github.ref }}

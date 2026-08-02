@@ -36,6 +36,10 @@ on:
   pull_request:
     branches: [master]
 
+# CI only reads the repository checkout; do not inherit repository-default write scopes.
+permissions:
+  contents: read
+
 # One run per ref; a new push cancels the previous in-flight run.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}

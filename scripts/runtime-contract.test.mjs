@@ -37,6 +37,14 @@ test("owned workflows use Node 22 only", () => {
   assert.equal(pins.length, 6, "exactly six Node 22 setup-node pins are required");
 });
 
+test("owned workflows restrict the token to read-only repository contents", () => {
+  for (const [name, body] of Object.entries(workflows)) {
+    const permissionBlock = body.match(/^permissions:\s*\n((?: {2}[^\n]*\n?)*)/m)?.[1];
+    assert.ok(permissionBlock, `${name} must set a top-level permissions block`);
+    assert.equal(permissionBlock.trim(), "contents: read", `${name} must grant only contents: read`);
+  }
+});
+
 test("every action reference in owned workflows is immutable and has the expected inventory", () => {
   const actionRefs = (body) => [...body.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)/gm)].map((match) => match[1]);
   const inventories = {
