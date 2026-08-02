@@ -17,7 +17,7 @@ vi.mock("@/lib/auth", () => ({
   listMemberships: (...args: unknown[]) => mocks.listMemberships(...args),
 }));
 vi.mock("@/stores/scanPersistNamespace", () => ({
-  hasLegacyBlob: () => false,
+  inspectLegacyAdoptionCandidate: () => Promise.resolve("absent"),
   persistKeyForUid: () => "sis-scan-user",
 }));
 vi.mock("@/stores/scanPersistStorage", () => ({

@@ -7,17 +7,8 @@ import { useScanStore } from "@/stores/scanStore";
 import { getSession, listMemberships } from "@/lib/auth";
 import { getSelectedBusinessId, isFirebaseBackend } from "@/lib/selectedBusiness";
 import { isLiveAuth } from "@/services/auth/authMode";
-import { hasLegacyBlob, persistKeyForUid } from "@/stores/scanPersistNamespace";
+import { inspectLegacyAdoptionCandidate, persistKeyForUid } from "@/stores/scanPersistNamespace";
 import { getAuthoritativePersistFallback, getPersistedStatePresence, type PersistedStatePresence } from "@/stores/scanPersistStorage";
-
-function readLegacyBlobPresence(): PersistedStatePresence {
-  if (typeof window === "undefined") return "absent";
-  try {
-    return hasLegacyBlob(window.localStorage) ? "found" : "absent";
-  } catch {
-    return "unavailable";
-  }
-}
 
 function readLocalKeyState(key: string): { presence: PersistedStatePresence; authoritativeFallback: boolean } {
   if (typeof window === "undefined") return { presence: "absent", authoritativeFallback: false };
@@ -43,6 +34,7 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const isBusinessSetupRoute = pathname === "/business";
   const bootstrapStarted = useRef(false);
+  const adoptionInFlight = useRef(false);
   const businessContextReady = useScanStore((s) => s.businessContextReady);
   const businessDataLoaded = useScanStore((s) => s.businessDataLoaded);
   const setBusinessContext = useScanStore((s) => s.setBusinessContext);
@@ -77,7 +69,7 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
         if (!membership) { completed = true; setStatus("no-business"); return; }
 
         // Legacy pre-account data on this browser + no per-uid key yet: the OWNER decides.
-        const legacyPresence = readLegacyBlobPresence();
+        const legacyPresence = await inspectLegacyAdoptionCandidate();
         const uidPersistKey = persistKeyForUid(user.uid);
         const localUidState = readLocalKeyState(uidPersistKey);
         // The ownership marker is deliberately tiny and can be stale. Always inspect the durable
@@ -86,7 +78,7 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
         const durablePresence = await getPersistedStatePresence(uidPersistKey);
         const alreadyOwn = localUidState.presence !== "absent" || durablePresence !== "absent";
         if (!active) return;
-        if (durablePresence === "unavailable" && !localUidState.authoritativeFallback) {
+        if (legacyPresence === "unavailable" || (durablePresence === "unavailable" && !localUidState.authoritativeFallback)) {
           completed = true;
           setStatus("error");
           return;
@@ -151,9 +143,21 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
             type="button"
             data-testid="adopt-data"
             onClick={async () => {
-              await useScanStore.getState().adoptLegacyLocalData(pendingCtx.uid);
-              setBusinessContext(pendingCtx.businessId, pendingCtx.uid);
-              setStatus("ready");
+              if (adoptionInFlight.current) return;
+              adoptionInFlight.current = true;
+              try {
+                const result = await useScanStore.getState().adoptLegacyLocalData(pendingCtx.uid);
+                if (result.status !== "adopted") {
+                  setStatus("error");
+                  return;
+                }
+                setBusinessContext(pendingCtx.businessId, pendingCtx.uid);
+                setStatus("ready");
+              } catch {
+                setStatus("error");
+              } finally {
+                adoptionInFlight.current = false;
+              }
             }}
             className="inline-flex min-h-[40px] items-center rounded-lg bg-amber-600 px-3 font-medium text-white hover:bg-amber-700"
           >

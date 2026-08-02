@@ -89,7 +89,7 @@ import { buildPersistedScanState, type PersistableScanState } from "@/stores/sca
 import { createAsyncDurablePersistStorage, createNativeIndexedDbDatabase, setBrowserPersistenceStatus, type PersistenceClearResult } from "@/stores/scanPersistStorage";
 import { emptyTenantState } from "@/stores/scanReset";
 import { clearSelectedBusinessId } from "@/lib/selectedBusiness";
-import { persistKeyForUid, migrateLegacyBlobOnce } from "@/stores/scanPersistNamespace";
+import { adoptLegacyPersistedState, persistKeyForUid, type LegacyAdoptionResult } from "@/stores/scanPersistNamespace";
 import { getOrCreateDeviceId } from "@/services/deviceIdentity";
 import { shouldReuseSession, buildAutoSessionName } from "@/services/sessions/autoSession";
 import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
@@ -736,7 +736,7 @@ export interface ScanState {
    *  that resolves once rehydrate has applied, so callers can await it before reading state. */
   rehydrateForUid: (uid: string) => Promise<void>;
   /** Owner-initiated: migrate the legacy pre-account blob into this uid's key, then rehydrate. */
-  adoptLegacyLocalData: (uid: string) => Promise<void>;
+  adoptLegacyLocalData: (uid: string) => Promise<LegacyAdoptionResult>;
   startSession: (name: string, location: string) => void;
   /** Mark the current session completed (status=completed, completedAt set) and persist it. */
   finishSession: () => void;
@@ -1861,18 +1861,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         return Promise.resolve();
       },
 
-      adoptLegacyLocalData: (uid: string) => {
-        if (typeof window === "undefined") return Promise.resolve();
-        // OWNER-INITIATED adopt: copy sis-scan-v1 into this uid's key (normalizing quantityDelta:0),
-        // DELETE the legacy blob, then hydrate from the adopted key. Returns the rehydrate promise so
-        // callers can await it before setBusinessContext (same ordering rule as the main gate path).
-        try {
-          migrateLegacyBlobOnce(uid, window.localStorage);
-        } catch {
-          // Private-mode localStorage can be unavailable. Rehydrate still safely checks IndexedDB;
-          // there is simply no synchronous legacy handoff source to adopt in this browser.
-        }
-        return get().rehydrateForUid(uid);
+      adoptLegacyLocalData: async (uid: string) => {
+        // OWNER-INITIATED adopt through the durable persistence authority. Context activation is the
+        // caller's responsibility and must happen only after this returns adopted.
+        const result = await adoptLegacyPersistedState(uid);
+        if (result.status === "adopted") await get().rehydrateForUid(uid);
+        return result;
       },
 
       recordFeedback: (type, payload) =>

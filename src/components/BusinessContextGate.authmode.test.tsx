@@ -13,7 +13,7 @@ vi.mock("@/lib/auth", () => ({
   listMemberships: vi.fn().mockResolvedValue([]),
 }));
 vi.mock("@/stores/scanPersistNamespace", () => ({
-  hasLegacyBlob: () => false,
+  inspectLegacyAdoptionCandidate: () => Promise.resolve("absent"),
   persistKeyForUid: (uid: string | null) => (uid ? `sis-scan-${uid}` : "sis-scan-v1"),
 }));
 vi.mock("@/stores/scanStore", () => ({

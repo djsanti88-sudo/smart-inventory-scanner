@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAsyncDurablePersistStorage, createAsyncDurableStorage, createNativeIndexedDbDatabase, getAuthoritativePersistFallback, getPersistedStatePresence, getPersistedStatePresenceFromDatabase, type AsyncKeyValueDatabase } from "@/stores/scanPersistStorage";
+import { createLegacyAdoptionOperations } from "@/stores/scanPersistNamespace";
 
 class Db implements AsyncKeyValueDatabase {
   values = new Map<string, string>(); fail = false;
@@ -961,6 +962,135 @@ describe("active async persistence adapter", () => {
     expect(await db.get("sis-scan-owner")).toBe("durable scan");
     expect(status).toHaveBeenCalledWith("available");
     expect(status).not.toHaveBeenCalledWith("degraded");
+  });
+});
+
+describe("durable legacy adoption", () => {
+  it("adopts a durable-only anonymous snapshot after normalizing zero-delta scans", async () => {
+    const db = new Db();
+    const source = JSON.stringify({
+      state: { scanFeed: [{ id: "scan-1", productId: "p-1", quantityDelta: 0 }], finalCounts: [{ productId: "p-1", quantity: 1 }] },
+      version: 8,
+    });
+    await db.set("sis-scan-v1", source);
+    const operations = createLegacyAdoptionOperations({
+      createStorage: () => createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }),
+      getPresence: (name) => getPersistedStatePresenceFromDatabase(name, db),
+    });
+
+    await expect(operations.inspect()).resolves.toBe("found");
+    await expect(operations.adopt("owner")).resolves.toEqual({ status: "adopted" });
+    const copied = JSON.parse((await db.get("sis-scan-owner"))!);
+    expect(copied.state.scanFeed).toEqual([{ id: "scan-1", productId: "p-1", quantityDelta: 1 }]);
+    expect(await operations.inspect()).toBe("absent");
+  });
+
+  it("never overwrites an existing durable UID target", async () => {
+    const db = new Db();
+    await db.set("sis-scan-v1", JSON.stringify({ state: { scanFeed: [{ id: "legacy" }] }, version: 8 }));
+    await db.set("sis-scan-owner", "owner snapshot");
+    const operations = createLegacyAdoptionOperations({
+      createStorage: () => createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }),
+      getPresence: (name) => getPersistedStatePresenceFromDatabase(name, db),
+    });
+
+    await expect(operations.adopt("owner")).resolves.toEqual({ status: "target-exists" });
+    expect(await db.get("sis-scan-owner")).toBe("owner snapshot");
+    expect(await db.get("sis-scan-v1")).not.toBeNull();
+  });
+
+  it("treats tombstoned anonymous state as absent", async () => {
+    const db = new Db();
+    await db.set("sis-scan-v1", JSON.stringify({ state: { scanFeed: [{ id: "stale" }] }, version: 8 }));
+    await db.set("sis-scan-v1::scanbin-cleared-v1", JSON.stringify({ __scanPersistClear: 1, version: 1, id: "clear" }));
+    await db.set("sis-scan-v1::scanbin-recovery-v1", JSON.stringify({ __scanPersistRecovery: 1, payload: "stale recovery" }));
+    const operations = createLegacyAdoptionOperations({
+      createStorage: () => createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }),
+      getPresence: (name) => getPersistedStatePresenceFromDatabase(name, db),
+    });
+
+    await expect(operations.inspect()).resolves.toBe("absent");
+    await expect(operations.adopt("owner")).resolves.toEqual({ status: "absent" });
+  });
+
+  it("fails closed when durable inspection is unavailable", async () => {
+    class UnavailableDb extends Db {
+      override async get(): Promise<string | null> { throw new Error("database unavailable"); }
+    }
+    const db = new UnavailableDb();
+    const operations = createLegacyAdoptionOperations({
+      createStorage: () => createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }),
+      getPresence: (name) => getPersistedStatePresenceFromDatabase(name, db),
+    });
+
+    await expect(operations.inspect()).resolves.toBe("unavailable");
+    await expect(operations.adopt("owner")).resolves.toEqual({ status: "unavailable" });
+  });
+
+  it("does not consume the source when target write or readback fails", async () => {
+    class TargetWriteFailsDb extends Db {
+      override async set(key: string, value: string): Promise<void> {
+        if (key === "sis-scan-owner") throw new Error("target write failed");
+        await super.set(key, value);
+      }
+    }
+    const db = new TargetWriteFailsDb();
+    const source = JSON.stringify({ state: { scanFeed: [{ id: "scan-1" }] }, version: 8 });
+    await db.set("sis-scan-v1", source);
+    const operations = createLegacyAdoptionOperations({
+      createStorage: () => createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }),
+      getPresence: (name) => getPersistedStatePresenceFromDatabase(name, db),
+    });
+
+    await expect(operations.adopt("owner")).resolves.toEqual({ status: "unavailable" });
+    expect(await db.get("sis-scan-v1")).toBe(source);
+  });
+
+  it("does not report adopted when source consumption cannot be verified", async () => {
+    const db = new Db();
+    const source = JSON.stringify({ state: { scanFeed: [{ id: "scan-1" }] }, version: 8 });
+    await db.set("sis-scan-v1", source);
+    const realStorage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => null });
+    const operations = createLegacyAdoptionOperations({
+      createStorage: () => ({ ...realStorage, removeItem: async () => undefined }),
+      getPresence: (name) => getPersistedStatePresenceFromDatabase(name, db),
+    });
+
+    await expect(operations.adopt("owner")).resolves.toEqual({ status: "unavailable" });
+    expect(await db.get("sis-scan-owner")).not.toBeNull();
+    await expect(operations.adopt("owner")).resolves.toEqual({ status: "target-exists" });
+  });
+
+  it("rejects invalid snapshots and isolates local-demo state", async () => {
+    const db = new Db();
+    await db.set("sis-scan-v1", "not JSON");
+    const invalid = createLegacyAdoptionOperations({
+      createStorage: () => createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }),
+      getPresence: (name) => getPersistedStatePresenceFromDatabase(name, db),
+    });
+    await expect(invalid.adopt("owner")).resolves.toEqual({ status: "invalid" });
+    const demo = createLegacyAdoptionOperations({
+      createStorage: () => createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }),
+      getPresence: (name) => getPersistedStatePresenceFromDatabase(name, db),
+      isLocalDemo: () => true,
+    });
+    await expect(demo.inspect()).resolves.toBe("absent");
+    await expect(demo.adopt("owner")).resolves.toEqual({ status: "absent" });
+    expect(await db.get("sis-scan-owner")).toBeNull();
+  });
+
+  it("coalesces a double-click adoption without inheriting the source twice", async () => {
+    const db = new Db();
+    await db.set("sis-scan-v1", JSON.stringify({ state: { scanFeed: [{ id: "only-once" }] }, version: 8 }));
+    const operations = createLegacyAdoptionOperations({
+      createStorage: () => createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }),
+      getPresence: (name) => getPersistedStatePresenceFromDatabase(name, db),
+    });
+
+    await expect(Promise.all([operations.adopt("owner"), operations.adopt("owner")])).resolves.toEqual([
+      { status: "adopted" }, { status: "adopted" },
+    ]);
+    expect(JSON.parse((await db.get("sis-scan-owner"))!).state.scanFeed).toEqual([{ id: "only-once" }]);
   });
 });
 
