@@ -93,4 +93,4 @@ decode settle path only acts on decoding/needs-review/suggested rows.
   passed: 1 file, 1 test. This was the single post-contract focused attempt
   requested for this round; no broader suite, lint, E2E, live/paid call, or
   production mutation ran afterward.
-- Round 1 commit: pending at time of this report append.
+- Round 1 commit: `ae7af163` (`test(tires): verify local demo fixture provenance`).
