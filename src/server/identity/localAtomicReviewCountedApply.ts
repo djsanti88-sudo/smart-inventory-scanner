@@ -1,6 +1,7 @@
 import type { AtomicLocalStorage, AtomicTransaction } from "./atomicLocalStorage";
 import type { AggregateImportEvent, IdentityLink, IdentityReview, ReviewAction, TenantIdentityProduct } from "@/services/identity/types";
 import { canonicalSha256 } from "@/services/identity/canonical";
+import { validateAggregateImportEvent } from "@/services/identity/importLedger";
 
 const reviewsKey = "identity-reviews";
 const productsKey = "identity-tenant-products";
@@ -47,17 +48,25 @@ export function createLocalAtomicReviewCountedApply(storage: AtomicLocalStorage,
     if (current.reviewAction) {
       if (!sameAction(current.reviewAction, input)) return { kind: "idempotency_conflict" };
       const count = current.reviewAction.countResult;
+      const context = current.signedRowContext;
+      const expectsCount = context?.mode === "physical_count" && ["confirm_candidate", "create_tenant_product"].includes(current.reviewAction.action);
+      if (Boolean(count) !== expectsCount) return { kind: "idempotency_conflict" };
       if (count) {
         if (!count.eventFingerprint || !count.operationFingerprint || !count.eventIdempotencyKey || !count.operationIdempotencyKey) return { kind: "idempotency_conflict" };
         const entries = (await transaction.get<Record<string, StoredLedger>>(ledgerKey)) ?? {};
         const stored = entries[eventKey(current.businessId, count.eventIdempotencyKey)];
         const operations = (await transaction.get<Record<string, StoredOperation>>(operationsKey)) ?? {};
         const operation = operations[operationKey({ businessId: current.businessId, importId: current.importId, rowId: `review-count:${current.reviewId}` })];
+        const expectedOperationFingerprint = await canonicalSha256({ reviewId: current.reviewId, payloadFingerprint: current.reviewAction.payloadFingerprint, eventFingerprint: stored?.event.fingerprint });
         if (!stored || stored.idempotencyKey !== count.eventIdempotencyKey || stored.event.idempotencyKey !== count.eventIdempotencyKey
+          || !context || !await validateAggregateImportEvent(stored.event)
           || stored.event.eventId !== count.eventId || stored.event.quantity !== count.quantity || stored.event.productId !== current.reviewAction.targetProductId
           || stored.event.businessId !== current.businessId || stored.event.importId !== current.importId || stored.event.rowId !== `review-count:${current.reviewId}`
+          || stored.event.sessionId !== context.sessionId || stored.event.quantity !== context.quantity || stored.event.unitOfMeasure !== context.unitOfMeasure
+          || stored.event.sourceFileOrdinal !== context.sourceFileOrdinal || stored.event.sheetName !== context.sheetName
+          || stored.event.sourceRowNumber !== context.sourceRowNumber || stored.event.createdAt !== context.eventCreatedAt
           || stored.event.fingerprint !== count.eventFingerprint || stored.fingerprint !== count.eventFingerprint
-          || stored.operationFingerprint !== count.operationFingerprint || operation?.state !== "applied" || operation.idempotencyKey !== count.operationIdempotencyKey
+          || count.operationFingerprint !== expectedOperationFingerprint || stored.operationFingerprint !== count.operationFingerprint || operation?.state !== "applied" || operation.idempotencyKey !== count.operationIdempotencyKey
           || operation.businessId !== current.businessId || operation.importId !== current.importId || operation.rowId !== `review-count:${current.reviewId}`
           || operation.payloadFingerprint !== current.reviewAction.payloadFingerprint || operation.operationFingerprint !== count.operationFingerprint
           || operation.eventFingerprint !== count.eventFingerprint || !await sameResult(operation.result, count.result)) return { kind: "idempotency_conflict" };
@@ -68,6 +77,8 @@ export function createLocalAtomicReviewCountedApply(storage: AtomicLocalStorage,
     if (input.revalidate && !await input.revalidate(transaction, current)) return { kind: "stale" };
 
     // Every caller-supplied mutation is bound to this tenant review before any write.
+    const expectsCount = current.signedRowContext?.mode === "physical_count" && ["confirm_candidate", "create_tenant_product"].includes(input.action);
+    if (Boolean(input.count) !== expectsCount) return { kind: "idempotency_conflict" };
     if ((input.targetProductId && input.link && input.link.targetProductId !== input.targetProductId)
       || (input.product && (input.product.businessId !== input.businessId || input.targetProductId !== input.product.productId))
       || (input.link && (input.link.businessId !== input.businessId || input.link.targetProductId !== input.targetProductId))
