@@ -149,7 +149,7 @@ describe("local signed apply composition", () => {
 
     const invalidCorrection = await applyPost(new Request("http://localhost/api/identity/apply", { method: "POST", body: JSON.stringify({ ...applyRequest, corrections: [{ rowId: payload.rowIds[0], targetProductId: "arbitrary-not-in-vetted-snapshot" }] }) }));
     expect(invalidCorrection.status).toBe(409);
-    expect(await invalidCorrection.json()).toEqual({ error: "Identity apply was rejected.", code: "apply_correction_target_invalid" });
+    expect(await invalidCorrection.json()).toEqual({ error: "Identity apply was rejected.", code: "apply_idempotency_conflict" });
 
     const changedProduct = { ...product, catalogVersion: "local-v2", catalogSnapshotHash: "" };
     const changedWire = { catalogVersion: "local-v2", catalogSnapshotHash: "", barcodeCandidates: [["012345678905", [changedProduct]]], partNumberCandidates: [], approvedLinks: [] };

@@ -49,7 +49,7 @@ describe("applyIdentityImport", () => {
     expect(h.ledger.applyOnce).not.toHaveBeenCalled();
   });
 
-  it("preflights every countable target against the current source before creating a run", async () => {
+  it("preserves non-atomic fallback target preflight before creating the run", async () => {
     const h = harness();
     await expect(applyIdentityImport({ signedPayloads: ["token"], mode: "physical_count", corrections: [] }, {
       ...h,
@@ -194,6 +194,19 @@ describe("applyIdentityImport", () => {
     const dependencies = { repository: createLocalRepository(storage), ledger: createLocalAggregateLedger(storage), verifier: async () => [chunk()], source: freshSource, clock: () => "2026-07-31T00:01:00.000Z", actor: { actorId: "owner-a", businessId: "shop-a", role: "owner" as const } };
     await applyIdentityImport({ signedPayloads: ["token"], mode: "physical_count", corrections: [{ rowId: "row-1", targetProductId: "product-2" }] }, dependencies);
     await expect(applyIdentityImport({ signedPayloads: ["token"], mode: "physical_count", corrections: [{ rowId: "row-1", targetProductId: "product-3" }] }, dependencies)).rejects.toThrow("apply_idempotency_conflict");
+  });
+
+  it("final-revalidates a corrected reconcile target inside the atomic batch", async () => {
+    const h = harness();
+    const atomicBatch = vi.fn(async (input: import("./localAtomicBatchApply").LocalAtomicBatchInput) => {
+      expect(input.rows[0]?.validation).toMatchObject({ targetProductId: "product-2", corrected: true });
+      return { completed: 0, results: [], stop: { rowId: "row-1", kind: "stale" as const } };
+    });
+    await expect(applyIdentityImport({ signedPayloads: ["token"], mode: "reconcile", corrections: [{ rowId: "row-1", targetProductId: "product-2" }] }, {
+      ...h, atomicBatch, source: freshSource, clock: () => "2026-07-31T00:01:00.000Z", actor: { actorId: "owner-a", businessId: "shop-a", role: "owner" as const },
+    })).rejects.toThrow("apply_correction_target_invalid");
+    expect(atomicBatch).toHaveBeenCalledTimes(1);
+    expect(h.repository.claimImportOperation).not.toHaveBeenCalled();
   });
 
   it("never counts invalid, non-product, or unresolved rows in physical mode", async () => {

@@ -7,6 +7,7 @@ import type { PreviewVerificationExpectation, SignedPreviewChunk } from "@/servi
 import type { AggregateLedgerPort, ExpectedInventorySession, IdentityDecision, IdentityReview, ImportRun, ScopedIdentifier } from "@/services/identity/types";
 import type { ImportOperationClaim, LocalIdentityRepository } from "./localRepository";
 import type { LocalAtomicCountedApplyInput, LocalAtomicCountedApplyResult } from "./localAtomicCountedApply";
+import type { LocalAtomicBatchInput, LocalAtomicBatchResult } from "./localAtomicBatchApply";
 
 type Role = "owner" | "admin" | "counter" | "viewer";
 type Mode = "physical_count" | "reconcile";
@@ -33,6 +34,8 @@ export interface ApplyDependencies {
   verifier: (payloads: string[], now: string, expected: PreviewVerificationExpectation) => Promise<SignedPreviewChunk[]>;
   source: ApplySource; ledger: Pick<AggregateLedgerPort, "applyOnce" | "findByIdempotencyKey">; clock: () => string; actor: ApplyActor;
   atomicCountedRow?: (input: LocalAtomicCountedApplyInput) => Promise<LocalAtomicCountedApplyResult>;
+  /** Local composed path only: bounded ordered durable commit. */
+  atomicBatch?: (input: LocalAtomicBatchInput) => Promise<LocalAtomicBatchResult>;
 }
 export interface ApplyAuditRecord { action: "counted" | "reconciled" | "not_counted"; sourceQuantity: number; targetProductId?: string; decisionKind: IdentityDecision["kind"]; decisionFingerprint: string; evidenceSnapshot: IdentityDecision["decisionBasis"]; constraintSnapshot: IdentityDecision["constraintOutcomes"]; correctionTargetProductId?: string; }
 export interface ApplyResult { importId: string; mode: Mode; countedRows: number; countQuantity: number; rows: Array<{ rowId: string; status: "counted" | "reconciled" | "not_counted"; eventId?: string; audit: ApplyAuditRecord }>; reconciliation?: { expectedRows: number; expectedQuantity: number; currentInventoryStatus: "unavailable"; varianceQuantity: null }; }
@@ -66,7 +69,7 @@ function isAggregateEventRow(record: Record<string, unknown>): boolean {
     && (record.unitOfMeasure === undefined || typeof record.unitOfMeasure === "string" && record.unitOfMeasure.toLowerCase() === "each");
 }
 
-async function preflightRows(chunks: SignedPreviewChunk[], input: ApplyIdentityImportInput, source: ApplySource, corrections: Map<string, ApplyCorrection>): Promise<PreflightRow[]> {
+async function preflightRows(chunks: SignedPreviewChunk[], input: ApplyIdentityImportInput, source: ApplySource, corrections: Map<string, ApplyCorrection>, deferTargetValidation: boolean): Promise<PreflightRow[]> {
   const rowIds = chunks.flatMap((chunk) => chunk.rowIds);
   const rows = chunks.flatMap((chunk) => chunk.rows);
   const decisions = chunks.flatMap((chunk) => chunk.decisions);
@@ -80,11 +83,14 @@ async function preflightRows(chunks: SignedPreviewChunk[], input: ApplyIdentityI
     const correction = corrections.get(rowId);
     const decision: ApplyDecision = correction ? { ...original, kind: "review", approvedProductId: correction.targetProductId } : original;
     const targetProductId = decision.kind === "automatic" ? decision.targetProductId : decision.kind === "review" ? decision.approvedProductId : undefined;
-    if ((input.mode === "physical_count" || Boolean(correction)) && targetProductId) {
+    if (!deferTargetValidation && (input.mode === "physical_count" || Boolean(correction)) && targetProductId) {
       if (!source.revalidateCountableTarget) throw new Error("apply_source_unavailable");
       const identifiers = Array.isArray(record.identifiers) ? record.identifiers as ScopedIdentifier[] : [];
       if (!await source.revalidateCountableTarget({ businessId: chunks[0]!.scope.businessId, sourceSystem: chunks[0]!.scope.sourceSystem, sourceSignature: chunks[0]!.scope.sourceSignature, vendorId: chunks[0]!.scope.vendorId, targetProductId, identifiers, row: record, decision: original, corrected: Boolean(correction) })) throw new Error(correction ? "apply_correction_target_invalid" : "apply_target_stale");
     }
+    // Target freshness is intentionally deferred to the local atomic row/batch commit.  A
+    // completed replay must not touch the current catalog, and a failed row must leave only its
+    // successful ordered prefix durable.
     preflight.push({ rowId, row: record, decision, correction });
   }
   return preflight;
@@ -100,12 +106,19 @@ export async function applyIdentityImport(input: ApplyIdentityImportInput, depen
   const allRowIds = chunks.flatMap((chunk) => chunk.rowIds);
   const combined = { ...first, rowIds: allRowIds };
   const corrections = correctionMap(input.corrections, combined);
-  const preflight = await preflightRows(chunks, input, dependencies.source, corrections);
   const operationFingerprint = await canonicalSha256({ previewFingerprint: first.previewFingerprint, mode: input.mode, corrections: [...corrections.values()].sort((a, b) => a.rowId.localeCompare(b.rowId)) });
   const prior = await dependencies.repository.getImportRun?.(first.scope.businessId, first.importId);
   if (prior?.state === "invalidated") throw new Error("apply_preview_invalidated");
   const createdAt = prior?.createdAt ?? dependencies.clock();
   const proposedRun = { importId: first.importId, businessId: first.scope.businessId, sourceFingerprint: first.sanitizedContentRootHash, mappingFingerprint: await canonicalSha256(first.orderedMappings), previewFingerprint: first.previewFingerprint, actorId: dependencies.actor.actorId, engineVersion: first.versions.engineVersion, pluginVersion: first.versions.pluginVersions.join(","), catalogVersion: first.versions.catalogVersion, operationFingerprint, createdAt };
+  if (prior?.state === "completed") {
+    const immutable = (run: typeof proposedRun | ImportRun) => ({ importId: run.importId, businessId: run.businessId, sourceFingerprint: run.sourceFingerprint, mappingFingerprint: run.mappingFingerprint, previewFingerprint: run.previewFingerprint, actorId: run.actorId, engineVersion: run.engineVersion, pluginVersion: run.pluginVersion, catalogVersion: run.catalogVersion, operationFingerprint: run.operationFingerprint });
+    if (await canonicalSha256(immutable(prior)) !== await canonicalSha256(immutable(proposedRun))) throw new Error("apply_idempotency_conflict");
+    const stored = prior.result as ApplyResult | undefined;
+    if (!stored || stored.importId !== prior.importId || stored.mode !== input.mode) throw new Error("apply_idempotency_conflict");
+    return stored;
+  }
+  const preflight = await preflightRows(chunks, input, dependencies.source, corrections, Boolean(dependencies.atomicBatch));
   let created: ImportRun;
   try { created = await dependencies.repository.createImportRun(proposedRun) as ImportRun; }
   catch (error) { if (error instanceof Error && /idempotency conflict/i.test(error.message)) throw new Error("apply_idempotency_conflict"); throw error; }
@@ -118,7 +131,7 @@ export async function applyIdentityImport(input: ApplyIdentityImportInput, depen
   if (run.state === "previewed" || run.state === "failed") await dependencies.repository.transitionImportRun(run.businessId, run.importId, "applying");
   // Applying a signed preview is the sole point that creates durable human work.  Preview itself
   // remains pure; the review keeps the exact signed decision/evidence snapshot for later audit.
-  if (dependencies.repository.saveIdentityReview) for (const item of preflight) {
+  if (!dependencies.atomicBatch && dependencies.repository.saveIdentityReview) for (const item of preflight) {
     // A manual correction has already supplied an auditable target and is counted below; creating
     // an actionable review for it would advertise work that is no longer actionable.
     if (item.correction || item.decision.kind === "automatic" || item.decision.kind === "non_product") continue;
@@ -146,8 +159,48 @@ export async function applyIdentityImport(input: ApplyIdentityImportInput, depen
     const targetProductId = item.decision.kind === "automatic" ? item.decision.targetProductId : item.decision.kind === "review" ? item.decision.approvedProductId : undefined;
     if (targetProductId) events.set(item.rowId, await createAggregateImportEvent({ businessId: run.businessId, importId: run.importId, rowId: item.rowId, sessionId: `identity-import:${run.importId}`, quantity: item.row.quantity as number, sourceFileOrdinal: item.row.sourceFileOrdinal as number, sheetName: item.row.sheetName as string, sourceRowNumber: item.row.sourceRowNumber as number, createdAt: run.createdAt, mode: "physical_count", decision: item.decision.kind === "automatic" ? { kind: "automatic", targetProductId } : { kind: "review", approvedProductId: targetProductId } }));
   }
+  if (dependencies.atomicBatch) {
+    const ordered: Array<{ item: PreflightRow; result: ApplyResult["rows"][number]; payloadFingerprint: string; event?: Awaited<ReturnType<typeof createAggregateImportEvent>>; review?: IdentityReview; validation?: LocalAtomicCountedApplyInput["validation"] }> = [];
+    for (const item of preflight) {
+      const { rowId, row, decision, correction } = item;
+      const targetProductId = decision.kind === "automatic" ? decision.targetProductId : decision.kind === "review" ? decision.approvedProductId : undefined;
+      const audit: ApplyAuditRecord = { action: input.mode === "physical_count" && targetProductId ? "counted" : input.mode === "reconcile" ? "reconciled" : "not_counted", sourceQuantity: row.quantity as number, ...(targetProductId ? { targetProductId } : {}), decisionKind: decision.kind, decisionFingerprint: decision.decisionFingerprint, evidenceSnapshot: decision.decisionBasis, constraintSnapshot: decision.constraintOutcomes, ...(correction ? { correctionTargetProductId: correction.targetProductId } : {}) };
+      const result: ApplyResult["rows"][number] = { rowId, status: audit.action === "counted" ? "counted" : audit.action === "reconciled" ? "reconciled" : "not_counted", ...(audit.action === "counted" ? { eventId: events.get(rowId)!.eventId } : {}), audit };
+      const projection = decision.kind === "review" && correction ? { ...decision, approvedProductId: correction.targetProductId } : { ...decision };
+      if (projection.kind === "review") delete (projection as { targetProductId?: string }).targetProductId;
+      const payloadFingerprint = await canonicalSha256({ operationFingerprint, rowId, decision: projection });
+      let review: IdentityReview | undefined;
+      if (!correction && decision.kind !== "automatic" && decision.kind !== "non_product") {
+        review = { reviewId: `identity-review:${await canonicalSha256({ businessId: run.businessId, importId: run.importId, rowId })}`, businessId: run.businessId, importId: run.importId, rowId, decision, scope: { sourceSystem: first.scope.sourceSystem, sourceSignature: first.scope.sourceSignature, vendorId: first.scope.vendorId }, signedRowContext: { mode: input.mode, quantity: row.quantity as number, unitOfMeasure: "each", sourceFileOrdinal: row.sourceFileOrdinal as number, sheetName: row.sheetName as string, sourceRowNumber: row.sourceRowNumber as number, sessionId: `identity-import:${run.importId}`, eventCreatedAt: run.createdAt, identifiers: Array.isArray(row.identifiers) ? row.identifiers as ScopedIdentifier[] : [] } };
+      }
+      const validation = (input.mode === "physical_count" || Boolean(correction)) && targetProductId ? { businessId: run.businessId, sourceSystem: first.scope.sourceSystem, sourceSignature: first.scope.sourceSignature, vendorId: first.scope.vendorId, targetProductId, identifiers: Array.isArray(row.identifiers) ? row.identifiers as ScopedIdentifier[] : [], row, decision: item.decision, corrected: Boolean(correction) } : undefined;
+      ordered.push({ item, result, payloadFingerprint, ...(input.mode === "physical_count" && targetProductId ? { event: events.get(rowId)! } : {}), ...(review ? { review } : {}), ...(validation ? { validation } : {}) });
+    }
+    const rows: ApplyResult["rows"] = [];
+    const committedRows: Array<{ row: ApplyResult["rows"][number]; source: PreflightRow }> = [];
+    const sourceByRowId = new Map(ordered.map((entry) => [entry.item.rowId, entry.item] as const));
+    for (let offset = 0; offset < ordered.length; offset += 100) {
+      const part = ordered.slice(offset, offset + 100);
+      const committed = await dependencies.atomicBatch({ businessId: run.businessId, importId: run.importId, rows: part.map((entry) => ({ rowId: entry.item.rowId, payloadFingerprint: entry.payloadFingerprint, result: { row: entry.result } satisfies RowApplyResult, ...(entry.validation ? { validation: entry.validation } : {}), ...(entry.event ? { count: { event: entry.event, operationFingerprint } } : {}), ...(entry.review ? { review: entry.review } : {}) })) });
+      for (let index = 0; index < committed.results.length; index += 1) {
+        const row = rowResultFrom(committed.results[index]);
+        if (!row) throw new Error("apply_recovery_invalid");
+        const source = sourceByRowId.get(row.rowId);
+        if (!source) throw new Error("apply_recovery_invalid");
+        rows.push(row);
+        committedRows.push({ row, source });
+      }
+      if (committed.stop) {
+        if (committed.stop.kind === "stale") { const stopped = part[committed.completed]!; throw new Error(stopped.item.correction ? "apply_correction_target_invalid" : "apply_target_stale"); }
+        throw new Error(committed.stop.kind === "in_progress" ? "apply_in_progress" : "apply_idempotency_conflict");
+      }
+    }
+    const result: ApplyResult = { importId: run.importId, mode: input.mode, countedRows: rows.filter((row) => row.status === "counted").length, countQuantity: rows.filter((row) => row.status === "counted").reduce((sum, row) => sum + row.audit.sourceQuantity, 0), rows, ...(input.mode === "reconcile" ? { reconciliation: { expectedRows: rows.length, expectedQuantity: rows.reduce((sum, row) => sum + row.audit.sourceQuantity, 0), currentInventoryStatus: "unavailable" as const, varianceQuantity: null } } : {}) };
+    if (input.mode === "reconcile" && dependencies.repository.saveExpectedInventorySession) await dependencies.repository.saveExpectedInventorySession({ importId: run.importId, businessId: run.businessId, sourceEvidenceSnapshot: run.sourceFingerprint, rows: committedRows.map(({ row, source }) => ({ rowId: row.rowId, ...(row.audit.targetProductId ? { targetProductId: row.audit.targetProductId } : {}), expectedQuantity: row.audit.sourceQuantity, currentQuantity: null, varianceQuantity: null, status: "expected_only" as const, decisionFingerprint: source.decision.decisionFingerprint, evidenceSnapshot: source.decision.decisionBasis, constraintSnapshot: source.decision.constraintOutcomes, chosenAction: row.audit.action, ...(row.audit.correctionTargetProductId ? { correctionTargetProductId: row.audit.correctionTargetProductId } : {}) })) });
+    if (dependencies.repository.completeImportRun) await dependencies.repository.completeImportRun(run.businessId, run.importId, result); else await dependencies.repository.transitionImportRun(run.businessId, run.importId, "completed");
+    return result;
+  }
   const rows: ApplyResult["rows"] = [];
-  const allRows = preflight.map((item) => item.row);
   for (const item of preflight) {
     const { rowId, row, decision, correction } = item;
     // Never serialize undefined correction fields into the durable idempotency projection.
@@ -198,7 +251,7 @@ export async function applyIdentityImport(input: ApplyIdentityImportInput, depen
     await dependencies.repository.completeImportOperation(claim.operation, claim.leaseId, { row: rowResult } satisfies RowApplyResult);
     rows.push(rowResult);
   }
-  const result: ApplyResult = { importId: run.importId, mode: input.mode, countedRows: rows.filter((row) => row.status === "counted").length, countQuantity: rows.filter((row) => row.status === "counted").reduce((sum, row) => sum + (row.status === "counted" ? Number((allRows[allRowIds.indexOf(row.rowId)] as Record<string, unknown>).quantity) : 0), 0), rows, ...(input.mode === "reconcile" ? { reconciliation: { expectedRows: rows.length, expectedQuantity: rows.reduce((sum, row) => sum + row.audit.sourceQuantity, 0), currentInventoryStatus: "unavailable" as const, varianceQuantity: null } } : {}) };
+  const result: ApplyResult = { importId: run.importId, mode: input.mode, countedRows: rows.filter((row) => row.status === "counted").length, countQuantity: rows.filter((row) => row.status === "counted").reduce((sum, row) => sum + row.audit.sourceQuantity, 0), rows, ...(input.mode === "reconcile" ? { reconciliation: { expectedRows: rows.length, expectedQuantity: rows.reduce((sum, row) => sum + row.audit.sourceQuantity, 0), currentInventoryStatus: "unavailable" as const, varianceQuantity: null } } : {}) };
   if (input.mode === "reconcile" && dependencies.repository.saveExpectedInventorySession) {
     const session: ExpectedInventorySession = { importId: run.importId, businessId: run.businessId, sourceEvidenceSnapshot: run.sourceFingerprint, rows: rows.map((row) => {
       const item = preflight.find((entry) => entry.rowId === row.rowId)!;

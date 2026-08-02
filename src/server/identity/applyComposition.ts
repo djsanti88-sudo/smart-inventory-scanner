@@ -12,11 +12,14 @@ import { createLocalRepository } from "./localRepository";
 import { createLocalPreviewSigner } from "./previewSigner";
 import { loadAuthoritativeLocalIdentityReadModel, loadConfiguredLocalIdentityReadModel, deriveAuthoritativeLinkSnapshotHash } from "./localIdentityReadModel";
 import { createLocalAtomicCountedApply } from "./localAtomicCountedApply";
+import { createLocalAtomicBatchApply } from "./localAtomicBatchApply";
 
 export interface LocalIdentityApplyComposition {
   storage: AtomicLocalStorage; signingKey: () => string | undefined; versions: PreviewVersions; now?: () => Date;
   authenticate(request: Request, businessId: string): Promise<ApplyActor | undefined>;
   revalidateCountableTarget?: (input: { businessId: string; sourceSystem: string; sourceSignature: string; vendorId: string; targetProductId: string; identifiers: ScopedIdentifier[]; row: Record<string, unknown>; decision: import("@/services/identity/types").IdentityDecision; corrected: boolean }, transaction?: AtomicTransaction) => Promise<boolean>;
+  /** Test-only seam for instrumenting the composed batch/projection path. */
+  createAtomicBatchForTest?: (storage: AtomicLocalStorage, revalidate: Parameters<typeof createLocalAtomicBatchApply>[1]) => ReturnType<typeof createLocalAtomicBatchApply>;
 }
 let injected: LocalIdentityApplyComposition | undefined;
 type Membership = ApplyActor;
@@ -74,5 +77,10 @@ export async function applyComposedIdentityImport(input: ApplyIdentityImportInpu
   const linkSnapshotHash = injected ? current.versions.linkSnapshotHash : await deriveAuthoritativeLinkSnapshotHash({ linkSnapshotHash: current.versions.linkSnapshotHash }, repository, actor.businessId);
   const versions = { ...current.versions, linkSnapshotHash };
   const atomicCountedRow = current.revalidateCountableTarget ? createLocalAtomicCountedApply(current.storage, current.revalidateCountableTarget) : undefined;
-  return applyIdentityImport(input, { repository, ledger: createLocalAggregateLedger(current.storage), verifier: (payloads, now, expected) => verifySignedPreviewChunks(payloads, signer, now, expected), source: { versions, revalidateCountableTarget: current.revalidateCountableTarget }, ...(atomicCountedRow ? { atomicCountedRow } : {}), clock, actor });
+  const revalidateBatch: Parameters<typeof createLocalAtomicBatchApply>[1] = async (row, transaction) => {
+    const validation = row.validation as Parameters<NonNullable<LocalIdentityApplyComposition["revalidateCountableTarget"]>>[0] | undefined;
+    return validation ? current.revalidateCountableTarget!(validation, transaction) : true;
+  };
+  const atomicBatch = current.revalidateCountableTarget ? (current.createAtomicBatchForTest ?? createLocalAtomicBatchApply)(current.storage, revalidateBatch) : undefined;
+  return applyIdentityImport(input, { repository, ledger: createLocalAggregateLedger(current.storage), verifier: (payloads, now, expected) => verifySignedPreviewChunks(payloads, signer, now, expected), source: { versions, revalidateCountableTarget: current.revalidateCountableTarget }, ...(atomicCountedRow ? { atomicCountedRow } : {}), ...(atomicBatch ? { atomicBatch } : {}), clock, actor });
 }
