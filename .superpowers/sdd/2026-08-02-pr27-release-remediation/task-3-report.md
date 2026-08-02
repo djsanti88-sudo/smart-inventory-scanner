@@ -61,3 +61,36 @@ decode settle path only acts on decoding/needs-review/suggested rows.
 - Concern: the fixture's `source_count: 3` is deliberate test metadata and
   differs from the generated records' current source count; all identity and
   resolver-relevant fields match the committed corpus.
+
+## Fix Round 1
+
+### Review corrections
+
+- Replaced all nine SQL-facing local-demo fixture records with read-only
+  `src/server/knowledge.generated.db` `tires` rows, including exact canonical
+  UIDs, model displays, confidence, part-number, missing-fields, and source
+  counts. In particular, `758823162664` is now `source_count: 2`.
+- Added direct EAN fallback assertions: `0758823162664` resolves through UPC
+  `758823162664` with canonical UID `TIRE_D419A1A03DB7FEB2FA99` and
+  `255/65R16 109T`; `0758823173844` resolves through UPC `758823173844` with
+  canonical UID `TIRE_6FEC84EF3585D21F491B` and `215/65R16 98H`. Both retain
+  their own verified feed row and quantity-one final count.
+- Replaced the synthetic parity-only comparison with a real invocation of
+  `runSameUidBlankPropagation` against a distinct repaired seven-table
+  fixture. It leaves the source target blank, fills repaired child and parent
+  brand/model/size from the unique donor, and writes all three expected audit
+  records.
+- Removed the unused `closeTireKnowledgeDbFixture` export.
+
+### Evidence
+
+- RED: `npx.cmd vitest run src/stores/localDemoBatch01Suggested.repro.test.ts`
+  failed before fixture correction: the EAN SU318 scan had no accepted
+  `TIRE_D419A1A03DB7FEB2FA99` local-demo provenance.
+- GREEN: `npx.cmd vitest run src/stores/localDemoBatch01Suggested.repro.test.ts`
+  passed: 1 file, 1 test.
+- GREEN: `npx.cmd vitest run src/services/tire/sameUidBlankPropagation.parity.test.ts`
+  passed: 1 file, 1 test. This was the single post-contract focused attempt
+  requested for this round; no broader suite, lint, E2E, live/paid call, or
+  production mutation ran afterward.
+- Round 1 commit: pending at time of this report append.

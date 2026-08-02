@@ -16,6 +16,11 @@ function nodeNormalize(value: string): string | null {
   return out || null;
 }
 
+function runSameUidBlankPropagation(dbPath: string) {
+  const source = "import('./scripts/tire-db-repair/12_same_uid_blank_propagation.mjs').then(({runSameUidBlankPropagation})=>process.stdout.write(JSON.stringify(runSameUidBlankPropagation({dbPath:process.argv[1],execute:true}))))";
+  return JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", source, dbPath], { cwd: process.cwd(), encoding: "utf8" }));
+}
+
 function createRepairFixture(filename: string) {
   const dir = mkdtempSync(join(tmpdir(), "same-uid-normalizer-"));
   temporaryDirectories.push(dir);
@@ -43,7 +48,7 @@ afterEach(() => {
 });
 
 describe("same-UID repair size normalizer parity", () => {
-  it("uses source and repaired seven-table fixtures for candidate donor parity", () => {
+  it("propagates a unique donor into a distinct repaired seven-table fixture and audits each child fill", () => {
     const source = createRepairFixture("source.db");
     const repaired = createRepairFixture("repaired.db");
     try {
@@ -51,7 +56,22 @@ describe("same-UID repair size normalizer parity", () => {
       for (const db of [source, repaired]) {
         expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((row: { name: string }) => row.name)).toEqual(expect.arrayContaining(tableNames));
       }
-      const donorSizes = [source, repaired].flatMap((db) => db.prepare(`SELECT DISTINCT s.size FROM tires t JOIN tires s ON s.canonical_product_uid=t.canonical_product_uid WHERE TRIM(COALESCE(t.size,''))='' AND TRIM(COALESCE(s.size,''))<>'' ORDER BY s.size`).all().map((row: { size: string }) => row.size));
+      expect(source.prepare("SELECT brand, model, size FROM tires WHERE barcode='blank'").get()).toEqual({ brand: "", model: "", size: "" });
+      const result = runSameUidBlankPropagation(repaired.name);
+      expect(result.executed).toBe(true);
+      expect(result.plan.childChanges).toEqual(expect.arrayContaining([
+        expect.objectContaining({ uid: "U1", barcode: "blank", field: "brand", value: "Fortune Tires", donorBarcode: "donor" }),
+        expect.objectContaining({ uid: "U1", barcode: "blank", field: "model", value: "Tormenta R/T", donorBarcode: "donor" }),
+        expect.objectContaining({ uid: "U1", barcode: "blank", field: "size", value: "35x12.50r17", donorBarcode: "donor" }),
+      ]));
+      expect(repaired.prepare("SELECT brand, model, size FROM tires WHERE barcode='blank'").get()).toEqual({ brand: "Fortune Tires", model: "Tormenta R/T", size: "35x12.50r17" });
+      expect(repaired.prepare("SELECT brand, model, size FROM canonical_tire_products WHERE canonical_product_id='U1'").get()).toEqual({ brand: "Fortune Tires", model: "Tormenta R/T", size: "35x12.50r17" });
+      expect(repaired.prepare("SELECT action, canonical_product_uid, barcode, previous_value, new_value, candidate_count FROM remaining_blank_fill_audit ORDER BY audit_id").all()).toEqual([
+        { action: "backfill_from_same_canonical_uid_unique_value_v1:brand", canonical_product_uid: "U1", barcode: "blank", previous_value: "", new_value: "Fortune Tires", candidate_count: 1 },
+        { action: "backfill_from_same_canonical_uid_unique_value_v1:model", canonical_product_uid: "U1", barcode: "blank", previous_value: "", new_value: "Tormenta R/T", candidate_count: 1 },
+        { action: "backfill_from_same_canonical_uid_unique_value_v1:size", canonical_product_uid: "U1", barcode: "blank", previous_value: "", new_value: "35x12.50r17", candidate_count: 1 },
+      ]);
+      const donorSizes = source.prepare(`SELECT DISTINCT s.size FROM tires t JOIN tires s ON s.canonical_product_uid=t.canonical_product_uid WHERE TRIM(COALESCE(t.size,''))='' AND TRIM(COALESCE(s.size,''))<>'' ORDER BY s.size`).all().map((row: { size: string }) => row.size);
       for (const value of [...donorSizes, "not a tire", "35X12.50R17JUNK", "235/40R19XL", "265/70R17", "245/65-17", "99X12.50R20", "11R99"]) {
         expect(nodeNormalize(value), value).toBe(normalizeTireSize(value));
       }

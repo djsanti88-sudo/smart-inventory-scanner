@@ -64,7 +64,3 @@ export function createTireKnowledgeDbFixture(rows: TireKnowledgeDbFixtureRow[]):
   }
   return db;
 }
-
-export function closeTireKnowledgeDbFixture(database: Database.Database): void {
-  database.close();
-}
