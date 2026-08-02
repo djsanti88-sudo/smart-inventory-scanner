@@ -120,6 +120,28 @@ describe("read-only local identity candidate source", () => {
     expect(result.candidatesByRecord.get(scoped.rawRecordFingerprint)).toContainEqual(expect.objectContaining({ productId: "tenant-product" }));
   });
 
+  it("groups a 5,000-row batch by full scope, isolates conflicts, and redistributes exact-family results", async () => {
+    const lookupApprovedLinks = vi.fn(async (scope) => scope.identifiers.flatMap((entry: ScopedIdentifier) => {
+      if (entry.normalized === "conflicted") return [approvedLink("conflict-a", { normalizedValue: entry.normalized }), approvedLink("conflict-b", { normalizedValue: entry.normalized })];
+      return [approvedLink(`target-${entry.normalized}`, { normalizedValue: entry.normalized, currentTarget: candidate(`target-${entry.normalized}`) })];
+    }));
+    const source = createReadOnlyCandidateSource({ snapshot: snapshot(), lookupApprovedLinks });
+    const rows = Array.from({ length: 5_000 }, (_, index) => input({
+      rawRecordFingerprint: `row-${index}`,
+      identifiers: [identifier({ raw: index === 0 ? "conflicted" : String(index), normalized: index === 0 ? "conflicted" : String(index) })],
+    }));
+    rows.push(input({ rawRecordFingerprint: "same-scope-duplicate", identifiers: [identifier({ raw: "1", normalized: "1" })] }));
+    rows.push(input({ rawRecordFingerprint: "other-tenant", businessId: "business-2", identifiers: [identifier({ raw: "1", normalized: "1" })] }));
+
+    const result = await source.lookupBatch(rows);
+
+    expect(lookupApprovedLinks).toHaveBeenCalledTimes(2);
+    expect(lookupApprovedLinks.mock.calls.map(([scope]) => scope.identifiers).sort((left, right) => left.length - right.length).map((entries) => entries.length)).toEqual([1, 5_000]);
+    expect(result.candidatesByRecord.get("row-0")?.some((entry) => entry.productId.startsWith("conflict-"))).toBe(false);
+    expect(result.candidatesByRecord.get("row-1")?.some((entry) => entry.productId === "target-1")).toBe(true);
+    expect(result.candidatesByRecord.get("other-tenant")?.some((entry) => entry.productId === "target-1")).toBe(false);
+  });
+
   it("keeps same-product barcode, part-number, and link evidence atomic in deterministic order", async () => {
     const barcodeHit = candidate("product-a", { evidenceId: "barcode-evidence" });
     const partNumberHit = candidate("product-a", {

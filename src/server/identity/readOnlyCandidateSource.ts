@@ -65,6 +65,10 @@ function uniqueIdentifiers(identifiers: ScopedIdentifier[]): ScopedIdentifier[] 
   });
 }
 
+function scopeKey(input: Pick<ApprovedLinkLookupInput, "businessId" | "sourceSystem" | "sourceSignature" | "vendorId">): string {
+  return JSON.stringify([input.businessId, input.sourceSystem, input.sourceSignature, input.vendorId]);
+}
+
 function snapshotCandidates(snapshot: LocalIdentitySnapshot, identifiers: ScopedIdentifier[], businessId: string): IdentityCandidate[] {
   const barcodeKeys = identifiers
     .filter((identifier) => barcodeIdentifierTypes.has(identifier.type))
@@ -186,18 +190,27 @@ export function createReadOnlyCandidateSource(
   return {
     readonlyOnly: true,
     async lookupBatch(inputs) {
-      const results: Array<[string, IdentityCandidate[]]> = await Promise.all(inputs.map(async (input) => {
-        const identifiers = uniqueIdentifiers(input.identifiers);
-        const scope = {
-          businessId: input.businessId,
-          sourceSystem: input.sourceSystem,
-          sourceSignature: input.sourceSignature,
-          vendorId: input.vendorId,
-          identifiers,
-        };
-        const links = approvedLinkCandidates(await dependencies.lookupApprovedLinks(scope), scope, snapshot);
-        return [input.rawRecordFingerprint, orderAtomicCandidates([...snapshotCandidates(snapshot, identifiers, input.businessId), ...links])];
+      const normalized = inputs.map((input) => ({ input, identifiers: uniqueIdentifiers(input.identifiers) }));
+      const grouped = new Map<string, Array<(typeof normalized)[number]>>();
+      for (const entry of normalized) {
+        const key = scopeKey(entry.input);
+        const entries = grouped.get(key);
+        if (entries) entries.push(entry);
+        else grouped.set(key, [entry]);
+      }
+      const linksByScope = new Map<string, ApprovedLinkLookupResult[]>();
+      await Promise.all([...grouped.entries()].map(async ([key, entries]) => {
+        const first = entries[0]!.input;
+        const identifiers = uniqueIdentifiers(entries.flatMap((entry) => entry.identifiers));
+        linksByScope.set(key, await dependencies.lookupApprovedLinks({ businessId: first.businessId, sourceSystem: first.sourceSystem, sourceSignature: first.sourceSignature, vendorId: first.vendorId, identifiers }));
       }));
+      const results: Array<[string, IdentityCandidate[]]> = normalized.map(({ input, identifiers }) => {
+        const scope = { businessId: input.businessId, sourceSystem: input.sourceSystem, sourceSignature: input.sourceSignature, vendorId: input.vendorId, identifiers };
+        const requested = new Set(identifiers.map(identifierKey));
+        const scopedLinks = (linksByScope.get(scopeKey(input)) ?? []).filter((link) => requested.has(JSON.stringify([link.identifierType, link.namespace, link.normalizedValue])));
+        const links = approvedLinkCandidates(scopedLinks, scope, snapshot);
+        return [input.rawRecordFingerprint, orderAtomicCandidates([...snapshotCandidates(snapshot, identifiers, input.businessId), ...links])];
+      });
 
       return {
         catalogVersion: snapshot.catalogVersion,

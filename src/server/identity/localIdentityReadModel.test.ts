@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { deriveAuthoritativeLinkSnapshotHash, deriveConfiguredSnapshotHashes, loadAuthoritativeLocalIdentityReadModel, loadConfiguredLocalIdentityReadModel } from "./localIdentityReadModel";
 import { createMemoryAtomicLocalStorage } from "./atomicLocalStorage";
 import { createLocalRepository } from "./localRepository";
+import { createReadOnlyCandidateSource } from "./readOnlyCandidateSource";
 
 const candidate = { productId: "p-1", category: "tire", businessScope: "master", verificationTier: "human_verified", automaticEligible: true, evidenceId: "e-1", evidenceVersion: "v1", exactCodeEvidence: true, identifiers: [{ type: "upc", raw: "012345678905", normalized: "012345678905", source: "fixture", evidenceAuthority: "human_verified_master", evidenceId: "e-1", evidenceVersion: "v1" }], attributes: {}, catalogVersion: "catalog-v1", catalogSnapshotHash: "hash-v1" };
 
@@ -97,6 +98,7 @@ describe("configured local identity read model", () => {
     vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", JSON.stringify(wire));
     const repository = {
       listCurrentIdentityLinks: vi.fn().mockResolvedValue([]),
+      findCurrentIdentityLinks: vi.fn().mockResolvedValue([]),
       listTenantProducts: vi.fn().mockResolvedValue([]),
     };
     const model = await loadAuthoritativeLocalIdentityReadModel(repository as never);
@@ -107,7 +109,63 @@ describe("configured local identity read model", () => {
 
     await Promise.all([lookup("012345678905"), lookup("036000291452"), lookup("012345678905")]);
 
-    expect(repository.listCurrentIdentityLinks).toHaveBeenCalledTimes(1);
+    expect(repository.listCurrentIdentityLinks).not.toHaveBeenCalled();
+    expect(repository.findCurrentIdentityLinks).toHaveBeenCalledTimes(3);
     expect(repository.listTenantProducts).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses bounded exact-family reads and lets a durable tombstone suppress only its configured family", async () => {
+    const configuredLinks = Array.from({ length: 26 }, (_, index) => {
+      const value = String(index).padStart(2, "0");
+      return { businessId: "shop-a", sourceSystem: "csv", sourceSignature: "v1", vendorId: "vendor-a", identifierType: "upc" as const, namespace: "", normalizedValue: value, status: "approved" as const, version: 1, evidenceId: `configured-${value}`, evidenceVersion: "v1", automaticEligible: true, targetProductId: `target-${value}`, currentTarget: { ...candidate, productId: `target-${value}` } };
+    });
+    const wire = { catalogVersion: "catalog-v1", catalogSnapshotHash: "", barcodeCandidates: [], partNumberCandidates: [], approvedLinks: configuredLinks };
+    wire.catalogSnapshotHash = (await deriveConfiguredSnapshotHashes(wire)).catalogSnapshotHash;
+    vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", JSON.stringify(wire));
+    const revoked = { businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc" as const, namespace: "", rawValue: "00", normalizedValue: "00", targetProductId: "target-00", status: "revoked" as const, version: 2, evidence: ["review"], createdBy: "manager", createdAt: "now" };
+    const repository = {
+      listCurrentIdentityLinks: vi.fn().mockRejectedValue(new Error("unbounded durable read")),
+      findCurrentIdentityLinks: vi.fn().mockResolvedValue([revoked]),
+      listTenantProducts: vi.fn().mockResolvedValue([]),
+    };
+    const model = await loadAuthoritativeLocalIdentityReadModel(repository as never);
+    const identifiers = Array.from({ length: 25 }, (_, index) => {
+      const value = String(index).padStart(2, "0");
+      return { type: "upc" as const, raw: value, normalized: value, source: "csv", evidenceAuthority: "vendor_import" as const, evidenceId: value, evidenceVersion: "v1" };
+    });
+
+    const links = await model!.lookupApprovedLinks({ businessId: "shop-a", sourceSystem: "csv", sourceSignature: "v1", vendorId: "vendor-a", identifiers });
+
+    expect(repository.listCurrentIdentityLinks).not.toHaveBeenCalled();
+    expect(repository.findCurrentIdentityLinks).toHaveBeenCalledTimes(1);
+    expect(repository.findCurrentIdentityLinks.mock.calls[0]![1]).toHaveLength(25);
+    expect(links.map((link) => link.normalizedValue)).toEqual(Array.from({ length: 24 }, (_, index) => String(index + 1).padStart(2, "0")));
+    expect(links).not.toContainEqual(expect.objectContaining({ normalizedValue: "25" }));
+  });
+
+  it("uses 200 exact-family repository reads for a deterministic 5,000-row candidate batch", async () => {
+    const wire = { catalogVersion: "catalog-v1", catalogSnapshotHash: "", barcodeCandidates: [["012345678905", [candidate]]], partNumberCandidates: [], approvedLinks: [] };
+    wire.catalogSnapshotHash = (await deriveConfiguredSnapshotHashes(wire)).catalogSnapshotHash;
+    vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", JSON.stringify(wire));
+    const repository = {
+      listCurrentIdentityLinks: vi.fn().mockRejectedValue(new Error("unbounded durable read")),
+      listTenantProducts: vi.fn().mockResolvedValue([]),
+      findCurrentIdentityLinks: vi.fn(async (_businessId, lookups) => lookups.map((lookup: { normalizedValue: string }) => ({ businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc" as const, namespace: "", rawValue: lookup.normalizedValue, normalizedValue: lookup.normalizedValue, targetProductId: "p-1", status: "approved" as const, version: 1, evidence: ["review"], createdBy: "manager", createdAt: "now" }))),
+    };
+    const model = await loadAuthoritativeLocalIdentityReadModel(repository as never);
+    const source = createReadOnlyCandidateSource({ snapshot: model!.snapshot, lookupApprovedLinks: model!.lookupApprovedLinks });
+    const rows = Array.from({ length: 5_000 }, (_, index) => ({
+      businessId: "shop-a", sourceSystem: "csv", sourceSignature: "v1", vendorId: "vendor-a", rawRecordFingerprint: `row-${index}`,
+      identifiers: [{ type: "upc" as const, raw: String(index), normalized: String(index), source: "csv", evidenceAuthority: "vendor_import" as const, evidenceId: String(index), evidenceVersion: "v1" }],
+    }));
+    rows.push({ ...rows[1]!, rawRecordFingerprint: "same-scope-duplicate" });
+
+    const result = await source.lookupBatch(rows as never);
+
+    expect(repository.findCurrentIdentityLinks).toHaveBeenCalledTimes(200);
+    expect(repository.findCurrentIdentityLinks.mock.calls.every(([, lookups]) => lookups.length <= 25)).toBe(true);
+    expect(repository.listCurrentIdentityLinks).not.toHaveBeenCalled();
+    expect(repository.listTenantProducts).toHaveBeenCalledTimes(1);
+    expect([...result.candidatesByRecord.values()].every((entries) => entries[0]?.productId === "p-1")).toBe(true);
   });
 });

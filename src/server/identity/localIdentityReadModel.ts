@@ -2,9 +2,9 @@ import "server-only";
 
 import { isValidApprovedLink, type ApprovedLinkLookupInput, type ApprovedLinkLookupResult } from "./readOnlyCandidateSource";
 import { isCompleteLocalIdentitySnapshot, type LocalIdentitySnapshot } from "./localSnapshotIndex";
-import type { IdentityCandidate, IdentityLink, ScopedIdentifier, TenantIdentityProduct } from "@/services/identity/types";
+import type { IdentityCandidate, ScopedIdentifier, TenantIdentityProduct } from "@/services/identity/types";
 import { canonicalSha256 } from "@/services/identity/canonical";
-import type { IdentityLinkPageRecord, LocalIdentityRepository } from "./localRepository";
+import type { IdentityLinkPageRecord, LinkLookup, LocalIdentityRepository } from "./localRepository";
 
 type Scope = Pick<ApprovedLinkLookupInput, "businessId" | "sourceSystem" | "sourceSignature" | "vendorId">;
 type SnapshotWire = { catalogVersion: string; catalogSnapshotHash: string; barcodeCandidates: Array<[string, IdentityCandidate[]]>; partNumberCandidates: Array<[string, IdentityCandidate[]]>; approvedLinks: ApprovedLinkLookupResult[] };
@@ -23,7 +23,7 @@ function predecessorContent(link: Pick<ApprovedLinkLookupResult, "businessId" | 
 export async function identityLinkPredecessorFingerprint(link: Pick<ApprovedLinkLookupResult, "businessId" | "sourceSystem" | "sourceSignature" | "vendorId" | "identifierType" | "namespace" | "normalizedValue" | "targetProductId" | "version">): Promise<string> { return canonicalSha256(predecessorContent(link)); }
 
 function scopeMatches(left: Scope, right: Scope): boolean { return left.businessId === right.businessId && left.sourceSystem === right.sourceSystem && left.sourceSignature === right.sourceSignature && left.vendorId === right.vendorId; }
-function linkFamily(link: Pick<ApprovedLinkLookupResult, "businessId" | "sourceSystem" | "sourceSignature" | "vendorId" | "identifierType" | "namespace" | "normalizedValue">): string { return JSON.stringify([link.businessId, link.sourceSystem, link.sourceSignature, link.vendorId, link.identifierType, link.namespace, link.normalizedValue]); }
+function linkFamily(link: Pick<ApprovedLinkLookupResult, "businessId" | "sourceSystem" | "sourceSignature" | "vendorId" | "identifierType" | "namespace" | "normalizedValue">): string { return JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]); }
 const configuredLinksSymbol = Symbol("configuredIdentityLinks");
 function allCandidates(snapshot: LocalIdentitySnapshot): IdentityCandidate[] { return [...snapshot.barcodeCandidates.values(), ...snapshot.partNumberCandidates.values()].flatMap((rows) => [...rows]); }
 function content(entries: Array<[string, IdentityCandidate[]]>): unknown[] { return entries.map(([key, candidates]) => [key, candidates.map((candidate) => Object.fromEntries(Object.entries(candidate).filter(([property]) => property !== "catalogSnapshotHash"))).sort((a, b) => a.productId.localeCompare(b.productId))]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))); }
@@ -77,23 +77,22 @@ export async function loadConfiguredLocalIdentityReadModel(): Promise<LocalIdent
  * This joins both before any preview/apply consumer reads them, so the link hash is an actual
  * content version rather than a configuration label.
  */
-export async function loadAuthoritativeLocalIdentityReadModel(repository: Pick<LocalIdentityRepository, "listCurrentIdentityLinks" | "listTenantProducts"> & Partial<Pick<LocalIdentityRepository, "pageAuthoritativeIdentityLinks">>): Promise<LocalIdentityReadModel | undefined> {
+export async function loadAuthoritativeLocalIdentityReadModel(repository: Pick<LocalIdentityRepository, "findCurrentIdentityLinks" | "listTenantProducts"> & Partial<Pick<LocalIdentityRepository, "listCurrentIdentityLinks" | "pageAuthoritativeIdentityLinks">>): Promise<LocalIdentityReadModel | undefined> {
   const configured = await loadConfiguredLocalIdentityReadModel();
   if (!configured) return undefined;
   const configuredCandidates = allCandidates(configured.snapshot);
+  const masterCandidateByProductId = new Map(configuredCandidates.filter((candidate) => candidate.businessScope === "master").map((candidate) => [candidate.productId, candidate]));
   const configuredLinks = (configured as LocalIdentityReadModel & { [configuredLinksSymbol]?: readonly ApprovedLinkLookupResult[] })[configuredLinksSymbol] ?? [];
+  const configuredLinksByFamily = new Map<string, ApprovedLinkLookupResult[]>();
+  for (const link of configuredLinks) configuredLinksByFamily.set(linkFamily(link), [...(configuredLinksByFamily.get(linkFamily(link)) ?? []), link]);
   // There is no cross-tenant enumeration path. The caller supplies its current tenant through lookup;
   // products are loaded lazily below and cached only for the duration of this model instance.
-  type TenantState = { durable: readonly IdentityLink[]; products: readonly TenantIdentityProduct[]; productById: ReadonlyMap<string, TenantIdentityProduct> };
+  type TenantState = { products: readonly TenantIdentityProduct[]; productById: ReadonlyMap<string, TenantIdentityProduct> };
   const tenantStates = new Map<string, Promise<TenantState>>();
   const tenantStateFor = (businessId: string): Promise<TenantState> => {
     const current = tenantStates.get(businessId);
     if (current) return current;
-    const loading = Promise.all([
-      repository.listCurrentIdentityLinks(businessId),
-      repository.listTenantProducts(businessId),
-    ]).then(([durable, products]) => ({
-      durable: Object.freeze([...durable]),
+    const loading = repository.listTenantProducts(businessId).then((products) => ({
       products: Object.freeze([...products]),
       productById: new Map(products.map((product) => [product.productId, product])),
     }));
@@ -101,12 +100,21 @@ export async function loadAuthoritativeLocalIdentityReadModel(repository: Pick<L
     return loading;
   };
   const linksFor = async (input: ApprovedLinkLookupInput): Promise<ApprovedLinkLookupResult[]> => {
-    const { durable, productById } = await tenantStateFor(input.businessId);
-    const current = durable.filter((link) => scopeMatches(link, input));
-    const configuredLinks = await configured.lookupApprovedLinks(input);
-    const merged = new Map(configuredLinks.map((link) => [linkFamily(link), link]));
-    for (const link of current) {
-      const master = configuredCandidates.find((candidate) => candidate.productId === link.targetProductId && candidate.businessScope === "master");
+    const { productById } = await tenantStateFor(input.businessId);
+    const requested = new Map<string, LinkLookup>();
+    for (const identifier of input.identifiers) {
+      const lookup: LinkLookup = { businessId: input.businessId, sourceSystem: input.sourceSystem, vendorId: input.vendorId, sourceSignature: input.sourceSignature, identifierType: identifier.type, namespace: identifier.namespace ?? "", normalizedValue: identifier.normalized };
+      requested.set(linkFamily(lookup), lookup);
+    }
+    const durable = (await Promise.all([...requested.values()].reduce<LinkLookup[][]>((chunks, lookup, index) => {
+      if (index % 25 === 0) chunks.push([]);
+      chunks[chunks.length - 1]!.push(lookup);
+      return chunks;
+    }, []).map((chunk) => repository.findCurrentIdentityLinks(input.businessId, chunk)))).flat();
+    const merged = new Map<string, ApprovedLinkLookupResult>();
+    for (const key of requested.keys()) for (const link of configuredLinksByFamily.get(key) ?? []) merged.set(key, link);
+    for (const link of durable) {
+      const master = masterCandidateByProductId.get(link.targetProductId);
       const product = productById.get(link.targetProductId);
       const target = master ?? (product ? { productId: product.productId, category: "tenant", businessScope: "tenant" as const, tenantBusinessId: product.businessId, verificationTier: "approved" as const, automaticEligible: true, evidenceId: `tenant-product:${product.productId}`, evidenceVersion: product.createdAt, exactCodeEvidence: true, identifiers: [{ type: link.identifierType, raw: link.rawValue, normalized: link.normalizedValue, ...(link.namespace ? { namespace: link.namespace } : {}), source: "tenant-identity-link", evidenceAuthority: "approved_tenant_link" as const, evidenceId: `identity-link:${link.version}`, evidenceVersion: String(link.version) }], title: product.name, attributes: {}, catalogVersion: configured.snapshot.catalogVersion, catalogSnapshotHash: configured.snapshot.catalogSnapshotHash } : null);
       // Current durable state wins for this exact identifier family, including tombstones.
@@ -115,7 +123,8 @@ export async function loadAuthoritativeLocalIdentityReadModel(repository: Pick<L
     return [...merged.values()].filter((link) => link.status === "approved");
   };
   const currentApprovedLinksFor = async (businessId: string): Promise<CurrentApprovedIdentityLink[]> => {
-    const [{ durable }, configuredLinks] = await Promise.all([tenantStateFor(businessId), configured.listCurrentApprovedLinks ? configured.listCurrentApprovedLinks(businessId) : []]);
+    if (!repository.listCurrentIdentityLinks) return [];
+    const [durable, configuredLinks] = await Promise.all([repository.listCurrentIdentityLinks(businessId), configured.listCurrentApprovedLinks ? configured.listCurrentApprovedLinks(businessId) : []]);
     const merged = new Map<string, Omit<CurrentApprovedIdentityLink, "predecessorFingerprint">>(configuredLinks.map((link) => [linkFamily(link), { ...link, predecessorSource: "configured" as const }]));
     for (const link of durable) {
       const key = linkFamily(link);

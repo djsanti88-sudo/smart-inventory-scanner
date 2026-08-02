@@ -5,7 +5,7 @@ import type { AtomicLocalStorage, AtomicPage, AtomicPageOptions, AtomicTransacti
 
 const linksKey = "identity-links", transformationsKey = "identity-transformations", runsKey = "identity-runs", operationsKey = "identity-operations", reviewsKey = "identity-reviews", expectedSessionsKey = "expected-inventory-sessions", tenantProductsKey = "identity-tenant-products";
 const emptyCurrentLinksFingerprint = createHash("sha256").update("[]").digest("hex");
-type LinkLookup = Pick<IdentityLink, "businessId" | "sourceSystem" | "vendorId" | "sourceSignature" | "identifierType" | "namespace" | "normalizedValue">;
+export type LinkLookup = Pick<IdentityLink, "businessId" | "sourceSystem" | "vendorId" | "sourceSignature" | "identifierType" | "namespace" | "normalizedValue">;
 export type IdentityLinkPageRecord = Pick<IdentityLink, "businessId" | "sourceSystem" | "vendorId" | "sourceSignature" | "identifierType" | "namespace" | "normalizedValue" | "targetProductId" | "status" | "version">;
 export type AuthoritativeIdentityLinkPageItem = IdentityLinkPageRecord & { predecessorSource: "configured" | "durable" };
 type OperationInput = Pick<ImportOperation, "businessId" | "importId" | "rowId" | "idempotencyKey" | "payloadFingerprint">;
