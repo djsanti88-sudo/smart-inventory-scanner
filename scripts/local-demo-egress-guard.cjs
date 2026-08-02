@@ -1,6 +1,12 @@
 "use strict";
 
 if (process.env.SCANBIN_LOCAL_DEMO === "1") {
+  Object.defineProperty(globalThis, "__SCANBIN_LOCAL_DEMO_EGRESS_GUARD__", {
+    value: 1,
+    configurable: false,
+    enumerable: false,
+    writable: false,
+  });
   const fs = require("node:fs");
   const net = require("node:net");
   const http = require("node:http");

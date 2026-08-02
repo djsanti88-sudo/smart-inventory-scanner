@@ -26,6 +26,7 @@
     "test:golden": "vitest run src/eval/goldenBaseline.test.ts",
     "test:corpus-drift": "vitest run src/server/tire-knowledge/corpusDrift.test.ts",
     "test:refresh-tire-meta": "node --test scripts/refresh-tire-meta.test.mjs",
+    "test:local-demo-egress": "node --test scripts/local-demo-egress-guard.test.mjs scripts/local-demo.test.mjs && vitest run src/services/security/localDemoClientEgress.test.ts src/components/SpeedInsightsTelemetry.test.tsx",
     "test:ledger": "vitest run src/stores/ledgerInvariants.store.test.ts src/stores/unknownEnqueue.store.test.ts src/stores/mergeUnion.store.test.ts src/stores/markWrongTransfer.store.test.ts src/stores/provenanceTier.store.test.ts src/stores/goldenClasses.store.test.ts src/services/inventory.replay.test.ts src/server/upc/ladderTimeout.test.ts",
     "test:e2e": "playwright test",
     "test:a11y": "playwright test e2e/a11y.spec.ts",

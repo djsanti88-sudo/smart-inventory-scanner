@@ -6,6 +6,7 @@ export async function GET() {
     return Response.json({
       blocked: error?.code === "LOCAL_DEMO_EGRESS_BLOCKED",
       code: error?.code ?? null,
+      guardMarker: globalThis.__SCANBIN_LOCAL_DEMO_EGRESS_GUARD__ ?? null,
     });
   }
 }

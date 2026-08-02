@@ -245,6 +245,7 @@ test("actual guarded Next production server is loopback-only and records blocked
     assert.deepEqual(await response.json(), {
       blocked: true,
       code: "LOCAL_DEMO_EGRESS_BLOCKED",
+      guardMarker: 1,
     });
 
     const externalAddress = Object.values(networkInterfaces()).flat()
@@ -257,6 +258,46 @@ test("actual guarded Next production server is loopback-only and records blocked
     assert.equal(entries[0].host, "example.com");
     assert.equal(entries[0].path, "/task-1-canary");
     assert.notEqual(entries[0].pid, process.pid);
+  } finally {
+    if (server) await stopChild(server);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("unguarded local-demo Next startup refuses the missing launcher attestation", async () => {
+  const fixture = resolve("scripts/fixtures/local-demo-next");
+  const directory = mkdtempSync(join(tmpdir(), "scanbin-next-unguarded-"));
+  const appDirectory = join(directory, "app");
+  let server;
+  try {
+    cpSync(fixture, appDirectory, { recursive: true });
+    symlinkSync(resolve("node_modules"), join(appDirectory, "node_modules"), "junction");
+    const nextBin = resolve("node_modules/next/dist/bin/next");
+    const build = spawnSync(process.execPath, [nextBin, "build", "--webpack"], {
+      cwd: appDirectory,
+      encoding: "utf8",
+      env: { ...process.env, SCANBIN_LOCAL_DEMO: "1", NEXT_TELEMETRY_DISABLED: "1" },
+      timeout: 120_000,
+    });
+    assert.equal(build.status, 0, `${build.stdout}\n${build.stderr}`);
+    const port = await reservePort();
+    let output = "";
+    server = spawn(process.execPath, [nextBin, "start", "-H", "127.0.0.1", "-p", String(port)], {
+      cwd: appDirectory,
+      env: { ...process.env, SCANBIN_LOCAL_DEMO: "1", NEXT_TELEMETRY_DISABLED: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    server.stdout.on("data", (chunk) => { output += chunk; });
+    server.stderr.on("data", (chunk) => { output += chunk; });
+    const exitCode = await new Promise((resolvePromise, rejectPromise) => {
+      const timeout = setTimeout(
+        () => rejectPromise(new Error(`Unguarded Next server did not refuse startup.\n${output}`)),
+        10_000,
+      );
+      server.once("exit", (code) => { clearTimeout(timeout); resolvePromise(code); });
+    });
+    assert.notEqual(exitCode, 0);
+    assert.match(output, /Local demo egress guard attestation failed/i);
   } finally {
     if (server) await stopChild(server);
     rmSync(directory, { recursive: true, force: true });

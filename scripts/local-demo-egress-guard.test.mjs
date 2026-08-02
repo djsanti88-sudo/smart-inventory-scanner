@@ -97,6 +97,24 @@ test("a blocked attempt fails closed when its ledger cannot be written", () => {
   }
 });
 
+test("preloaded local-demo guard attests its immutable marker before server code", () => {
+  const directory = mkdtempSync(join(tmpdir(), "scanbin-egress-marker-"));
+  const ledger = join(directory, "ledger.jsonl");
+  try {
+    const result = guarded(`
+      const descriptor = Object.getOwnPropertyDescriptor(globalThis, "__SCANBIN_LOCAL_DEMO_EGRESS_GUARD__");
+      console.log(JSON.stringify({ value: globalThis.__SCANBIN_LOCAL_DEMO_EGRESS_GUARD__, descriptor }));
+    `, ledger);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      value: 1,
+      descriptor: { value: 1, writable: false, enumerable: false, configurable: false },
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("loopback works and a blocked spawned worker shares the parent ledger", () => {
   const directory = mkdtempSync(join(tmpdir(), "scanbin-egress-worker-"));
   const ledger = join(directory, "ledger.jsonl");

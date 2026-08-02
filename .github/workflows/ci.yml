@@ -104,6 +104,9 @@ jobs:
       - name: Verify tire metadata refresh preserves the generated payload
         run: npm run test:refresh-tire-meta
 
+      - name: Attest local-demo egress containment
+        run: npm run test:local-demo-egress
+
   build:
     name: build
     runs-on: ubuntu-latest
