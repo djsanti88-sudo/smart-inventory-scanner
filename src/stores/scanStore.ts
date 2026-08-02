@@ -89,7 +89,7 @@ import { buildPersistedScanState, type PersistableScanState } from "@/stores/sca
 import { createAsyncDurablePersistStorage, createNativeIndexedDbDatabase, setBrowserPersistenceStatus, type PersistenceClearResult } from "@/stores/scanPersistStorage";
 import { emptyTenantState } from "@/stores/scanReset";
 import { clearSelectedBusinessId } from "@/lib/selectedBusiness";
-import { acquirePersistenceMutationBarrier, adoptLegacyPersistedStateWithHandoff, ownsPersistenceMutationBarrier, persistKeyForUid, releasePersistenceMutationBarrier, tryAcquirePersistenceMutationBarrier, type LegacyAdoptionResult } from "@/stores/scanPersistNamespace";
+import { adoptLegacyPersistedStateWithHandoff, persistKeyForUid, runPersistenceMutation, tryRunPersistenceMutation, type LegacyAdoptionResult } from "@/stores/scanPersistNamespace";
 import { getOrCreateDeviceId } from "@/services/deviceIdentity";
 import { shouldReuseSession, buildAutoSessionName } from "@/services/sessions/autoSession";
 import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
@@ -1776,8 +1776,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       resetForSignOut: () => {
-        const barrier = tryAcquirePersistenceMutationBarrier();
-        if (!barrier) return Promise.resolve({ cleared: false, authority: "none" } as const);
+        const started = tryRunPersistenceMutation(async () => {
         const finishReset = () => {
           // Re-point persist at the anon key only AFTER the signed-in namespace has been authoritatively
           // cleared. Firebase's own SDK auth persistence is cleared by fbSignOut (auth.ts:66-69) in the
@@ -1833,8 +1832,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // switch to anon or discard its in-memory tenant state.
         if (!deps.persistName) {
           finishReset();
-          releasePersistenceMutationBarrier(barrier);
-          return Promise.resolve({ cleared: true, authority: "none" } as const);
+          return { cleared: true, authority: "none" } as const;
         }
         const persistMutationEpochAtClearStart = appPersistMutationEpoch;
         return get().clearPersistedState().then((persistenceClear) => {
@@ -1848,7 +1846,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           }
           finishReset();
           return persistenceClear;
-        }).finally(() => releasePersistenceMutationBarrier(barrier));
+        });
+        });
+        return started.ran ? started.value : Promise.resolve({ cleared: false, authority: "none" } as const);
       },
 
       rehydrateForUid: async (uid: string) => {
@@ -1857,35 +1857,29 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // adopting the pre-account blob is an explicit owner action (adoptLegacyLocalData), never an
         // automatic side effect of signing in (shared-browser inheritance hazard).
         if (!deps.persistName) return Promise.resolve(); // non-persisted test store: nothing to re-point
-        const barrier = await acquirePersistenceMutationBarrier();
-        const contextEpoch = appPersistContextEpoch;
-        const persistApi = (useScanStore as unknown as {
-          persist?: { setOptions: (o: { name: string }) => void; rehydrate: () => Promise<void> | void };
-        }).persist;
-        if (persistApi && ownsPersistenceMutationBarrier(barrier) && appPersistContextEpoch === contextEpoch) {
+        await runPersistenceMutation(async () => {
+          const contextEpoch = appPersistContextEpoch;
+          const persistApi = (useScanStore as unknown as {
+            persist?: { setOptions: (o: { name: string }) => void; rehydrate: () => Promise<void> | void };
+          }).persist;
+          if (!persistApi || appPersistContextEpoch !== contextEpoch) return;
           appPersistContextEpoch += 1;
           persistApi.setOptions({ name: persistKeyForUid(uid) });
           // Returned so callers (BusinessContextGate) can AWAIT rehydrate before calling
           // setBusinessContext - only then does the store's businessId/userId reflect the persisted
           // state, letting the same-tenant refresh guard above actually match on a real refresh.
-          try { await Promise.resolve(persistApi.rehydrate()); } finally { releasePersistenceMutationBarrier(barrier); }
-          return;
-        }
-        releasePersistenceMutationBarrier(barrier);
-        return;
+          await Promise.resolve(persistApi.rehydrate());
+        });
       },
 
       rehydrateActivePersistedState: async () => {
         if (typeof window === "undefined" || !deps.persistName) return Promise.resolve();
-        const barrier = await acquirePersistenceMutationBarrier();
-        const persistApi = (useScanStore as unknown as {
-          persist?: { rehydrate: () => Promise<void> | void };
-        }).persist;
-        if (!persistApi || !ownsPersistenceMutationBarrier(barrier)) {
-          releasePersistenceMutationBarrier(barrier);
-          return;
-        }
-        try { await Promise.resolve(persistApi.rehydrate()); } finally { releasePersistenceMutationBarrier(barrier); }
+        await runPersistenceMutation(async () => {
+          const persistApi = (useScanStore as unknown as {
+            persist?: { rehydrate: () => Promise<void> | void };
+          }).persist;
+          if (persistApi) await Promise.resolve(persistApi.rehydrate());
+        });
       },
 
       adoptLegacyLocalData: async (uid: string) => {
@@ -6893,8 +6887,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       clearLocalCache: () => {
-        const barrier = tryAcquirePersistenceMutationBarrier();
-        if (!barrier) return Promise.resolve({ cleared: false, authority: "none" } as const);
+        const started = tryRunPersistenceMutation(async () => {
         // Clear ONLY browser-local data. In CLOUD mode we must NEVER call db.reset() (FirebaseSyncTarget
         // guards against a destructive cloud wipe and throws) and must NEVER reseed mock data over the
         // real cloud catalog - the cloud data re-loads on the next page load. In MOCK mode, reset the
@@ -6957,7 +6950,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             return { ...result, cleared: false };
           }
           return result;
-        }).finally(() => releasePersistenceMutationBarrier(barrier));
+        });
+        });
+        return started.ran ? started.value : Promise.resolve({ cleared: false, authority: "none" } as const);
       },
 
       applyCleanupSelections: (selectedCountIds) => {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAsyncDurablePersistStorage, createAsyncDurableStorage, createNativeIndexedDbDatabase, getAuthoritativePersistFallback, getPersistedStatePresence, getPersistedStatePresenceFromDatabase, type AsyncKeyValueDatabase } from "@/stores/scanPersistStorage";
-import { createLegacyAdoptionOperations, releasePersistenceMutationBarrier, tryAcquirePersistenceMutationBarrier } from "@/stores/scanPersistNamespace";
+import { createLegacyAdoptionOperations, tryRunPersistenceMutation } from "@/stores/scanPersistNamespace";
 
 class Db implements AsyncKeyValueDatabase {
   values = new Map<string, string>(); fail = false;
@@ -1056,6 +1056,54 @@ describe("persistence context generations", () => {
     expect(await database.get("sis-scan-owner::scanbin-recovery-v1")).toBeNull();
     expect(local.values.get("sis-scan-owner")).toBeUndefined();
   });
+
+  it("does not remove a tombstone when the write context changes after the awaited tombstone read", async () => {
+    let context = "A";
+    class TombstoneReadSwitchDb extends Db {
+      tombstoneReads = 0;
+      override async get(key: string): Promise<string | null> {
+        const value = await super.get(key);
+        if (key === "sis-scan-owner::scanbin-cleared-v1" && ++this.tombstoneReads >= 2) context = "B";
+        return value;
+      }
+    }
+    const database = new TombstoneReadSwitchDb();
+    const storage = createAsyncDurableStorage({
+      database,
+      getLegacyStorage: () => legacy(),
+      getWriteContext: () => context,
+      isWriteContextCurrent: (token) => token === context,
+    });
+
+    await storage.removeItem("sis-scan-owner");
+    context = "A";
+    await storage.setItem("sis-scan-owner", "A-newer-scan");
+
+    expect(await database.get("sis-scan-owner::scanbin-cleared-v1")).not.toBeNull();
+    expect(await database.get("sis-scan-owner")).toBeNull();
+  });
+
+  it("does not remove a matching write intent when its context changes after the awaited intent read", async () => {
+    let context = "A";
+    class IntentReadSwitchDb extends Db {
+      override async get(key: string): Promise<string | null> {
+        const value = await super.get(key);
+        if (key === "sis-scan-owner::scanbin-write-intent-v1") context = "B";
+        return value;
+      }
+    }
+    const database = new IntentReadSwitchDb();
+    const storage = createAsyncDurableStorage({
+      database,
+      getLegacyStorage: () => legacy(),
+      getWriteContext: () => context,
+      isWriteContextCurrent: (token) => token === context,
+    });
+
+    await storage.setItem("sis-scan-owner", "A-scan");
+
+    expect(await database.get("sis-scan-owner::scanbin-write-intent-v1")).not.toBeNull();
+  });
 });
 
 describe("durable legacy adoption", () => {
@@ -1068,15 +1116,14 @@ describe("durable legacy adoption", () => {
       createStorage: () => createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }),
       getPresence: (name) => getPersistedStatePresenceFromDatabase(name, db),
     });
-    const clearBarrier = tryAcquirePersistenceMutationBarrier();
-    expect(clearBarrier).not.toBeNull();
-    try {
-      await expect(operations.adopt("owner")).resolves.toEqual({ status: "target-exists" });
-      expect(await db.get("sis-scan-v1")).toBe(source);
-      expect(await db.get("sis-scan-owner")).toBeNull();
-    } finally {
-      releasePersistenceMutationBarrier(clearBarrier!);
-    }
+    let release!: () => void;
+    const held = tryRunPersistenceMutation(() => new Promise<void>((resolve) => { release = resolve; }));
+    expect(held.ran).toBe(true);
+    await expect(operations.adopt("owner")).resolves.toEqual({ status: "target-exists" });
+    expect(await db.get("sis-scan-v1")).toBe(source);
+    expect(await db.get("sis-scan-owner")).toBeNull();
+    release();
+    if (held.ran) await held.value;
   });
 
   it("adopts a durable-only anonymous snapshot after normalizing zero-delta scans", async () => {

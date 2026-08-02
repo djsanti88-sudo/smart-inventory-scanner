@@ -19,13 +19,13 @@ const LOCAL_DEMO_KEY = "sis-local-demo-scan-v1";
 // It is intentionally transient: IndexedDB remains the cross-tab authority.
 let persistenceMutationBarrier: symbol | null = null;
 const persistenceMutationWaiters: Array<(token: symbol) => void> = [];
-export function tryAcquirePersistenceMutationBarrier(): symbol | null {
+function tryAcquirePersistenceMutationBarrier(): symbol | null {
   if (persistenceMutationBarrier) return null;
   const token = Symbol("scan-persist-mutation");
   persistenceMutationBarrier = token;
   return token;
 }
-export function releasePersistenceMutationBarrier(token: symbol): void {
+function releasePersistenceMutationBarrier(token: symbol): void {
   if (persistenceMutationBarrier !== token) return;
   const next = persistenceMutationWaiters.shift();
   if (!next) { persistenceMutationBarrier = null; return; }
@@ -33,14 +33,43 @@ export function releasePersistenceMutationBarrier(token: symbol): void {
   persistenceMutationBarrier = replacement;
   next(replacement);
 }
-export function ownsPersistenceMutationBarrier(token: symbol): boolean {
-  return persistenceMutationBarrier === token;
-}
 /** Hydration must serialize rather than silently proceeding without its required namespace lease. */
-export function acquirePersistenceMutationBarrier(): Promise<symbol> {
+function acquirePersistenceMutationBarrier(): Promise<symbol> {
   const token = tryAcquirePersistenceMutationBarrier();
   if (token) return Promise.resolve(token);
   return new Promise((resolve) => persistenceMutationWaiters.push(resolve));
+}
+
+/**
+ * Run a destructive operation only when its in-tab persistence lease is immediately available.
+ * The lease token deliberately never crosses this module boundary: callers get a result, not a
+ * capability they could retain, release early, or use after it has been superseded.
+ */
+export function tryRunPersistenceMutation<T>(work: () => Promise<T>):
+  | { ran: false }
+  | { ran: true; value: Promise<T> } {
+  const barrier = tryAcquirePersistenceMutationBarrier();
+  if (!barrier) return { ran: false };
+  // Invoke immediately so a clear records its mutation epoch before any caller can schedule a
+  // competing scan in the same turn; Promise.finally still owns release for async work.
+  let value: Promise<T>;
+  try {
+    value = Promise.resolve(work());
+  } catch (error) {
+    value = Promise.reject(error);
+  }
+  value = value.finally(() => releasePersistenceMutationBarrier(barrier));
+  return { ran: true, value };
+}
+
+/** FIFO mutation runner for hydration and adoption handoffs that must wait rather than fail open. */
+export async function runPersistenceMutation<T>(work: () => Promise<T>): Promise<T> {
+  const barrier = await acquirePersistenceMutationBarrier();
+  try {
+    return await work();
+  } finally {
+    releasePersistenceMutationBarrier(barrier);
+  }
 }
 
 export type LegacyAdoptionResult =
@@ -52,7 +81,8 @@ export type LegacyAdoptionResult =
 
 type LegacyAdoptionOperations = {
   inspect: () => Promise<PersistedStatePresence>;
-  adopt: (uid: string, ownedBarrier?: symbol) => Promise<LegacyAdoptionResult>;
+  adopt: (uid: string) => Promise<LegacyAdoptionResult>;
+  adoptWithHandoff: (uid: string, onAdopted: () => Promise<LegacyAdoptionResult>) => Promise<LegacyAdoptionResult>;
 };
 
 /** Narrow test seam: production creates one adapter backed by the browser's IndexedDB authority. */
@@ -98,16 +128,8 @@ export function createLegacyAdoptionOperations(options: LegacyAdoptionOptions): 
     if (localDemo()) return "absent";
     return options.getPresence(LEGACY_KEY);
   };
-  const adopt = (uid: string, ownedBarrier?: symbol): Promise<LegacyAdoptionResult> => {
+  const adoptWhileLocked = async (uid: string): Promise<LegacyAdoptionResult> => {
     if (localDemo()) return Promise.resolve({ status: "absent" });
-    const existing = inFlight.get(uid);
-    if (existing) return existing;
-    const operation = (async (): Promise<LegacyAdoptionResult> => {
-      const barrier = ownedBarrier ?? tryAcquirePersistenceMutationBarrier();
-      if (!barrier) return { status: "target-exists" };
-      if (ownedBarrier && !ownsPersistenceMutationBarrier(ownedBarrier)) return { status: "target-exists" };
-      const releaseBarrier = ownedBarrier === undefined;
-      try {
       const sourcePresence = await inspect();
       if (sourcePresence === "unavailable") return { status: "unavailable" };
       if (sourcePresence === "absent") return { status: "absent" };
@@ -130,24 +152,31 @@ export function createLegacyAdoptionOperations(options: LegacyAdoptionOptions): 
         if (await options.getPresence(targetKey) !== "found" || await options.database.get(targetKey) !== normalized) {
           return { status: "unavailable" };
         }
-        // A destructive operation may have won after a delayed reservation. Never consume
-        // anonymous source unless this adoption still owns the shared linearization point.
-        if (!ownsPersistenceMutationBarrier(barrier)) return { status: "unavailable" };
+        // The private mutation runner owns the shared linearization point across this durable
+        // reservation and source consumption, so a destructive caller cannot interleave here.
         await storage.removeItem(LEGACY_KEY);
         if (await storage.getItem(LEGACY_KEY) !== null || await inspect() !== "absent") return { status: "unavailable" };
       } catch {
         return { status: "unavailable" };
       }
       return { status: "adopted" };
-      } finally {
-        if (releaseBarrier) releasePersistenceMutationBarrier(barrier);
-      }
-    })();
+  };
+  const adopt = (uid: string): Promise<LegacyAdoptionResult> => {
+    if (localDemo()) return Promise.resolve({ status: "absent" });
+    const existing = inFlight.get(uid);
+    if (existing) return existing;
+    const started = tryRunPersistenceMutation(() => adoptWhileLocked(uid));
+    const operation = started.ran ? started.value : Promise.resolve({ status: "target-exists" } as const);
     inFlight.set(uid, operation);
     void operation.finally(() => inFlight.delete(uid));
     return operation;
   };
-  return { inspect, adopt };
+  const adoptWithHandoff = (uid: string, onAdopted: () => Promise<LegacyAdoptionResult>) =>
+    runPersistenceMutation(async () => {
+      const result = await adoptWhileLocked(uid);
+      return result.status === "adopted" ? onAdopted() : result;
+    });
+  return { inspect, adopt, adoptWithHandoff };
 }
 
 let browserLegacyAdoptionOperations: LegacyAdoptionOperations | null = null;
@@ -185,14 +214,8 @@ export async function adoptLegacyPersistedStateWithHandoff(
   onAdopted: () => Promise<LegacyAdoptionResult>,
 ): Promise<LegacyAdoptionResult> {
   if (isLocalDemoPersistence()) return { status: "absent" };
-  const barrier = await acquirePersistenceMutationBarrier();
-  try {
-    const operations = getBrowserLegacyAdoptionOperations();
-    const result = (await operations?.adopt(uid, barrier)) ?? { status: "unavailable" };
-    return result.status === "adopted" ? await onAdopted() : result;
-  } finally {
-    releasePersistenceMutationBarrier(barrier);
-  }
+  const operations = getBrowserLegacyAdoptionOperations();
+  return (await operations?.adoptWithHandoff(uid, onAdopted)) ?? { status: "unavailable" };
 }
 
 export function persistKeyForUid(uid: string | null): string {

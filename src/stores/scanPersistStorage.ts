@@ -442,21 +442,32 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       reportDegraded(); return false;
     }
   };
-  const clearTombstone = async (name: string, generation: number, operationToken: string | null): Promise<boolean> => {
+  const clearTombstone = async (
+    name: string,
+    generation: number,
+    operationToken: string | null,
+    contextStillCurrent: () => boolean = () => true,
+  ): Promise<boolean> => {
     if (generationFor(name) !== generation) return false;
+    if (!contextStillCurrent()) return false;
     if (operationToken === null) return true;
     if (options.database) {
       try {
         const durable = await options.database.get(tombstoneKey(name));
+        if (generationFor(name) !== generation || !contextStillCurrent()) return false;
         if (durable !== null && durable !== operationToken) return false;
-        if (durable === operationToken) await options.database.remove(tombstoneKey(name));
+        if (durable === operationToken) {
+          if (generationFor(name) !== generation || !contextStillCurrent()) return false;
+          await options.database.remove(tombstoneKey(name));
+          if (generationFor(name) !== generation || !contextStillCurrent()) return false;
+        }
         reportAvailable();
       } catch {
         reportDegraded();
         return false;
       }
     }
-    if (generationFor(name) !== generation) return false;
+    if (generationFor(name) !== generation || !contextStillCurrent()) return false;
     const local = legacyRead(tombstoneKey(name));
     if (!local.available) return false;
     if (local.value !== null && local.value !== operationToken) return false;
@@ -539,7 +550,12 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       if (!options.database) return;
       try {
         const currentIntent = decodeWriteIntent(await options.database.get(writeIntentKey(name)));
-        if (currentIntent?.id === intentId) await options.database.remove(writeIntentKey(name));
+        if (!contextStillCurrent()) return;
+        if (currentIntent?.id === intentId) {
+          if (!contextStillCurrent()) return;
+          await options.database.remove(writeIntentKey(name));
+          if (!contextStillCurrent()) return;
+        }
       } catch {
         reportDegraded();
       }
@@ -591,7 +607,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       if (!mainWritten || generationFor(name) !== token) return;
       if (!contextStillCurrent()) return;
       const localRetired = retireAuthoritativeLocalFallback(name);
-      const tombstoneCleared = await clearTombstone(name, token, recoveryToken);
+      const tombstoneCleared = await clearTombstone(name, token, recoveryToken, contextStillCurrent);
       if (localRetired && tombstoneCleared) {
         try {
           await options.database.remove(recoveryKey(name));
@@ -695,7 +711,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       const localRetired = recoveryWritten
         ? retireAuthoritativeLocalFallback(name)
         : (removeLegacySnapshotOnce(name), true);
-      const tombstoneCleared = await clearTombstone(name, token, tombstoneToken);
+      const tombstoneCleared = await clearTombstone(name, token, tombstoneToken, contextStillCurrent);
       if (recoveryWritten && localRetired && tombstoneCleared && options.database) {
         try {
           if (!contextStillCurrent()) return;
