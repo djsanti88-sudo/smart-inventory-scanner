@@ -58,7 +58,10 @@ const lockWaitMilliseconds = 15_000;
 function clone<T>(value: T): T { return value === undefined ? value : JSON.parse(JSON.stringify(value)) as T; }
 function plainRecord(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype; }
 function storageRoot(): string { return path.resolve(process.cwd(), ".tmp", "identity-import"); }
-function mutexKey(root: string): string { return path.normalize(root).toLocaleLowerCase("en-US"); }
+function canonicalPathKey(root: string): string {
+  const normalized = path.normalize(root);
+  return process.platform === "win32" ? normalized.toLocaleLowerCase("en-US") : normalized;
+}
 function corrupt(): Error { return new Error("identity_storage_corrupt"); }
 function digest(value: string): string { return createHash("sha256").update(value).digest("hex").slice(0, 32); }
 function fullDigest(value: string): string { return createHash("sha256").update(value).digest("hex"); }
@@ -71,7 +74,7 @@ function assertBounds(options: { offset: number; limit: number }): void { if (!N
 function assertConfiguredRoot(root: string): string {
   const base = storageRoot();
   const resolved = path.resolve(root);
-  if (path.dirname(resolved) !== base || !path.basename(resolved)) throw new Error(`Local identity storage root must be a direct child of ${base}`);
+  if (canonicalPathKey(path.dirname(resolved)) !== canonicalPathKey(base) || !path.basename(resolved)) throw new Error(`Local identity storage root must be a direct child of ${base}`);
   for (const directory of [path.dirname(base), base, resolved]) {
     try { const stat = lstatSync(directory); if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("identity-import path is a reparse or symlink path"); }
     catch (error: unknown) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
@@ -93,8 +96,7 @@ async function recheckPhysicalRoot(root: string): Promise<string> {
   await ensureDirectory(root);
   const base = await realpath(configuredBase);
   const child = await realpath(root);
-  const lowerBase = path.normalize(base).toLocaleLowerCase("en-US");
-  if (path.dirname(child).toLocaleLowerCase("en-US") !== lowerBase) throw new Error("identity-import child escaped approved base");
+  if (canonicalPathKey(path.dirname(child)) !== canonicalPathKey(base)) throw new Error("identity-import child escaped approved base");
   const stat = await lstat(root);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("identity-import child is a reparse or symlink path");
   return child;
@@ -120,7 +122,7 @@ async function assertRegularFile(filePath: string): Promise<boolean> {
 }
 
 async function withMutex<T>(root: string, action: () => Promise<T>): Promise<T> {
-  const key = mutexKey(root), previous = rootMutexes.get(key) ?? Promise.resolve();
+  const key = canonicalPathKey(root), previous = rootMutexes.get(key) ?? Promise.resolve();
   let release: () => void = () => {};
   const current = new Promise<void>((resolve) => { release = resolve; });
   const queued = previous.then(() => current); rootMutexes.set(key, queued); await previous;

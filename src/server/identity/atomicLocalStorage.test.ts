@@ -76,6 +76,42 @@ describe("createFileAtomicLocalStorage", () => {
     await expect(createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.get("record"))).resolves.toEqual({ value: "committed" });
   });
 
+  it("coordinates physical-root aliases and keeps Linux distinct-case child roots independent", async () => {
+    const root = testRoot();
+    const alias = process.platform === "win32"
+      ? path.join(path.dirname(root).toUpperCase(), path.basename(root).toUpperCase())
+      : path.join(root, ".");
+    const first = createFileAtomicLocalStorage({ root });
+    const second = createFileAtomicLocalStorage({ root: alias });
+
+    await first.transaction((transaction) => transaction.set("first", { value: 1 }));
+    await second.transaction((transaction) => transaction.set("second", { value: 2 }));
+    await expect(first.read!((transaction) => transaction.get("second"))).resolves.toEqual({ value: 2 });
+    await expect(second.read!((transaction) => transaction.get("first"))).resolves.toEqual({ value: 1 });
+
+    if (process.platform !== "win32") {
+      const lower = testRoot();
+      const upper = path.join(storageBase, `${path.basename(lower).toUpperCase()}-CASE`);
+      ownedRoots.push(upper);
+      const entered: string[] = [];
+      let release: (() => void) | undefined;
+      const bothEntered = new Promise<void>((resolve) => { release = resolve; });
+      const waitForBoth = Promise.race([
+        bothEntered,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("distinct case roots shared a mutex")), 250)),
+      ]);
+      const run = (candidate: string, key: string) => createFileAtomicLocalStorage({ root: candidate }).transaction(async (transaction) => {
+        entered.push(key);
+        if (entered.length === 2) release?.();
+        await waitForBoth;
+        await transaction.set(key, { value: key });
+      });
+      await Promise.all([run(lower, "lower"), run(upper, "upper")]);
+      await expect(createFileAtomicLocalStorage({ root: lower }).read!((transaction) => transaction.get("lower"))).resolves.toEqual({ value: "lower" });
+      await expect(createFileAtomicLocalStorage({ root: upper }).read!((transaction) => transaction.get("upper"))).resolves.toEqual({ value: "upper" });
+    }
+  });
+
   it("performs an initialized-root preview read without creating a lock or cache file", async () => {
     const root = testRoot();
     await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", []));

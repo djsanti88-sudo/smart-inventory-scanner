@@ -123,8 +123,8 @@ const ARCHIVE_SUBDIR = "decode-archive";
 const OUTCOMES_SUBDIR = "decode-outcomes";
 const KV_FILE = ".ladder-kv.json";
 
-function currentMonth(): string {
-  return new Date().toISOString().slice(0, 7); // YYYY-MM
+function currentMonth(now: () => Date): string {
+  return now().toISOString().slice(0, 7); // YYYY-MM
 }
 
 /** Read + JSON.parse a file, returning `fallback` on missing file or corrupt JSON (never throws). */
@@ -149,7 +149,8 @@ function writeJson(path: string, value: unknown): void {
  *  - archive-> `<dir>/decode-archive/<YYYY-MM>.jsonl` (append-only JSONL, bucketed by entry month)
  * The dir is created lazily on first write. Reads of corrupt data degrade to defaults with a warn.
  */
-export function fileLadderStorage(dir: string): LadderStorage {
+export function fileLadderStorage(dir: string, options?: { now?: () => Date }): LadderStorage {
+  const now = options?.now ?? (() => new Date());
   const usagePath = join(dir, USAGE_FILE);
   const missPath = join(dir, MISS_FILE);
   const archiveDir = join(dir, ARCHIVE_SUBDIR);
@@ -162,7 +163,7 @@ export function fileLadderStorage(dir: string): LadderStorage {
 
   return {
     async readUsage(): Promise<UsageState> {
-      return readJson<UsageState>(usagePath, { month: currentMonth(), used: 0 });
+      return readJson<UsageState>(usagePath, { month: currentMonth(now), used: 0 });
     },
 
     async writeUsage(s: UsageState): Promise<void> {
@@ -270,7 +271,8 @@ const TABLE_OUTCOMES = "decode_outcomes";
  *  - decode_archive: append-only INSERT, never UPDATE/DELETE (purge-proof evidence trail).
  * `CREATE TABLE IF NOT EXISTS` runs once per adapter instance (memoized), lazily on first call.
  */
-export function tursoLadderStorage(client: TursoClientLike): LadderStorage {
+export function tursoLadderStorage(client: TursoClientLike, options?: { now?: () => Date }): LadderStorage {
+  const now = options?.now ?? (() => new Date());
   let ensured: Promise<void> | null = null;
 
   async function ensureTables(): Promise<void> {
@@ -328,7 +330,7 @@ export function tursoLadderStorage(client: TursoClientLike): LadderStorage {
         args: [],
       });
       if (result.rows.length === 0) {
-        return { month: currentMonth(), used: 0 };
+        return { month: currentMonth(now), used: 0 };
       }
       const row = result.rows[0];
       return { month: row.month as string, used: Number(row.used) };

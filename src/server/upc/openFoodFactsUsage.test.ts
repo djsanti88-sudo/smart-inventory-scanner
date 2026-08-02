@@ -40,7 +40,7 @@ describe("openFoodFactsUsage", () => {
   });
 
   it("used at the limit (10) blocks with a local per-minute-cap reason", async () => {
-    const storage = fileLadderStorage(dir);
+    const storage = fileLadderStorage(dir, { now: AT_12_34 });
     for (let i = 0; i < 10; i++) await storage.increment("openfoodfacts-usage:2026-07-12T12:34");
     const usage = openFoodFactsUsage(storage, { now: AT_12_34 });
     const gate = await usage.canSpend();
@@ -75,7 +75,7 @@ describe("openFoodFactsUsage", () => {
   });
 
   it("NEVER touches the paid Go-UPC usage key, the UPCitemdb daily key, or the AI-lookup daily cap key", async () => {
-    const storage = fileLadderStorage(dir);
+    const storage = fileLadderStorage(dir, { now: AT_12_34 });
     const usage = openFoodFactsUsage(storage, { now: AT_12_34 });
     await usage.record();
     expect(await storage.readUsage()).toEqual({ month: "2026-07", used: 0 }); // paid Go-UPC untouched

@@ -42,7 +42,7 @@ describe("upcItemDbUsage", () => {
   });
 
   it("used at the limit (90) blocks with a local-cap reason", async () => {
-    const storage = fileLadderStorage(dir);
+    const storage = fileLadderStorage(dir, { now: AT_JULY_12 });
     for (let i = 0; i < 90; i++) await storage.increment(`upcitemdb-usage:2026-07-12`);
     const usage = upcItemDbUsage(storage, { now: AT_JULY_12 });
     const gate = await usage.canSpend();
@@ -78,7 +78,7 @@ describe("upcItemDbUsage", () => {
   });
 
   it("NEVER touches the paid Go-UPC usage key or the daily AI-lookup cap key (own namespace)", async () => {
-    const storage = fileLadderStorage(dir);
+    const storage = fileLadderStorage(dir, { now: AT_JULY_12 });
     const usage = upcItemDbUsage(storage, { now: AT_JULY_12 });
     await usage.record();
     // The paid Go-UPC usage file is untouched (still default month/used 0).

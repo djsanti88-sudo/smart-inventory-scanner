@@ -36,6 +36,15 @@ describe("fileLadderStorage", () => {
       expect(typeof s.month).toBe("string");
     });
 
+    it("uses one injected clock for an empty July store and its August rollover", async () => {
+      let instant = new Date("2026-07-31T23:59:59.000Z");
+      const store = fileLadderStorage(dir, { now: () => instant });
+
+      expect(await store.readUsage()).toEqual({ month: "2026-07", used: 0 });
+      instant = new Date("2026-08-01T00:00:01.000Z");
+      expect(await store.readUsage()).toEqual({ month: "2026-08", used: 0 });
+    });
+
     it("round-trips a written usage state", async () => {
       const store = fileLadderStorage(dir);
       const written: UsageState = { month: "2026-07", used: 42 };
@@ -397,6 +406,15 @@ describe("tursoLadderStorage", () => {
     const store = tursoLadderStorage(memTursoClient());
     const s = await store.readUsage();
     expect(s.used).toBe(0);
+  });
+
+  it("uses one injected clock for an empty July table and its August rollover", async () => {
+    let instant = new Date("2026-07-31T23:59:59.000Z");
+    const store = tursoLadderStorage(memTursoClient(), { now: () => instant });
+
+    expect(await store.readUsage()).toEqual({ month: "2026-07", used: 0 });
+    instant = new Date("2026-08-01T00:00:01.000Z");
+    expect(await store.readUsage()).toEqual({ month: "2026-08", used: 0 });
   });
 
   it("writeUsage then readUsage round-trips via upsert", async () => {
