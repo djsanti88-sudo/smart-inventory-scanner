@@ -6,6 +6,7 @@ export function register() {
     process.env.SCANBIN_LOCAL_DEMO === "1" &&
     marker !== 1
   ) {
-    throw new Error("Local demo egress guard attestation failed: start through the local-demo launcher.");
+    console.error("Local demo egress guard attestation failed: start through the local-demo launcher.");
+    process.exit(1);
   }
 }

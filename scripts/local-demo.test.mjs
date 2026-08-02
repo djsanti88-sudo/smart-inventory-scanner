@@ -264,7 +264,7 @@ test("actual guarded Next production server is loopback-only and records blocked
   }
 });
 
-test("unguarded local-demo Next startup refuses the missing launcher attestation", async () => {
+test("unguarded local-demo Next startup exits promptly after the missing launcher attestation", async () => {
   const fixture = resolve("scripts/fixtures/local-demo-next");
   const directory = mkdtempSync(join(tmpdir(), "scanbin-next-unguarded-"));
   const appDirectory = join(directory, "app");
@@ -276,7 +276,7 @@ test("unguarded local-demo Next startup refuses the missing launcher attestation
     const build = spawnSync(process.execPath, [nextBin, "build", "--webpack"], {
       cwd: appDirectory,
       encoding: "utf8",
-      env: { ...process.env, SCANBIN_LOCAL_DEMO: "1", NEXT_TELEMETRY_DISABLED: "1" },
+      env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" },
       timeout: 120_000,
     });
     assert.equal(build.status, 0, `${build.stdout}\n${build.stderr}`);
@@ -291,8 +291,8 @@ test("unguarded local-demo Next startup refuses the missing launcher attestation
     server.stderr.on("data", (chunk) => { output += chunk; });
     const exitCode = await new Promise((resolvePromise, rejectPromise) => {
       const timeout = setTimeout(
-        () => rejectPromise(new Error(`Unguarded Next server did not refuse startup.\n${output}`)),
-        10_000,
+        () => rejectPromise(new Error(`Unguarded Next server did not exit after attestation failure.\n${output}`)),
+        3_000,
       );
       server.once("exit", (code) => { clearTimeout(timeout); resolvePromise(code); });
     });
