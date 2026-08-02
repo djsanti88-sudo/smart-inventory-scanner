@@ -91,6 +91,22 @@ describe("IdentityReviewTable", () => {
     expect(new URL(fetchMock.mock.calls[3]![0] as string, "http://local").searchParams.get("afterLink")).toBe("link-1");
   });
 
+  it("latches navigation before a bucket reset can accept a stale Next click", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    let resolveBucket: (value: unknown) => void = () => undefined;
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [review], currentApprovedLinks: [], nextReviewCursor: "review-1", nextLinkCursor: null }) })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveBucket = resolve; }));
+
+    render(<IdentityReviewTable businessId="shop-a" actorRole="admin" />);
+    await screen.findByText("row-1");
+    const next = screen.getByRole("button", { name: /next reviews/i });
+    fireEvent.click(screen.getByRole("button", { name: /automatic/i }));
+    fireEvent.click(next);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    resolveBucket({ ok: true, json: async () => ({ reviews: [], currentApprovedLinks: [], nextReviewCursor: null, nextLinkCursor: null }) });
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/Review page 1\. Link page 1\./i));
+  });
+
   it("renders the signed candidate display with product id secondary and never renders unallowlisted fields", async () => {
     const displayed = { ...review, cost: "999.00", quantity: 44, notes: "secret note", decision: { ...review.decision, candidates: [{ ...review.decision.candidates[0]!, display: { label: "Roadmaster RM234", category: "Tire", attributes: { size: "225/65R17", season: "All Season", cost: "999.00", quantity: "44", notes: "secret note", unknown: "private" } } }] } };
     vi.mocked(global.fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [displayed] }) } as Response);
