@@ -121,7 +121,10 @@ test("full inventory scan proof", async ({ page }) => {
   await page.screenshot({ path: `${PROOF}/05-needs-review.png`, fullPage: true });
 
   const row = page.getByTestId("review-row-UNKNOWN123");
-  await row.getByLabel("link to product").selectOption({ label: "Coca-Cola 12 pack 12 oz cans" });
+  await row.getByRole("button", { name: "Choose product" }).click();
+  const search = row.getByRole("combobox", { name: "Search products" });
+  await search.fill("coca");
+  await row.getByRole("option", { name: "Coca-Cola 12 pack 12 oz cans" }).click();
   await row.getByTestId("link-existing").click();
   // Owner rule (fc2188a, 2026-07-01, predates this test's last update): Needs Review hides items that
   // are already resolved AND synced, so the row disappears from the queue entirely instead of lingering

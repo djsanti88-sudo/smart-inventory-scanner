@@ -38,6 +38,28 @@ describe("NeedsReviewTable - Barcode column visible to all roles (Task 4)", () =
 });
 
 describe("NeedsReviewTable - product linking", () => {
+  it("links the exact 855724007602 Coca-Cola review through the current accessible picker", () => {
+    const resolveUnknown = vi.fn();
+    useScanStore.setState({
+      needsReviewQueue: [review({ id: "coke-855", cleanCode: "855724007602", status: "open", syncStatus: "pending" })],
+      products: [{ id: "prod-coke", name: "Coca-Cola 12 pack 12 oz cans" }] as unknown as import("@/types").Product[],
+      resolveUnknown,
+    });
+    render(<NeedsReviewTable />);
+
+    fireEvent.click(screen.getByTestId("choose-product-coke-855"));
+    const search = screen.getByRole("combobox", { name: "Search products" });
+    fireEvent.change(search, { target: { value: "coca" } });
+    fireEvent.click(screen.getByRole("option", { name: "Coca-Cola 12 pack 12 oz cans" }));
+    fireEvent.click(screen.getByTestId("link-existing"));
+
+    expect(resolveUnknown).toHaveBeenCalledWith("coke-855", "link_existing", {
+      productId: "prod-coke",
+      applyToCount: true,
+      selectedAliasCodes: [],
+    });
+  });
+
   it("shows a searchable, prettified product picker only after the operator chooses to link", () => {
     useScanStore.setState({
       needsReviewQueue: [review({ id: "pd1", cleanCode: "086699998600", status: "open", syncStatus: "pending" })],

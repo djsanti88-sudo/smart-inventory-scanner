@@ -57,6 +57,19 @@ const CORPUS_ROW = {
   field_completeness_score: "1.0", missing_fields: "", source_count: 2,
 };
 
+// This is the deterministic two-row import contract used by the browser spec.  It
+// deliberately lives in the route test's mocked corpus rather than assuming a
+// generated database exists in every CI worker.
+const FALKEN_IMPORT_ROW = {
+  ...CORPUS_ROW,
+  canonical_product_uid: "falken-28030703",
+  brand: "Falken", brand_normalized: "falken",
+  model: "Wildpeak A/T3W", model_normalized: "wildpeak at3w",
+  size: "LT275/70R18", raw_size_text: "LT275/70R18",
+  manufacturer_part_number: "28030703",
+  barcode: "848983006493",
+};
+
 function makeRequest(body: unknown): Request {
   return new Request("http://localhost/api/reconcile/match", {
     method: "POST",
@@ -257,6 +270,24 @@ describe("POST /api/reconcile/match - validation (400 on garbage)", () => {
 });
 
 describe("POST /api/reconcile/match - matching through the mocked local corpus", () => {
+  it("keeps the two-row universal-import fixture deterministic: Falken matches and WIDGET-100 is unmatched", async () => {
+    mockLookupAll.mockImplementation(async (key: string) => (key === "28030703" ? [FALKEN_IMPORT_ROW] : []));
+
+    const response = await POST(makeRequest({ rows: [
+      validRow({ externalId: "28030703", partNumbers: ["28030703"], brand: "Falken", model: "Wildpeak A/T3W", sizeText: "LT275/70R18" }),
+      // Give the otherwise unknown row a tire signal. Without one the matcher
+      // correctly classifies it as non_tire, which is a different contract.
+      validRow({ externalId: "WIDGET-100", partNumbers: ["WIDGET-100"], brand: "Acme", model: "Widget tire", sizeText: undefined }),
+    ] }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.matches).toMatchObject([
+      { status: "matched", matchBasis: "part_number_exact", candidate: { uid: "falken-28030703", brand: "Falken" } },
+      { status: "unmatched" },
+    ]);
+  });
+
   it("PN hit corroborated by brand + size -> matched, with linkageSuggestion carried through", async () => {
     mockLookupAll.mockImplementation(async (key: string) => (key === "90000027117" ? [CORPUS_ROW] : []));
 

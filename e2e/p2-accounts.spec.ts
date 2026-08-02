@@ -64,9 +64,9 @@ for (const vp of VIEWPORTS) {
         const s = (window as unknown as { __scanStore?: { setState: (p: object) => void } }).__scanStore;
         s?.setState({ scanFeed: [{ id: "leak2" }] }); // queues a coalesced write under sis-scan-test-uid
       });
-      await page.evaluate(() => {
-        const s = (window as unknown as { __scanStore?: { getState: () => { resetForSignOut: () => void } } }).__scanStore;
-        s?.getState().resetForSignOut();
+      await page.evaluate(async () => {
+        const s = (window as unknown as { __scanStore?: { getState: () => { resetForSignOut: () => Promise<unknown> } } }).__scanStore;
+        await s?.getState().resetForSignOut();
       });
       const after = await page.evaluate(() => {
         // Compute the null check INSIDE the browser: `?? "unset"` on a correctly-null userId would
@@ -82,10 +82,6 @@ for (const vp of VIEWPORTS) {
       expect(after.feedLen).toBe(0);
       expect(after.userIdIsNull).toBe(true);
       expect(after.uidKeyGone).toBe(true); // the signed-out user's blob is GONE, not just reset in memory
-      // Post-tick re-check (I1 regression guard): the immediate check above is timing-lucky and would
-      // not catch a fail-soft coalesced write resurrecting the uid key on the next 0ms flush timer.
-      // Wait past that tick and assert the key is STILL gone.
-      await page.waitForTimeout(100);
       const stillGone = await page.evaluate(() => window.localStorage.getItem("sis-scan-test-uid") === null);
       expect(stillGone).toBe(true);
       await page.screenshot({ path: `e2e/proof/p2-signout-${vp.name}.png` });

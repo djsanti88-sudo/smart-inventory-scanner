@@ -74,7 +74,10 @@ test("resolver never maps codes to wrong products; human approval makes them det
 
   // Human approves a correction: link 855724007602 to a real verified product (Coca-Cola).
   const row = page.getByTestId("review-row-855724007602");
-  await row.getByLabel("link to product").selectOption({ label: "Coca-Cola 12 pack 12 oz cans" });
+  await row.getByRole("button", { name: "Choose product" }).click();
+  const search = row.getByRole("combobox", { name: "Search products" });
+  await search.fill("coca");
+  await row.getByRole("option", { name: "Coca-Cola 12 pack 12 oz cans" }).click();
   await row.getByTestId("link-existing").click();
   // Owner rule (fc2188a, 2026-07-01, predates this test's last update): Needs Review hides items that
   // are already resolved AND synced, so nothing lingers once it is truly done. The row disappears from

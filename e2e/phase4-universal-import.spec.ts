@@ -3,14 +3,8 @@ import { test, expect, type Page, type Route } from "./fixtures";
 
 // Task 11 (Phase 4 Stage A ship gate) AC5 e2e proof: the Universal Import panel on /products, driven
 // through the real UI, for both desktop and phone viewports. Uses the reordered/renamed TSV fixture
-// (src/services/import/__fixtures__/reordered-renamed.tsv), which carries a real RUNTIME-corpus part
-// number (Falken Wildpeak A/T3W, manufacturer_part_number 28030703, size LT275/70R18, barcode
-// 848983006493 - queried directly from src/server/knowledge.generated.db, the DB the app actually
-// loads; the older tire_corpus_seed.csv is stale pre-generation source data and is NOT what
-// /api/reconcile/match reads) so the LOCAL /api/reconcile/match route (real committed corpus, no live
-// network) reports one genuine exact match. Only /api/ai-lookup is route-mocked, matching every other
-// P3/P4 mock spec - /api/reconcile/match and /api/import-mapping are local-only routes over the
-// committed corpus and the mock KV seam, never a live provider.
+// (src/services/import/__fixtures__/reordered-renamed.tsv). The reconcile route is mocked below:
+// generated corpus artifacts are intentionally not assumed to exist in every clean CI worker.
 //
 // Deterministic exact-match count: the fixture has exactly 2 data rows. Row 1 (PN 28030703, brand
 // Falken, size LT275/70R18) hits the part-number-exact path in identityMatcher.ts (AM-R4: brand AND
@@ -36,6 +30,14 @@ async function mockAiLookup(page: Page) {
 
 async function runImportFlow(page: Page, viewportLabel: string) {
   await mockAiLookup(page);
+  await page.route("**/api/reconcile/match", async (route: Route) => {
+    const body = route.request().postDataJSON() as { rows?: unknown[] };
+    expect(body.rows).toHaveLength(2);
+    return route.fulfill({ json: { matches: [
+      { status: "matched", matchBasis: "part_number_exact", confidence: 1, candidate: { uid: "falken-28030703", brand: "Falken", model: "Wildpeak A/T3W", size: "LT275/70R18" } },
+      { status: "unmatched", reason: "No corpus candidate found.", confidence: 0 },
+    ] } });
+  });
   await page.goto("/products");
 
   const panel = page.getByTestId("universal-import-panel");
