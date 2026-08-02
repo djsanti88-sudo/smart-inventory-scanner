@@ -138,7 +138,15 @@ describe("configured local identity read model", () => {
 
     expect(repository.listCurrentIdentityLinks).not.toHaveBeenCalled();
     expect(repository.findCurrentIdentityLinks).toHaveBeenCalledTimes(1);
-    expect(repository.findCurrentIdentityLinks.mock.calls[0]![1]).toHaveLength(25);
+    expect(repository.findCurrentIdentityLinks.mock.calls[0]![1]).toEqual(identifiers.map((identifier) => ({
+      businessId: "shop-a",
+      sourceSystem: "csv",
+      vendorId: "vendor-a",
+      sourceSignature: "v1",
+      identifierType: identifier.type,
+      namespace: "",
+      normalizedValue: identifier.normalized,
+    })));
     expect(links.map((link) => link.normalizedValue)).toEqual(Array.from({ length: 24 }, (_, index) => String(index + 1).padStart(2, "0")));
     expect(links).not.toContainEqual(expect.objectContaining({ normalizedValue: "25" }));
   });
@@ -149,8 +157,8 @@ describe("configured local identity read model", () => {
     vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", JSON.stringify(wire));
     const repository = {
       listCurrentIdentityLinks: vi.fn().mockRejectedValue(new Error("unbounded durable read")),
-      listTenantProducts: vi.fn().mockResolvedValue([]),
-      findCurrentIdentityLinks: vi.fn(async (_businessId, lookups) => lookups.map((lookup: { normalizedValue: string }) => ({ businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc" as const, namespace: "", rawValue: lookup.normalizedValue, normalizedValue: lookup.normalizedValue, targetProductId: "p-1", status: "approved" as const, version: 1, evidence: ["review"], createdBy: "manager", createdAt: "now" }))),
+      listTenantProducts: vi.fn().mockResolvedValue(Array.from({ length: 5_000 }, (_, index) => ({ businessId: "shop-a", productId: `p-${index}`, name: `Product ${index}`, createdBy: "manager", createdAt: "now" }))),
+      findCurrentIdentityLinks: vi.fn(async (_businessId, lookups) => lookups.map((lookup: { normalizedValue: string }) => ({ businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc" as const, namespace: "", rawValue: lookup.normalizedValue, normalizedValue: lookup.normalizedValue, targetProductId: `p-${lookup.normalizedValue}`, status: "approved" as const, version: 1, evidence: ["review"], createdBy: "manager", createdAt: "now" }))),
     };
     const model = await loadAuthoritativeLocalIdentityReadModel(repository as never);
     const source = createReadOnlyCandidateSource({ snapshot: model!.snapshot, lookupApprovedLinks: model!.lookupApprovedLinks });
@@ -164,8 +172,10 @@ describe("configured local identity read model", () => {
 
     expect(repository.findCurrentIdentityLinks).toHaveBeenCalledTimes(200);
     expect(repository.findCurrentIdentityLinks.mock.calls.every(([, lookups]) => lookups.length <= 25)).toBe(true);
+    expect(repository.findCurrentIdentityLinks.mock.calls.flatMap(([, lookups]) => lookups)).toEqual(Array.from({ length: 5_000 }, (_, index) => ({ businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue: String(index) })));
     expect(repository.listCurrentIdentityLinks).not.toHaveBeenCalled();
     expect(repository.listTenantProducts).toHaveBeenCalledTimes(1);
-    expect([...result.candidatesByRecord.values()].every((entries) => entries[0]?.productId === "p-1")).toBe(true);
+    expect([...result.candidatesByRecord.keys()]).toEqual([...Array.from({ length: 5_000 }, (_, index) => `row-${index}`), "same-scope-duplicate"]);
+    expect([...result.candidatesByRecord.values()].map((entries) => entries.map((entry) => entry.productId))).toEqual([...Array.from({ length: 5_000 }, (_, index) => [`p-${index}`]), ["p-1"]]);
   });
 });

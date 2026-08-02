@@ -131,12 +131,20 @@ describe("read-only local identity candidate source", () => {
       identifiers: [identifier({ raw: index === 0 ? "conflicted" : String(index), normalized: index === 0 ? "conflicted" : String(index) })],
     }));
     rows.push(input({ rawRecordFingerprint: "same-scope-duplicate", identifiers: [identifier({ raw: "1", normalized: "1" })] }));
+    rows.push(input({ rawRecordFingerprint: "different-signature-duplicate", sourceSignature: "schema-v2", identifiers: [identifier({ raw: "1", normalized: "1" })] }));
+    rows.push(input({ rawRecordFingerprint: "different-vendor-duplicate", vendorId: "vendor-b", identifiers: [identifier({ raw: "1", normalized: "1" })] }));
     rows.push(input({ rawRecordFingerprint: "other-tenant", businessId: "business-2", identifiers: [identifier({ raw: "1", normalized: "1" })] }));
 
     const result = await source.lookupBatch(rows);
 
-    expect(lookupApprovedLinks).toHaveBeenCalledTimes(2);
-    expect(lookupApprovedLinks.mock.calls.map(([scope]) => scope.identifiers).sort((left, right) => left.length - right.length).map((entries) => entries.length)).toEqual([1, 5_000]);
+    expect(lookupApprovedLinks).toHaveBeenCalledTimes(4);
+    expect(lookupApprovedLinks.mock.calls.map(([scope]) => scope).sort((left, right) => `${left.businessId}:${left.sourceSignature}:${left.vendorId}`.localeCompare(`${right.businessId}:${right.sourceSignature}:${right.vendorId}`))).toEqual([
+      expect.objectContaining({ businessId: "business-1", sourceSystem: "vendor-export", sourceSignature: "schema-v1", vendorId: "vendor-a", identifiers: expect.any(Array) }),
+      { businessId: "business-1", sourceSystem: "vendor-export", sourceSignature: "schema-v1", vendorId: "vendor-b", identifiers: [identifier({ raw: "1", normalized: "1" })] },
+      { businessId: "business-1", sourceSystem: "vendor-export", sourceSignature: "schema-v2", vendorId: "vendor-a", identifiers: [identifier({ raw: "1", normalized: "1" })] },
+      { businessId: "business-2", sourceSystem: "vendor-export", sourceSignature: "schema-v1", vendorId: "vendor-a", identifiers: [identifier({ raw: "1", normalized: "1" })] },
+    ]);
+    expect(lookupApprovedLinks.mock.calls.map(([scope]) => scope.identifiers).sort((left, right) => left.length - right.length).map((entries) => entries.length)).toEqual([1, 1, 1, 5_000]);
     expect(result.candidatesByRecord.get("row-0")?.some((entry) => entry.productId.startsWith("conflict-"))).toBe(false);
     expect(result.candidatesByRecord.get("row-1")?.some((entry) => entry.productId === "target-1")).toBe(true);
     expect(result.candidatesByRecord.get("other-tenant")?.some((entry) => entry.productId === "target-1")).toBe(false);
