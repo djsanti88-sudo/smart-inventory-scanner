@@ -76,7 +76,7 @@ for (const vp of VIEWPORTS) {
       // plus fake per-uid durable/legacy state, then assert BOTH the in-memory wipe and key removal.
       await page.route("**/api/ai-lookup", mockAiLookup);
       await page.goto("/scan");
-      await page.evaluate(() => {
+      const anonymousSettingsSnapshot = await page.evaluate(() => {
         window.localStorage.setItem("sis-scan-test-uid", JSON.stringify({ state: {}, version: 8 }));
         window.localStorage.setItem("sis-selected-business-v1", "test-business");
         const s = (window as unknown as {
@@ -84,21 +84,37 @@ for (const vp of VIEWPORTS) {
             getState: () => {
               products: Array<Record<string, unknown>>;
               aliases: Array<Record<string, unknown>>;
+              settings: Record<string, unknown>;
             };
             setState: (p: object) => void;
           };
         }).__scanStore;
         if (!s) throw new Error("scan store hook is unavailable");
         const state = s.getState();
+        const tenantProducts = state.products.map((product) => ({ ...product, businessId: "test-business" }));
+        const tenantAliases = state.aliases.map((alias) => ({ ...alias, businessId: "test-business" }));
         s.setState({
           businessId: "test-business",
           userId: "test-uid",
           // Preserve a deterministic valid alias hit after moving the fixture into a distinct tenant.
-          products: state.products.map((product) => ({ ...product, businessId: "test-business" })),
-          aliases: state.aliases.map((alias) => ({ ...alias, businessId: "test-business" })),
+          products: tenantProducts,
+          aliases: tenantAliases,
+          settings: {
+            ...state.settings,
+            businessId: "test-business",
+            ownerPinHash: "seeded-owner-pin-hash",
+            aiLookupEnabled: false,
+            dailyLookupCount: 17,
+            scannerDebounceMs: 123,
+            scanContext: "any",
+          },
+          firstScanAt: "2026-08-02T12:34:56.000Z",
+          recentLocations: ["Front counter", "Warehouse rack 7"],
+          syncedScanEventIds: ["seeded-synced-event-1", "seeded-synced-event-2"],
           scanFeed: [{ id: "leak" }],
           needsReviewQueue: [{ id: "leak-r" }],
         });
+        return JSON.stringify(state.settings);
       });
       // N1 (I1 mechanism guard): actually re-point persist at the signed-out user's per-uid key and queue
       // a coalesced write under it BEFORE the reset. This is what makes the test able to CATCH the I1 bug:
@@ -132,6 +148,12 @@ for (const vp of VIEWPORTS) {
               userId: string | null;
               currentSession: unknown | null;
               sessionId: string;
+              products: Array<Record<string, unknown>>;
+              aliases: Array<Record<string, unknown>>;
+              settings: Record<string, unknown>;
+              firstScanAt: string | null;
+              recentLocations: string[];
+              syncedScanEventIds: string[];
             };
           };
         }).__scanStore;
@@ -151,6 +173,12 @@ for (const vp of VIEWPORTS) {
         const counted = s.getState();
         const expectedFeed = JSON.stringify(counted.scanFeed);
         const expectedFinalCounts = JSON.stringify(counted.finalCounts);
+        const expectedProducts = JSON.stringify(counted.products);
+        const expectedAliases = JSON.stringify(counted.aliases);
+        const expectedSettings = JSON.stringify(counted.settings);
+        const expectedFirstScanAt = counted.firstScanAt;
+        const expectedRecentLocations = JSON.stringify(counted.recentLocations);
+        const expectedSyncedScanEventIds = JSON.stringify(counted.syncedScanEventIds);
         const countTotalAfterScan = counted.finalCounts.reduce((total, count) => total + count.quantity, 0);
         const result = await reset;
         const state = s.getState();
@@ -174,6 +202,20 @@ for (const vp of VIEWPORTS) {
           actualFeed: JSON.stringify(state.scanFeed),
           expectedFinalCounts,
           actualFinalCounts: JSON.stringify(state.finalCounts),
+          productCount: counted.products.length,
+          aliasCount: counted.aliases.length,
+          expectedProducts,
+          actualProducts: JSON.stringify(state.products),
+          expectedAliases,
+          actualAliases: JSON.stringify(state.aliases),
+          expectedSettings,
+          actualSettings: JSON.stringify(state.settings),
+          expectedFirstScanAt,
+          actualFirstScanAt: state.firstScanAt,
+          expectedRecentLocations,
+          actualRecentLocations: JSON.stringify(state.recentLocations),
+          expectedSyncedScanEventIds,
+          actualSyncedScanEventIds: JSON.stringify(state.syncedScanEventIds),
         };
       });
       expect(contendedReset.cleared).toBe(false);
@@ -191,6 +233,25 @@ for (const vp of VIEWPORTS) {
       expect(contendedReset.countTotalAfterReset).toBe(contendedReset.countTotalAfterScan);
       expect(contendedReset.actualFeed).toBe(contendedReset.expectedFeed);
       expect(contendedReset.actualFinalCounts).toBe(contendedReset.expectedFinalCounts);
+      expect(contendedReset.productCount).toBeGreaterThan(0);
+      expect(contendedReset.aliasCount).toBeGreaterThan(0);
+      expect(contendedReset.actualProducts).toBe(contendedReset.expectedProducts);
+      expect(contendedReset.actualAliases).toBe(contendedReset.expectedAliases);
+      expect(contendedReset.actualSettings).toBe(contendedReset.expectedSettings);
+      expect(JSON.parse(contendedReset.expectedSettings)).toMatchObject({
+        businessId: "test-business",
+        ownerPinHash: "seeded-owner-pin-hash",
+        aiLookupEnabled: false,
+        dailyLookupCount: 17,
+        scannerDebounceMs: 123,
+        scanContext: "any",
+      });
+      expect(contendedReset.expectedFirstScanAt).toBe("2026-08-02T12:34:56.000Z");
+      expect(contendedReset.actualFirstScanAt).toBe(contendedReset.expectedFirstScanAt);
+      expect(JSON.parse(contendedReset.expectedRecentLocations)).toEqual(["Front counter", "Warehouse rack 7"]);
+      expect(contendedReset.actualRecentLocations).toBe(contendedReset.expectedRecentLocations);
+      expect(contendedReset.actualSyncedScanEventIds).toBe(contendedReset.expectedSyncedScanEventIds);
+      expect(contendedReset.expectedSyncedScanEventIds).toContain("seeded-synced-event-1");
       const durableAfterContendedReset = await inspectUidPersistNamespace(page, "sis-scan-test-uid");
       expect(durableAfterContendedReset.mainValue).toContain(contendedReset.physicalScanId);
 
@@ -226,6 +287,12 @@ for (const vp of VIEWPORTS) {
               finalCounts: unknown[];
               needsReviewQueue: unknown[];
               pendingSyncQueue: unknown[];
+              products: unknown[];
+              aliases: unknown[];
+              settings: Record<string, unknown>;
+              firstScanAt: string | null;
+              recentLocations: string[];
+              syncedScanEventIds: string[];
             };
           };
         }).__scanStore;
@@ -243,6 +310,12 @@ for (const vp of VIEWPORTS) {
           finalCountsLen: state.finalCounts.length,
           reviewLen: state.needsReviewQueue.length,
           pendingSyncLen: state.pendingSyncQueue.length,
+          productsLen: state.products.length,
+          aliasesLen: state.aliases.length,
+          settingsSnapshot: JSON.stringify(state.settings),
+          firstScanAt: state.firstScanAt,
+          recentLocations: state.recentLocations,
+          syncedScanEventIds: state.syncedScanEventIds,
           uidKeyGone: window.localStorage.getItem("sis-scan-test-uid") === null,
           selectedBusinessKeyGone: window.localStorage.getItem("sis-selected-business-v1") === null,
         };
@@ -252,6 +325,12 @@ for (const vp of VIEWPORTS) {
       expect(after.finalCountsLen).toBe(0);
       expect(after.reviewLen).toBe(0);
       expect(after.pendingSyncLen).toBe(0);
+      expect(after.productsLen).toBe(0);
+      expect(after.aliasesLen).toBe(0);
+      expect(after.settingsSnapshot).toBe(anonymousSettingsSnapshot);
+      expect(after.firstScanAt).toBeNull();
+      expect(after.recentLocations).toEqual([]);
+      expect(after.syncedScanEventIds).toEqual([]);
       expect(after.userIdIsNull).toBe(true);
       expect(after.currentSessionIsNull).toBe(true);
       expect(after.sessionId).toBe("");
