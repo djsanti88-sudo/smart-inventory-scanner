@@ -292,6 +292,16 @@ async function lookupPartNumberTurso(key: string): Promise<{ row: TireKnowledgeR
 export async function lookupByExactBarcode(code: string, options?: TireKnowledgeLookupOptions): Promise<TireKnowledgeRow | null> {
   const key = normBarcodeKey(code);
   if (!key) return null;
+  const approvedBossRedirect = findBossShopCodeRedirect(key);
+  const bossRedirectAllowed = approvedBossRedirect
+    ? isBossShopCodeAliasBusinessAllowed(options?.authenticatedBusinessId)
+    : false;
+  if (approvedBossRedirect && !bossRedirectAllowed) {
+    console.warn("[tire-knowledge] Boss shop-code redirect disabled for request", {
+      allowlistConfigured: Boolean((process.env.BOSS_SHOP_CODE_ALIAS_BUSINESS_IDS ?? "").trim()),
+      authenticatedBusinessIdPresent: Boolean(options?.authenticatedBusinessId?.trim()),
+    });
+  }
   const candidates = lookupCandidates(key);
   const stmt = getStmtBarcode();
   if (stmt) {
@@ -299,7 +309,7 @@ export async function lookupByExactBarcode(code: string, options?: TireKnowledge
       const row = (stmt.get(c) as TireKnowledgeRow | undefined) ?? null;
       if (row) return row;
     }
-    const redirect = isBossShopCodeAliasBusinessAllowed(options?.authenticatedBusinessId) ? findBossShopCodeRedirect(key) : undefined;
+    const redirect = bossRedirectAllowed ? approvedBossRedirect : undefined;
     if (redirect) {
       const row = (stmt.get(redirect.canonicalBarcode) as TireKnowledgeRow | undefined) ?? null;
       if (row && matchesBossShopCodeRedirectTarget(redirect, row)) return { ...row, bossShopCodeAliasSelected: key };
@@ -312,7 +322,7 @@ export async function lookupByExactBarcode(code: string, options?: TireKnowledge
     if (tursoResult.state === "hit") return tursoResult.row;
     if (tursoResult.state === "error") ordinaryTursoQueryErrored = true;
   }
-  const redirect = isBossShopCodeAliasBusinessAllowed(options?.authenticatedBusinessId) ? findBossShopCodeRedirect(key) : undefined;
+  const redirect = bossRedirectAllowed ? approvedBossRedirect : undefined;
   // An ordinary candidate query error is not an ordinary miss.  Do not make a second canonical
   // redirect query after uncertain evidence; ordinary lookup still retains its JSON fallback below.
   if (redirect && !ordinaryTursoQueryErrored) {
