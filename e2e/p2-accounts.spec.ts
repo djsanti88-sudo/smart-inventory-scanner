@@ -49,9 +49,9 @@ async function inspectUidPersistNamespace(page: Page, uidKey: string) {
     return {
       databaseName,
       mainValue: typeof main === "string" ? main : null,
-      durableTombstonePresent: typeof tombstone === "string" && tombstone.length > 0,
-      recoveryKeyGone: recovery === undefined,
-      writeIntentKeyGone: writeIntent === undefined,
+      tombstoneValue: typeof tombstone === "string" ? tombstone : null,
+      recoveryValue: typeof recovery === "string" ? recovery : null,
+      writeIntentValue: typeof writeIntent === "string" ? writeIntent : null,
     };
   }, { key: uidKey });
 }
@@ -129,10 +129,51 @@ for (const vp of VIEWPORTS) {
         if (!s) throw new Error("scan store hook is unavailable");
         await s.getState().rehydrateForUid("test-uid"); // persist now points at sis-scan-test-uid
       });
+      // Complete the namespace handoff before seeding the proof state. This guarantees no hydration
+      // lease or earlier fixture write can deny reset's own lease and mask the mutation-epoch race.
+      await page.evaluate(async () => {
+        const s = (window as unknown as {
+          __scanStore?: { getState: () => { rehydrateActivePersistedState: () => Promise<void> } };
+        }).__scanStore;
+        if (!s) throw new Error("scan store hook is unavailable");
+        await s.getState().rehydrateActivePersistedState();
+      });
       await page.evaluate(() => {
         const s = (window as unknown as { __scanStore?: { setState: (p: object) => void } }).__scanStore;
-        s?.setState({ scanFeed: [{ id: "leak2" }] }); // queues a coalesced write under sis-scan-test-uid
+        s?.setState({
+          scanFeed: [{ id: "leak2" }],
+          online: false,
+          pendingSyncQueue: [{
+            id: "seeded-pending-sync", businessId: "test-business", sessionId: "seeded-session",
+            entityType: "ScanEvent", entityId: "seeded-event", operation: "SAVE_SCAN_EVENT",
+            payload: { id: "seeded-event" }, status: "pending", retryCount: 0, lastError: null,
+            createdAt: "2026-08-02T12:00:00.000Z", updatedAt: "2026-08-02T12:00:00.000Z",
+            idempotencyKey: "seeded-pending-sync-key", scanEventId: "seeded-event",
+          }],
+          sessions: [{
+            id: "seeded-session", businessId: "test-business", name: "Seeded completed session",
+            location: "Warehouse rack 7", status: "completed", startedAt: "2026-08-02T10:00:00.000Z",
+            completedAt: "2026-08-02T11:00:00.000Z", createdBy: "test-uid",
+            notes: "must survive failed reset", syncStatus: "synced",
+          }],
+          sessionHistory: [{
+            sessionId: "seeded-session", startedAt: "2026-08-02T10:00:00.000Z",
+            endedAt: "2026-08-02T11:00:00.000Z",
+            scanRows: [{ time: "2026-08-02T10:30:00.000Z", code: "seeded-code", productName: "Seeded product", quantityDelta: 1 }],
+            totalScans: 1, totalUnits: 1,
+          }],
+          countSnapshots: [{
+            id: "seeded-count-snapshot", label: "Seeded count snapshot", takenAt: "2026-08-02T11:30:00.000Z",
+            lines: [{ productId: "prod-nokian", name: "Nokian Outpost APT", qty: 7 }],
+          }],
+        }); // queues one coalesced tenant snapshot under sis-scan-test-uid
       });
+      // Wait for that single post-handoff snapshot to become durable. The snapshot marker proves the
+      // whole setState payload committed; the null intent proves its crash-recovery bookkeeping retired.
+      await expect.poll(async () => (await inspectUidPersistNamespace(page, "sis-scan-test-uid")).mainValue)
+        .toContain("seeded-count-snapshot");
+      await expect.poll(async () => (await inspectUidPersistNamespace(page, "sis-scan-test-uid")).writeIntentValue)
+        .toBeNull();
       const durableBeforeReset = await inspectUidPersistNamespace(page, "sis-scan-test-uid");
       expect(durableBeforeReset.databaseName).toBe("scanbin-persist-v1");
       expect(durableBeforeReset.mainValue).not.toBeNull();
@@ -144,6 +185,11 @@ for (const vp of VIEWPORTS) {
               processScan: (code: string) => { id: string; quantityDelta: number } | null;
               scanFeed: Array<{ id: string }>;
               finalCounts: Array<{ quantity: number }>;
+              needsReviewQueue: Array<{ id: string }>;
+              pendingSyncQueue: Array<Record<string, unknown>>;
+              sessions: Array<Record<string, unknown>>;
+              sessionHistory: Array<Record<string, unknown>>;
+              countSnapshots: Array<Record<string, unknown>>;
               businessId: string;
               userId: string | null;
               currentSession: unknown | null;
@@ -159,9 +205,9 @@ for (const vp of VIEWPORTS) {
         }).__scanStore;
         if (!s) throw new Error("scan store hook is unavailable");
 
-        // A physical scan can land while durable removal is in flight. The store must fail closed here:
-        // returning cleared:false preserves the newly counted scan instead of discarding it to complete
-        // sign-out. This is intentionally a mutation DURING reset, not another pre-reset fixture write.
+        // Reset acquires the persistence lease and starts its durable clear first. A physical scan then
+        // lands while that clear is in flight. The mutation epoch must make reset fail closed after its
+        // durable work completes, preserving the newly counted scan and every older tenant field.
         const before = s.getState();
         const originalTenant = { businessId: before.businessId, userId: before.userId };
         const originalSessionId = before.sessionId;
@@ -171,8 +217,14 @@ for (const vp of VIEWPORTS) {
         const reset = before.resetForSignOut();
         const physicalScan = s.getState().processScan("6419440485331");
         const counted = s.getState();
+        const expectedCurrentSession = JSON.stringify(counted.currentSession);
         const expectedFeed = JSON.stringify(counted.scanFeed);
         const expectedFinalCounts = JSON.stringify(counted.finalCounts);
+        const expectedNeedsReviewQueue = JSON.stringify(counted.needsReviewQueue);
+        const expectedPendingSyncQueue = JSON.stringify(counted.pendingSyncQueue);
+        const expectedSessions = JSON.stringify(counted.sessions);
+        const expectedSessionHistory = JSON.stringify(counted.sessionHistory);
+        const expectedCountSnapshots = JSON.stringify(counted.countSnapshots);
         const expectedProducts = JSON.stringify(counted.products);
         const expectedAliases = JSON.stringify(counted.aliases);
         const expectedSettings = JSON.stringify(counted.settings);
@@ -191,6 +243,8 @@ for (const vp of VIEWPORTS) {
           originalSessionPresent,
           sessionIdAfterReset: state.sessionId,
           sessionPresentAfterReset: state.currentSession !== null,
+          expectedCurrentSession,
+          actualCurrentSession: JSON.stringify(state.currentSession),
           physicalScanId: physicalScan?.id ?? null,
           physicalScanQuantityDelta: physicalScan?.quantityDelta ?? 0,
           feedLengthBeforeScan,
@@ -202,8 +256,16 @@ for (const vp of VIEWPORTS) {
           actualFeed: JSON.stringify(state.scanFeed),
           expectedFinalCounts,
           actualFinalCounts: JSON.stringify(state.finalCounts),
-          productCount: counted.products.length,
-          aliasCount: counted.aliases.length,
+          expectedNeedsReviewQueue,
+          actualNeedsReviewQueue: JSON.stringify(state.needsReviewQueue),
+          expectedPendingSyncQueue,
+          actualPendingSyncQueue: JSON.stringify(state.pendingSyncQueue),
+          expectedSessions,
+          actualSessions: JSON.stringify(state.sessions),
+          expectedSessionHistory,
+          actualSessionHistory: JSON.stringify(state.sessionHistory),
+          expectedCountSnapshots,
+          actualCountSnapshots: JSON.stringify(state.countSnapshots),
           expectedProducts,
           actualProducts: JSON.stringify(state.products),
           expectedAliases,
@@ -226,6 +288,7 @@ for (const vp of VIEWPORTS) {
       expect(contendedReset.originalSessionPresent).toBe(true);
       expect(contendedReset.sessionIdAfterReset).toBe(contendedReset.originalSessionId);
       expect(contendedReset.sessionPresentAfterReset).toBe(true);
+      expect(contendedReset.actualCurrentSession).toBe(contendedReset.expectedCurrentSession);
       expect(contendedReset.physicalScanId).not.toBeNull();
       expect(contendedReset.physicalScanQuantityDelta).toBe(1);
       expect(contendedReset.feedLengthAfterScan).toBe(contendedReset.feedLengthBeforeScan + 1);
@@ -233,8 +296,18 @@ for (const vp of VIEWPORTS) {
       expect(contendedReset.countTotalAfterReset).toBe(contendedReset.countTotalAfterScan);
       expect(contendedReset.actualFeed).toBe(contendedReset.expectedFeed);
       expect(contendedReset.actualFinalCounts).toBe(contendedReset.expectedFinalCounts);
-      expect(contendedReset.productCount).toBeGreaterThan(0);
-      expect(contendedReset.aliasCount).toBeGreaterThan(0);
+      expect(contendedReset.actualNeedsReviewQueue).toBe(contendedReset.expectedNeedsReviewQueue);
+      expect(JSON.parse(contendedReset.expectedNeedsReviewQueue)).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: "leak-r" })]),
+      );
+      expect(contendedReset.actualPendingSyncQueue).toBe(contendedReset.expectedPendingSyncQueue);
+      expect(JSON.parse(contendedReset.expectedPendingSyncQueue).length).toBeGreaterThan(0);
+      expect(contendedReset.actualSessions).toBe(contendedReset.expectedSessions);
+      expect(JSON.parse(contendedReset.expectedSessions).length).toBeGreaterThan(0);
+      expect(contendedReset.actualSessionHistory).toBe(contendedReset.expectedSessionHistory);
+      expect(JSON.parse(contendedReset.expectedSessionHistory).length).toBeGreaterThan(0);
+      expect(contendedReset.actualCountSnapshots).toBe(contendedReset.expectedCountSnapshots);
+      expect(JSON.parse(contendedReset.expectedCountSnapshots).length).toBeGreaterThan(0);
       expect(contendedReset.actualProducts).toBe(contendedReset.expectedProducts);
       expect(contendedReset.actualAliases).toBe(contendedReset.expectedAliases);
       expect(contendedReset.actualSettings).toBe(contendedReset.expectedSettings);
@@ -252,8 +325,39 @@ for (const vp of VIEWPORTS) {
       expect(contendedReset.actualRecentLocations).toBe(contendedReset.expectedRecentLocations);
       expect(contendedReset.actualSyncedScanEventIds).toBe(contendedReset.expectedSyncedScanEventIds);
       expect(contendedReset.expectedSyncedScanEventIds).toContain("seeded-synced-event-1");
+      await expect.poll(async () => (await inspectUidPersistNamespace(page, "sis-scan-test-uid")).mainValue)
+        .toContain(contendedReset.physicalScanId);
+      await expect.poll(async () => (await inspectUidPersistNamespace(page, "sis-scan-test-uid")).writeIntentValue)
+        .toBeNull();
       const durableAfterContendedReset = await inspectUidPersistNamespace(page, "sis-scan-test-uid");
+      expect(durableAfterContendedReset.databaseName).toBe(durableBeforeReset.databaseName);
       expect(durableAfterContendedReset.mainValue).toContain(contendedReset.physicalScanId);
+      expect(durableAfterContendedReset.tombstoneValue).toBeNull();
+      expect(durableAfterContendedReset.recoveryValue).toBeNull();
+      expect(durableAfterContendedReset.writeIntentValue).toBeNull();
+      const durableContendedState = JSON.parse(durableAfterContendedReset.mainValue ?? "null")?.state;
+      expect(durableContendedState?.scanFeed).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: contendedReset.physicalScanId })]),
+      );
+      expect(durableContendedState?.currentSession).toEqual(JSON.parse(contendedReset.expectedCurrentSession));
+      expect(durableContendedState?.finalCounts).toEqual(JSON.parse(contendedReset.expectedFinalCounts));
+      expect(durableContendedState?.needsReviewQueue).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: "leak-r" })]),
+      );
+      expect(durableContendedState?.pendingSyncQueue?.length).toBeGreaterThan(0);
+      expect(durableContendedState?.sessions?.length).toBeGreaterThan(0);
+      expect(durableContendedState?.sessionHistory?.length).toBeGreaterThan(0);
+      expect(durableContendedState?.countSnapshots?.length).toBeGreaterThan(0);
+      const expectedProductIds = (JSON.parse(contendedReset.expectedProducts) as Array<{ id: string }>)
+        .map((product) => product.id).sort();
+      expect(durableContendedState?.products?.length).toBe(expectedProductIds.length);
+      expect(durableContendedState?.products?.map((product: { id: string }) => product.id).sort())
+        .toEqual(expectedProductIds);
+      expect(durableContendedState?.settings).toEqual(JSON.parse(contendedReset.expectedSettings));
+      expect(durableContendedState?.firstScanAt).toBe(contendedReset.expectedFirstScanAt);
+      expect(durableContendedState?.recentLocations).toEqual(JSON.parse(contendedReset.expectedRecentLocations));
+      expect(durableContendedState?.syncedScanEventIds)
+        .toEqual(JSON.parse(contendedReset.expectedSyncedScanEventIds));
 
       // runSignOutFlow cannot be invoked in the mock browser without a production test seam. Direct reset
       // is the ratified E2E mechanism; the focused wrapper tests prove it aborts auth on cleared:false.
@@ -341,13 +445,22 @@ for (const vp of VIEWPORTS) {
       expect(after.selectedBusinessKeyGone).toBe(true);
 
       const durable = await inspectUidPersistNamespace(page, "sis-scan-test-uid");
-      expect(durable).toEqual({
-        databaseName: "scanbin-persist-v1",
-        mainValue: null,
-        durableTombstonePresent: true,
-        recoveryKeyGone: true,
-        writeIntentKeyGone: true,
+      expect(durable.databaseName).toBe("scanbin-persist-v1");
+      expect(durable.mainValue).toBeNull();
+      expect(durable.recoveryValue).toBeNull();
+      expect(durable.writeIntentValue).toBeNull();
+      expect(durable.tombstoneValue).not.toBeNull();
+      const tombstone = JSON.parse(durable.tombstoneValue ?? "null");
+      expect(tombstone).toMatchObject({
+        __scanPersistClear: 1,
+        // The contended reset durably issued generation 1 before the scan's newer write retired it;
+        // this successful retry is therefore the second authoritative clear generation.
+        version: 2,
+        id: expect.any(String),
+        issuedAt: expect.any(Number),
+        intentBarrierEstablished: true,
       });
+      expect(tombstone.id).not.toBe("");
 
       await page.evaluate(() => new Promise<void>((resolve) => queueMicrotask(resolve)));
       const legacyStillGone = await page.evaluate(() => ({

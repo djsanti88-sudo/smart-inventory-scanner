@@ -71,8 +71,8 @@ async function seedWrongVerifiedProduct(page: Page) {
           ...prev.aliases,
           {
             id: "e2e-seed-alias-wrong-1", businessId: s.businessId, productId, rawCodeExample: code,
-            cleanCode: code, normalizedCode: code, aliasType: "barcode", source: "seed", confidence: 1,
-            approved: true, createdAt: s.sessionId, updatedAt: s.sessionId, createdBy: "seed",
+            cleanCode: code, normalizedCode: code, aliasType: "barcode", source: "human_review", confidence: 1,
+            approved: true, createdAt: s.sessionId, updatedAt: s.sessionId, createdBy: "human_link_existing",
             lastSeenAt: s.sessionId, syncStatus: "synced", idempotencyKey: "e2e-seed-alias-wrong-1",
           },
         ],
@@ -114,6 +114,12 @@ for (const vp of [
     await scan(page, WRONG_CODE);
     await scan(page, WRONG_CODE);
     await expect(page.getByTestId("final-count-body").locator('tr[data-testid^="count-row-"]')).toHaveCount(1);
+    const preCorrectionCounts = await page.evaluate(() => {
+      type Store = { getState: () => { finalCounts: Array<{ productId: string; quantity: number }> } };
+      const w = window as unknown as { __scanStore: Store };
+      return w.__scanStore.getState().finalCounts.map(({ productId, quantity }) => ({ productId, quantity }));
+    });
+    expect(preCorrectionCounts).toEqual([{ productId: WRONG_PRODUCT_ID, quantity: 2 }]);
     await expect(page.getByTestId(`qty-${WRONG_PRODUCT_ID}`)).toHaveText(/2/);
 
     const before = await totalCounted(page);

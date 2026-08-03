@@ -11,7 +11,7 @@ const FAST1 = "111111111117";
 const FAST2 = "222222222224";
 const FAST3 = "333333333331";
 const FALLBACK = "810118139604";
-const NEEDS_REVIEW = "444444444448"; // provider rate-limited
+const NEEDS_REVIEW = "400000000008"; // provider rate-limited; valid UPC-A absent from local catalogs
 const NOT_FOUND = "555555555555"; // searched, genuinely not listed
 
 const STATUS = {
