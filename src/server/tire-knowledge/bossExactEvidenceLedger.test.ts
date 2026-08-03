@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   BOSS_EXACT_EVIDENCE_LEDGER,
+  BOSS_SHOP_CODE_REDIRECTS,
+  findBossShopCodeRedirect,
+  matchesBossShopCodeRedirectTarget,
   matchesBossExactEvidenceLedger,
 } from "@/server/tire-knowledge/bossExactEvidenceLedger";
 
@@ -57,5 +60,74 @@ describe("Boss exact-evidence ledger", () => {
       expect(entry.disposition).toBe("accepted");
       expect(entry.bossPartNumber).toMatch(/^(BH|TH)\d+$/);
     }
+  });
+});
+
+const BOSS_SHOP_CODE_CASES = [
+  ["3220017209", "003220017209", "TIRE_688C82A02536FEEFBA1C", "BH1600462", "blackhawk", "33X12.50R20", 16],
+  ["3220017315", "003220017315", "TIRE_2F2263B3167393AB7EA5", "BH1600467", "blackhawk", "35X12.50R17", 21],
+  ["3220017438", "003220017438", "TIRE_D0F7590DC52EB30084BC", "BH1600479", "blackhawk", "275/55R20", 33],
+  ["3220017483", "003220017483", "TIRE_C403AC1F3DB3491E7E3B", "BH1600487", "blackhawk", "265/75R16", 41],
+  ["3220018367", "003220018367", "TIRE_D207F9B2A5E9E7010EFB", "BH4120851", "blackhawk", "235/70R16", 391],
+  ["3220018381", "003220018381", "TIRE_751C135054BD4468225F", "BH4120857", "blackhawk", "245/75R16", 397],
+  ["3220018411", "003220018411", "TIRE_DC7B51A10E3EEF677592", "BH4120867", "blackhawk", "245/75R17", 407],
+  ["3220018428", "003220018428", "TIRE_544F4F079893176C1521", "BH4120879", "blackhawk", "35X12.50R18", 419],
+  ["3220018435", "003220018435", "TIRE_A76115D4AC263F54A952", "BH4120886", "blackhawk", "285/60R20", 426],
+  ["77676020526", "077676020526", "TIRE_8FF5C1A475EFB383981F", "NX10557", "nexen", "245/50R20", 1734],
+] as const;
+
+describe("Boss shop-code redirect evidence ledger", () => {
+  it.each(BOSS_SHOP_CODE_CASES)("maps approved shop code %s only to its frozen canonical identity", (scannedCode, canonicalBarcode, canonicalProductUid, canonicalManufacturerPartNumber, normalizedBrand, canonicalSize, sourceRow) => {
+    const redirect = findBossShopCodeRedirect(scannedCode);
+
+    expect(redirect).toEqual({
+      scannedCode,
+      canonicalBarcode,
+      canonicalProductUid,
+      canonicalManufacturerPartNumber,
+      normalizedBrand,
+      canonicalSize,
+      sourceSheet: "Sheet1",
+      sourceRow,
+      evidenceKind: "boss_workbook_reconciliation_shop_code_redirect",
+      workbookSha256: "AA0AA341B674AF3898E02B8BAA0F2F6587DF18110C677ACFC86845F731FA2404",
+      disposition: "accepted",
+    });
+  });
+
+  it("is immutable, unique, and rejects a neighboring non-evidence key", () => {
+    expect(BOSS_SHOP_CODE_REDIRECTS).toHaveLength(10);
+    expect(Object.isFrozen(BOSS_SHOP_CODE_REDIRECTS)).toBe(true);
+    expect(new Set(BOSS_SHOP_CODE_REDIRECTS.map(({ scannedCode }) => scannedCode)).size).toBe(10);
+    expect(findBossShopCodeRedirect("3220017210")).toBeUndefined();
+  });
+
+  it("normalizes scanner spaces and dashes only, without altering leading zeroes or accepting suffixes", () => {
+    expect(findBossShopCodeRedirect("3220-017-209")?.canonicalBarcode).toBe("003220017209");
+    expect(findBossShopCodeRedirect(" 3220 017 209 ")?.canonicalBarcode).toBe("003220017209");
+    expect(findBossShopCodeRedirect("03220017209")).toBeUndefined();
+    expect(findBossShopCodeRedirect("32200172090")).toBeUndefined();
+    expect(findBossShopCodeRedirect("220017209")).toBeUndefined();
+  });
+
+  it("requires the entire canonical target fingerprint", () => {
+    const redirect = findBossShopCodeRedirect("3220017209");
+    expect(redirect).toBeDefined();
+    if (!redirect) throw new Error("approved redirect missing");
+
+    const row = {
+      barcode: redirect.canonicalBarcode,
+      canonical_product_uid: redirect.canonicalProductUid,
+      manufacturer_part_number: redirect.canonicalManufacturerPartNumber,
+      brand: "Blackhawk",
+      size: redirect.canonicalSize,
+      raw_size_text: redirect.canonicalSize,
+    };
+    expect(matchesBossShopCodeRedirectTarget(redirect, row)).toBe(true);
+    expect(matchesBossShopCodeRedirectTarget(redirect, { ...row, barcode: "003220017210" })).toBe(false);
+    expect(matchesBossShopCodeRedirectTarget(redirect, { ...row, canonical_product_uid: "TIRE_OTHER" })).toBe(false);
+    expect(matchesBossShopCodeRedirectTarget(redirect, { ...row, manufacturer_part_number: "BH_OTHER" })).toBe(false);
+    expect(matchesBossShopCodeRedirectTarget(redirect, { ...row, brand: "Nexen" })).toBe(false);
+    expect(matchesBossShopCodeRedirectTarget(redirect, { ...row, size: "35X12.50R20", raw_size_text: "35X12.50R20" })).toBe(false);
   });
 });
