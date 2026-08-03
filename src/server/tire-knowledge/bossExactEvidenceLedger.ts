@@ -120,9 +120,14 @@ export function matchesBossShopCodeRedirectTarget(redirect: BossShopCodeRedirect
     model: row.model,
     modelDisplay: row.model_display,
   });
+  // Turso's trusted tire rows occasionally retain a size as compact digits. This fallback is
+  // intentionally usable only after an exact frozen redirect lookup and only against that
+  // redirect's own canonical size; it does not widen corpus or scanner matching.
+  const hasExactCompactRedirectSize = canonicalSize === null && [row.size, row.raw_size_text]
+    .some((value) => value?.trim() === redirect.canonicalSize.replace(/\D/g, ""));
   return row.barcode === redirect.canonicalBarcode
     && row.canonical_product_uid === redirect.canonicalProductUid
     && row.manufacturer_part_number === redirect.canonicalManufacturerPartNumber
     && normalizeBrand(row.brand) === redirect.normalizedBrand
-    && canonicalSize === redirect.canonicalSize;
+    && (canonicalSize === redirect.canonicalSize || hasExactCompactRedirectSize);
 }

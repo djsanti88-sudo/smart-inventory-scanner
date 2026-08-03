@@ -130,4 +130,39 @@ describe("Boss shop-code redirect evidence ledger", () => {
     expect(matchesBossShopCodeRedirectTarget(redirect, { ...row, brand: "Nexen" })).toBe(false);
     expect(matchesBossShopCodeRedirectTarget(redirect, { ...row, size: "35X12.50R20", raw_size_text: "35X12.50R20" })).toBe(false);
   });
+
+  it.each([
+    ["35X12.50R17", "35125017", "3220017315"],
+    ["275/55R20", "2755520", "3220017438"],
+    ["245/50R20", "2455020", "77676020526"],
+  ])("accepts Turso's compact %s representation %s only for frozen redirect %s", (canonicalSize, compactSize, scannedCode) => {
+    const redirect = findBossShopCodeRedirect(scannedCode);
+    expect(redirect).toBeDefined();
+    if (!redirect) throw new Error("approved redirect missing");
+
+    expect(matchesBossShopCodeRedirectTarget(redirect, {
+      barcode: redirect.canonicalBarcode,
+      canonical_product_uid: redirect.canonicalProductUid,
+      manufacturer_part_number: redirect.canonicalManufacturerPartNumber,
+      brand: redirect.normalizedBrand,
+      size: compactSize,
+      raw_size_text: compactSize,
+    })).toBe(true);
+    expect(redirect.canonicalSize).toBe(canonicalSize);
+  });
+
+  it("rejects a compact size belonging to another frozen redirect", () => {
+    const redirect = findBossShopCodeRedirect("3220017315");
+    expect(redirect).toBeDefined();
+    if (!redirect) throw new Error("approved redirect missing");
+
+    expect(matchesBossShopCodeRedirectTarget(redirect, {
+      barcode: redirect.canonicalBarcode,
+      canonical_product_uid: redirect.canonicalProductUid,
+      manufacturer_part_number: redirect.canonicalManufacturerPartNumber,
+      brand: redirect.normalizedBrand,
+      size: "35125018",
+      raw_size_text: "35125018",
+    })).toBe(false);
+  });
 });
