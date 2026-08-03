@@ -2552,6 +2552,29 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               scanEventId,
             }),
           ]);
+          // A counted provisional is deliberately not a trusted identity, so a later physical scan
+          // must be allowed to heal its still-open review when the server has a tenant-gated exact
+          // corpus redirect for it.  The count above remains the only count for this physical scan;
+          // `liveDecode` only enriches/resolves the already-open review.  The route accepts the
+          // unredacted candidate only for its frozen allowlisted aliases, while ordinary inputs stay
+          // redacted and cannot become an identity through this path.
+          if (provMatchId) {
+            const existingOpenReview = get().needsReviewQueue.find(
+              (review) => review.cleanCode === cleaned.cleanCode && review.status === "open",
+            );
+            const stateAfterCount = get();
+            const today = createdAt.slice(0, 10);
+            const rescanAutoGate = evaluateAutoDecode({
+              aiEnabled: stateAfterCount.settings.aiLookupEnabled,
+              status: stateAfterCount.aiStatus,
+              online: stateAfterCount.online,
+              dailyCount: stateAfterCount.settings.lastResetDate === today ? stateAfterCount.settings.dailyLookupCount : 0,
+              dailyLimit: stateAfterCount.settings.dailyLookupLimit,
+              breaker: stateAfterCount.breaker,
+              now: new Date(createdAt).getTime(),
+            });
+            if (existingOpenReview && rescanAutoGate.allowed) void get().liveDecode(existingOpenReview.id);
+          }
           return event;
         }
 
