@@ -2401,7 +2401,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const matchedProduct = resolution.productId
           ? products.find((p) => p.id === resolution.productId)
           : undefined;
-        const knownConflict = isKnown
+        // The side-door firewall protects automatic deterministic matches from poisoned source data.
+        // A clerk who explicitly approved this exact alias through Needs Review has already made the
+        // identity decision; treating that human_review alias as an automatic source claim makes the
+        // next physical scan count on a new provisional instead of the selected product.
+        const humanApprovedAlias =
+          (resolution.matchType === "exact_alias" || resolution.matchType === "normalized_alias") &&
+          aliases.some(
+            (alias) =>
+              alias.productId === resolution.productId &&
+              alias.approved &&
+              alias.source === "human_review" &&
+              (cleaned.normalizedCandidates.includes(alias.cleanCode) || cleaned.normalizedCandidates.includes(alias.normalizedCode)),
+          );
+        const knownConflict = isKnown && !humanApprovedAlias
           ? detectIdentityContextConflict(get().settings.scanContext ?? "any", matchedProduct)
           : null;
         const countable = isKnown && !knownConflict;

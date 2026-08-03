@@ -669,6 +669,7 @@ describe("scanStore - AI suggestions NEVER auto-save (trust boundary)", () => {
   it("only a HUMAN approval creates the alias + makes future scans deterministic Known", () => {
     const db = new MockDb();
     const store = createTestScanStore({ db });
+    store.getState().updateSettings({ scanContext: "tire" });
     store.getState().processScan("855724007602");
     const reviewId = store.getState().needsReviewQueue.find((r) => r.status === "open")!.id;
 
@@ -680,6 +681,9 @@ describe("scanStore - AI suggestions NEVER auto-save (trust boundary)", () => {
     const ev = store.getState().processScan("855724007602");
     expect(ev?.resolverStatus).toBe("known");
     expect(ev?.matchedProductId).toBe("prod-coke");
+    expect(countFor(store, "prod-coke")).toBe(2);
+    expect(store.getState().scanFeed).toHaveLength(2);
+    expect(store.getState().scanFeed.every((event) => event.matchedProductId === "prod-coke" && event.quantityDelta === 1)).toBe(true);
   });
 });
 

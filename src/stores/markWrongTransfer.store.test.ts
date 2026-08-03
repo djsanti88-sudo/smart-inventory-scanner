@@ -29,6 +29,36 @@ function seedKnown(store: ReturnType<typeof createTestScanStore>, code: string) 
 }
 
 describe("D2: markWrong transfers quantity instead of destroying it", () => {
+  it("the mock E2E's cross-category seeded alias still counts each known physical scan before correction", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ aiLookupEnabled: false, scanContext: "tire" });
+    const code = "049000006346";
+    const state = store.getState();
+    const productId = "e2e-seed-wrong-1";
+    store.setState((prev) => ({
+      products: [...prev.products, {
+        id: productId, businessId: state.businessId, name: "Wrongly Mapped Item", brand: "TestBrand", category: "misc",
+        specsShort: "", specsFull: "", primarySku: "", primaryBarcode: code, gtin: "", upc: "", ean: "",
+        vendorCodes: [], aliases: [], imageUrl: "", productUrl: "", location: "", notes: "", status: "active",
+        source: "seed", confidence: 1, verified: true, createdAt: state.sessionId, updatedAt: state.sessionId, createdBy: "seed", updatedBy: "seed",
+      }],
+      aliases: [...prev.aliases, {
+        id: "e2e-seed-alias-wrong-1", businessId: state.businessId, productId, rawCodeExample: code, cleanCode: code,
+        normalizedCode: code, aliasType: "barcode", source: "seed", confidence: 1, approved: true,
+        createdAt: state.sessionId, updatedAt: state.sessionId, createdBy: "seed", lastSeenAt: state.sessionId,
+        syncStatus: "synced", idempotencyKey: "e2e-seed-alias-wrong-1",
+      }],
+    }));
+
+    const first = store.getState().processScan(code);
+    const second = store.getState().processScan(code);
+
+    expect(first?.matchedProductId).toBe(productId);
+    expect(second?.matchedProductId).toBe(productId);
+    expect(store.getState().finalCounts.find((count) => count.productId === productId)?.quantity).toBe(2);
+    expect(store.getState().scanFeed).toHaveLength(2);
+  });
+
   it("marking a counted product wrong keeps total physical quantity constant", async () => {
     const store = createTestScanStore({ db: new MockDb() });
     store.getState().updateSettings({ aiLookupEnabled: false });
