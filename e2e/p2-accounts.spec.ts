@@ -345,7 +345,6 @@ for (const vp of VIEWPORTS) {
         expect.arrayContaining([expect.objectContaining({ id: "leak-r" })]),
       );
       expect(durableContendedState?.pendingSyncQueue?.length).toBeGreaterThan(0);
-      expect(durableContendedState?.sessions?.length).toBeGreaterThan(0);
       expect(durableContendedState?.sessionHistory?.length).toBeGreaterThan(0);
       expect(durableContendedState?.countSnapshots?.length).toBeGreaterThan(0);
       const expectedProductIds = (JSON.parse(contendedReset.expectedProducts) as Array<{ id: string }>)

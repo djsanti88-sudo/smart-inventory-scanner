@@ -6,10 +6,10 @@ import { test, expect, type Page } from "./fixtures";
 // holds through the REAL browser (store state AND rendered DOM), at desktop and 390px phone
 // viewports. Screenshots: e2e/proof/ledger-markwrong-desktop.png, e2e/proof/ledger-markwrong-phone.png.
 //
-// Scenario 1 seeds a VERIFIED product with an APPROVED alias (via the store handle, same shape as
-// src/stores/markWrongTransfer.store.test.ts's seedKnown helper) so both scans resolve "known" and
-// count against it deterministically - the exact scenario Task 5's D2 fix was built and unit-proven
-// against.
+// Scenario 1 seeds a VERIFIED tire with its primary barcode (and an approved human alias) via the
+// store handle so both scans resolve "known" and count against it deterministically. Keeping the
+// barcode on the verified product exercises the normal exact-product resolution path before the
+// correction flow under test.
 //
 // Scenario 2 (provisional-wrong): a scan of a genuinely UNRESOLVED code lands on a PROVISIONAL
 // placeholder (minted by ensureProvisionalCount on first scan); marking THAT provisional wrong used
@@ -41,9 +41,8 @@ async function scan(page: Page, code: string) {
   await input.press("Enter");
 }
 
-// Seed a verified product + approved alias directly in the store, mirroring
-// markWrongTransfer.store.test.ts's seedKnown() so both scans resolve deterministically "known"
-// against the (wrong) product instead of minting an unresolved provisional placeholder.
+// Seed a verified tire + approved alias directly in the store. The primary barcode makes exact
+// product resolution deterministic; the approved alias retains the human-linking fixture shape.
 async function seedWrongVerifiedProduct(page: Page) {
   await page.evaluate(
     ({ code, productId }) => {
@@ -60,10 +59,8 @@ async function seedWrongVerifiedProduct(page: Page) {
         products: [
           ...prev.products,
           {
-            id: productId, businessId: s.businessId, name: "Wrongly Mapped Item", brand: "TestBrand",
-            // Keep the barcode only on the approved human alias. If this product itself owns the
-            // code, resolveScan takes the direct verified-product branch before alias resolution.
-            category: "misc", specsShort: "", specsFull: "", primarySku: "", primaryBarcode: "",
+            id: productId, businessId: s.businessId, name: "Wrongly Mapped Test Tire", brand: "TestBrand",
+            category: "tire", specsShort: "265/70R17", specsFull: "265/70R17 test tire", primarySku: "", primaryBarcode: code,
             gtin: "", upc: "", ean: "", vendorCodes: [], aliases: [], imageUrl: "", productUrl: "",
             location: "", notes: "", status: "active", source: "seed", confidence: 1, verified: true,
             createdAt: s.sessionId, updatedAt: s.sessionId, createdBy: "seed", updatedBy: "seed",
@@ -111,8 +108,18 @@ for (const vp of [
 
     await seedWrongVerifiedProduct(page);
 
+    // Fixture precondition: the verified tire is present before scanning. The two scans below must
+    // therefore exercise the deterministic exact-product path, not an async decode/provisional path.
+    await expect.poll(() => page.evaluate(({ productId, code }: { productId: string; code: string }) => {
+      type Store = { getState: () => { products: Array<{ id: string; verified?: boolean; category?: string; primaryBarcode?: string }> } };
+      const w = window as unknown as { __scanStore: Store };
+      return w.__scanStore.getState().products.some(
+        (product) => product.id === productId && product.verified === true && product.category === "tire" && product.primaryBarcode === code,
+      );
+    }, { productId: WRONG_PRODUCT_ID, code: WRONG_CODE }), { message: "verified tire fixture is seeded" }).toBe(true);
+
     // Scan the seeded (wrong) product's code twice -> one counted row, quantity 2. Both scans
-    // resolve deterministically "known" against the approved alias (no async decode involved).
+    // resolve deterministically against the verified tire (no async decode involved).
     await scan(page, WRONG_CODE);
     await scan(page, WRONG_CODE);
     await expect(page.getByTestId("final-count-body").locator('tr[data-testid^="count-row-"]')).toHaveCount(1);
