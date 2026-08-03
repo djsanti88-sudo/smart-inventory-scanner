@@ -678,6 +678,9 @@ describe("scanStore - AI suggestions NEVER auto-save (trust boundary)", () => {
 
     const alias = store.getState().aliases.find((a) => a.cleanCode === "855724007602");
     expect(alias?.approved).toBe(true);
+    expect(alias?.businessId).toBe(store.getState().businessId);
+    expect(alias?.source).toBe("human_review");
+    expect(alias?.createdBy).toBe("human_link_existing");
     const ev = store.getState().processScan("855724007602");
     expect(ev?.resolverStatus).toBe("known");
     expect(ev?.matchedProductId).toBe("prod-coke");

@@ -2402,16 +2402,18 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           ? products.find((p) => p.id === resolution.productId)
           : undefined;
         // The side-door firewall protects automatic deterministic matches from poisoned source data.
-        // A clerk who explicitly approved this exact alias through Needs Review has already made the
-        // identity decision; treating that human_review alias as an automatic source claim makes the
-        // next physical scan count on a new provisional instead of the selected product.
+        // Only the exact, current-tenant alias written by an actual human `link_existing` action may
+        // bypass it. `source: human_review` alone is not proof: older automatic resolve paths stamped
+        // that source too, and a foreign tenant's human-looking alias must never lend trust here.
         const humanApprovedAlias =
           (resolution.matchType === "exact_alias" || resolution.matchType === "normalized_alias") &&
           aliases.some(
             (alias) =>
+              alias.businessId === businessId &&
               alias.productId === resolution.productId &&
               alias.approved &&
               alias.source === "human_review" &&
+              alias.createdBy === "human_link_existing" &&
               (cleaned.normalizedCandidates.includes(alias.cleanCode) || cleaned.normalizedCandidates.includes(alias.normalizedCode)),
           );
         const knownConflict = isKnown && !humanApprovedAlias
@@ -5534,6 +5536,21 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           aliasId,
           "RESOLVE_ALIAS",
         );
+        const isHumanLinkExisting =
+          action === "link_existing" && (payload.origin === undefined || payload.origin === "human");
+        const automaticAliasSource: Alias["source"] =
+          payload.origin === "catalog" || payload.origin === "auto_verify"
+            ? "catalog"
+            : /openai|gpt/i.test(review.providerName)
+              ? "ai_openai"
+              : /gemini/i.test(review.providerName)
+                ? "ai_gemini"
+                : "ai_mock";
+        const isAutomaticResolution =
+          payload.origin === "ai" ||
+          payload.origin === "catalog" ||
+          payload.origin === "auto_verify" ||
+          payload.origin === "auto_count";
         const newAlias: Alias = {
           id: aliasId,
           businessId: state.businessId,
@@ -5545,12 +5562,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           normalizedCode:
             review.normalizedCandidates?.[review.normalizedCandidates.length - 1] ?? review.cleanCode,
           aliasType: codeTypeToAliasType(detectCodeType(review.cleanCode)),
-          source: "human_review",
+          source: isHumanLinkExisting
+            ? "human_review"
+            : isAutomaticResolution
+              ? automaticAliasSource
+              : "human_review",
           confidence: 1,
           approved: !weakGuessProduct, // NOT approved when minting from an evidence-less AI suggestion (Phase-2 poison guard)
           createdAt: now(),
           updatedAt: now(),
-          createdBy: "human",
+          createdBy: isHumanLinkExisting
+            ? "human_link_existing"
+            : isAutomaticResolution
+              ? payload.origin!
+              : "human",
           lastSeenAt: now(),
           syncStatus: "pending",
           idempotencyKey: aliasKeyOp,

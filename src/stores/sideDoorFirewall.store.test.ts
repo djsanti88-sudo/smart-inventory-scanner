@@ -34,6 +34,106 @@ describe("Phase 8C side-door firewall - deterministic count path", () => {
     expect(countFor(store, "prod-coke")).toBe(1);
   });
 
+  const linkedCode = "855724007602";
+
+  function linkCrossCategoryAlias(
+    store: ReturnType<typeof createTestScanStore>,
+    origin?: "human" | "ai" | "auto_verify",
+  ) {
+    store.getState().updateSettings({ scanContext: "tire" });
+    store.getState().processScan(linkedCode);
+    const review = store.getState().needsReviewQueue.find((item) => item.cleanCode === linkedCode && item.status === "open")!;
+    store.getState().resolveUnknown(review.id, "link_existing", {
+      productId: "prod-coke",
+      applyToCount: true,
+      ...(origin ? { origin } : {}),
+    });
+    return store.getState().aliases.find((alias) => alias.cleanCode === linkedCode && alias.productId === "prod-coke")!;
+  }
+
+  function expectRescanBlocked(store: ReturnType<typeof createTestScanStore>) {
+    store.getState().processScan(linkedCode);
+    expect(countFor(store, "prod-coke")).toBe(1);
+    expect(store.getState().scanFeed).toHaveLength(2);
+    expect(store.getState().scanFeed[0].matchedProductId).not.toBe("prod-coke");
+    expect(store.getState().finalCounts.reduce((total, count) => total + count.quantity, 0)).toBe(2);
+  }
+
+  it("an AI-origin approved alias keeps non-human provenance and cannot bypass the tire firewall", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const alias = linkCrossCategoryAlias(store, "ai");
+
+    expect(alias.approved).toBe(true);
+    expect(alias.source).toBe("ai_mock");
+    expect(alias.createdBy).toBe("ai");
+    expectRescanBlocked(store);
+  });
+
+  it("an auto_verify-origin approved alias keeps non-human provenance and cannot bypass the tire firewall", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const alias = linkCrossCategoryAlias(store, "auto_verify");
+
+    expect(alias.approved).toBe(true);
+    expect(alias.source).toBe("catalog");
+    expect(alias.createdBy).toBe("auto_verify");
+    expectRescanBlocked(store);
+  });
+
+  it("a foreign-tenant human-looking alias cannot lend its provenance to the current tenant's automatic alias", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const automaticAlias = linkCrossCategoryAlias(store, "ai");
+    store.setState((state) => ({
+      aliases: [
+        ...state.aliases,
+        {
+          ...automaticAlias,
+          id: "foreign-human-looking-alias",
+          businessId: "other-business",
+          source: "human_review",
+          createdBy: "human_link_existing",
+          idempotencyKey: "foreign-human-looking-alias",
+        },
+      ],
+    }));
+
+    expectRescanBlocked(store);
+  });
+
+  it("unapproved human provenance and an ambiguous current mapping cannot bypass the tire firewall", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const automaticAlias = linkCrossCategoryAlias(store, "ai");
+    store.setState((state) => ({
+      aliases: [
+        ...state.aliases.map((alias) =>
+          alias.id === automaticAlias.id ? { ...alias, source: "catalog" as const, createdBy: "auto_verify" } : alias,
+        ),
+        {
+          ...automaticAlias,
+          id: "revoked-human-alias",
+          source: "human_review",
+          createdBy: "human_link_existing",
+          approved: false,
+          idempotencyKey: "revoked-human-alias",
+        },
+        {
+          ...automaticAlias,
+          id: "ambiguous-current-alias",
+          productId: "prod-nokian",
+          source: "human_review",
+          createdBy: "human_link_existing",
+          approved: true,
+          idempotencyKey: "ambiguous-current-alias",
+        },
+      ],
+    }));
+
+    store.getState().processScan(linkedCode);
+    expect(countFor(store, "prod-coke")).toBe(1);
+    expect(countFor(store, "prod-nokian")).toBe(0);
+    expect(store.getState().scanFeed).toHaveLength(2);
+    expect(store.getState().finalCounts.reduce((total, count) => total + count.quantity, 0)).toBe(2);
+  });
+
   it("still counts a real tire in TIRE context (no false block)", () => {
     const store = createTestScanStore({ db: new MockDb() });
     store.getState().updateSettings({ scanContext: "tire" });
