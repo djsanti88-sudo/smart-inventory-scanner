@@ -632,11 +632,13 @@ describe("createFileAtomicLocalStorage", () => {
     expect(items.map((item) => item?.index)).toEqual(Array.from({ length: 20 }, (_, index) => index));
   });
 
-  it("serializes two adapters addressed to the same Windows directory through case aliases", async () => {
+  it("serializes two adapters addressed to the same physical directory through aliases", async () => {
     const root = testRoot();
-    const caseAlias = path.join(storageBase, path.basename(root).toUpperCase());
+    const alias = process.platform === "win32"
+      ? path.join(storageBase, path.basename(root).toUpperCase())
+      : path.join(root, ".");
     const first = createFileAtomicLocalStorage({ root });
-    const second = createFileAtomicLocalStorage({ root: caseAlias });
+    const second = createFileAtomicLocalStorage({ root: alias });
     await Promise.all([
       first.transaction((transaction) => transaction.set("first", true)),
       second.transaction((transaction) => transaction.set("second", true)),
