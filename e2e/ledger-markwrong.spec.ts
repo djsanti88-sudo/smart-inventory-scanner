@@ -106,6 +106,8 @@ for (const vp of [
     await page.waitForURL("**/scan");
     await expect(page.getByTestId("scanner-input")).toBeFocused();
 
+    // Wait for StoreHydrator before seeding: its rehydrate would otherwise overwrite this state.
+    await expect(page.getByTestId("final-count-body")).toBeVisible();
     await seedWrongVerifiedProduct(page);
 
     // Fixture precondition: the verified tire is present before scanning. The two scans below must
