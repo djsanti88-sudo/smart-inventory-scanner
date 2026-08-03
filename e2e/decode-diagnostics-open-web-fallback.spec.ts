@@ -102,6 +102,13 @@ test("decode diagnostics + open-web fallback: fast path intact, honest reasons, 
   // 4. TRULY UNLISTED: only after a search was attempted does it say "no product matched".
   await page.goto("/scan");
   await scan(page, UNLISTED);
+  await expect.poll(() => posts, { message: "unlisted decode request completed" }).toBe(4);
+  await expect.poll(() => page.evaluate((code: string) => {
+    type Review = { cleanCode?: string; reason?: string };
+    type Store = { getState: () => { needsReviewQueue: Review[] } };
+    const w = window as unknown as { __scanStore: Store };
+    return w.__scanStore.getState().needsReviewQueue.find((review) => review.cleanCode === code)?.reason ?? "";
+  }, UNLISTED), { message: "unlisted decode reason settled" }).toContain("no product matched");
   await page.goto("/review");
   const unlistedRow = page.getByTestId(`review-row-${UNLISTED}`);
   await expect(unlistedRow).toBeVisible();

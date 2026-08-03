@@ -107,6 +107,7 @@ for (const vp of [
         && state.finalCounts.some((count) => count.productId === productId && count.quantity === 1);
     }, { productId: wrongProductId, code: wrongCode }), { message: "human-confirmed product retains original scan" }).toBe(true);
     await scan(page, wrongCode);
+    // Approved identity propagation promotes both physical rows to the canonical known identity.
     await expect.poll(() => page.evaluate((code: string) => {
       type Event = { cleanCode?: string; matchedProductId?: string; status?: string };
       const w = window as unknown as { __scanStore: { getState: () => { scanFeed: Event[] } } };
@@ -115,7 +116,7 @@ for (const vp of [
         .map((event) => ({ matchedProductId: event.matchedProductId, status: event.status }));
     }, wrongCode), { message: "approved-alias rescan preserves both physical event identities" }).toEqual([
       { matchedProductId: wrongProductId, status: "known" },
-      { matchedProductId: wrongProductId, status: "resolved" },
+      { matchedProductId: wrongProductId, status: "known" },
     ]);
     await expect(page.getByTestId("final-count-body").locator('tr[data-testid^="count-row-"]')).toHaveCount(1);
     const preCorrectionCounts = await page.evaluate(() => {
