@@ -64,10 +64,48 @@ for (const vp of VIEWPORTS) {
         const s = (window as unknown as { __scanStore?: { setState: (p: object) => void } }).__scanStore;
         s?.setState({ scanFeed: [{ id: "leak2" }] }); // queues a coalesced write under sis-scan-test-uid
       });
-      await page.evaluate(async () => {
-        const s = (window as unknown as { __scanStore?: { getState: () => { resetForSignOut: () => Promise<unknown> } } }).__scanStore;
-        await s?.getState().resetForSignOut();
+      const contendedReset = await page.evaluate(async () => {
+        const s = (window as unknown as {
+          __scanStore?: {
+            getState: () => {
+              resetForSignOut: () => Promise<{ cleared: boolean }>;
+              processScan: (code: string) => { id: string } | null;
+              scanFeed: Array<{ id: string }>;
+              userId: string | null;
+            };
+          };
+        }).__scanStore;
+        if (!s) throw new Error("scan store hook is unavailable");
+
+        // A physical scan can land while durable removal is in flight. The store must fail closed here:
+        // returning cleared:false preserves the newly counted scan instead of discarding it to complete
+        // sign-out. This is intentionally a mutation DURING reset, not another pre-reset fixture write.
+        const reset = s.getState().resetForSignOut();
+        const physicalScan = s.getState().processScan("6419440485331");
+        const result = await reset;
+        const state = s.getState();
+        return {
+          cleared: result.cleared,
+          physicalScanQueued: physicalScan !== null,
+          physicalScanPreserved: physicalScan !== null && state.scanFeed.some((event) => event.id === physicalScan.id),
+          userId: state.userId,
+        };
       });
+      expect(contendedReset.cleared).toBe(false);
+      expect(contendedReset.physicalScanQueued).toBe(true);
+      expect(contendedReset.physicalScanPreserved).toBe(true);
+      expect(contendedReset.userId).toBe("test-uid");
+
+      // runSignOutFlow is a module-level UI helper, not a browser hook. Its retry is this same clean
+      // reset action after the user re-confirms; run it only after the contended operation has finished.
+      const retry = await page.evaluate(async () => {
+        const s = (window as unknown as {
+          __scanStore?: { getState: () => { resetForSignOut: () => Promise<{ cleared: boolean }> } };
+        }).__scanStore;
+        if (!s) throw new Error("scan store hook is unavailable");
+        return s.getState().resetForSignOut();
+      });
+      expect(retry.cleared).toBe(true);
       const after = await page.evaluate(() => {
         // Compute the null check INSIDE the browser: `?? "unset"` on a correctly-null userId would
         // coerce it to the string "unset" and defeat expect(after.userId).toBeNull() even when the
