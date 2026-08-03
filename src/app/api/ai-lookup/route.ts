@@ -24,6 +24,8 @@ import { clampConfidenceThreshold } from "@/services/security/decodePolicy";
 import { readDailyUsedForAccount, chargeDailySlotForAccount } from "@/services/security/aiSpendGuard";
 import { buildMasterCatalogEntry, appendMasterCatalogEntry } from "@/server/catalog/masterAppend";
 import { logServerEvent } from "@/server/log";
+import { findBossShopCodeRedirect } from "@/server/tire-knowledge/bossExactEvidenceLedger";
+import { isBossShopCodeAliasBusinessAllowed } from "@/server/tire-knowledge/tireKnowledgeIndex";
 
 // FAST-FIRST: cheap/fast models do the first pass (+ page-fetch). The slow PRO models are only used
 // to escalate when the fast pass found no product. All overridable via env. (Reported by GET only;
@@ -535,6 +537,17 @@ export async function POST(request: Request) {
       // traffic once the per-account gate above has run (accountCapCleared reflects the gate's outcome).
       capContext: authedBusinessId ? { authedBusinessId, accountCapCleared } : undefined,
     });
+    if (findBossShopCodeRedirect(code)) {
+      const payload = outcome.kind === "computed" ? outcome.payload : null;
+      console.log("[tire-knowledge] Boss shop-code route outcome", {
+        authenticatedBusinessIdPresent: Boolean(authedBusinessId),
+        allowlistMatched: isBossShopCodeAliasBusinessAllowed(authedBusinessId),
+        outcomeKind: outcome.kind,
+        decisionStatus: payload?.decision?.status ?? null,
+        resultCount: payload?.results?.length ?? 0,
+        tenantScopedAlias: payload?.debug?.tenantScopedAlias === true,
+      });
+    }
     if (outcome.kind === "persisted") {
       // FIX 4 (review MEDIUM, stale-verified replay + transaction storm): NEVER appends here. A cached/
       // L2-replay payload may have been written under a LOOSER historical verify gate than the current
