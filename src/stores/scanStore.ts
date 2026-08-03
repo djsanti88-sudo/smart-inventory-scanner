@@ -5581,11 +5581,50 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           idempotencyKey: aliasKeyOp,
         };
 
-        // Avoid duplicate aliases for the same clean code + product.
-        const aliasExists = state.aliases.some(
-          (a) => a.cleanCode === newAlias.cleanCode && a.productId === productId,
+        // Avoid duplicate aliases for the same current-tenant clean code + product. A genuine human
+        // `link_existing` may CONFIRM one already-approved automatic alias in place, preserving its id
+        // and createdAt while recording the later human provenance as a fresh audited/synced update.
+        // Fail closed on revoked aliases and duplicate ambiguity: neither is silently resurrected or
+        // selected. Foreign-tenant and wrong-product aliases never participate in this upgrade.
+        const matchingExistingAliases = state.aliases.filter(
+          (alias) =>
+            alias.businessId === state.businessId &&
+            alias.cleanCode === newAlias.cleanCode &&
+            alias.productId === productId,
         );
-        const aliases = aliasExists ? state.aliases : [...state.aliases, newAlias];
+        const aliasExists = matchingExistingAliases.length > 0;
+        const confirmableExistingAlias =
+          isHumanLinkExisting &&
+          matchingExistingAliases.length === 1 &&
+          matchingExistingAliases[0].approved &&
+          !(
+            matchingExistingAliases[0].source === "human_review" &&
+            matchingExistingAliases[0].createdBy === "human_link_existing"
+          )
+            ? matchingExistingAliases[0]
+            : null;
+        const confirmationAt = confirmableExistingAlias ? now() : null;
+        const confirmedExistingAlias: Alias | null = confirmableExistingAlias && confirmationAt
+          ? {
+              ...confirmableExistingAlias,
+              source: "human_review",
+              createdBy: "human_link_existing",
+              updatedAt: confirmationAt,
+              lastSeenAt: confirmationAt,
+              syncStatus: "pending",
+              idempotencyKey: buildIdempotencyKey(
+                state.businessId,
+                state.sessionId,
+                `${confirmableExistingAlias.id}:human-confirm:${idFactory()}`,
+                "RESOLVE_ALIAS",
+              ),
+            }
+          : null;
+        const aliases = confirmedExistingAlias
+          ? state.aliases.map((alias) => (alias.id === confirmedExistingAlias.id ? confirmedExistingAlias : alias))
+          : aliasExists
+            ? state.aliases
+            : [...state.aliases, newAlias];
 
         const needsReviewQueue = state.needsReviewQueue.map((r) =>
           r.id === reviewId
@@ -5692,7 +5731,22 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             }),
           );
         }
-        if (!aliasExists) {
+        if (confirmedExistingAlias) {
+          queued.push(
+            makeQueueItem({
+              idFactory,
+              now,
+              businessId: state.businessId,
+              sessionId: state.sessionId,
+              entityType: "Alias",
+              entityId: confirmedExistingAlias.id,
+              operation: "RESOLVE_ALIAS",
+              payload: confirmedExistingAlias,
+              idempotencyKey: confirmedExistingAlias.idempotencyKey,
+              scanEventId: null,
+            }),
+          );
+        } else if (!aliasExists) {
           queued.push(
             makeQueueItem({
               idFactory,
@@ -5838,7 +5892,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (createdProduct) {
           emitAudit({ entityType: "Product", entityId: createdProduct.id, action: "product_created", metadata: { code: review.cleanCode, origin: payload.origin ?? "human" } });
         }
-        if (!aliasExists) {
+        if (confirmedExistingAlias) {
+          emitAudit({
+            entityType: "Alias",
+            entityId: confirmedExistingAlias.id,
+            action: "alias_approved",
+            metadata: { code: review.cleanCode, productId, origin: "human", confirmation: "existing_alias" },
+          });
+        } else if (!aliasExists) {
           emitAudit({ entityType: "Alias", entityId: aliasId, action: "alias_approved", metadata: { code: review.cleanCode, productId, origin: payload.origin ?? "human" } });
         }
 

@@ -79,6 +79,179 @@ describe("Phase 8C side-door firewall - deterministic count path", () => {
     expectRescanBlocked(store);
   });
 
+  it("a genuine human confirmation upgrades one existing automatic alias in place and the next physical scan totals two", async () => {
+    const db = new MockDb();
+    const audit = vi.fn();
+    let tick = 0;
+    const store = createTestScanStore({
+      db,
+      audit,
+      now: () => `2026-06-12T10:00:00.${String(tick++).padStart(3, "0")}Z`,
+    });
+    store.setState({ userId: "audit-user" });
+    const automaticAlias = linkCrossCategoryAlias(store, "ai");
+    const originalCreatedAt = automaticAlias.createdAt;
+    const originalUpdatedAt = automaticAlias.updatedAt;
+    const originalKey = automaticAlias.idempotencyKey;
+    const reviewId = store.getState().reopenNeedsReview(linkedCode, "Owner confirms the existing mapping")!;
+
+    store.getState().resolveUnknown(reviewId, "link_existing", {
+      productId: "prod-coke",
+      applyToCount: false,
+    });
+
+    const matching = store.getState().aliases.filter(
+      (alias) =>
+        alias.businessId === store.getState().businessId &&
+        alias.cleanCode === linkedCode &&
+        alias.productId === "prod-coke",
+    );
+    expect(matching).toHaveLength(1);
+    expect(matching[0]).toMatchObject({
+      id: automaticAlias.id,
+      createdAt: originalCreatedAt,
+      source: "human_review",
+      createdBy: "human_link_existing",
+      approved: true,
+    });
+    expect(matching[0].updatedAt).not.toBe(originalUpdatedAt);
+    expect(matching[0].lastSeenAt).toBe(matching[0].updatedAt);
+    expect(matching[0].idempotencyKey).not.toBe(originalKey);
+    await vi.waitFor(() =>
+      expect(db.getAlias(store.getState().businessId, linkedCode, "prod-coke")).toMatchObject({
+        id: automaticAlias.id,
+        source: "human_review",
+        createdBy: "human_link_existing",
+      }),
+    );
+    expect(audit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityType: "Alias",
+        entityId: automaticAlias.id,
+        action: "alias_approved",
+        metadata: expect.objectContaining({ origin: "human", confirmation: "existing_alias" }),
+      }),
+    );
+
+    store.getState().processScan(linkedCode);
+    expect(countFor(store, "prod-coke")).toBe(2);
+    expect(store.getState().scanFeed).toHaveLength(2);
+    expect(store.getState().finalCounts.reduce((total, count) => total + count.quantity, 0)).toBe(2);
+  });
+
+  it("human confirmation never upgrades a foreign-tenant alias and creates current-tenant provenance", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const automaticAlias = linkCrossCategoryAlias(store, "ai");
+    store.setState((state) => ({
+      aliases: state.aliases.map((alias) =>
+        alias.id === automaticAlias.id ? { ...alias, businessId: "other-business" } : alias,
+      ),
+    }));
+    const reviewId = store.getState().reopenNeedsReview(linkedCode, "Owner selects a current-tenant mapping")!;
+
+    store.getState().resolveUnknown(reviewId, "link_existing", {
+      productId: "prod-coke",
+      applyToCount: false,
+    });
+
+    const foreign = store.getState().aliases.find((alias) => alias.id === automaticAlias.id)!;
+    expect(foreign).toMatchObject({
+      businessId: "other-business",
+      productId: "prod-coke",
+      source: "ai_mock",
+      createdBy: "ai",
+    });
+    const current = store.getState().aliases.find(
+      (alias) => alias.businessId === store.getState().businessId && alias.cleanCode === linkedCode,
+    );
+    expect(current).toMatchObject({
+      productId: "prod-coke",
+      source: "human_review",
+      createdBy: "human_link_existing",
+    });
+  });
+
+  it("human confirmation never upgrades an existing alias for a different product", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const automaticAlias = linkCrossCategoryAlias(store, "ai");
+    const reviewId = store.getState().reopenNeedsReview(linkedCode, "Owner selects a different product")!;
+
+    store.getState().resolveUnknown(reviewId, "link_existing", {
+      productId: "prod-nokian",
+      applyToCount: false,
+    });
+
+    expect(store.getState().aliases.find((alias) => alias.id === automaticAlias.id)).toMatchObject({
+      productId: "prod-coke",
+      source: "ai_mock",
+      createdBy: "ai",
+    });
+    expect(
+      store.getState().aliases.find(
+        (alias) =>
+          alias.businessId === store.getState().businessId &&
+          alias.cleanCode === linkedCode &&
+          alias.productId === "prod-nokian",
+      ),
+    ).toMatchObject({ source: "human_review", createdBy: "human_link_existing" });
+  });
+
+  it("automatic actions, revoked aliases, and ambiguous same-product duplicates cannot upgrade provenance", () => {
+    const automaticStore = createTestScanStore({ db: new MockDb() });
+    const automaticAlias = linkCrossCategoryAlias(automaticStore, "ai");
+    const automaticReview = automaticStore.getState().reopenNeedsReview(linkedCode, "automatic replay")!;
+    automaticStore.getState().resolveUnknown(automaticReview, "link_existing", {
+      productId: "prod-coke",
+      applyToCount: false,
+      origin: "auto_verify",
+    });
+    expect(automaticStore.getState().aliases.find((alias) => alias.id === automaticAlias.id)).toMatchObject({
+      source: "ai_mock",
+      createdBy: "ai",
+    });
+
+    const revokedStore = createTestScanStore({ db: new MockDb() });
+    const revokedAlias = linkCrossCategoryAlias(revokedStore, "ai");
+    revokedStore.setState((state) => ({
+      aliases: state.aliases.map((alias) =>
+        alias.id === revokedAlias.id ? { ...alias, approved: false } : alias,
+      ),
+    }));
+    const revokedReview = revokedStore.getState().reopenNeedsReview(linkedCode, "human confirmation")!;
+    revokedStore.getState().resolveUnknown(revokedReview, "link_existing", {
+      productId: "prod-coke",
+      applyToCount: false,
+    });
+    expect(revokedStore.getState().aliases.find((alias) => alias.id === revokedAlias.id)).toMatchObject({
+      approved: false,
+      source: "ai_mock",
+      createdBy: "ai",
+    });
+
+    const ambiguousStore = createTestScanStore({ db: new MockDb() });
+    const ambiguousAlias = linkCrossCategoryAlias(ambiguousStore, "ai");
+    ambiguousStore.setState((state) => ({
+      aliases: [
+        ...state.aliases,
+        {
+          ...ambiguousAlias,
+          id: "duplicate-automatic-alias",
+          idempotencyKey: "duplicate-automatic-alias",
+        },
+      ],
+    }));
+    const ambiguousReview = ambiguousStore.getState().reopenNeedsReview(linkedCode, "human confirmation")!;
+    ambiguousStore.getState().resolveUnknown(ambiguousReview, "link_existing", {
+      productId: "prod-coke",
+      applyToCount: false,
+    });
+    const ambiguous = ambiguousStore.getState().aliases.filter(
+      (alias) => alias.businessId === ambiguousStore.getState().businessId && alias.cleanCode === linkedCode,
+    );
+    expect(ambiguous).toHaveLength(2);
+    expect(ambiguous.some((alias) => alias.createdBy === "human_link_existing")).toBe(false);
+  });
+
   it("a foreign-tenant human-looking alias cannot lend its provenance to the current tenant's automatic alias", () => {
     const store = createTestScanStore({ db: new MockDb() });
     const automaticAlias = linkCrossCategoryAlias(store, "ai");
