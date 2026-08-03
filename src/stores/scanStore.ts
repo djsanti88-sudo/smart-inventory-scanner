@@ -3441,6 +3441,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   proRecheck: review.reopenedFromWrong === true, // auto-escalate a marked-wrong code to the stronger model
                   rawCode: rawCodeSanitized,
                   cleanCode: cleanCodeSanitized,
+                  // The server accepts this original scanner code only for a frozen exact Boss
+                  // redirect after auth + tenant allowlist checks. All ordinary decode fields stay
+                  // sanitized, so arbitrary phone-like values cannot bypass PII redaction.
+                  exactScanCodeCandidate: review.cleanCode,
                   codeType,
                   confidenceThreshold: 0.8,
                   allowImageSuggestions: s.allowImageSuggestions,
@@ -3485,7 +3489,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 body: JSON.stringify({
                   ...(await aiRequestAuth(state.businessId)),
                   mode: "decode", proRecheck: review.reopenedFromWrong === true,
-                  rawCode: rawCodeSanitized, cleanCode: cleanCodeSanitized, codeType,
+                  rawCode: rawCodeSanitized, cleanCode: cleanCodeSanitized,
+                  exactScanCodeCandidate: review.cleanCode, codeType,
                   confidenceThreshold: 0.8, allowImageSuggestions: s.allowImageSuggestions,
                   budgetMs: clampedBudgetMs, scanContext, brandPrefixHint,
                 }),
@@ -4685,6 +4690,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               scanContext: "tire",
               rawCode: rawCodeSanitized,
               cleanCode: cleanCodeSanitized,
+              exactScanCodeCandidate: review.cleanCode,
               codeType,
               confidenceThreshold: 0.85,
               allowImageSuggestions: s.allowImageSuggestions,

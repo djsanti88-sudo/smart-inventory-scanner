@@ -31,6 +31,7 @@ beforeEach(() => {
   delete process.env.IS_E2E;
   delete process.env.AI_LIVE_SCAN_CONTEXT;
   delete process.env.AI_ALLOW_NONPUBLIC_AUTOCOUNT;
+  process.env.BOSS_SHOP_CODE_ALIAS_BUSINESS_IDS = "b1";
   runDecodePipeline.mockReset().mockResolvedValue({ kind: "computed", payload: { debug: {} }, cached: false, paidComputeCharged: false });
   memberGet.mockReset().mockResolvedValue({ exists: true });
   readDailyUsedForAccount.mockReset().mockResolvedValue(0);
@@ -39,6 +40,8 @@ beforeEach(() => {
 afterEach(() => {
   process.env.NEXT_PUBLIC_AUTH_MODE = ORIG.NEXT_PUBLIC_AUTH_MODE;
   process.env.IS_E2E = ORIG.IS_E2E;
+  if (ORIG.BOSS_SHOP_CODE_ALIAS_BUSINESS_IDS === undefined) delete process.env.BOSS_SHOP_CODE_ALIAS_BUSINESS_IDS;
+  else process.env.BOSS_SHOP_CODE_ALIAS_BUSINESS_IDS = ORIG.BOSS_SHOP_CODE_ALIAS_BUSINESS_IDS;
 });
 
 function decodeReq(extra: Record<string, unknown> = {}) {
@@ -101,9 +104,12 @@ describe("ai-lookup D4 live-mode trust", () => {
     expect(arg.codeType).not.toBe("upc"); // "TX100-PN" is not a UPC; server recompute wins over the client claim
   });
 
-  it("preserves a frozen ten-digit Boss shop code for the pipeline after scanner separator normalization", async () => {
+  it("restores only a frozen Boss shop-code candidate after the client has redacted the scan", async () => {
     const { POST } = await import("./route");
-    await POST(decodeReq({ cleanCode: "3220-017-209" }));
+    await POST(decodeReq({
+      cleanCode: "[redacted-phone]",
+      exactScanCodeCandidate: "3220-017-209",
+    }));
 
     expect(runDecodePipeline).toHaveBeenCalledWith(expect.objectContaining({
       code: "3220017209",
@@ -112,9 +118,22 @@ describe("ai-lookup D4 live-mode trust", () => {
     }));
   });
 
-  it("keeps an unrelated ten-digit numeric input redacted before the pipeline", async () => {
+  it("does not let an unrelated ten-digit candidate bypass redaction before the pipeline", async () => {
     const { POST } = await import("./route");
-    await POST(decodeReq({ cleanCode: "5551234567" }));
+    await POST(decodeReq({
+      cleanCode: "[redacted-phone]",
+      exactScanCodeCandidate: "5551234567",
+    }));
+
+    expect(runDecodePipeline).toHaveBeenCalledWith(expect.objectContaining({
+      code: "[redacted-phone]",
+      cleanCodeSanitized: "[redacted-phone]",
+    }));
+  });
+
+  it("does not restore a frozen code from the ordinary sanitized fields without the separate candidate", async () => {
+    const { POST } = await import("./route");
+    await POST(decodeReq({ cleanCode: "3220017209" }));
 
     expect(runDecodePipeline).toHaveBeenCalledWith(expect.objectContaining({
       code: "[redacted-phone]",

@@ -49,13 +49,14 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs"; // Admin SDK requires the Node runtime (same as resolve-scan/route.ts:25)
 
 /**
- * Keep the small, frozen Boss shop-code ledger usable by the decode pipeline without
- * weakening the general PII sanitizer. `findBossShopCodeRedirect` accepts only its
- * own exact values (after scanner space/dash normalization), so every other phone-like
- * 10-digit input remains redacted before it can reach a provider.
+ * The ordinary decode payload is always PII-sanitized. A separate scanner candidate is
+ * considered only after the live-auth membership gate and tenant allowlist have passed;
+ * it can only restore one frozen exact Boss shop-code redirect. This prevents arbitrary
+ * ten-digit values from bypassing the sanitizer or reaching a provider.
  */
-function sanitizeDecodeCode(input: string): string {
-  return findBossShopCodeRedirect(input)?.scannedCode ?? sanitizeForAiLookup(input).clean;
+function approvedBossShopCodeCandidate(input: unknown, authenticatedBusinessId: string | null): string | undefined {
+  if (typeof input !== "string" || !isBossShopCodeAliasBusinessAllowed(authenticatedBusinessId)) return undefined;
+  return findBossShopCodeRedirect(input)?.scannedCode;
 }
 
 function selectProvider(name: string): AiProvider {
@@ -254,8 +255,8 @@ export async function POST(request: Request) {
     if (localBody.mode !== "decode" && localBody.mode !== "decode-deep") {
       return Response.json({ error: "Only local tire decode is available in local demo.", reasonCode: "local_demo_decode_only" }, { status: 409 });
     }
-    const rawCodeSanitized = sanitizeDecodeCode(localBody.rawCode ?? "");
-    const cleanCodeSanitized = sanitizeDecodeCode(localBody.cleanCode ?? "");
+    const rawCodeSanitized = sanitizeForAiLookup(localBody.rawCode ?? "").clean;
+    const cleanCodeSanitized = sanitizeForAiLookup(localBody.cleanCode ?? "").clean;
     const code = cleanCodeSanitized || rawCodeSanitized;
     const outcome = await runDecodePipeline({ code, codeType: detectCodeType(code), rawCodeSanitized, cleanCodeSanitized, threshold: clampConfidenceThreshold(localBody.confidenceThreshold), allowNonPublicAutoCount: false, forceRetry: localBody.forceRetry === true, budgetMs: typeof localBody.budgetMs === "number" ? clampDecodeBudgetMs(localBody.budgetMs) : undefined });
     if (outcome.kind !== "computed") return Response.json({ error: "Local demo decode did not settle.", reasonCode: "local_demo_unavailable" }, { status: 503 });
@@ -300,6 +301,8 @@ export async function POST(request: Request) {
   let body: {
     rawCode?: string;
     cleanCode?: string;
+    /** Original scanner clean code; accepted only for an exact, tenant-allowed frozen redirect. */
+    exactScanCodeCandidate?: string;
     codeType?: string;
     mode?: "lookup" | "decode" | "decode-deep";
     deep?: boolean; // Task 5: client opt-in to the synchronous deep/Firecrawl decode (off the tire hot path)
@@ -362,9 +365,11 @@ export async function POST(request: Request) {
     authedBusinessId = bizId;
   }
 
-  // Defense in depth: sanitize again on the server before anything reaches a provider.
-  const rawCodeSanitized = sanitizeDecodeCode(body.rawCode ?? "");
-  const cleanCodeSanitized = sanitizeDecodeCode(body.cleanCode ?? "");
+  // Defense in depth: sanitize again on the server before anything reaches a provider. The only
+  // exception is an exact frozen, tenant-allowed scanner candidate reconstructed after auth.
+  const rawCodeSanitized = sanitizeForAiLookup(body.rawCode ?? "").clean;
+  const candidate = approvedBossShopCodeCandidate(body.exactScanCodeCandidate, authedBusinessId);
+  const cleanCodeSanitized = candidate ?? sanitizeForAiLookup(body.cleanCode ?? "").clean;
   const code = cleanCodeSanitized || rawCodeSanitized;
   // D4: never trust the client's codeType. Always recompute from the sanitized code server-side.
   const codeType = detectCodeType(code);

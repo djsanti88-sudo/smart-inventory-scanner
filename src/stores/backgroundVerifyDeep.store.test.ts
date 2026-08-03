@@ -154,6 +154,7 @@ describe("client-orchestrated background verify (suggested tire -> verified -> c
     const deep = bodies.find((b) => b.mode === "decode-deep");
     expect(deep, "a decode-deep request must have been sent").toBeDefined();
     expect(deep!.scanContext).toBe("tire");
+    expect(deep!.exactScanCodeCandidate).toBe(HANKOOK_CODE);
   });
 
   it("a late / DUPLICATE deep verified response does NOT double-count (idempotent via open-status guard)", async () => {

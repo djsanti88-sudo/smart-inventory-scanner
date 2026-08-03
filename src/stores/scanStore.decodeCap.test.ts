@@ -44,10 +44,10 @@ describe("decodeOnce 429 handling (daily cap vs real rate limit)", () => {
     const store = aiOnStore();
     const review = openReview(store, "086699998538");
 
-    const calls: string[] = [];
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
     const original = globalThis.fetch;
-    globalThis.fetch = vi.fn(async (url: string) => {
-      calls.push(String(url));
+    globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? "{}")) });
       return new Response(
         JSON.stringify({ error: "Daily AI lookup cap reached (200/200). No AI call made.", reasonCode: "daily_cap" }),
         { status: 429 }
@@ -64,17 +64,17 @@ describe("decodeOnce 429 handling (daily cap vs real rate limit)", () => {
     expect(r?.reason).toContain("Daily AI lookup cap reached");
     expect(r?.reason).toContain("Retry after the cap resets");
     expect(r?.reason).not.toContain("provider error");
-    expect(calls.filter((u) => u.includes("/api/ai-lookup")).length).toBe(1); // no retry on daily_cap
+    expect(calls.filter((call) => call.url.includes("/api/ai-lookup"))).toHaveLength(1); // no retry on daily_cap
   });
 
   it("account_daily_cap 429 (F4): no retry, honest ACCOUNT-scoped reason, exactly one fetch call", async () => {
     const store = aiOnStore();
     const review = openReview(store, "086699998540");
 
-    const calls: string[] = [];
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
     const original = globalThis.fetch;
-    globalThis.fetch = vi.fn(async (url: string) => {
-      calls.push(String(url));
+    globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? "{}")) });
       return new Response(
         JSON.stringify({ error: "Your daily AI lookup cap is reached (500/500).", reasonCode: "account_daily_cap" }),
         { status: 429 }
@@ -92,7 +92,7 @@ describe("decodeOnce 429 handling (daily cap vs real rate limit)", () => {
     expect(r?.reason).toContain("Your account's daily AI lookup cap is reached");
     expect(r?.reason).toContain("Retry after the cap resets");
     expect(r?.reason).not.toContain("provider error");
-    expect(calls.filter((u) => u.includes("/api/ai-lookup")).length).toBe(1); // no retry on account cap
+    expect(calls.filter((call) => call.url.includes("/api/ai-lookup"))).toHaveLength(1); // no retry on account cap
   });
 
   it("daily_cap 429 WITH a known prefix: the row is named by the prefix floor, reason stays the honest cap copy (P2)", async () => {
@@ -138,11 +138,11 @@ describe("decodeOnce 429 handling (daily cap vs real rate limit)", () => {
     const store = aiOnStore();
     const review = openReview(store, "086699998539");
 
-    const calls: string[] = [];
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
     const original = globalThis.fetch;
     let call = 0;
-    globalThis.fetch = vi.fn(async (url: string) => {
-      calls.push(String(url));
+    globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? "{}")) });
       call++;
       if (call === 1) {
         return new Response(JSON.stringify({ error: "rate limited" }), {
@@ -180,7 +180,9 @@ describe("decodeOnce 429 handling (daily cap vs real rate limit)", () => {
       globalThis.fetch = original;
     }
 
-    expect(calls.filter((u) => u.includes("/api/ai-lookup")).length).toBe(2); // single retry preserved
+    const decodeCalls = calls.filter((call) => call.url.includes("/api/ai-lookup"));
+    expect(decodeCalls).toHaveLength(2); // single retry preserved
+    expect(decodeCalls.every((call) => call.body.exactScanCodeCandidate === "086699998539")).toBe(true);
     const r = store.getState().needsReviewQueue.find((q) => q.id === review.id);
     // Genuine rate-limit retry succeeded (200 on retry) - this must NOT surface the daily-cap copy.
     expect(r?.reason ?? "").not.toContain("Daily AI lookup cap reached");
