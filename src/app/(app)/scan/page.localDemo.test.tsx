@@ -97,15 +97,17 @@ describe("ScanPage local demo proof batch", () => {
       await Promise.resolve();
     });
 
-    expect(processScan).toHaveBeenCalledTimes(20);
-    expect(screen.getByTestId("bulk-scan-progress")).toHaveTextContent("20 of 101");
+    // Each physical scan yields before the next one starts, so an aisle paste never
+    // monopolizes the browser before the operator can see feedback or stop it.
+    expect(processScan).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("bulk-scan-progress")).toHaveTextContent("1 of 101");
     expect(screen.getByTestId("stop-bulk-scan")).toHaveAttribute("type", "button");
     expect(screen.getByTestId("start-session")).toBeDisabled();
     expect(screen.getByTestId("finish-session")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Clear session" })).toBeDisabled();
 
     await act(async () => {
-      for (let index = 0; index < 5; index += 1) {
+      for (let index = 0; index < 100; index += 1) {
         await vi.advanceTimersToNextTimerAsync();
       }
       await completion;
@@ -126,7 +128,7 @@ describe("ScanPage local demo proof batch", () => {
     processScan.mockReset();
     const report = vi.spyOn(console, "error").mockImplementation(() => {});
     processScan.mockImplementation((code: string) => {
-      if (code === "cancel-3") throw new Error("not added");
+      if (code === "cancel-0") throw new Error("not added");
       return { cleanCode: code };
     });
 
@@ -138,7 +140,7 @@ describe("ScanPage local demo proof batch", () => {
       cancelled = mocks.scannerOnScan!(Array.from({ length: 101 }, (_, index) => `cancel-${index}`).join(" ")) as Promise<unknown>;
       await Promise.resolve();
     });
-    expect(processScan).toHaveBeenCalledTimes(20);
+    expect(processScan).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Stop remaining" }));
     await act(async () => {
       await vi.advanceTimersToNextTimerAsync();
@@ -146,7 +148,7 @@ describe("ScanPage local demo proof batch", () => {
     });
 
     expect(screen.getByTestId("bulk-scan-outcome")).toHaveTextContent(
-      "Stopped after 20 of 101 scans. 19 were added, 1 failed, and 81 remaining scans were not added.",
+      "Stopped after 1 of 101 scans. 0 were added, 1 failed, and 100 remaining scans were not added.",
     );
     expect(screen.queryByTestId("bulk-scan-progress")).toBeNull();
 
@@ -156,11 +158,11 @@ describe("ScanPage local demo proof batch", () => {
       await Promise.resolve();
     });
     expect(screen.queryByTestId("bulk-scan-outcome")).toBeNull();
-    expect(screen.getByTestId("bulk-scan-progress")).toHaveTextContent("20 of 21");
+    expect(screen.getByTestId("bulk-scan-progress")).toHaveTextContent("1 of 21");
 
     fireEvent.click(screen.getByRole("button", { name: "Stop remaining" }));
     await act(async () => {
-      await vi.advanceTimersToNextTimerAsync();
+      for (let index = 0; index < 20; index += 1) await vi.advanceTimersToNextTimerAsync();
       await next;
     });
     report.mockRestore();
@@ -181,7 +183,7 @@ describe("ScanPage local demo proof batch", () => {
     let completion!: Promise<unknown>;
     await act(async () => {
       completion = mocks.scannerOnScan!([...Array.from({ length: 20 }, (_, index) => `ok-${index}`), "failed"].join(" ")) as Promise<unknown>;
-      await vi.advanceTimersToNextTimerAsync();
+      for (let index = 0; index < 20; index += 1) await vi.advanceTimersToNextTimerAsync();
       await completion;
     });
 

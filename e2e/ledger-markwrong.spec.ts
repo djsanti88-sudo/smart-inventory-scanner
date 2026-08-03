@@ -61,7 +61,9 @@ async function seedWrongVerifiedProduct(page: Page) {
           ...prev.products,
           {
             id: productId, businessId: s.businessId, name: "Wrongly Mapped Item", brand: "TestBrand",
-            category: "misc", specsShort: "", specsFull: "", primarySku: "", primaryBarcode: code,
+            // Keep the barcode only on the approved human alias. If this product itself owns the
+            // code, resolveScan takes the direct verified-product branch before alias resolution.
+            category: "misc", specsShort: "", specsFull: "", primarySku: "", primaryBarcode: "",
             gtin: "", upc: "", ean: "", vendorCodes: [], aliases: [], imageUrl: "", productUrl: "",
             location: "", notes: "", status: "active", source: "seed", confidence: 1, verified: true,
             createdAt: s.sessionId, updatedAt: s.sessionId, createdBy: "seed", updatedBy: "seed",

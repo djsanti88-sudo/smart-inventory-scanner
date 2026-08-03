@@ -27,7 +27,7 @@ import { gradeBarcode } from "@/services/upc/barcodeTrust";
 import { canonicalGtin, isValidCheckDigit } from "@/services/upc/gtin";
 import { clampDecodeBudgetMs, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
 import { hashPin, verifyPin, isValidPinFormat } from "@/services/security/pinLock";
-import { resolveScanToProductTiered } from "@/services/aliasMatcher";
+import { matchAlias, resolveScanToProductTiered } from "@/services/aliasMatcher";
 import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/services/productDedup";
 import { incrementInventoryCount } from "@/services/inventory";
 import { buildIdempotencyKey } from "@/services/idempotency";
@@ -1777,6 +1777,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
       resetForSignOut: () => {
         const started = tryRunPersistenceMutation(async () => {
+        const uidAtClearStart = get().userId;
+        const businessIdAtClearStart = get().businessId;
+        const contextEpochAtClearStart = appPersistContextEpoch;
         const finishReset = () => {
           // Re-point persist at the anon key only AFTER the signed-in namespace has been authoritatively
           // cleared. Firebase's own SDK auth persistence is cleared by fbSignOut (auth.ts:66-69) in the
@@ -1835,13 +1838,35 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           return { cleared: true, authority: "none" } as const;
         }
         const persistMutationEpochAtClearStart = appPersistMutationEpoch;
-        return get().clearPersistedState().then((persistenceClear) => {
+        return get().clearPersistedState().then(async (persistenceClear) => {
           if (!persistenceClear.cleared) return persistenceClear;
           // Any persisted mutation may land while IndexedDB is completing the clear: physical scans,
           // async enrichment, sync reconciliation, or settings changes. Discarding that newer state
           // could violate the counting law or let its post-clear write recreate tenant data. Keep the
           // active UID namespace/state intact and make the caller retry sign-out.
           if (appPersistMutationEpoch !== persistMutationEpochAtClearStart) {
+            // The clear has retired any snapshot scheduled before its tombstone. Persist exactly one
+            // CURRENT snapshot after that clear, otherwise a physical scan that landed in this window
+            // survives in memory but disappears on reload. Never use this recovery path to write an
+            // anonymous, switched-user, or switched-business namespace.
+            const current = get();
+            const persistApi = (useScanStore as unknown as {
+              persist?: { getOptions?: () => { name?: string } };
+            }).persist;
+            const activeName = persistApi?.getOptions?.().name ?? deps.persistName;
+            if (
+              !uidAtClearStart ||
+              current.userId !== uidAtClearStart ||
+              current.businessId !== businessIdAtClearStart ||
+              appPersistContextEpoch !== contextEpochAtClearStart ||
+              activeName !== persistKeyForUid(uidAtClearStart)
+            ) {
+              return { ...persistenceClear, cleared: false };
+            }
+            await scanPersistStorage.setItem(activeName, {
+              state: buildPersistedScanState(current as unknown as PersistableScanState),
+              version: 14,
+            });
             return { ...persistenceClear, cleared: false };
           }
           finishReset();
@@ -2407,15 +2432,18 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // that source too, and a foreign tenant's human-looking alias must never lend trust here.
         const humanApprovedAlias =
           (resolution.matchType === "exact_alias" || resolution.matchType === "normalized_alias") &&
-          aliases.some(
-            (alias) =>
-              alias.businessId === businessId &&
-              alias.productId === resolution.productId &&
-              alias.approved &&
-              alias.source === "human_review" &&
-              alias.createdBy === "human_link_existing" &&
-              (cleaned.normalizedCandidates.includes(alias.cleanCode) || cleaned.normalizedCandidates.includes(alias.normalizedCode)),
-          );
+          matchAlias(
+            cleaned,
+            aliases.filter(
+              (alias) =>
+                alias.businessId === businessId &&
+                alias.productId === resolution.productId &&
+                alias.approved &&
+                alias.source === "human_review" &&
+                alias.createdBy === "human_link_existing",
+            ),
+            businessId,
+          )?.productId === resolution.productId;
         const knownConflict = isKnown && !humanApprovedAlias
           ? detectIdentityContextConflict(get().settings.scanContext ?? "any", matchedProduct)
           : null;

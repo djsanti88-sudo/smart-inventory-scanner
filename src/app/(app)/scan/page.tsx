@@ -46,7 +46,9 @@ function ScanPageContent() {
     } = { mounted: true };
     holder.queue = createScanSubmissionQueue({
       processScan,
-      chunkSize: 20,
+      // One synchronous store/render/sync operation per task keeps a large paste
+      // interruptible for scanner input, Stop, and paint feedback.
+      chunkSize: 1,
       onBulkStart: (progress) => {
         if (!holder.mounted) return;
         setBatchOutcome(null);

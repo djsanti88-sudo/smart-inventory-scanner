@@ -93,6 +93,38 @@ describe("resetForSignOut durable clear ordering", () => {
     expect(useScanStore.getState().finalCounts.reduce((total, row) => total + row.quantity, 0)).toBe(1);
   });
 
+  it("durably rewrites the active UID snapshot after a post-clear physical scan so it survives reload", async () => {
+    let resolveClear!: (result: { cleared: boolean; authority: "durable" | "local" | "none" }) => void;
+    mocks.removeItem.mockReturnValueOnce(new Promise((resolve) => { resolveClear = resolve; }));
+
+    const { useScanStore } = await import("@/stores/scanStore");
+    await useScanStore.getState().rehydrateForUid("owner");
+    useScanStore.setState({ businessId: "business-owner", userId: "owner", scanFeed: [], finalCounts: [] });
+
+    const reset = useScanStore.getState().resetForSignOut();
+    const physicalScan = useScanStore.getState().processScan("6419440485331");
+    expect(physicalScan).not.toBeNull();
+    const writesBeforeClearCompletes = mocks.setItem.mock.calls.length;
+
+    resolveClear({ cleared: true, authority: "durable" });
+    await expect(reset).resolves.toEqual({ cleared: false, authority: "durable" });
+
+    // A snapshot scheduled before the clear is intentionally rejected by the durable adapter. The
+    // reset path must therefore issue and await one fresh, current-owner write after the clear.
+    expect(mocks.setItem).toHaveBeenCalledTimes(writesBeforeClearCompletes + 1);
+    const [namespace, persisted] = mocks.setItem.mock.calls.at(-1)!;
+    expect(namespace).toBe("sis-scan-owner");
+
+    // Exercise the real Zustand rehydrate seam with the recovered durable payload, rather than only
+    // inspecting/migrating its object shape. The counted row must repopulate a wiped in-memory store.
+    useScanStore.setState({ scanFeed: [], finalCounts: [] });
+    mocks.getItem.mockResolvedValueOnce(persisted);
+    await useScanStore.getState().rehydrateForUid("owner");
+    expect(useScanStore.getState().scanFeed)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ id: physicalScan!.id })]));
+    expect(useScanStore.getState().finalCounts.reduce((total, row) => total + row.quantity, 0)).toBe(1);
+  });
+
   it("aborts the reset when prefix enrichment mutates persisted product state during the UID clear", async () => {
     let resolveClear!: (result: { cleared: boolean; authority: "durable" | "local" | "none" }) => void;
     let resolveFloor!: (response: Response) => void;

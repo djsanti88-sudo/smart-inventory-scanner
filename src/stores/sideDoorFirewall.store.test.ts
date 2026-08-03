@@ -34,6 +34,68 @@ describe("Phase 8C side-door firewall - deterministic count path", () => {
     expect(countFor(store, "prod-coke")).toBe(1);
   });
 
+  function addCrossCategoryAlias(
+    store: ReturnType<typeof createTestScanStore>,
+    fields: { rawCodeExample: string; cleanCode: string; normalizedCode: string },
+    provenance: { businessId?: string; source?: "human_review" | "ai_mock"; createdBy?: string } = {},
+  ) {
+    store.getState().updateSettings({ scanContext: "tire" });
+    store.setState((state) => ({
+      aliases: [
+        ...state.aliases,
+        {
+          ...state.aliases[0],
+          id: `cross-category-${fields.cleanCode}`,
+          businessId: provenance.businessId ?? state.businessId,
+          productId: "prod-coke",
+          ...fields,
+          source: provenance.source ?? "human_review",
+          createdBy: provenance.createdBy ?? "human_link_existing",
+          approved: true,
+          idempotencyKey: `cross-category-${fields.cleanCode}`,
+        },
+      ],
+    }));
+  }
+
+  it.each([
+    {
+      label: "numeric exact cleanCode",
+      scanned: "123456789012",
+      alias: { rawCodeExample: "different-raw", cleanCode: "123456789012", normalizedCode: "different-normalized" },
+    },
+    {
+      label: "rawCodeExample-only",
+      scanned: "RAW-ONLY-COCA",
+      alias: { rawCodeExample: "RAW-ONLY-COCA", cleanCode: "different-clean", normalizedCode: "different-normalized" },
+    },
+    {
+      label: "ASCII case-only cleanCode",
+      scanned: "coke-sku",
+      alias: { rawCodeExample: "different-raw", cleanCode: "COKE-SKU", normalizedCode: "different-normalized" },
+    },
+  ])("a current-tenant human $label match bypasses the tire firewall", ({ scanned, alias }) => {
+    const store = createTestScanStore({ db: new MockDb() });
+    addCrossCategoryAlias(store, alias);
+
+    expect(store.getState().processScan(scanned)?.status).toBe("known");
+    expect(countFor(store, "prod-coke")).toBe(1);
+  });
+
+  it("automatic and foreign aliases cannot borrow the human firewall bypass", () => {
+    const code = "123456789012";
+    const alias = { rawCodeExample: code, cleanCode: code, normalizedCode: code };
+    const automatic = createTestScanStore({ db: new MockDb() });
+    addCrossCategoryAlias(automatic, alias, { source: "ai_mock", createdBy: "ai" });
+    expect(automatic.getState().processScan(code)?.status).toBe("needs_review");
+    expect(countFor(automatic, "prod-coke")).toBe(0);
+
+    const foreign = createTestScanStore({ db: new MockDb() });
+    addCrossCategoryAlias(foreign, alias, { businessId: "other-business" });
+    expect(foreign.getState().processScan(code)?.status).toBe("needs_review");
+    expect(countFor(foreign, "prod-coke")).toBe(0);
+  });
+
   const linkedCode = "855724007602";
 
   function linkCrossCategoryAlias(

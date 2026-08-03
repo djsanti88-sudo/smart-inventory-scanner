@@ -119,7 +119,7 @@ describe("ScanPage queued scanner DOM proof", () => {
     const oldCodes = Array.from({ length: 21 }, (_, index) => `old-${index + 1}`);
 
     const input = submitPaste(oldCodes);
-    expect(oldProcessScan).toHaveBeenCalledTimes(20);
+    expect(oldProcessScan).toHaveBeenCalledTimes(1);
     expect(document.activeElement).toBe(input);
 
     const newProcessScan = routeTo("new");
@@ -127,12 +127,15 @@ describe("ScanPage queued scanner DOM proof", () => {
     view.rerender(<ScanPage />);
     await releaseNextChunk();
     submitPaste(["new-1"]);
-    await act(async () => { await Promise.resolve(); });
+    for (let release = 0; oldProcessScan.mock.calls.length + newProcessScan.mock.calls.length < 22 && release < 20; release += 1) {
+      await releaseNextChunk();
+    }
     view.rerender(<ScanPage />);
 
     expect(screen.getByTestId("queue-feed-probe")).toHaveTextContent([
-      ...oldCodes.map((code) => `old:${code}`),
+      ...oldCodes.slice(0, 2).map((code) => `old:${code}`),
       "new:new-1",
+      ...oldCodes.slice(2).map((code) => `old:${code}`),
     ].join(","));
     expect(oldProcessScan).toHaveBeenCalledTimes(21);
     expect(newProcessScan).toHaveBeenCalledTimes(1);
@@ -148,8 +151,8 @@ describe("ScanPage queued scanner DOM proof", () => {
     const input = submitPaste(codes);
     expect(input.value).toBe("");
     expect(document.activeElement).toBe(input);
-    expect(processScan).toHaveBeenCalledTimes(20);
-    expect(screen.getByTestId("bulk-scan-progress")).toHaveTextContent("20 of 101");
+    expect(processScan).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("bulk-scan-progress")).toHaveTextContent("1 of 101");
 
     fireEvent.change(input, { target: { value: "hardware-1" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -158,36 +161,36 @@ describe("ScanPage queued scanner DOM proof", () => {
     expect(input.value).toBe("");
     expect(document.activeElement).toBe(input);
     fireEvent.click(screen.getByTestId("camera-queue-probe"));
-    expect(processScan).toHaveBeenCalledTimes(20);
+    expect(processScan).toHaveBeenCalledTimes(1);
 
     await releaseNextChunk();
     expect(processScan.mock.calls.map(([code]) => code)).toEqual([
-      ...codes.slice(0, 20), "hardware-1", ...codes.slice(20, 40),
+      codes[0], "hardware-1", codes[1],
     ]);
-    for (let release = 0; processScan.mock.calls.length < 103 && release < 5; release += 1) {
+    for (let release = 0; processScan.mock.calls.length < 103 && release < 100; release += 1) {
       await releaseNextChunk();
     }
     expect(processScan.mock.calls.map(([code]) => code)).toEqual([
-      ...codes.slice(0, 20), "hardware-1", ...codes.slice(20, 40), "camera-1", ...codes.slice(40),
+      codes[0], "hardware-1", codes[1], "camera-1", ...codes.slice(2),
     ]);
     expect(processScan).toHaveBeenCalledTimes(103);
     expect(new Set(processScan.mock.calls.map(([code]) => code)).size).toBe(103);
     expect(screen.queryByTestId("bulk-scan-progress")).toBeNull();
   });
 
-  it("stops at the accepted chunk boundary without rolling back the 40 physical scans already accepted", async () => {
+  it("stops at the next per-scan boundary without rolling back accepted physical scans", async () => {
     vi.useFakeTimers();
     const processScan = resetStore();
     render(<ScanPage />);
     submitPaste(Array.from({ length: 101 }, (_, index) => `stop-${index + 1}`));
     await releaseNextChunk();
-    expect(processScan).toHaveBeenCalledTimes(40);
+    expect(processScan).toHaveBeenCalledTimes(2);
 
     fireEvent.click(screen.getByTestId("stop-bulk-scan"));
     await releaseNextChunk();
 
-    expect(processScan).toHaveBeenCalledTimes(40);
-    expect(processScan.mock.calls.map(([code]) => code)).toEqual(Array.from({ length: 40 }, (_, index) => `stop-${index + 1}`));
+    expect(processScan).toHaveBeenCalledTimes(2);
+    expect(processScan.mock.calls.map(([code]) => code)).toEqual(["stop-1", "stop-2"]);
     expect(screen.queryByTestId("bulk-scan-progress")).toBeNull();
   });
 
@@ -198,10 +201,10 @@ describe("ScanPage queued scanner DOM proof", () => {
     const codes = Array.from({ length: 101 }, (_, index) => `unmount-${index + 1}`);
     const view = render(<ScanPage />);
     submitPaste(codes);
-    expect(processScan).toHaveBeenCalledTimes(20);
+    expect(processScan).toHaveBeenCalledTimes(1);
 
     view.unmount();
-    for (let batch = 0; batch < 5; batch += 1) await releaseNextChunk();
+    for (let batch = 0; batch < 100; batch += 1) await releaseNextChunk();
 
     expect(processScan.mock.calls.map(([code]) => code)).toEqual(codes);
     expect(consoleError.mock.calls.join(" ")).not.toMatch(/state update on an unmounted|not wrapped in act/i);
