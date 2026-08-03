@@ -85,7 +85,7 @@ describe("createFileAtomicLocalStorage", () => {
     await expect(createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.get("record"))).resolves.toEqual({ value: "committed" });
   });
 
-  it("coordinates physical-root aliases and keeps Linux distinct-case child roots independent", async () => {
+  it("coordinates adapters sharing a normalized root and keeps POSIX distinct-case child roots independent", async () => {
     const root = testRoot();
     const alias = process.platform === "win32"
       ? path.join(path.dirname(root).toUpperCase(), path.basename(root).toUpperCase())
@@ -632,19 +632,48 @@ describe("createFileAtomicLocalStorage", () => {
     expect(items.map((item) => item?.index)).toEqual(Array.from({ length: 20 }, (_, index) => index));
   });
 
-  it("serializes two adapters addressed to the same physical directory through aliases", async () => {
+  it("serializes two adapters addressed to the same configured directory", async () => {
     const root = testRoot();
-    const alias = process.platform === "win32"
-      ? path.join(storageBase, path.basename(root).toUpperCase())
-      : path.join(root, ".");
     const first = createFileAtomicLocalStorage({ root });
-    const second = createFileAtomicLocalStorage({ root: alias });
+    const second = createFileAtomicLocalStorage({ root });
     await Promise.all([
       first.transaction((transaction) => transaction.set("first", true)),
       second.transaction((transaction) => transaction.set("second", true)),
     ]);
 
     await expect(first.transaction(async (transaction) => [await transaction.get("first"), await transaction.get("second")])).resolves.toEqual([true, true]);
+  });
+
+  it.skipIf(process.platform !== "win32")("serializes two adapters addressed through Windows case aliases", async () => {
+    const root = testRoot();
+    const caseAlias = path.join(storageBase, path.basename(root).toUpperCase());
+    expect(caseAlias).not.toBe(root);
+
+    const first = createFileAtomicLocalStorage({ root });
+    const second = createFileAtomicLocalStorage({ root: caseAlias });
+    await Promise.all([
+      first.transaction((transaction) => transaction.set("first", true)),
+      second.transaction((transaction) => transaction.set("second", true)),
+    ]);
+
+    await expect(first.transaction(async (transaction) => [await transaction.get("first"), await transaction.get("second")])).resolves.toEqual([true, true]);
+  });
+
+  it.skipIf(process.platform === "win32")("keeps POSIX case-distinct configured directories isolated", async () => {
+    const lowerRoot = testRoot();
+    const upperRoot = path.join(storageBase, path.basename(lowerRoot).toUpperCase());
+    ownedRoots.push(upperRoot);
+    expect(upperRoot).not.toBe(lowerRoot);
+
+    const lower = createFileAtomicLocalStorage({ root: lowerRoot });
+    const upper = createFileAtomicLocalStorage({ root: upperRoot });
+    await Promise.all([
+      lower.transaction((transaction) => transaction.set("lower", true)),
+      upper.transaction((transaction) => transaction.set("upper", true)),
+    ]);
+
+    await expect(lower.transaction(async (transaction) => [await transaction.get("lower"), await transaction.get("upper")])).resolves.toEqual([true, undefined]);
+    await expect(upper.transaction(async (transaction) => [await transaction.get("lower"), await transaction.get("upper")])).resolves.toEqual([undefined, true]);
   });
 
   it("survives reconstruction using an atomic same-directory replacement", async () => {
