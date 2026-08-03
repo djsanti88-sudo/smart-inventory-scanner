@@ -125,9 +125,16 @@ export function matchesBossShopCodeRedirectTarget(redirect: BossShopCodeRedirect
   // redirect's own canonical size; it does not widen corpus or scanner matching.
   const hasExactCompactRedirectSize = canonicalSize === null && [row.size, row.raw_size_text]
     .some((value) => value?.trim() === redirect.canonicalSize.replace(/\D/g, ""));
-  return row.barcode === redirect.canonicalBarcode
-    && row.canonical_product_uid === redirect.canonicalProductUid
-    && row.manufacturer_part_number === redirect.canonicalManufacturerPartNumber
-    && normalizeBrand(row.brand) === redirect.normalizedBrand
-    && (canonicalSize === redirect.canonicalSize || hasExactCompactRedirectSize);
+  const checks = {
+    barcode: row.barcode === redirect.canonicalBarcode,
+    canonicalProductUid: row.canonical_product_uid === redirect.canonicalProductUid,
+    manufacturerPartNumber: row.manufacturer_part_number === redirect.canonicalManufacturerPartNumber,
+    brand: normalizeBrand(row.brand) === redirect.normalizedBrand,
+    size: canonicalSize === redirect.canonicalSize || hasExactCompactRedirectSize,
+  };
+  const matches = Object.values(checks).every(Boolean);
+  if (!matches) {
+    console.warn("[tire-knowledge] Boss shop-code target fingerprint mismatch", checks);
+  }
+  return matches;
 }
