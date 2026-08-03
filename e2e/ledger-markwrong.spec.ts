@@ -61,7 +61,7 @@ for (const vp of [
 
     // Wait for StoreHydrator before the real human-confirmation flow.
     await expect(page.getByTestId("final-count-body")).toBeVisible();
-    const wrongCode = vp.name === "desktop" ? "697662131854" : "697662137658";
+    const wrongCode = vp.name === "desktop" ? "739105284618" : "604927183503";
     await scan(page, wrongCode);
     await expect.poll(() => totalCounted(page), { message: "initial unknown scan counted" }).toBe(1);
 
@@ -107,13 +107,16 @@ for (const vp of [
         && state.finalCounts.some((count) => count.productId === productId && count.quantity === 1);
     }, { productId: wrongProductId, code: wrongCode }), { message: "human-confirmed product retains original scan" }).toBe(true);
     await scan(page, wrongCode);
-    await expect.poll(() => page.evaluate(({ productId, code }: { productId: string; code: string }) => {
+    await expect.poll(() => page.evaluate((code: string) => {
       type Event = { cleanCode?: string; matchedProductId?: string; status?: string };
       const w = window as unknown as { __scanStore: { getState: () => { scanFeed: Event[] } } };
-      return w.__scanStore.getState().scanFeed.filter(
-        (event) => event.cleanCode === code && event.matchedProductId === productId && event.status === "known",
-      ).length;
-    }, { productId: wrongProductId, code: wrongCode }), { message: "second scan resolves known through approved alias" }).toBe(1);
+      return w.__scanStore.getState().scanFeed
+        .filter((event) => event.cleanCode === code)
+        .map((event) => ({ matchedProductId: event.matchedProductId, status: event.status }));
+    }, wrongCode), { message: "approved-alias rescan preserves both physical event identities" }).toEqual([
+      { matchedProductId: wrongProductId, status: "known" },
+      { matchedProductId: wrongProductId, status: "resolved" },
+    ]);
     await expect(page.getByTestId("final-count-body").locator('tr[data-testid^="count-row-"]')).toHaveCount(1);
     const preCorrectionCounts = await page.evaluate(() => {
       type Store = { getState: () => { finalCounts: Array<{ productId: string; quantity: number }> } };
