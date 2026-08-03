@@ -11,6 +11,7 @@ import { resolveUnknownFast } from "@/services/ai/parallelResolve";
 import { decodeReasonCode, REASON_TEXT, sanitizeCustomerReason, allMissReasonCode, MISS_REASON_TEXT } from "@/services/ai/decodeFallback";
 import { withDecodeCache, getDecodeCache } from "@/services/ai/decodeCache";
 import { resolveExactBarcode, resolveExactBarcodeLocal, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
+import { findBossShopCodeRedirect } from "@/server/tire-knowledge/bossExactEvidenceLedger";
 import { isLocalDemo } from "@/server/localDemo";
 import { isLikelyMisreadGtin } from "@/services/upc/misread";
 import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
@@ -146,7 +147,7 @@ function corpusPayload(
     reasonCode: "ok",
     reasonText: "",
     timedOut: false,
-    debug: { providersAttempted: corpus.providerNames, evidenceStrengths: corpus.evidences.map((e) => e.strength), sourceCounts: [0], corroborationPath: corpus.path, aiCalled: false, pageFetched: false, cached: false, ...(isLocalDemo() && corpus.canonicalProductUid ? { canonicalProductUid: corpus.canonicalProductUid } : {}) },
+    debug: { providersAttempted: corpus.providerNames, evidenceStrengths: corpus.evidences.map((e) => e.strength), sourceCounts: [0], corroborationPath: corpus.path, aiCalled: false, pageFetched: false, cached: false, ...(corpus.bossShopCodeAlias ? { tenantScopedAlias: true } : {}), ...(isLocalDemo() && corpus.canonicalProductUid ? { canonicalProductUid: corpus.canonicalProductUid } : {}) },
     sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
   };
 }
@@ -157,6 +158,15 @@ function localDemoMissPayload(rawCodeSanitized: string, cleanCodeSanitized: stri
     decision: { status: "needs_review", confidence: 0, reason: "No exact match was found in the local tire database.", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider", confidence: 0, reason: "Local tire corpus miss.", brandSimilarity: 0, nameSimilarity: 0, contradictions: [] } },
     reasonCode: "no_result", reasonText: "No exact match was found in the local tire database.", timedOut: false,
     debug: { providersAttempted: ["local-tire-corpus"], evidenceStrengths: [], sourceCounts: [], corroborationPath: "local_demo_corpus_miss", ladderPath: "none", ladderReasons: [{ rung: "local-tire-corpus", reason: "exact local tire match not found" }], aiCalled: false, pageFetched: false, cached: false },
+    sanitizedInput: { rawCodeSanitized, cleanCodeSanitized } };
+}
+
+/** Scoped identifiers never enter shared caches, catalog, learned, or provider rungs after their scoped lookup misses. */
+function restrictedIdentifierMissPayload(rawCodeSanitized: string, cleanCodeSanitized: string): DecodePayload {
+  return { mode: "decode", providerNames: [], results: [], evidences: [], providerStatuses: [],
+    decision: { status: "needs_review", confidence: 0, reason: "No exact match was found.", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider", confidence: 0, reason: "No exact match was found.", brandSimilarity: 0, nameSimilarity: 0, contradictions: [] } },
+    reasonCode: "no_result", reasonText: "No exact match was found.", timedOut: false,
+    debug: { providersAttempted: [], evidenceStrengths: [], sourceCounts: [], corroborationPath: "exact_identifier_miss", aiCalled: false, pageFetched: false, cached: false },
     sanitizedInput: { rawCodeSanitized, cleanCodeSanitized } };
 }
 
@@ -691,7 +701,22 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     const gtinShaped = isGtinShaped(code);
     // `misread` (QA HARDENING FIX #6) is computed once at the top of runDecodePipeline - see there.
     const skuShaped = !gtinShaped && codeType !== "empty";
-    const corpus = (!misread ? await resolveExactBarcode(code) : null) ?? (skuShaped ? await resolveExactPartNumber(code) : null);
+    const barcodeCorpus = !misread
+      ? capContext?.authedBusinessId
+        ? await resolveExactBarcode(code, { authenticatedBusinessId: capContext.authedBusinessId })
+        : await resolveExactBarcode(code)
+      : null;
+    if (barcodeCorpus) {
+      if (!barcodeCorpus.bossShopCodeAlias) appendDecodeOutcome({ settledBy: "tire-corpus", status: barcodeCorpus.decision.status, reasons: [], sourceTier: null });
+      return { kind: "computed", payload: corpusPayload(barcodeCorpus, rawCodeSanitized, cleanCodeSanitized), cached: false, paidComputeCharged: false };
+    }
+    // A known Boss shop identifier is tenant-scoped evidence, never a global code.  Once the
+    // barcode/alias path declined it (including a fingerprint mismatch), stop before part-number,
+    // shared cache/catalog/learned, and provider rungs regardless of the tenant allowlist.
+    if (findBossShopCodeRedirect(code)) {
+      return { kind: "computed", payload: restrictedIdentifierMissPayload(rawCodeSanitized, cleanCodeSanitized), cached: false, paidComputeCharged: false };
+    }
+    const corpus = skuShaped ? await resolveExactPartNumber(code) : null;
     if (corpus) {
       appendDecodeOutcome({ settledBy: "tire-corpus", status: corpus.decision.status, reasons: [], sourceTier: null });
       return { kind: "computed", payload: corpusPayload(corpus, rawCodeSanitized, cleanCodeSanitized), cached: false, paidComputeCharged: false };

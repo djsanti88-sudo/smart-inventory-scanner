@@ -572,7 +572,7 @@ export async function POST(request: Request) {
     // today) and per-request transaction-storm reasons - and an L1 replay is the same untrusted class,
     // so it must be excluded here too. ONLY a FRESH compute (cached === false), where the CURRENT verify
     // gate was actually applied, is trusted to write master.
-    if (!outcome.cached) {
+    if (!outcome.cached && outcome.payload.debug.tenantScopedAlias !== true) {
       maybeAppendMasterCatalogEntry(outcome.payload, code, codeType);
     }
     return Response.json({ ...outcome.payload, debug: { ...outcome.payload.debug, cached: outcome.cached } });

@@ -54,6 +54,33 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+describe("resolveExactBarcode approved shop-code alias", () => {
+  const aliasRow = {
+    ...CORPUS_ROW,
+    canonical_product_uid: "TIRE_688C82A02536FEEFBA1C",
+    brand: "blackhawk",
+    size: "33X12.50R20",
+    raw_size_text: "33X12.50R20",
+    manufacturer_part_number: "BH1600462",
+    barcode: "003220017209",
+    barcode_type: "ean",
+    bossShopCodeAliasSelected: "3220017209",
+  };
+
+  it("returns verified evidence for the scanned approved shop code while retaining the canonical barcode", async () => {
+    mockLookupByExactBarcode.mockResolvedValueOnce(aliasRow);
+    const result = await resolveExactBarcode("3220017209", { authenticatedBusinessId: "tenant-a" });
+    expect(result).toMatchObject({ bossShopCodeAlias: true, decision: { status: "verified" } });
+    expect(result!.evidences[0].matchedCode).toBe("3220017209");
+    expect(result!.results[0].primaryBarcode).toBe("003220017209");
+  });
+
+  it("rejects a forged alias marker whose canonical fingerprint does not match the frozen ledger", async () => {
+    mockLookupByExactBarcode.mockResolvedValueOnce({ ...aliasRow, manufacturer_part_number: "forged" });
+    await expect(resolveExactBarcode("3220017209", { authenticatedBusinessId: "tenant-a" })).resolves.toBeNull();
+  });
+});
+
 describe("resolveExactPartNumber - confidence tiers (RC4)", () => {
   it("returns null on a corpus miss", async () => {
     mockLookupByExactPartNumber.mockResolvedValueOnce(null);

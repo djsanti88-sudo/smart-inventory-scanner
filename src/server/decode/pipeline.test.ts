@@ -2664,3 +2664,86 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     }, 30000);
   });
 });
+// Tenant-scoped Boss shop identifiers must not fall through into shared decode state when the
+// authenticated business is absent or not allowlisted.
+describe("Boss shop-code tenant gate", () => {
+  const priorAllowlist = process.env.BOSS_SHOP_CODE_ALIAS_BUSINESS_IDS;
+  const priorE2e = process.env.IS_E2E;
+  let networkSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    networkSpy = vi.fn(() => { throw new Error("reserved code reached network/provider"); });
+    vi.stubGlobal("fetch", networkSpy);
+    process.env.BOSS_SHOP_CODE_ALIAS_BUSINESS_IDS = "boss-tenant";
+    delete process.env.IS_E2E;
+  });
+  afterEach(() => {
+    if (priorAllowlist === undefined) delete process.env.BOSS_SHOP_CODE_ALIAS_BUSINESS_IDS;
+    else process.env.BOSS_SHOP_CODE_ALIAS_BUSINESS_IDS = priorAllowlist;
+    if (priorE2e === undefined) delete process.env.IS_E2E;
+    else process.env.IS_E2E = priorE2e;
+    vi.unstubAllGlobals();
+  });
+
+  async function expectReservedCodeStopsBeforeSharedRungs(capContext: undefined | { authedBusinessId: string; accountCapCleared: boolean }) {
+    vi.mocked(resolveExactBarcode).mockReset().mockResolvedValueOnce(null);
+    vi.mocked(resolveExactPartNumber).mockImplementation(async () => { throw new Error("reserved code reached part-number resolver"); });
+    vi.mocked(getPersistedDecode).mockImplementation(async () => { throw new Error("reserved code reached persisted cache"); });
+    vi.mocked(lookupRetailBarcodeAsync).mockImplementation(async () => { throw new Error("reserved code reached retail corpus"); });
+    vi.mocked(lookupMasterCatalog).mockImplementation(async () => { throw new Error("reserved code reached master catalog"); });
+    vi.mocked(getLearnedProduct).mockImplementation(async () => { throw new Error("reserved code reached learned products"); });
+    const storageSpy = vi.spyOn(await import("@/server/upc/storage"), "ladderStorage");
+
+    const outcome = await runDecodePipeline({ ...makeReq("3220017209"), capContext });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(outcome).toMatchObject({
+      kind: "computed",
+      payload: {
+        reasonCode: "no_result",
+        decision: { status: "needs_review" },
+        debug: { providersAttempted: [] },
+      },
+    });
+    if (outcome.kind !== "computed") throw new Error("unreachable");
+    expect(JSON.stringify(outcome.payload)).not.toMatch(/boss|reserved|approved business|shop[- ]code/i);
+    expect(outcome.payload.debug).not.toHaveProperty("tenantScopedAlias");
+    expect(vi.mocked(resolveExactPartNumber)).not.toHaveBeenCalled();
+    expect(vi.mocked(getPersistedDecode)).not.toHaveBeenCalled();
+    expect(vi.mocked(lookupRetailBarcodeAsync)).not.toHaveBeenCalled();
+    expect(vi.mocked(lookupMasterCatalog)).not.toHaveBeenCalled();
+    expect(vi.mocked(getLearnedProduct)).not.toHaveBeenCalled();
+    expect(networkSpy).not.toHaveBeenCalled();
+    expect(storageSpy).not.toHaveBeenCalled();
+    storageSpy.mockRestore();
+  }
+
+  it("returns a neutral unresolved result before shared rungs for an anonymous reserved identifier", async () => {
+    vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+    await expectReservedCodeStopsBeforeSharedRungs(undefined);
+    expect(vi.mocked(resolveExactBarcode)).toHaveBeenCalledWith("3220017209");
+  });
+
+  it("stops before shared rungs when an allowlisted lookup rejects the alias fingerprint", async () => {
+    await expectReservedCodeStopsBeforeSharedRungs({ authedBusinessId: "boss-tenant", accountCapCleared: true });
+    expect(vi.mocked(resolveExactBarcode)).toHaveBeenCalledWith("3220017209", { authenticatedBusinessId: "boss-tenant" });
+  });
+
+  it("passes only the authenticated allowlisted business scope to the corpus provider", async () => {
+    vi.mocked(resolveExactBarcode).mockResolvedValueOnce({
+      bossShopCodeAlias: true,
+      path: "corpus_exact_barcode",
+      providerNames: ["tire-corpus"],
+      results: [],
+      evidences: [],
+      decision: { status: "verified", confidence: 0.9, reason: "approved alias", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider", confidence: 0.9, reason: "approved alias", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] } },
+    });
+    const storageSpy = vi.spyOn(await import("@/server/upc/storage"), "ladderStorage");
+    await runDecodePipeline({ ...makeReq("3220017209"), capContext: { authedBusinessId: "boss-tenant", accountCapCleared: true } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(vi.mocked(resolveExactBarcode)).toHaveBeenCalledWith("3220017209", { authenticatedBusinessId: "boss-tenant" });
+    expect(storageSpy).not.toHaveBeenCalled();
+    storageSpy.mockRestore();
+  });
+});

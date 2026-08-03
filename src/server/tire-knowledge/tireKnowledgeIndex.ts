@@ -7,6 +7,7 @@ import { getTursoClient as getRetailTursoClient, type TursoClient } from "@/serv
 import { lookupCandidates } from "@/services/upc/gtin";
 import { tirePartNumberVariants } from "@/services/catalog/tirePartNumber";
 import { isTrustedLocalDemoTireRow, isValidLocalDemoGtin } from "@/server/tire-knowledge/localDemoTrust.mjs";
+import { findBossShopCodeRedirect, matchesBossShopCodeRedirectTarget } from "@/server/tire-knowledge/bossExactEvidenceLedger";
 
 // SERVER-ONLY tire knowledge index reader. Uses SQLite for microsecond lookups with ~5MB memory.
 // The `server-only` import makes this a BUILD ERROR if imported from a client component.
@@ -30,6 +31,16 @@ export interface TireKnowledgeRow {
   source_count: number;
   /** Ephemeral marker set only after the local UPC/EAN twin identity gate passes. */
   localDemoTwinSelected?: boolean;
+  /** Ephemeral marker for a tenant-gated frozen Boss shop-code redirect. */
+  bossShopCodeAliasSelected?: string;
+}
+
+export interface TireKnowledgeLookupOptions { authenticatedBusinessId?: string | null; }
+
+/** Server-only exact allowlist; empty/anonymous values never enable a redirect. */
+export function isBossShopCodeAliasBusinessAllowed(businessId: string | null | undefined): boolean {
+  if (!businessId?.trim()) return false;
+  return (process.env.BOSS_SHOP_CODE_ALIAS_BUSINESS_IDS ?? "").split(",").map((value) => value.trim()).filter(Boolean).includes(businessId);
 }
 
 export interface TireKnowledgeMeta extends Record<string, unknown> { schema_version?: string; generated_at?: string; trusted_rows_ingested?: number; barcode_index_count?: number; harvester_snapshot_used?: boolean; }
@@ -219,17 +230,34 @@ function rowFromTurso(row: Record<string, unknown>): TireKnowledgeRow {
   };
 }
 
-/** Turso barcode lookup. Fail-safe: any error (missing creds, network) returns null, never throws. */
-async function lookupBarcodeTurso(key: string): Promise<TireKnowledgeRow | null> {
+type TursoBarcodeLookup =
+  | { state: "unavailable" | "miss" | "error"; row: null }
+  | { state: "hit"; row: TireKnowledgeRow };
+
+/** Turso barcode lookup distinguishes an unavailable client from a query error for alias safety. */
+async function lookupBarcodeTursoResult(key: string): Promise<TursoBarcodeLookup> {
   try {
     const client = await getTireTursoClient();
-    if (!client) return null;
+    if (!client) return { state: "unavailable", row: null };
     const result = await client.execute({ sql: "SELECT * FROM tires WHERE barcode = ?", args: [key] });
-    if (result.rows.length === 0) return null;
-    return rowFromTurso(result.rows[0]);
+    if (result.rows.length === 0) return { state: "miss", row: null };
+    return { state: "hit", row: rowFromTurso(result.rows[0]) };
   } catch (e) {
     console.warn("[tire-knowledge] Turso barcode lookup failed:", (e as Error).message);
-    return null;
+    return { state: "error", row: null };
+  }
+}
+
+/** Redirect-specific Turso lookup distinguishes unavailable (JSON may be used) from an error (terminal miss). */
+async function lookupBossRedirectTurso(key: string): Promise<{ available: boolean; row: TireKnowledgeRow | null }> {
+  try {
+    const client = await getTireTursoClient();
+    if (!client) return { available: false, row: null };
+    const result = await client.execute({ sql: "SELECT * FROM tires WHERE barcode = ?", args: [key] });
+    return { available: true, row: result.rows.length ? rowFromTurso(result.rows[0]) : null };
+  } catch (e) {
+    console.warn("[tire-knowledge] Turso Boss shop-code redirect lookup failed:", (e as Error).message);
+    return { available: true, row: null };
   }
 }
 
@@ -261,7 +289,7 @@ async function lookupPartNumberTurso(key: string): Promise<{ row: TireKnowledgeR
 
 /** EXACT trusted barcode lookup. Order: local SQLite (fast, dev) -> Turso (Vercel) -> in-memory JSON
  *  (last-ditch dev fallback; the file is .vercelignored so it never exists on Vercel). Never near-matches. */
-export async function lookupByExactBarcode(code: string): Promise<TireKnowledgeRow | null> {
+export async function lookupByExactBarcode(code: string, options?: TireKnowledgeLookupOptions): Promise<TireKnowledgeRow | null> {
   const key = normBarcodeKey(code);
   if (!key) return null;
   const candidates = lookupCandidates(key);
@@ -271,17 +299,41 @@ export async function lookupByExactBarcode(code: string): Promise<TireKnowledgeR
       const row = (stmt.get(c) as TireKnowledgeRow | undefined) ?? null;
       if (row) return row;
     }
+    const redirect = isBossShopCodeAliasBusinessAllowed(options?.authenticatedBusinessId) ? findBossShopCodeRedirect(key) : undefined;
+    if (redirect) {
+      const row = (stmt.get(redirect.canonicalBarcode) as TireKnowledgeRow | undefined) ?? null;
+      if (row && matchesBossShopCodeRedirectTarget(redirect, row)) return { ...row, bossShopCodeAliasSelected: key };
+    }
     return null;
   }
+  let ordinaryTursoQueryErrored = false;
   for (const c of candidates) {
-    const tursoRow = await lookupBarcodeTurso(c);
-    if (tursoRow) return tursoRow;
+    const tursoResult = await lookupBarcodeTursoResult(c);
+    if (tursoResult.state === "hit") return tursoResult.row;
+    if (tursoResult.state === "error") ordinaryTursoQueryErrored = true;
+  }
+  const redirect = isBossShopCodeAliasBusinessAllowed(options?.authenticatedBusinessId) ? findBossShopCodeRedirect(key) : undefined;
+  // An ordinary candidate query error is not an ordinary miss.  Do not make a second canonical
+  // redirect query after uncertain evidence; ordinary lookup still retains its JSON fallback below.
+  if (redirect && !ordinaryTursoQueryErrored) {
+    const redirectResult = await lookupBossRedirectTurso(redirect.canonicalBarcode);
+    if (redirectResult.available && !redirectResult.row) return null;
+    const row = redirectResult.row;
+    if (row && matchesBossShopCodeRedirectTarget(redirect, row)) return { ...row, bossShopCodeAliasSelected: key };
   }
   const idx = getJsonIndex();
   if (!idx) return null;
   for (const c of candidates) {
     const row = idx.barcodeIndex[c] ?? null;
     if (row) return row;
+  }
+  // A JSON ordinary exact hit above remains valid ordinary behavior.  But once every ordinary
+  // candidate missed, an earlier Turso error makes a redirect unsafe: never query/read its
+  // canonical target from JSON after an uncertain ordinary probe.
+  if (redirect && ordinaryTursoQueryErrored) return null;
+  if (redirect) {
+    const row = idx.barcodeIndex[redirect.canonicalBarcode] ?? null;
+    if (row && matchesBossShopCodeRedirectTarget(redirect, row)) return { ...row, bossShopCodeAliasSelected: key };
   }
   return null;
 }

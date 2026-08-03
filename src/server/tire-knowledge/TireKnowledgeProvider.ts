@@ -1,12 +1,12 @@
 import "server-only";
 import type { AiLookupResult, DecodeDecision, EvidenceResult } from "@/types";
 import { emptyResult } from "@/services/ai/provider";
-import { lookupByExactBarcode, lookupByExactBarcodeLocal, lookupByExactPartNumber, type TireKnowledgeRow } from "@/server/tire-knowledge/tireKnowledgeIndex";
+import { lookupByExactBarcode, lookupByExactBarcodeLocal, lookupByExactPartNumber, type TireKnowledgeRow, type TireKnowledgeLookupOptions } from "@/server/tire-knowledge/tireKnowledgeIndex";
 import { isTrustedLocalDemoTireRow } from "@/server/tire-knowledge/localDemoTrust.mjs";
 import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
 import { basePartNumberKey } from "@/services/catalog/tirePartNumber";
 import { normalizeTrustedCorpusTireSize } from "@/services/tire/tireSizeNormalizer";
-import { matchesBossExactEvidenceLedger } from "@/server/tire-knowledge/bossExactEvidenceLedger";
+import { findBossShopCodeRedirect, matchesBossExactEvidenceLedger, matchesBossShopCodeRedirectTarget } from "@/server/tire-knowledge/bossExactEvidenceLedger";
 
 // SERVER-ONLY deterministic tire-knowledge provider. It turns an EXACT trusted-corpus hit into a decode
 // result WITHOUT any AI call or page fetch. It runs in the /api/ai-lookup route BEFORE the AI providers and
@@ -22,6 +22,7 @@ export interface CorpusDecodeResult {
   providerNames: string[];
   path: "corpus_exact_barcode" | "corpus_exact_part_number";
   canonicalProductUid?: string;
+  bossShopCodeAlias?: true;
 }
 
 // verified_2src is the strongest tier (independent two-source). verified_1src_strong is strong single
@@ -110,21 +111,23 @@ function verifiedEvidence(code: string): EvidenceResult {
  * EXACT trusted-barcode resolution. Returns a VERIFIED decode (auto-count candidate, subject to the
  * downstream store gate) or null on a miss. No AI, no page fetch.
  */
-export async function resolveExactBarcode(code: string): Promise<CorpusDecodeResult | null> {
-  const row = await lookupByExactBarcode(code);
+export async function resolveExactBarcode(code: string, options?: TireKnowledgeLookupOptions): Promise<CorpusDecodeResult | null> {
+  const row = await lookupByExactBarcode(code, options);
   if (!row) return null;
+  const redirect = row.bossShopCodeAliasSelected ? findBossShopCodeRedirect(row.bossShopCodeAliasSelected) : undefined;
+  if (row.bossShopCodeAliasSelected && (!redirect || !matchesBossShopCodeRedirectTarget(redirect, row))) return null;
   const result = toResult(row, true);
   const confidence = result.confidence;
   const decision: DecodeDecision = {
     status: "verified",
     confidence,
-    reason: "Verified from the trusted tire knowledge base (exact barcode). No AI lookup needed.",
+    reason: redirect ? "Verified from the trusted tire knowledge base (approved exact alias). No AI lookup needed." : "Verified from the trusted tire knowledge base (exact barcode). No AI lookup needed.",
     evidenceStrength: "fetched_source",
     exactCodeEvidenceVerifiedByApp: true,
     crossCheck: { decision: "single_provider", confidence, reason: "Trusted corpus exact barcode.", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
     corroborationPath: "corpus_exact_barcode",
   };
-  return { decision, results: [result], evidences: [verifiedEvidence(row.barcode)], providerNames: ["tire-corpus"], path: "corpus_exact_barcode" };
+  return { decision, results: [result], evidences: [verifiedEvidence(redirect?.scannedCode ?? row.barcode)], providerNames: ["tire-corpus"], path: "corpus_exact_barcode", ...(redirect ? { bossShopCodeAlias: true as const } : {}) };
 }
 
 /** Local-demo corpus resolution deliberately accepts only the conservative SQLite evidence tier. */

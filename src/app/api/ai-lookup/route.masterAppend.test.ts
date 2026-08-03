@@ -194,6 +194,24 @@ describe("ai-lookup master-append hook wiring (P5b Task 2)", () => {
     expect(appendMasterCatalogEntry).toHaveBeenCalledOnce();
   });
 
+  it("does NOT append a fresh boss-only shop-code alias to the shared master catalog", async () => {
+    const regular = verifiedComputedOutcome();
+    runDecodePipeline.mockResolvedValue({
+      ...regular,
+      payload: {
+        ...regular.payload,
+        debug: { ...regular.payload.debug, tenantScopedAlias: true },
+      },
+    });
+    const { POST } = await import("./route");
+    const res = await POST(decodeReq({ cleanCode: "3220017209" }));
+
+    expect(res.status).toBe(200);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(buildMasterCatalogEntry).not.toHaveBeenCalled();
+    expect(appendMasterCatalogEntry).not.toHaveBeenCalled();
+  });
+
   it("does NOT call the append hook on a persisted/L2-replay outcome (fresh-compute only)", async () => {
     runDecodePipeline.mockResolvedValue({
       kind: "persisted" as const,

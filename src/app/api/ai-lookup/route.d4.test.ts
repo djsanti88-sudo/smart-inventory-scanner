@@ -69,6 +69,26 @@ describe("ai-lookup D4 live-mode trust", () => {
     expect(runDecodePipeline).not.toHaveBeenCalled();
   });
 
+  it("does not treat a raw businessId as authority when the membership record is absent", async () => {
+    memberGet.mockResolvedValue({ exists: false });
+    const { POST } = await import("./route");
+    const res = await POST(decodeReq({ businessId: "boss-shop" }));
+
+    expect(res.status).toBe(403);
+    expect(runDecodePipeline).not.toHaveBeenCalled();
+  });
+
+  it("threads the authenticated member businessId, rather than an unverified client value, into the decode cap context", async () => {
+    const { POST } = await import("./route");
+    const res = await POST(decodeReq({ businessId: "boss-shop" }));
+
+    expect(res.status).toBe(200);
+    expect(runDecodePipeline).toHaveBeenCalledOnce();
+    expect(runDecodePipeline).toHaveBeenCalledWith(expect.objectContaining({
+      capContext: { authedBusinessId: "boss-shop", accountCapCleared: true },
+    }));
+  });
+
   it("hostile scanContext 'tire' + autoCount flag never reach the pipeline in live mode (server policy wins)", async () => {
     const { POST } = await import("./route");
     await POST(decodeReq({ scanContext: "tire", autoCountNonPublicWithEvidence: true, codeType: "upc" }));
