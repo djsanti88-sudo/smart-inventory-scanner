@@ -46,7 +46,7 @@ vi.mock("@/components/CameraScanButton", () => ({
   },
 }));
 vi.mock("@/components/LiveScanFeed", () => ({
-  LiveScanFeed: () => <div data-testid="queue-feed-probe">{(mocks.storeState.scanFeed as ScanEvent[]).map((event) => event.cleanCode).join(",")}</div>,
+  LiveScanFeed: () => <div data-testid="queue-feed-probe">{(mocks.storeState.scanFeed as ScanEvent[]).map((event) => `${event.notes}:${event.cleanCode}`).join(",")}</div>,
 }));
 vi.mock("@/components/FinalCountTable", () => ({ FinalCountTable: () => <div /> }));
 vi.mock("@/components/SyncStatusBar", () => ({ SyncStatusBar: () => <div /> }));
@@ -95,12 +95,47 @@ describe("ScanPage queued scanner DOM proof", () => {
     // A hardware wedge writes its complete value in one input event, then sends Enter.
     fireEvent.input(input, { target: { value: "6419440485331" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    await act(async () => { await Promise.resolve(); });
-    view.rerender(<ScanPage />);
 
     expect(staleProcessScan).not.toHaveBeenCalled();
     expect(currentProcessScan).toHaveBeenCalledWith("6419440485331");
+    expect(document.activeElement).toBe(input);
+
+    await act(async () => { await Promise.resolve(); });
+    view.rerender(<ScanPage />);
     expect(screen.getByTestId("queue-feed-probe")).toHaveTextContent("6419440485331");
+  });
+
+  it("keeps delayed accepted work on its admission handler and sends later Enter work to the new handler", async () => {
+    vi.useFakeTimers();
+    resetStore();
+    const routeTo = (context: "old" | "new") => vi.fn((code: string) => {
+      const event = { ...eventFor(code, 1), notes: context };
+      mocks.storeState.scanFeed = [...(mocks.storeState.scanFeed as ScanEvent[]), event];
+      return event;
+    });
+    const oldProcessScan = routeTo("old");
+    mocks.storeState.processScan = oldProcessScan;
+    const view = render(<ScanPage />);
+    const oldCodes = Array.from({ length: 21 }, (_, index) => `old-${index + 1}`);
+
+    const input = submitPaste(oldCodes);
+    expect(oldProcessScan).toHaveBeenCalledTimes(20);
+    expect(document.activeElement).toBe(input);
+
+    const newProcessScan = routeTo("new");
+    mocks.storeState.processScan = newProcessScan;
+    view.rerender(<ScanPage />);
+    await releaseNextChunk();
+    submitPaste(["new-1"]);
+    await act(async () => { await Promise.resolve(); });
+    view.rerender(<ScanPage />);
+
+    expect(screen.getByTestId("queue-feed-probe")).toHaveTextContent([
+      ...oldCodes.map((code) => `old:${code}`),
+      "new:new-1",
+    ].join(","));
+    expect(oldProcessScan).toHaveBeenCalledTimes(21);
+    expect(newProcessScan).toHaveBeenCalledTimes(1);
     expect(document.activeElement).toBe(input);
   });
 

@@ -40,20 +40,12 @@ function ScanPageContent() {
   const [batchProgress, setBatchProgress] = useState<ScanBatchProgress | null>(null);
   const [batchOutcome, setBatchOutcome] = useState<string | null>(null);
   const [queueHolder] = useState(() => {
-    let currentProcessScan = processScan;
     const holder: {
       mounted: boolean;
-      updateProcessScan: (next: typeof processScan) => void;
       queue?: ReturnType<typeof createScanSubmissionQueue<ReturnType<typeof processScan>>>;
-    } = {
-      mounted: true,
-      updateProcessScan: (next) => { currentProcessScan = next; },
-    };
+    } = { mounted: true };
     holder.queue = createScanSubmissionQueue({
-      // The queue lives for the page, while Zustand can replace action references during hydration
-      // or a business-context transition. Resolve admitted work through the latest action instead
-      // of silently dispatching it to the callback from the queue's first render.
-      processScan: (code) => currentProcessScan(code),
+      processScan,
       chunkSize: 20,
       onBulkStart: (progress) => {
         if (!holder.mounted) return;
@@ -82,9 +74,6 @@ function ScanPageContent() {
     return holder;
   });
   const scanQueue = queueHolder.queue!;
-  useEffect(() => {
-    queueHolder.updateProcessScan(processScan);
-  }, [processScan, queueHolder]);
   const location = useScanStore((s) => s.location);
   const setLocation = useScanStore((s) => s.setLocation);
   const recentLocations = useScanStore((s) => s.recentLocations);
@@ -111,8 +100,10 @@ function ScanPageContent() {
   const handleScan = (raw: string) => {
     const resolvesAsSingleCode = (code: string) => resolveRawScan(code, products, aliases, businessId).resolverStatus === "known";
     const codes = planScanBatch(raw, resolvesAsSingleCode);
-    if (codes.length <= 1) return scanQueue.enqueueSingle(codes[0] ?? raw);
-    return scanQueue.enqueueBulk(codes);
+    // Capture the action installed with this committed event handler. A delayed FIFO item must
+    // finish in the business/context that accepted it, even if the page re-renders before dequeue.
+    if (codes.length <= 1) return scanQueue.enqueueSingle(codes[0] ?? raw, processScan);
+    return scanQueue.enqueueBulk(codes, undefined, processScan);
   };
 
   // Learn which provider keys are configured (server-side) so unknown scans can auto-decode.

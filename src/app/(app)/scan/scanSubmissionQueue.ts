@@ -15,17 +15,19 @@ export interface ScanSubmissionQueueOptions<T> {
 type BulkJob<T> = {
   codes: readonly string[];
   controller: AbortController;
+  processScan: ProcessScan<T>;
   resolve: (result: ScanBatchResult<T>) => void;
 };
 
 type SingleJob<T> = {
   code: string;
+  processScan: ProcessScan<T>;
   resolve: (result: T | null) => void;
 };
 
 export interface ScanSubmissionQueue<T> {
-  enqueueBulk(codes: readonly string[], controller?: AbortController): Promise<ScanBatchResult<T>>;
-  enqueueSingle(code: string): Promise<T | null>;
+  enqueueBulk(codes: readonly string[], controller?: AbortController, processScan?: ProcessScan<T>): Promise<ScanBatchResult<T>>;
+  enqueueSingle(code: string, processScan?: ProcessScan<T>): Promise<T | null>;
   stopActiveBulk(): void;
   readonly activeBulk: boolean;
 }
@@ -41,7 +43,7 @@ export function createScanSubmissionQueue<T>(options: ScanSubmissionQueueOptions
 
   async function processSingle(job: SingleJob<T>) {
     try {
-      job.resolve(await options.processScan(job.code));
+      job.resolve(await job.processScan(job.code));
     } catch (error) {
       reportError(job.code, error);
       job.resolve(null);
@@ -61,7 +63,7 @@ export function createScanSubmissionQueue<T>(options: ScanSubmissionQueueOptions
 
         active = bulkJobs.shift()!;
         options.onBulkStart?.({ processed: 0, total: active.codes.length });
-        const result = await runScanBatch(active.codes, options.processScan, {
+        const result = await runScanBatch(active.codes, active.processScan, {
           chunkSize: options.chunkSize ?? 20,
           signal: active.controller.signal,
           yieldToBrowser: options.yieldToBrowser,
@@ -86,15 +88,15 @@ export function createScanSubmissionQueue<T>(options: ScanSubmissionQueueOptions
   }
 
   return {
-    enqueueBulk(codes, controller = new AbortController()) {
+    enqueueBulk(codes, controller = new AbortController(), processScan = options.processScan) {
       return new Promise<ScanBatchResult<T>>((resolve) => {
-        bulkJobs.push({ codes, controller, resolve });
+        bulkJobs.push({ codes, controller, processScan, resolve });
         void drain();
       });
     },
-    enqueueSingle(code) {
+    enqueueSingle(code, processScan = options.processScan) {
       return new Promise<T | null>((resolve) => {
-        singles.push({ code, resolve });
+        singles.push({ code, processScan, resolve });
         void drain();
       });
     },
