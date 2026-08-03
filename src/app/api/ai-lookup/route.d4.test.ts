@@ -101,6 +101,37 @@ describe("ai-lookup D4 live-mode trust", () => {
     expect(arg.codeType).not.toBe("upc"); // "TX100-PN" is not a UPC; server recompute wins over the client claim
   });
 
+  it("preserves a frozen ten-digit Boss shop code for the pipeline after scanner separator normalization", async () => {
+    const { POST } = await import("./route");
+    await POST(decodeReq({ cleanCode: "3220-017-209" }));
+
+    expect(runDecodePipeline).toHaveBeenCalledWith(expect.objectContaining({
+      code: "3220017209",
+      rawCodeSanitized: "",
+      cleanCodeSanitized: "3220017209",
+    }));
+  });
+
+  it("keeps an unrelated ten-digit numeric input redacted before the pipeline", async () => {
+    const { POST } = await import("./route");
+    await POST(decodeReq({ cleanCode: "5551234567" }));
+
+    expect(runDecodePipeline).toHaveBeenCalledWith(expect.objectContaining({
+      code: "[redacted-phone]",
+      cleanCodeSanitized: "[redacted-phone]",
+    }));
+  });
+
+  it("keeps the frozen eleven-digit Boss shop code unchanged for the pipeline", async () => {
+    const { POST } = await import("./route");
+    await POST(decodeReq({ cleanCode: "77676020526" }));
+
+    expect(runDecodePipeline).toHaveBeenCalledWith(expect.objectContaining({
+      code: "77676020526",
+      cleanCodeSanitized: "77676020526",
+    }));
+  });
+
   // FINDING B (P6 fix wave): the per-account DECODE charge moved OUT of this route and INTO the
   // pipeline's chargePaidSlot (charged together with the global slot, at one exception-consistent site).
   // The route therefore no longer post-charges the account on the decode path - it delegates BOTH charges

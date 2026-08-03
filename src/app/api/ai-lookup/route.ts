@@ -48,6 +48,16 @@ const OPENAI_DECODE_MODEL = process.env.OPENAI_DECODE_MODEL || "gpt-5"; // pro e
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs"; // Admin SDK requires the Node runtime (same as resolve-scan/route.ts:25)
 
+/**
+ * Keep the small, frozen Boss shop-code ledger usable by the decode pipeline without
+ * weakening the general PII sanitizer. `findBossShopCodeRedirect` accepts only its
+ * own exact values (after scanner space/dash normalization), so every other phone-like
+ * 10-digit input remains redacted before it can reach a provider.
+ */
+function sanitizeDecodeCode(input: string): string {
+  return findBossShopCodeRedirect(input)?.scannedCode ?? sanitizeForAiLookup(input).clean;
+}
+
 function selectProvider(name: string): AiProvider {
   switch (name) {
     case "gemini":
@@ -244,8 +254,8 @@ export async function POST(request: Request) {
     if (localBody.mode !== "decode" && localBody.mode !== "decode-deep") {
       return Response.json({ error: "Only local tire decode is available in local demo.", reasonCode: "local_demo_decode_only" }, { status: 409 });
     }
-    const rawCodeSanitized = sanitizeForAiLookup(localBody.rawCode ?? "").clean;
-    const cleanCodeSanitized = sanitizeForAiLookup(localBody.cleanCode ?? "").clean;
+    const rawCodeSanitized = sanitizeDecodeCode(localBody.rawCode ?? "");
+    const cleanCodeSanitized = sanitizeDecodeCode(localBody.cleanCode ?? "");
     const code = cleanCodeSanitized || rawCodeSanitized;
     const outcome = await runDecodePipeline({ code, codeType: detectCodeType(code), rawCodeSanitized, cleanCodeSanitized, threshold: clampConfidenceThreshold(localBody.confidenceThreshold), allowNonPublicAutoCount: false, forceRetry: localBody.forceRetry === true, budgetMs: typeof localBody.budgetMs === "number" ? clampDecodeBudgetMs(localBody.budgetMs) : undefined });
     if (outcome.kind !== "computed") return Response.json({ error: "Local demo decode did not settle.", reasonCode: "local_demo_unavailable" }, { status: 503 });
@@ -353,8 +363,8 @@ export async function POST(request: Request) {
   }
 
   // Defense in depth: sanitize again on the server before anything reaches a provider.
-  const rawCodeSanitized = sanitizeForAiLookup(body.rawCode ?? "").clean;
-  const cleanCodeSanitized = sanitizeForAiLookup(body.cleanCode ?? "").clean;
+  const rawCodeSanitized = sanitizeDecodeCode(body.rawCode ?? "");
+  const cleanCodeSanitized = sanitizeDecodeCode(body.cleanCode ?? "");
   const code = cleanCodeSanitized || rawCodeSanitized;
   // D4: never trust the client's codeType. Always recompute from the sanitized code server-side.
   const codeType = detectCodeType(code);
