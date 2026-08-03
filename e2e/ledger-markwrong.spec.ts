@@ -6,10 +6,9 @@ import { test, expect, type Page } from "./fixtures";
 // holds through the REAL browser (store state AND rendered DOM), at desktop and 390px phone
 // viewports. Screenshots: e2e/proof/ledger-markwrong-desktop.png, e2e/proof/ledger-markwrong-phone.png.
 //
-// Scenario 1 seeds a VERIFIED tire with its primary barcode (and an approved human alias) via the
-// store handle so both scans resolve "known" and count against it deterministically. Keeping the
-// barcode on the verified product exercises the normal exact-product resolution path before the
-// correction flow under test.
+// Scenario 1 creates a VERIFIED tire through the same human-confirmation action used by the app:
+// an initially unknown scan is counted, the open review is confirmed as a new product, then its
+// approved alias resolves the next physical scan to that same product before correction.
 //
 // Scenario 2 (provisional-wrong): a scan of a genuinely UNRESOLVED code lands on a PROVISIONAL
 // placeholder (minted by ensureProvisionalCount on first scan); marking THAT provisional wrong used
@@ -28,57 +27,11 @@ const AI_OFF = {
   dailyLimit: 200, missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"], e2e: true,
 };
 
-// A valid UPC from the local unknown-scan batch. It has no approved alias or current
-// tire/retail corpus entry; do not replace it with a common retail barcode, because a
-// later corpus import can resolve that code before this deliberately seeded alias runs.
-const WRONG_CODE = "086699368492";
-const WRONG_PRODUCT_ID = "e2e-seed-wrong-1";
-
 async function scan(page: Page, code: string) {
   const input = page.getByTestId("scanner-input");
   await input.click();
   await input.pressSequentially(code, { delay: 2 });
   await input.press("Enter");
-}
-
-// Seed a verified tire + approved alias directly in the store. The primary barcode makes exact
-// product resolution deterministic; the approved alias retains the human-linking fixture shape.
-async function seedWrongVerifiedProduct(page: Page) {
-  await page.evaluate(
-    ({ code, productId }) => {
-      type Product = Record<string, unknown>;
-      type Alias = Record<string, unknown>;
-      type State = { businessId: string; sessionId: string; products: Product[]; aliases: Alias[] };
-      type Store = {
-        getState: () => State;
-        setState: (fn: (prev: State) => Partial<State>) => void;
-      };
-      const w = window as unknown as { __scanStore: Store };
-      const s = w.__scanStore.getState();
-      w.__scanStore.setState((prev) => ({
-        products: [
-          ...prev.products,
-          {
-            id: productId, businessId: s.businessId, name: "Wrongly Mapped Test Tire", brand: "TestBrand",
-            category: "tire", specsShort: "265/70R17", specsFull: "265/70R17 test tire", primarySku: "", primaryBarcode: code,
-            gtin: "", upc: "", ean: "", vendorCodes: [], aliases: [], imageUrl: "", productUrl: "",
-            location: "", notes: "", status: "active", source: "seed", confidence: 1, verified: true,
-            createdAt: s.sessionId, updatedAt: s.sessionId, createdBy: "seed", updatedBy: "seed",
-          },
-        ],
-        aliases: [
-          ...prev.aliases,
-          {
-            id: "e2e-seed-alias-wrong-1", businessId: s.businessId, productId, rawCodeExample: code,
-            cleanCode: code, normalizedCode: code, aliasType: "barcode", source: "human_review", confidence: 1,
-            approved: true, createdAt: s.sessionId, updatedAt: s.sessionId, createdBy: "human_link_existing",
-            lastSeenAt: s.sessionId, syncStatus: "synced", idempotencyKey: "e2e-seed-alias-wrong-1",
-          },
-        ],
-      }));
-    },
-    { code: WRONG_CODE, productId: WRONG_PRODUCT_ID },
-  );
 }
 
 // Total counted quantity via the dev/test store handle (scanStore.ts:5270-5272; same pattern as
@@ -106,32 +59,69 @@ for (const vp of [
     await page.waitForURL("**/scan");
     await expect(page.getByTestId("scanner-input")).toBeFocused();
 
-    // Wait for StoreHydrator before seeding: its rehydrate would otherwise overwrite this state.
+    // Wait for StoreHydrator before the real human-confirmation flow.
     await expect(page.getByTestId("final-count-body")).toBeVisible();
-    await seedWrongVerifiedProduct(page);
+    const wrongCode = vp.name === "desktop" ? "697662131854" : "697662137658";
+    await scan(page, wrongCode);
+    await expect.poll(() => totalCounted(page), { message: "initial unknown scan counted" }).toBe(1);
 
-    // Fixture precondition: the verified tire is present before scanning. The two scans below must
-    // therefore exercise the deterministic exact-product path, not an async decode/provisional path.
+    // Confirm the open review through the normal human create_new store action, preserving the
+    // already-counted physical scan rather than injecting a product/alias fixture into state. This
+    // deliberately does not exercise the separate link_existing mismatch/firewall override path.
+    const wrongProductId = await page.evaluate(async (code: string) => {
+      type Review = { id: string; cleanCode: string; status: string };
+      type Product = { id: string; verified?: boolean; provisional?: boolean; primaryBarcode?: string; category?: string };
+      type Alias = { productId: string; approved?: boolean; cleanCode?: string; source?: string; createdBy?: string };
+      type State = {
+        needsReviewQueue: Review[];
+        products: Product[];
+        aliases: Alias[];
+        resolveUnknown: (reviewId: string, action: "create_new", options: {
+          origin: "human"; applyToCount: boolean; newProduct: Record<string, unknown>;
+        }) => Promise<void> | void;
+      };
+      const w = window as unknown as { __scanStore: { getState: () => State } };
+      const review = w.__scanStore.getState().needsReviewQueue.find((item) => item.cleanCode === code && item.status === "open");
+      if (!review) return "";
+      await w.__scanStore.getState().resolveUnknown(review.id, "create_new", {
+        origin: "human", applyToCount: true,
+        newProduct: {
+          name: "Wrongly Mapped Test Tire", brand: "TestBrand", category: "tire",
+          specsShort: "265/70R17", specsFull: "265/70R17 test tire", primaryBarcode: code,
+        },
+      });
+      const state = w.__scanStore.getState();
+      const product = state.products.find((item) => item.primaryBarcode === code && item.verified === true && item.provisional !== true && item.category === "tire");
+      if (!product || !state.aliases.some((alias) => alias.productId === product.id && alias.approved === true && alias.cleanCode === code && alias.source === "human_review" && alias.createdBy === "human")) return "";
+      return product.id;
+    }, wrongCode);
+    expect(wrongProductId).not.toBe("");
+
+    // The original feed item maps to the newly verified human-confirmed product; scanning the
+    // exact approved alias again must count on that one row without a duplicate.
     await expect.poll(() => page.evaluate(({ productId, code }: { productId: string; code: string }) => {
-      type Store = { getState: () => { products: Array<{ id: string; verified?: boolean; category?: string; primaryBarcode?: string }> } };
-      const w = window as unknown as { __scanStore: Store };
-      return w.__scanStore.getState().products.some(
-        (product) => product.id === productId && product.verified === true && product.category === "tire" && product.primaryBarcode === code,
-      );
-    }, { productId: WRONG_PRODUCT_ID, code: WRONG_CODE }), { message: "verified tire fixture is seeded" }).toBe(true);
-
-    // Scan the seeded (wrong) product's code twice -> one counted row, quantity 2. Both scans
-    // resolve deterministically against the verified tire (no async decode involved).
-    await scan(page, WRONG_CODE);
-    await scan(page, WRONG_CODE);
+      type State = { scanFeed: Array<{ matchedProductId?: string; cleanCode?: string }>; finalCounts: Array<{ productId: string; quantity: number }> };
+      const w = window as unknown as { __scanStore: { getState: () => State } };
+      const state = w.__scanStore.getState();
+      return state.scanFeed.some((event) => event.cleanCode === code && event.matchedProductId === productId)
+        && state.finalCounts.some((count) => count.productId === productId && count.quantity === 1);
+    }, { productId: wrongProductId, code: wrongCode }), { message: "human-confirmed product retains original scan" }).toBe(true);
+    await scan(page, wrongCode);
+    await expect.poll(() => page.evaluate(({ productId, code }: { productId: string; code: string }) => {
+      type Event = { cleanCode?: string; matchedProductId?: string; status?: string };
+      const w = window as unknown as { __scanStore: { getState: () => { scanFeed: Event[] } } };
+      return w.__scanStore.getState().scanFeed.filter(
+        (event) => event.cleanCode === code && event.matchedProductId === productId && event.status === "known",
+      ).length;
+    }, { productId: wrongProductId, code: wrongCode }), { message: "second scan resolves known through approved alias" }).toBe(1);
     await expect(page.getByTestId("final-count-body").locator('tr[data-testid^="count-row-"]')).toHaveCount(1);
     const preCorrectionCounts = await page.evaluate(() => {
       type Store = { getState: () => { finalCounts: Array<{ productId: string; quantity: number }> } };
       const w = window as unknown as { __scanStore: Store };
       return w.__scanStore.getState().finalCounts.map(({ productId, quantity }) => ({ productId, quantity }));
     });
-    expect(preCorrectionCounts).toEqual([{ productId: WRONG_PRODUCT_ID, quantity: 2 }]);
-    await expect(page.getByTestId(`qty-${WRONG_PRODUCT_ID}`)).toHaveText(/2/);
+    expect(preCorrectionCounts).toEqual([{ productId: wrongProductId, quantity: 2 }]);
+    await expect(page.getByTestId(`qty-${wrongProductId}`)).toHaveText(/2/);
 
     const before = await totalCounted(page);
     expect(before).toBe(2);
@@ -142,7 +132,7 @@ for (const vp of [
       type Store = { getState: () => { markWrong: (pid: string, o?: { reason?: string }) => Promise<string | null> } };
       const w = window as unknown as { __scanStore: Store };
       await w.__scanStore.getState().markWrong(id, { reason: "e2e ledger proof" });
-    }, WRONG_PRODUCT_ID);
+    }, wrongProductId);
 
     // STORE assertion: total physical quantity is invariant across markWrong.
     await expect.poll(() => totalCounted(page), { message: "total physical quantity invariant" }).toBe(before);
@@ -150,14 +140,14 @@ for (const vp of [
     // DOM assertions: the transfer is RENDERED, not just stored. Exactly one counted row remains (the
     // Unidentified provisional), the wrong product's row is gone, and the qty cell shows the full 2.
     await expect(page.getByTestId("final-count-body").locator('tr[data-testid^="count-row-"]')).toHaveCount(1);
-    await expect(page.getByTestId(`count-row-${WRONG_PRODUCT_ID}`)).toHaveCount(0);
+    await expect(page.getByTestId(`count-row-${wrongProductId}`)).toHaveCount(0);
     const provisionalId = await page.evaluate(() => {
       type Store = { getState: () => { finalCounts: Array<{ productId: string }> } };
       const w = window as unknown as { __scanStore: Store };
       return w.__scanStore.getState().finalCounts[0]?.productId ?? "";
     });
     expect(provisionalId).not.toBe("");
-    expect(provisionalId).not.toBe(WRONG_PRODUCT_ID);
+    expect(provisionalId).not.toBe(wrongProductId);
     await expect(page.getByTestId(`qty-${provisionalId}`)).toHaveText(/2/);
 
     await page.screenshot({ path: `e2e/proof/ledger-markwrong-${vp.name}.png`, fullPage: true });
