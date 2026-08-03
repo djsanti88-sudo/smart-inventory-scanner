@@ -40,9 +40,20 @@ function ScanPageContent() {
   const [batchProgress, setBatchProgress] = useState<ScanBatchProgress | null>(null);
   const [batchOutcome, setBatchOutcome] = useState<string | null>(null);
   const [queueHolder] = useState(() => {
-    const holder: { mounted: boolean; queue?: ReturnType<typeof createScanSubmissionQueue<ReturnType<typeof processScan>>> } = { mounted: true };
+    let currentProcessScan = processScan;
+    const holder: {
+      mounted: boolean;
+      updateProcessScan: (next: typeof processScan) => void;
+      queue?: ReturnType<typeof createScanSubmissionQueue<ReturnType<typeof processScan>>>;
+    } = {
+      mounted: true,
+      updateProcessScan: (next) => { currentProcessScan = next; },
+    };
     holder.queue = createScanSubmissionQueue({
-      processScan,
+      // The queue lives for the page, while Zustand can replace action references during hydration
+      // or a business-context transition. Resolve admitted work through the latest action instead
+      // of silently dispatching it to the callback from the queue's first render.
+      processScan: (code) => currentProcessScan(code),
       chunkSize: 20,
       onBulkStart: (progress) => {
         if (!holder.mounted) return;
@@ -71,6 +82,9 @@ function ScanPageContent() {
     return holder;
   });
   const scanQueue = queueHolder.queue!;
+  useEffect(() => {
+    queueHolder.updateProcessScan(processScan);
+  }, [processScan, queueHolder]);
   const location = useScanStore((s) => s.location);
   const setLocation = useScanStore((s) => s.setLocation);
   const recentLocations = useScanStore((s) => s.recentLocations);

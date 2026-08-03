@@ -45,7 +45,9 @@ vi.mock("@/components/CameraScanButton", () => ({
     return <button type="button" data-testid="camera-queue-probe" onClick={() => void onScan("camera-1")}>Camera probe</button>;
   },
 }));
-vi.mock("@/components/LiveScanFeed", () => ({ LiveScanFeed: () => <div /> }));
+vi.mock("@/components/LiveScanFeed", () => ({
+  LiveScanFeed: () => <div data-testid="queue-feed-probe">{(mocks.storeState.scanFeed as ScanEvent[]).map((event) => event.cleanCode).join(",")}</div>,
+}));
 vi.mock("@/components/FinalCountTable", () => ({ FinalCountTable: () => <div /> }));
 vi.mock("@/components/SyncStatusBar", () => ({ SyncStatusBar: () => <div /> }));
 vi.mock("@/components/ExportMenu", () => ({ ExportMenu: () => <div /> }));
@@ -77,6 +79,31 @@ afterEach(() => {
 });
 
 describe("ScanPage queued scanner DOM proof", () => {
+  it("admits a hardware Enter through the current scan handler after the page re-renders", async () => {
+    resetStore();
+    const view = render(<ScanPage />);
+    const staleProcessScan = mocks.storeState.processScan as ReturnType<typeof vi.fn>;
+    const currentProcessScan = vi.fn((code: string) => {
+      const event = eventFor(code, 1);
+      mocks.storeState.scanFeed = [event];
+      return event;
+    });
+    mocks.storeState.processScan = currentProcessScan;
+    view.rerender(<ScanPage />);
+
+    const input = screen.getByTestId("scanner-input") as HTMLInputElement;
+    // A hardware wedge writes its complete value in one input event, then sends Enter.
+    fireEvent.input(input, { target: { value: "6419440485331" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await act(async () => { await Promise.resolve(); });
+    view.rerender(<ScanPage />);
+
+    expect(staleProcessScan).not.toHaveBeenCalled();
+    expect(currentProcessScan).toHaveBeenCalledWith("6419440485331");
+    expect(screen.getByTestId("queue-feed-probe")).toHaveTextContent("6419440485331");
+    expect(document.activeElement).toBe(input);
+  });
+
   it("keeps the actual scanner input live and serializes hardware and camera scans at separate chunk boundaries", async () => {
     vi.useFakeTimers();
     const processScan = resetStore();
