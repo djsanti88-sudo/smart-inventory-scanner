@@ -28,7 +28,10 @@ const AI_OFF = {
   dailyLimit: 200, missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"], e2e: true,
 };
 
-const WRONG_CODE = "049000006346";
+// A valid UPC from the local unknown-scan batch. It has no approved alias or current
+// tire/retail corpus entry; do not replace it with a common retail barcode, because a
+// later corpus import can resolve that code before this deliberately seeded alias runs.
+const WRONG_CODE = "086699368492";
 const WRONG_PRODUCT_ID = "e2e-seed-wrong-1";
 
 async function scan(page: Page, code: string) {
