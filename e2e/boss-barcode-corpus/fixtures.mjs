@@ -188,5 +188,10 @@ export function runtimeCanonicalIdFor(entry) {
   const rows = JSON.parse(readFileSync(join(process.cwd(), "src", "server", "tire-knowledge", "exact-index", `${shard}.json`), "utf8"));
   const row = rows[entry.lookupKey];
   if (!row || row.bossTrusted !== true || typeof row.canonical_product_uid !== "string" || !row.canonical_product_uid) throw new Error("Selected UI spelling lacks a trusted exact runtime identity.");
-  return row.canonical_product_uid;
+  return opaqueTrustedExactCanonicalId(row.canonical_product_uid);
+}
+
+/** Must exactly mirror the server's opaque canonical identity; raw source UIDs never leave the harness. */
+export function opaqueTrustedExactCanonicalId(canonicalProductUid) {
+  return `trusted-exact:v1:${createHash("sha256").update(canonicalProductUid).digest("hex").slice(0, 32).toUpperCase()}`;
 }

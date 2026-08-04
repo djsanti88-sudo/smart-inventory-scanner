@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deriveCorpusFixtures } from "./fixtures.mjs";
+import { deriveCorpusFixtures, opaqueTrustedExactCanonicalId } from "./fixtures.mjs";
 
 const manifest = {
   admittedBossCodes: 2,
@@ -37,4 +37,8 @@ test("deriveCorpusFixtures rejects an accepted spelling that is not canonical-eq
     final_status: "accepted", gtin_valid: "true", raw_barcode: "00012345600012",
     normalized_barcode_candidates: "00012345600013", matched_stable_product_id: "product-a",
   }], { ...manifest, admittedBossCodes: 1, acceptedSpellings: 1, nonGtinApprovedRows: 0, nonGtinApprovedIdentifiers: 0, excludedCasePacks: 0, blockedPackageCanonicalKeys: [] }), /canonical-equivalent/);
+});
+
+test("opaque trusted exact identity matches the provider contract", () => {
+  assert.equal(opaqueTrustedExactCanonicalId("product-a"), "trusted-exact:v1:2898B41B903D0EBB491452B44A103968");
 });
