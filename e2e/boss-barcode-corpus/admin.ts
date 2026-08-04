@@ -29,4 +29,7 @@ export async function seedLocalCorpusTenant() {
   catch (error) { if (!String((error as { code?: string }).code ?? "").includes("already-exists")) throw error; }
   await db.doc(`businesses/${LOCAL_CORPUS_BUSINESS_ID}`).set({ name: "Local corpus certification (synthetic)", createdBy: LOCAL_CORPUS_UID });
   await db.doc(`businessMembers/${LOCAL_CORPUS_BUSINESS_ID}_${LOCAL_CORPUS_UID}`).set({ businessId: LOCAL_CORPUS_BUSINESS_ID, userId: LOCAL_CORPUS_UID, role: "owner" });
+  // Pin the same ordinary business the login provisioner will select; this prevents an old emulator
+  // profile from silently creating a default tenant and turning a persistence test into a UI-only run.
+  await db.doc(`userProfiles/${LOCAL_CORPUS_UID}`).set({ authUserId: LOCAL_CORPUS_UID, email: LOCAL_CORPUS_EMAIL, defaultBusinessId: LOCAL_CORPUS_BUSINESS_ID });
 }

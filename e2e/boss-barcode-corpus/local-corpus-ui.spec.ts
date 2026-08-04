@@ -78,14 +78,26 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
     immediateMs.push(performance.now() - started);
     const settleStart = performance.now();
     await expect.poll(async () => {
-      const row = feed.locator("tr").first(); const status = await row.getByTestId("decode-row-status").textContent().catch(() => "");
+      // The feed's semantic status is rendered as ordinary row text (not a nested test id).
+      // We assert its terminal vocabulary without relying on an implementation-only cell layout.
+      const status = await feed.locator("tr").first().textContent();
       return /Verified \(app-confirmed\)|Counted/.test(status ?? "");
     }, { timeout: SETTLEMENT_TIMEOUT_MS, intervals: [10, 20, 50] }).toBe(true);
     settledMs.push(performance.now() - started); queueMs.push(performance.now() - settleStart);
     await new Promise((resolve) => setTimeout(resolve, SCANNER_INTERVAL_MS));
   }
   await expect(input).toBeFocused();
-  await expect(page.getByTestId("pending-count")).toHaveText(/^(?:Waiting to save|All saved): 0$/, { timeout: 30_000 });
+  try {
+    await expect(page.getByTestId("pending-count")).toHaveText(/^(?:Waiting to save|All saved): 0$/, { timeout: 30_000 });
+  } catch (error) {
+    const diagnostic = await page.evaluate(() => ({
+      pending: document.querySelector('[data-testid="pending-count"]')?.textContent ?? "",
+      syncError: document.querySelector('[data-testid="sync-error"]')?.textContent ?? "",
+      selectedBusiness: window.localStorage.getItem("sis-selected-business-v1"),
+    }));
+    await testInfo.attach("local-corpus-persistence-diagnostic", { contentType: "application/json", body: Buffer.from(JSON.stringify(diagnostic)) });
+    throw error;
+  }
   const settled = await settledCount(selected.length, expectedIdentities);
   const visual = await page.evaluate(() => { const state = (window as Window & { __localCorpusHistory?: { forbidden: boolean; observer: MutationObserver | null } }).__localCorpusHistory; state?.observer?.disconnect(); return state?.forbidden ?? true; });
   expect(visual, "trusted exact UI must not transiently show Suggested, Needs Review, Conflict, or Vendor").toBe(false);
