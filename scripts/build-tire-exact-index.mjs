@@ -59,6 +59,7 @@ function csvRows(text) {
     else if ((char === "\n" || char === "\r") && !quote) { if (char === "\r" && text[i + 1] === "\n") i++; row.push(cell); if (row.some(Boolean)) rows.push(row); row = []; cell = ""; }
     else cell += char;
   }
+  if (quote) throw new Error("CSV contains an unclosed quote");
   if (cell || row.length) { row.push(cell); rows.push(row); }
   const [headers, ...values] = rows;
   return values.map((fields) => Object.fromEntries(headers.map((header, index) => [header, fields[index] ?? ""])));
@@ -116,18 +117,20 @@ function resolveReviewedMpnConflict({ key, globalPointer, bossPointer, globalRow
 function requireOutputLimits(dir, manifest) {
   let total = 0;
   for (const shard of SHARDS) { const size = statSync(join(dir, `${shard}.json`)).size; if (size > MAX_SHARD) throw new Error(`shard ${shard} exceeds 1 MiB`); total += size; }
-  total += statSync(join(dir, "manifest.json")).size;
+  total += statSync(join(dir, "manifest.json")).size + statSync(join(dir, "conflict-ledger.json")).size;
   if (total > MAX_TOTAL) throw new Error("exact index exceeds 40 MiB");
   if (Object.values(manifest.shardCounts).some((count) => count > Math.ceil(manifest.totalKeys * 0.2) + 1)) throw new Error("unbalanced shard distribution");
   return total;
 }
-function artifactNames() { return ["manifest.json", ...SHARDS.map((shard) => `${shard}.json`)]; }
+function artifactNames() { return ["conflict-ledger.json", "manifest.json", ...SHARDS.map((shard) => `${shard}.json`)]; }
 function verifyManifestInternals(dir, manifest) {
   if (!manifest || typeof manifest !== "object" || !manifest.shardHashes || !manifest.shardCounts || !manifest.shardBytes) {
     throw new Error("artifact manifest is malformed");
   }
   const expectedDigest = sha256(JSON.stringify(Object.fromEntries(Object.entries(manifest).filter(([key]) => key !== "contentDigest"))));
   if (manifest.contentDigest !== expectedDigest) throw new Error("artifact manifest content digest mismatch");
+  const conflictLedger = readFileSync(join(dir, "conflict-ledger.json"));
+  if (manifest.conflictLedgerSha256 !== sha256(conflictLedger)) throw new Error("artifact conflict ledger hash mismatch");
   for (const shard of SHARDS) {
     const name = `${shard}.json`; const bytes = readFileSync(join(dir, name));
     if (manifest.shardHashes[shard] !== sha256(bytes)) throw new Error(`artifact shard hash mismatch: ${name}`);
@@ -219,6 +222,9 @@ export function buildExactIndex(options = {}) {
     if (canonicalGtin(rec.raw_barcode) === canonicalGtin("30029885620210")) { blockedPackages.add(key); continue; }
     const dbRow = repair.get(rec.matched_barcode);
     if (!dbRow) throw new Error(`Boss source ${rec.sheet}:${rec.row} has no repair source pointer ${rec.matched_barcode}`);
+    if (String(dbRow.canonical_product_uid ?? "") !== String(rec.matched_stable_product_id ?? "")) {
+      throw new Error(`Boss source ${pointer} disagrees with repair-issued canonical product identity`);
+    }
     const row = minimal({ ...dbRow, barcode: rec.matched_barcode || rec.raw_barcode }, "authenticated_boss_corpus", true);
     const existing = all.get(key);
     if (existing) {
@@ -249,6 +255,10 @@ export function buildExactIndex(options = {}) {
   const nonGtinApprovedIdentifiers = [...acceptedSpellingKeys.keys()].filter((key) => key.startsWith("nongtin:")).length;
   const nonGtinBlankAliasConflicts = nonGtinConflictLedger.filter((entry) => entry.finalStatus === "alias").length;
   const sourceDerivedNonGtinSample = sourceDerivedNonGtinCandidates.sort((a, b) => a.length - b.length || a.localeCompare(b)).slice(0, 20);
+  const redactedConflictLedger = { schemaVersion: "1.0.0", entries: [
+    ...nonGtinConflictLedger,
+    ...[...ledger.values()].map((entry) => ({ sourcePointer: entry.bossSourcePointer, finalStatus: "accepted", reason: "reviewed_mpn_field_omitted", identifierSha256: sha256(entry.canonicalKey) })),
+  ].sort((a, b) => `${a.sourcePointer}:${a.reason}`.localeCompare(`${b.sourcePointer}:${b.reason}`)) };
   if (expectedCounts && (bossCanonicals.size !== expectedCounts.admittedBossCodes || acceptedSpellings !== expectedCounts.acceptedSpellings || nonGtinApprovedRows !== expectedCounts.nonGtinApprovedRows ||
     nonGtinApprovedIdentifiers !== expectedCounts.nonGtinApprovedIdentifiers || nonGtinBlankAliasConflicts !== expectedCounts.nonGtinBlankAliasConflicts)) {
     throw new Error(`Boss cardinality mismatch: codes=${bossCanonicals.size}, spellings=${acceptedSpellings}, nonGtin=${nonGtinApprovedIdentifiers}, blankAliases=${nonGtinBlankAliasConflicts}`);
@@ -258,7 +268,9 @@ export function buildExactIndex(options = {}) {
     for (const [key, value] of [...all.entries()].sort(([a], [b]) => a.localeCompare(b))) shards[shardFor(key)][key] = value.row;
     const shardHashes = {}; const shardCounts = {}; const shardBytes = {};
     for (const shard of SHARDS) { const bytes = Buffer.from(JSON.stringify(shards[shard]) + "\n"); shardHashes[shard] = sha256(bytes); shardCounts[shard] = Object.keys(shards[shard]).length; shardBytes[shard] = bytes.length; writeFileSync(join(staged, `${shard}.json`), bytes); }
-    const manifest = { schemaVersion: "1.0.0", generatorVersion: "1.0.0", shardAlgorithm: "sha256-first-byte-mod-64-v1", approvedCorpusSha256: expected.global, repairSha256: expected.repair, reconciliationSha256: expected.reconciliation, collisionDispositionCount: ledger.size, collisionDispositionLedgerSha256: dispositionLedger.digest, admittedBossCodes: bossCanonicals.size, acceptedSpellings, nonGtinApprovedRows, nonGtinApprovedIdentifiers, nonGtinBlankAliasConflicts, nonGtinConflictLedgerSha256: sha256(JSON.stringify(nonGtinConflictLedger)), sourceDerivedNonGtinSampleCount: sourceDerivedNonGtinSample.length, sourceDerivedNonGtinSampleSha256: sha256(JSON.stringify(sourceDerivedNonGtinSample)), excludedCasePacks, blockedPackageCanonicalKeys: [...blockedPackages].sort(), shardHashes, shardCounts, shardBytes, totalShardBytes: Object.values(shardBytes).reduce((sum, value) => sum + value, 0), totalKeys: all.size };
+    const conflictLedgerBytes = Buffer.from(JSON.stringify(redactedConflictLedger, null, 2) + "\n");
+    writeFileSync(join(staged, "conflict-ledger.json"), conflictLedgerBytes);
+    const manifest = { schemaVersion: "1.0.0", generatorVersion: "1.0.0", shardAlgorithm: "sha256-first-byte-mod-64-v1", approvedCorpusSha256: expected.global, repairSha256: expected.repair, reconciliationSha256: expected.reconciliation, collisionDispositionCount: ledger.size, collisionDispositionLedgerSha256: dispositionLedger.digest, conflictLedgerCount: redactedConflictLedger.entries.length, conflictLedgerSha256: sha256(conflictLedgerBytes), admittedBossCodes: bossCanonicals.size, acceptedSpellings, nonGtinApprovedRows, nonGtinApprovedIdentifiers, nonGtinBlankAliasConflicts, nonGtinConflictLedgerSha256: sha256(JSON.stringify(nonGtinConflictLedger)), sourceDerivedNonGtinSampleCount: sourceDerivedNonGtinSample.length, sourceDerivedNonGtinSampleSha256: sha256(JSON.stringify(sourceDerivedNonGtinSample)), excludedCasePacks, blockedPackageCanonicalKeys: [...blockedPackages].sort(), shardHashes, shardCounts, shardBytes, totalShardBytes: Object.values(shardBytes).reduce((sum, value) => sum + value, 0), totalKeys: all.size };
     manifest.contentDigest = sha256(JSON.stringify(manifest)); writeFileSync(join(staged, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
     const totalBytes = requireOutputLimits(staged, manifest);
     if (options.check) validateOnDiskArtifact(outputDir, staged);
