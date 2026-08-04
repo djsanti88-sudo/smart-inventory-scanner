@@ -5,7 +5,8 @@ import { createReceipt } from "./receipt.mjs";
 export function redactPersistenceDiagnostic(parsed) {
   const categories = Object.fromEntries(Object.entries(parsed?.queue?.errors ?? {}).map(([message, count]) => [
     /permission-denied|insufficient permissions/i.test(message) ? "permission_denied"
-      : /idempotency_conflict/i.test(message) ? "idempotency_conflict"
+      : /payload_idempotency_mismatch/i.test(message) ? "payload_idempotency_mismatch"
+        : /idempotency_conflict/i.test(message) ? "idempotency_conflict"
         : /invalid_|must be a valid/i.test(message) ? "validation_failure"
           : /unavailable|deadline|network|transaction/i.test(message) ? "retryable_transport_or_transaction"
             : "other_redacted_error",
