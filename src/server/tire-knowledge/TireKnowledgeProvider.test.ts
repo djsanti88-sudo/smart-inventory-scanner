@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const mockLookupByExactPartNumber = vi.fn();
 const mockLookupByExactBarcode = vi.fn();
+const mockLookupTrustedExactBarcode = vi.fn();
 vi.mock("@/server/tire-knowledge/tireKnowledgeIndex", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/tire-knowledge/tireKnowledgeIndex")>();
   return {
@@ -20,7 +21,15 @@ vi.mock("@/server/tire-knowledge/tireKnowledgeIndex", async (importOriginal) => 
   };
 });
 
-import { resolveExactPartNumber, resolveExactBarcode } from "@/server/tire-knowledge/TireKnowledgeProvider";
+vi.mock("@/server/tire-knowledge/tireExactIndex", () => ({
+  lookupTrustedExactBarcode: (...args: unknown[]) => mockLookupTrustedExactBarcode(...args),
+}));
+
+import {
+  resolveExactPartNumber,
+  resolveExactBarcode,
+  resolveTrustedExactBarcodeDecision,
+} from "@/server/tire-knowledge/TireKnowledgeProvider";
 
 const CORPUS_ROW = {
   canonical_product_uid: "uid-1",
@@ -48,6 +57,43 @@ const CORPUS_ROW = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe("resolveTrustedExactBarcodeDecision", () => {
+  it("returns a Boss-attested hit with an opaque stable canonical id", async () => {
+    mockLookupTrustedExactBarcode.mockResolvedValueOnce({
+      kind: "hit",
+      sourceScope: "authenticated_boss_corpus",
+      row: { ...CORPUS_ROW, canonical_product_uid: "private-canonical-tire-uid", barcode: "3220017438" },
+    });
+
+    const decision = await resolveTrustedExactBarcodeDecision("3220017438", { authenticatedBossCorpus: true });
+
+    expect(decision).toMatchObject({
+      kind: "hit",
+      sourceScope: "authenticated_boss_corpus",
+      result: {
+        decision: {
+          status: "verified",
+          corroborationPath: "boss_trusted_exact_barcode",
+          exactCodeEvidenceVerifiedByApp: true,
+        },
+      },
+    });
+    if (decision.kind !== "hit") throw new Error("expected hit");
+    const canonicalId = decision.result.decision.trustedExactCanonicalProductId;
+    expect(canonicalId).toMatch(/^trusted-exact:v1:[A-F0-9]{32}$/);
+    expect(canonicalId).not.toContain("private-canonical-tire-uid");
+    expect(canonicalId).not.toContain("3220017438");
+  });
+
+  it("preserves an index integrity failure as unavailable instead of a miss", async () => {
+    mockLookupTrustedExactBarcode.mockResolvedValueOnce({ kind: "unavailable" });
+
+    await expect(
+      resolveTrustedExactBarcodeDecision("3220017438", { authenticatedBossCorpus: true }),
+    ).resolves.toEqual({ kind: "unavailable" });
+  });
 });
 
 describe("resolveExactPartNumber - confidence tiers (RC4)", () => {

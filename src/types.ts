@@ -128,6 +128,8 @@ export interface Product {
   // ORPHANED verified product (verified lost on persist reset) which must still re-alias via resolveUnknown.
   provisional?: boolean;
   provenanceTier?: ProvenanceTier;
+  /** Opaque server-issued identity used only to coalesce authenticated trusted-exact scan spellings. */
+  trustedExactCanonicalId?: string;
   // Build 2 (product-name polish): fields split out of `name` by the deterministic structurer
   // (src/services/polish/structurer.ts) or, as a fallback, the LLM polish path. All optional so
   // older persisted products (no structuring run yet) fall back to `brand` / `name` at display time.
@@ -619,6 +621,7 @@ export type CorroborationPath =
   | "corpus_exact_part_number"
   | "internet_two_source_size"
   | "non_public_trusted_source"
+  | "boss_trusted_exact_barcode"
   | "gpt_self_report";
 
 export interface DecodeDecision {
@@ -629,4 +632,6 @@ export interface DecodeDecision {
   exactCodeEvidenceVerifiedByApp: boolean; // set ONLY from EvidenceVerifier output, never the model
   crossCheck: CrossCheckResult;
   corroborationPath?: CorroborationPath; // set only when status === "verified"
+  /** Opaque stable identity emitted only by the authenticated server-side trusted-exact path. */
+  trustedExactCanonicalProductId?: string;
 }

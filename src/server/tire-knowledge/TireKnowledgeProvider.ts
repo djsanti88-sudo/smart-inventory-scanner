@@ -1,7 +1,9 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import type { AiLookupResult, DecodeDecision, EvidenceResult } from "@/types";
 import { emptyResult } from "@/services/ai/provider";
 import { lookupByExactBarcode, lookupByExactPartNumber, type TireKnowledgeRow } from "@/server/tire-knowledge/tireKnowledgeIndex";
+import { lookupTrustedExactBarcode } from "@/server/tire-knowledge/tireExactIndex";
 import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
 import { basePartNumberKey } from "@/services/catalog/tirePartNumber";
 
@@ -107,6 +109,53 @@ export async function resolveExactBarcode(code: string): Promise<CorpusDecodeRes
     corroborationPath: "corpus_exact_barcode",
   };
   return { decision, results: [result], evidences: [verifiedEvidence(row.barcode)], providerNames: ["tire-corpus"], path: "corpus_exact_barcode" };
+}
+
+/** Server-only pre-guard exact lookup; callers must mint authenticatedBossCorpus from verified membership. */
+export type TrustedExactBarcodeProviderDecision =
+  | { kind: "hit"; result: CorpusDecodeResult; sourceScope: "global_corpus" | "authenticated_boss_corpus" }
+  | { kind: "blocked_package"; canonicalKey: string }
+  | { kind: "unavailable" }
+  | { kind: "miss" };
+
+function opaqueCanonicalProductId(row: TireKnowledgeRow): string {
+  const digest = createHash("sha256").update(row.canonical_product_uid).digest("hex").slice(0, 32).toUpperCase();
+  return `trusted-exact:v1:${digest}`;
+}
+
+export async function resolveTrustedExactBarcodeDecision(
+  code: string,
+  access: { authenticatedBossCorpus: boolean },
+): Promise<TrustedExactBarcodeProviderDecision> {
+  const exact = await lookupTrustedExactBarcode(code, access);
+  if (!exact) return { kind: "miss" };
+  if (exact.kind === "blocked_package" || exact.kind === "unavailable") return exact;
+  const result = toResult(exact.row);
+  const confidence = result.confidence;
+  const decoded: CorpusDecodeResult = {
+    decision: {
+      status: "verified", confidence, reason: "Verified from the trusted tire knowledge base (exact barcode). No AI lookup needed.",
+      evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true,
+      crossCheck: { decision: "single_provider", confidence, reason: "Trusted corpus exact barcode.", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
+      corroborationPath: exact.sourceScope === "authenticated_boss_corpus"
+        ? "boss_trusted_exact_barcode"
+        : "corpus_exact_barcode",
+      ...(exact.sourceScope === "authenticated_boss_corpus" ? {
+        trustedExactCanonicalProductId: opaqueCanonicalProductId(exact.row),
+      } : {}),
+    },
+    results: [result], evidences: [verifiedEvidence(exact.row.barcode)], providerNames: ["tire-corpus"], path: "corpus_exact_barcode",
+  };
+  return { kind: "hit", result: decoded, sourceScope: exact.sourceScope };
+}
+
+/** Compatibility wrapper for callers that only need a successful trusted-exact decode. */
+export async function resolveTrustedExactBarcode(
+  code: string,
+  access: { authenticatedBossCorpus: boolean },
+): Promise<CorpusDecodeResult | null> {
+  const decision = await resolveTrustedExactBarcodeDecision(code, access);
+  return decision.kind === "hit" ? decision.result : null;
 }
 
 // RC4 (owner-ratified, pilot PN recall): "if only the distributor affix differs and the digits are
