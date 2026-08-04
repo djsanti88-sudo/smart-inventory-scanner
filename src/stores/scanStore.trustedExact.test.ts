@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestScanStore, trustedExactProbeCandidate } from "@/stores/scanStore";
 import { MockDb } from "@/services/mockDb";
-import type { ScanEvent } from "@/types";
+import { validatePendingSyncItem } from "@/services/db/firebase/firebaseSyncSafety";
+import type { PendingSyncItem, ScanEvent } from "@/types";
 
 const SHORT_CODE = "3220017438";
 const OTHER_SHORT_CODE = "3220017439";
@@ -77,6 +78,19 @@ function missResponse(): Response {
 
 function decodeCalls(fetchSpy: ReturnType<typeof vi.fn>) {
   return fetchSpy.mock.calls.filter(([url]) => String(url) === "/api/ai-lookup");
+}
+
+class StrictValidationDb extends MockDb {
+  readonly rejected: Array<{ item: PendingSyncItem; errorCode: string }> = [];
+
+  override apply(item: PendingSyncItem) {
+    const failure = validatePendingSyncItem(item);
+    if (failure) {
+      this.rejected.push({ item, errorCode: failure.errorCode });
+      return { ok: false, alreadyApplied: false, error: failure.message, errorCode: failure.errorCode };
+    }
+    return super.apply(item);
+  }
 }
 
 afterEach(() => {
@@ -158,6 +172,19 @@ describe("authenticated trusted-exact scan settlement", () => {
       resolutionAction: "trusted_exact",
     });
     expect(db.snapshot().scanEvents[event!.id]?.decodeStatus).toBe("verified");
+  });
+
+  it("drains every trusted-exact persistence operation through the Firebase safety envelope", async () => {
+    const db = new StrictValidationDb();
+    const store = createTestScanStore({ db, trustedExactProbeEnabled: true });
+    store.getState().updateSettings({ aiLookupEnabled: false });
+    globalThis.fetch = vi.fn(async () => response()) as unknown as typeof fetch;
+
+    store.getState().processScan(SHORT_CODE);
+
+    await vi.waitFor(() => expect(store.getState().needsReviewQueue[0]?.status).toBe("resolved"));
+    await vi.waitFor(() => expect(store.getState().pendingSyncQueue).toEqual([]));
+    expect(db.rejected).toEqual([]);
   });
 
   it("settles a rapid duplicate short scan exactly twice with one request and no duplicate product", async () => {

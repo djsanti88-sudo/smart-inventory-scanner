@@ -1357,6 +1357,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       const target = existingCanonical ?? provisional;
       const targetId = target.id;
       const settledAt = now();
+      const reviewKey = buildIdempotencyKey(
+        state.businessId,
+        review.sessionId,
+        `${review.id}:trusted-exact:${canonicalId}`,
+        "SAVE_UNKNOWN_SCAN",
+      );
       const settledProduct: Product = {
         ...target,
         name: result.productName?.trim() || target.name,
@@ -1434,6 +1440,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         resolvedBy: "system:trusted_exact",
         resolutionAction: "trusted_exact",
         syncStatus: "pending",
+        idempotencyKey: reviewKey,
       };
 
       let finalCounts = state.finalCounts;
@@ -1475,7 +1482,6 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           });
         });
       const productKey = buildIdempotencyKey(state.businessId, review.sessionId, `${targetId}:trusted-exact:${version}`, "SAVE_PRODUCT");
-      const reviewKey = buildIdempotencyKey(state.businessId, review.sessionId, `${review.id}:trusted-exact:${canonicalId}`, "SAVE_UNKNOWN_SCAN");
       const persistOps: PendingSyncItem[] = [
         ...transferOps,
         makeQueueItem({
