@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createTestScanStore } from "@/stores/scanStore";
+import { createTestScanStore, trustedExactProbeCandidate } from "@/stores/scanStore";
 import { MockDb } from "@/services/mockDb";
 import type { ScanEvent } from "@/types";
 
@@ -84,6 +84,13 @@ afterEach(() => {
 });
 
 describe("authenticated trusted-exact scan settlement", () => {
+  it("exports the pure probe eligibility contract for corpus certification", () => {
+    expect(trustedExactProbeCandidate("3182205")).toBe(true);
+    expect(trustedExactProbeCandidate("TST21017")).toBe(true);
+    expect(trustedExactProbeCandidate("000000000000")).toBe(false);
+    expect(trustedExactProbeCandidate("QA1")).toBe(false);
+  });
+
   it.each([
     ["approved 3-digit", "550", `trusted-exact:v1:${"1".repeat(32)}`],
     ["approved 7-digit", "3182205", `trusted-exact:v1:${"2".repeat(32)}`],
@@ -127,6 +134,7 @@ describe("authenticated trusted-exact scan settlement", () => {
     const body = JSON.parse(String(decodeCalls(fetchSpy)[0]?.[1]?.body));
     expect(body).toMatchObject({ mode: "decode", deterministicOnly: true, cleanCode: SHORT_CODE });
     const state = store.getState();
+    expect(state.needsReviewQueue[0]?.resolutionAction).toBe("trusted_exact");
     expect(state.scanFeed[0]).toMatchObject({
       rawCode: SHORT_CODE,
       cleanCode: SHORT_CODE,
@@ -140,7 +148,10 @@ describe("authenticated trusted-exact scan settlement", () => {
     expect(state.aliases).toEqual(aliasesBefore);
     expect(state.catalog).toEqual([]);
     expect(lookupGlobalCatalog).not.toHaveBeenCalled();
-    expect(db.snapshot().reviews[state.needsReviewQueue[0].id]?.status).toBe("resolved");
+    expect(db.snapshot().reviews[state.needsReviewQueue[0].id]).toMatchObject({
+      status: "resolved",
+      resolutionAction: "trusted_exact",
+    });
     expect(db.snapshot().scanEvents[event!.id]?.decodeStatus).toBe("verified");
   });
 

@@ -27,6 +27,10 @@ import { cleanScanCode } from "@/services/scanCleaner";
 import { resolveTrustedExactBarcodeDecision } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { getTireExactIndexFingerprint } from "@/server/tire-knowledge/tireExactIndex";
 import { trustedExactRateLimiter } from "@/services/security/trustedExactRateLimit";
+import {
+  cacheTrustedExactMembership,
+  hasCachedTrustedExactMembership,
+} from "@/services/security/trustedExactMembershipCache";
 
 // FAST-FIRST: cheap/fast models do the first pass (+ page-fetch). The slow PRO models are only used
 // to escalate when the fast pass found no product. All overridable via env. (Reported by GET only;
@@ -333,9 +337,13 @@ export async function POST(request: Request) {
       }
       return Response.json({ error: "Invalid or expired sign-in.", reasonCode: "bad_token" }, { status: 401 });
     }
-    const member = await getAdminDb().doc(`${COLLECTIONS.businessMembers}/${memberDocId(bizId, uid)}`).get();
-    if (!member.exists) {
-      return Response.json({ error: "Not a member of this business.", reasonCode: "not_member" }, { status: 403 });
+    const membershipCheckedAt = Date.now();
+    if (!hasCachedTrustedExactMembership(uid, bizId, membershipCheckedAt)) {
+      const member = await getAdminDb().doc(`${COLLECTIONS.businessMembers}/${memberDocId(bizId, uid)}`).get();
+      if (!member.exists) {
+        return Response.json({ error: "Not a member of this business.", reasonCode: "not_member" }, { status: 403 });
+      }
+      cacheTrustedExactMembership(uid, bizId, membershipCheckedAt);
     }
     authedBusinessId = bizId;
     authedUid = uid;

@@ -355,6 +355,7 @@ export interface UnknownCodeReview {
 export type ResolutionAction =
   | "link_existing"
   | "create_new"
+  | "trusted_exact"
   | "ignore"
   | "add_alias"
   | "reject_suggestion";

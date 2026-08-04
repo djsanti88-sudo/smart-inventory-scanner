@@ -106,7 +106,7 @@ function bossHit(code = "3220017438") {
   };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   process.env.NEXT_PUBLIC_AUTH_MODE = "live";
   process.env.TRUSTED_EXACT_BOSS_BUSINESS_IDS = " business-a , business-b ";
   delete process.env.NEXT_PUBLIC_TRUSTED_EXACT_BOSS_BUSINESS_IDS;
@@ -119,6 +119,8 @@ beforeEach(() => {
   runDecodePipeline.mockReset().mockResolvedValue({ kind: "computed", payload: { debug: {} }, cached: false, paidComputeCharged: false });
   ladderStorage.mockReset().mockResolvedValue({});
   legacyRateLimit.mockReset().mockResolvedValue({ allowed: true, retryAfterMs: 0 });
+  const { resetTrustedExactMembershipCacheForTests } = await import("@/services/security/trustedExactMembershipCache");
+  resetTrustedExactMembershipCacheForTests();
 });
 
 afterEach(() => {
@@ -163,7 +165,7 @@ describe("authenticated Boss trusted-exact route", () => {
     expect(body.results[0]).not.toHaveProperty("sourceUrls");
   });
 
-  it("verifies the token and membership on every hit and miss, and applies the same uid+business limiter first", async () => {
+  it("verifies the token on every request but reuses a positive same-member lookup within 30 seconds", async () => {
     resolveTrustedExactBarcodeDecision
       .mockResolvedValueOnce(bossHit())
       .mockResolvedValueOnce({ kind: "miss" });
@@ -173,12 +175,52 @@ describe("authenticated Boss trusted-exact route", () => {
     await POST(request("SAFE-SHORT-MISS"));
 
     expect(verifyIdToken).toHaveBeenCalledTimes(2);
-    expect(memberGet).toHaveBeenCalledTimes(2);
+    expect(memberGet).toHaveBeenCalledOnce();
     expect(trustedExactCheck).toHaveBeenNthCalledWith(1, "uid-a", "business-a");
     expect(trustedExactCheck).toHaveBeenNthCalledWith(2, "uid-a", "business-a");
     expect(resolveTrustedExactBarcodeDecision).toHaveBeenCalledTimes(2);
     expect(runDecodePipeline).not.toHaveBeenCalled();
     expect(ladderStorage).not.toHaveBeenCalled();
+  });
+
+  it("expires a positive membership after 30 seconds without ever caching the token verification", async () => {
+    const now = vi.spyOn(Date, "now");
+    now.mockReturnValueOnce(1_000).mockReturnValueOnce(31_001);
+    const { POST } = await import("./route");
+
+    await POST(request("SAFE-SHORT-MISS"));
+    await POST(request("SAFE-SHORT-MISS"));
+
+    expect(verifyIdToken).toHaveBeenCalledTimes(2);
+    expect(memberGet).toHaveBeenCalledTimes(2);
+    now.mockRestore();
+  });
+
+  it("does not cache membership misses", async () => {
+    memberGet.mockResolvedValue({ exists: false });
+    const { POST } = await import("./route");
+
+    expect((await POST(request("3220017438"))).status).toBe(403);
+    expect((await POST(request("3220017438"))).status).toBe(403);
+
+    expect(verifyIdToken).toHaveBeenCalledTimes(2);
+    expect(memberGet).toHaveBeenCalledTimes(2);
+  });
+
+  it("keys positive membership by both verified uid and requested business", async () => {
+    memberGet
+      .mockResolvedValueOnce({ exists: true })
+      .mockResolvedValueOnce({ exists: false })
+      .mockResolvedValueOnce({ exists: false });
+    const { POST } = await import("./route");
+
+    expect((await POST(request("SAFE-SHORT-MISS"))).status).toBe(200);
+    expect((await POST(request("SAFE-SHORT-MISS", { businessId: "business-b" }))).status).toBe(403);
+    verifyIdToken.mockResolvedValueOnce({ uid: "uid-b", email: "other@example.com" });
+    expect((await POST(request("SAFE-SHORT-MISS"))).status).toBe(403);
+
+    expect(verifyIdToken).toHaveBeenCalledTimes(3);
+    expect(memberGet).toHaveBeenCalledTimes(3);
   });
 
   it("rejects nonmembers, foreign-business membership, and expired tokens before exact access", async () => {

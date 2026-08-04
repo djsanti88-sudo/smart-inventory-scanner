@@ -453,7 +453,7 @@ function scrubSuggestedBarcode(value: string | undefined, partNumber?: string): 
   return gradeBarcode({ barcode: v, partNumber }).verdict === "rejected" ? "" : v;
 }
 
-function deterministicExactLookupEligible(code: string): boolean {
+export function trustedExactProbeCandidate(code: string): boolean {
   const value = code.trim();
   const grade = gradeBarcode({ barcode: value });
   if (grade.placeholder) return false;
@@ -1428,7 +1428,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         status: "resolved",
         resolvedAt: settledAt,
         resolvedBy: "system:trusted_exact",
-        resolutionAction: "create_new",
+        resolutionAction: "trusted_exact",
         syncStatus: "pending",
       };
 
@@ -2794,7 +2794,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (misread) {
           autoGate = { allowed: false, reason: "Scan misread - decode was not attempted." };
         }
-        const deterministicCandidate = deterministicExactLookupEligible(cleaned.cleanCode);
+        const deterministicCandidate = trustedExactProbeCandidate(cleaned.cleanCode);
         const deterministicLookupEligible = trustedExactProbeEnabled
           && get().online
           && deterministicCandidate
