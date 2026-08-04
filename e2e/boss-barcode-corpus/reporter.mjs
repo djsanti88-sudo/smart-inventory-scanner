@@ -35,8 +35,17 @@ export default class LocalCorpusReporter {
         persistenceDiagnostic = redactPersistenceDiagnostic(parsed);
       } catch { persistenceDiagnostic = { unreadable: true }; }
     }
+    const settlementAttachments = this.results.flatMap((entry) => entry.attachments ?? []).filter((entry) => entry.name === "local-corpus-settlement-diagnostic");
+    let settlementDiagnostic = null;
+    if (settlementAttachments.length === 1) {
+      try {
+        const attachment = settlementAttachments[0]; const raw = attachment.body ?? (attachment.path ? readFileSync(attachment.path) : null);
+        const parsed = raw ? JSON.parse(Buffer.from(raw).toString("utf8")) : null;
+        settlementDiagnostic = Object.fromEntries(["expectedEvents", "events", "knownEvents", "badDecode", "productLinkMismatch", "activeReviews", "counted", "products"].map((key) => [key, Number(parsed?.[key]) || 0]));
+      } catch { settlementDiagnostic = { unreadable: true }; }
+    }
     const status = result.status === "passed" && payload ? "passed" : "failed";
-    const receipt = createReceipt({ status, testsExpected: this.total, testsObserved: this.results.length, elapsedMs: Date.now() - this.startedAt, aggregate: payload, persistenceDiagnostic, failures: this.results.filter((entry) => entry.status !== "passed").map((entry) => ({ status: entry.status })) });
+    const receipt = createReceipt({ status, testsExpected: this.total, testsObserved: this.results.length, elapsedMs: Date.now() - this.startedAt, aggregate: payload, persistenceDiagnostic, settlementDiagnostic, failures: this.results.filter((entry) => entry.status !== "passed").map((entry) => ({ status: entry.status })) });
     const dir = resolve("outputs/boss-barcode-certification"); mkdirSync(dir, { recursive: true });
     const target = resolve(dir, "localhost-synthetic-ui.receipt.json"); const temporary = resolve(dir, `.local-${process.pid}.tmp`);
     writeFileSync(temporary, `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx" }); renameSync(temporary, target);

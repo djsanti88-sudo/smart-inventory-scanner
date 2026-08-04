@@ -30,25 +30,34 @@ async function login(page: Page) {
   await expect(page.getByTestId("scanner-input")).toBeFocused({ timeout: 30_000 });
 }
 
-async function settledCount(expectedEvents: number, expectedIdentities: Map<string, string>) {
-  const db = adminDb(); const started = Date.now();
-  while (Date.now() - started < SETTLEMENT_TIMEOUT_MS) {
-    const [events, products, reviews, counts] = await Promise.all([
+async function settlementSnapshot(expectedEvents: number, expectedIdentities: Map<string, string>) {
+  const db = adminDb();
+  const [events, products, reviews, counts] = await Promise.all([
       db.collection(`businesses/${LOCAL_CORPUS_BUSINESS_ID}/scanEvents`).get(), db.collection(`businesses/${LOCAL_CORPUS_BUSINESS_ID}/products`).get(),
       db.collection(`businesses/${LOCAL_CORPUS_BUSINESS_ID}/unknownCodeReviews`).get(), db.collection(`businesses/${LOCAL_CORPUS_BUSINESS_ID}/inventoryCounts`).get(),
-    ]);
-    const productById = new Map(products.docs.map((doc) => [doc.id, doc.data()]));
-    const eventOk = events.size === expectedEvents && events.docs.every((doc) => {
-      const event = doc.data(); const product = productById.get(String(event.matchedProductId));
-      return event.status === "known" && event.decodeStatus !== "needs_review" && event.decodeStatus !== "suggested"
-        && typeof event.rawCode === "string" && expectedIdentities.get(event.rawCode) === product?.trustedExactCanonicalId;
-    });
-    const activeReviews = reviews.docs.filter((doc) => !["resolved", "ignored"].includes(String(doc.data().status))).length;
-    const counted = counts.docs.reduce((sum, doc) => sum + Number(doc.data().countedQuantity ?? doc.data().quantity ?? 0), 0);
-    if (eventOk && activeReviews === 0 && counted === expectedEvents) return { events: events.size, counted, activeReviews, products: productById.size };
+  ]);
+  const productById = new Map(products.docs.map((doc) => [doc.id, doc.data()]));
+  let knownEvents = 0; let badDecode = 0; let productLinkMismatch = 0;
+  for (const doc of events.docs) {
+    const event = doc.data(); const product = productById.get(String(event.matchedProductId));
+    if (event.status === "known") knownEvents++; else badDecode++;
+    if (event.decodeStatus === "needs_review" || event.decodeStatus === "suggested") badDecode++;
+    if (typeof event.rawCode !== "string" || expectedIdentities.get(event.rawCode) !== product?.trustedExactCanonicalId) productLinkMismatch++;
+  }
+  const activeReviews = reviews.docs.filter((doc) => !["resolved", "ignored"].includes(String(doc.data().status))).length;
+  const counted = counts.docs.reduce((sum, doc) => sum + Number(doc.data().countedQuantity ?? doc.data().quantity ?? 0), 0);
+  return { expectedEvents, events: events.size, knownEvents, badDecode, productLinkMismatch, activeReviews, counted, products: productById.size };
+}
+
+async function settledCount(expectedEvents: number, expectedIdentities: Map<string, string>) {
+  const started = Date.now(); let last = await settlementSnapshot(expectedEvents, expectedIdentities);
+  while (Date.now() - started < SETTLEMENT_TIMEOUT_MS) {
+    last = await settlementSnapshot(expectedEvents, expectedIdentities);
+    if (last.events === expectedEvents && last.knownEvents === expectedEvents && last.badDecode === 0 && last.productLinkMismatch === 0 && last.activeReviews === 0 && last.counted === expectedEvents) return last;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  throw new Error("Synthetic local trusted-exact scans did not settle within 2 seconds.");
+  const error = new Error("Synthetic local trusted-exact scans did not settle within 2 seconds.");
+  Object.assign(error, { settlementDiagnostic: last }); throw error;
 }
 
 test("synthetic normal-member UI proves short and boundary trusted exact barcode settlement", async ({ page }, testInfo) => {
@@ -112,7 +121,13 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
     await testInfo.attach("local-corpus-persistence-diagnostic", { contentType: "application/json", body: Buffer.from(JSON.stringify(diagnostic)) });
     throw error;
   }
-  const settled = await settledCount(selected.length, expectedIdentities);
+  let settled;
+  try { settled = await settledCount(selected.length, expectedIdentities); }
+  catch (error) {
+    const diagnostic = error as Error & { settlementDiagnostic?: unknown };
+    await testInfo.attach("local-corpus-settlement-diagnostic", { contentType: "application/json", body: Buffer.from(JSON.stringify(diagnostic.settlementDiagnostic ?? { unavailable: true })) });
+    throw error;
+  }
   const visual = await page.evaluate(() => { const state = (window as Window & { __localCorpusHistory?: { forbidden: boolean; observer: MutationObserver | null } }).__localCorpusHistory; state?.observer?.disconnect(); return state?.forbidden ?? true; });
   expect(visual, "trusted exact UI must not transiently show Suggested, Needs Review, Conflict, or Vendor").toBe(false);
   expect(page.url()).toContain("/scan");
