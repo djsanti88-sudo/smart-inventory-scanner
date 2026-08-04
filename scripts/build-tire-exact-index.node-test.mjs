@@ -107,6 +107,16 @@ test("records a deterministic source-derived shortest non-GTIN sample without pu
   } finally { rmSync(fx.root, { recursive: true, force: true }); }
 });
 
+test("rejects a GTIN reconciliation row whose stable product identity disagrees with repair", () => {
+  const fx = fixture();
+  try {
+    const changed = readFileSync(fx.reconciliationPath, "utf8").replace(",unit,036000291452,exact_barcode", ",other,036000291452,exact_barcode");
+    writeFileSync(fx.reconciliationPath, changed);
+    fx.hashes.reconciliation = sha256(changed);
+    assert.throws(() => build(fx), /disagrees with repair-issued canonical product identity/i);
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
 test("pinned source bytes, status, checksum, and package rules fail closed while approved non-GTIN identifiers remain exact", () => {
   const fx = fixture();
   mkdirSync(fx.outputDir); writeFileSync(join(fx.outputDir, "sentinel"), "prior");
