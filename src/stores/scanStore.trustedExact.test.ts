@@ -87,8 +87,13 @@ describe("authenticated trusted-exact scan settlement", () => {
   it("exports the pure probe eligibility contract for corpus certification", () => {
     expect(trustedExactProbeCandidate("3182205")).toBe(true);
     expect(trustedExactProbeCandidate("TST21017")).toBe(true);
+    expect(trustedExactProbeCandidate("123 E+45")).toBe(true);
+    expect(trustedExactProbeCandidate("01 Jan 2026")).toBe(true);
+    expect(trustedExactProbeCandidate("12345'")).toBe(true);
     expect(trustedExactProbeCandidate("000000000000")).toBe(false);
     expect(trustedExactProbeCandidate("QA1")).toBe(false);
+    expect(trustedExactProbeCandidate("LABEL")).toBe(false);
+    expect(trustedExactProbeCandidate("????1")).toBe(false);
   });
 
   it.each([
@@ -166,16 +171,45 @@ describe("authenticated trusted-exact scan settlement", () => {
     store.getState().processScan(SHORT_CODE);
     store.getState().processScan(SHORT_CODE);
 
-    expect(store.getState().finalCounts.reduce((sum, row) => sum + row.quantity, 0)).toBe(2);
-    expect(store.getState().scanFeed.map((event) => event.rawCode)).toEqual([SHORT_CODE, SHORT_CODE]);
+    const pendingSnapshot = {
+      totalCount: store.getState().finalCounts.reduce((sum, row) => sum + row.quantity, 0),
+      rawCodes: store.getState().scanFeed.map((event) => event.rawCode),
+      decodeStatuses: store.getState().scanFeed.map((event) => event.decodeStatus),
+      reasons: store.getState().scanFeed.map((event) => event.reason),
+      reviews: store.getState().needsReviewQueue.map((review) => ({ status: review.status, decodeStatus: review.decodeStatus })),
+    };
     release(response());
     await vi.waitFor(() => expect(store.getState().needsReviewQueue[0]?.status).toBe("resolved"));
+
+    expect(pendingSnapshot.totalCount).toBe(2);
+    expect(pendingSnapshot.rawCodes).toEqual([SHORT_CODE, SHORT_CODE]);
+    expect(pendingSnapshot.decodeStatuses).toEqual(["decoding", "decoding"]);
+    expect(pendingSnapshot.reasons.every((reason) => !/suggested|needs review/i.test(reason))).toBe(true);
+    expect(pendingSnapshot.reviews).toEqual([{ status: "open", decodeStatus: "decoding" }]);
 
     const state = store.getState();
     expect(decodeCalls(fetchSpy)).toHaveLength(1);
     expect(state.products.filter((item) => item.trustedExactCanonicalId === CANONICAL_ID && item.status === "active")).toHaveLength(1);
     expect(state.finalCounts.reduce((sum, row) => sum + row.quantity, 0)).toBe(2);
     expect(state.scanFeed.every((event) => event.decodeStatus === "verified")).toBe(true);
+  });
+
+  it("keeps the existing Suggested repeat presentation for an ordinary decode in flight", async () => {
+    let release!: (value: Response) => void;
+    const pending = new Promise<Response>((resolve) => { release = resolve; });
+    const store = createTestScanStore({ db: new MockDb(), trustedExactProbeEnabled: false });
+    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().updateSettings({ aiLookupEnabled: true });
+    globalThis.fetch = vi.fn(() => pending) as unknown as typeof fetch;
+
+    store.getState().processScan(SHORT_CODE);
+    store.getState().processScan(SHORT_CODE);
+
+    const pendingStatuses = store.getState().scanFeed.map((event) => event.decodeStatus);
+    release(response());
+    await vi.waitFor(() => expect(store.getState().needsReviewQueue[0]?.status).toBe("resolved"));
+
+    expect(pendingStatuses).toEqual(["suggested", "decoding"]);
   });
 
   it("coalesces two short-code spellings with one opaque canonical id without learning aliases", async () => {

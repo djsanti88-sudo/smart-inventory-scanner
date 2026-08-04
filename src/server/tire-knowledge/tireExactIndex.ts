@@ -208,30 +208,45 @@ function toTireKnowledgeRow(row: ExactIndexRow): TireKnowledgeRow {
   };
 }
 
-function exactLookupKey(code: string): string | null {
-  return canonicalGtin(code) ?? (code.trim() ? `nongtin:${code.trim()}` : null);
-}
-
 /** Reads exactly one authenticated, hash-verified shard. Asset faults fail closed, distinct from a miss. */
 export async function lookupTrustedExactBarcode(
   code: string,
   access: { authenticatedBossCorpus: boolean },
 ): Promise<TrustedExactBarcodeResult> {
-  const canonicalKey = exactLookupKey(code);
-  if (!canonicalKey) return null;
+  const exactCode = code.trim();
+  if (!exactCode) return null;
+  const canonicalKey = canonicalGtin(exactCode);
+  const rawExactKey = `nongtin:${exactCode}`;
   const manifestResult = await getManifest();
   if (manifestResult.kind === "unavailable") return manifestResult;
   const manifest = manifestResult.value;
-  if (manifest.blockedPackageCanonicalKeys.includes(canonicalKey)) return { kind: "blocked_package", canonicalKey };
-  const shardResult = await getShard(shardFor(canonicalKey), manifest);
-  if (shardResult.kind === "unavailable") return shardResult;
-  const row = shardResult.value[canonicalKey];
-  if (!row) return null;
-  if (row.sourceScope === "authenticated_boss_corpus" && !access.authenticatedBossCorpus) return null;
-  const sourceScope = access.authenticatedBossCorpus && row.bossTrusted
-    ? "authenticated_boss_corpus"
-    : row.sourceScope;
-  return { kind: "hit", row: toTireKnowledgeRow(row), sourceScope };
+  if (canonicalKey && manifest.blockedPackageCanonicalKeys.includes(canonicalKey)) {
+    return { kind: "blocked_package", canonicalKey };
+  }
+
+  const lookupKeys = canonicalKey ? [canonicalKey, rawExactKey] : [rawExactKey];
+  for (const [index, lookupKey] of lookupKeys.entries()) {
+    const shardResult = await getShard(shardFor(lookupKey), manifest);
+    if (shardResult.kind === "unavailable") return shardResult;
+    const row = shardResult.value[lookupKey];
+    if (!row) continue;
+
+    // A raw fallback for a digit string that also canonicalizes is deliberately narrower than an
+    // ordinary exact lookup: only the authenticated, source-approved Boss row can opt that literal
+    // spelling out of GTIN canonicalization. The canonical key always wins when it exists.
+    const rawFallback = canonicalKey !== null && index === 1;
+    if (rawFallback && (
+      !access.authenticatedBossCorpus
+      || !row.bossTrusted
+      || row.sourceScope !== "authenticated_boss_corpus"
+    )) return null;
+    if (row.sourceScope === "authenticated_boss_corpus" && !access.authenticatedBossCorpus) return null;
+    const sourceScope = access.authenticatedBossCorpus && row.bossTrusted
+      ? "authenticated_boss_corpus"
+      : row.sourceScope;
+    return { kind: "hit", row: toTireKnowledgeRow(row), sourceScope };
+  }
+  return null;
 }
 
 export async function getTireExactIndexFingerprint(): Promise<{ schemaVersion: string; contentDigest: string } | null> {

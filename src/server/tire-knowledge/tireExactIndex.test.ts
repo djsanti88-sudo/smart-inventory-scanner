@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { canonicalGtin } from "@/services/upc/gtin";
 
 const { readFileMock } = vi.hoisted(() => ({ readFileMock: vi.fn() }));
 
@@ -49,6 +50,46 @@ describe("trusted tire exact index", () => {
     await expect(lookupTrustedExactBarcode("3220017438", { authenticatedBossCorpus: true })).resolves.toMatchObject({
       kind: "hit", sourceScope: "authenticated_boss_corpus", row: { barcode: "3220017438" },
     });
+  });
+
+  it("resolves every admitted digit-shaped Boss identifier stored under its exact non-GTIN key", async () => {
+    const manifest = JSON.parse(readFileSync("src/server/tire-knowledge/exact-index/manifest.json", "utf8"));
+    const digitShapedNonGtinRows = Object.keys(manifest.shardCounts).flatMap((shard) => {
+      const rows = JSON.parse(readFileSync(`src/server/tire-knowledge/exact-index/${shard}.json`, "utf8"));
+      return Object.entries(rows)
+        .filter(([key, value]) => {
+          const barcode = (value as { barcode?: unknown }).barcode;
+          return key.startsWith("nongtin:")
+            && typeof barcode === "string"
+            && /^\d+$/.test(barcode)
+            && canonicalGtin(barcode) !== null;
+        })
+        .map(([, value]) => value as { barcode: string });
+    });
+
+    expect(digitShapedNonGtinRows).toHaveLength(38);
+    const unauthorizedResults = await Promise.all(digitShapedNonGtinRows.map(({ barcode }) =>
+      lookupTrustedExactBarcode(barcode, { authenticatedBossCorpus: false }),
+    ));
+    const results = await Promise.all(digitShapedNonGtinRows.map(({ barcode }) =>
+      lookupTrustedExactBarcode(barcode, { authenticatedBossCorpus: true }),
+    ));
+
+    expect(unauthorizedResults.every((result) => result === null)).toBe(true);
+    results.forEach((result, index) => {
+      expect(result).toMatchObject({
+        kind: "hit",
+        sourceScope: "authenticated_boss_corpus",
+        row: { barcode: digitShapedNonGtinRows[index].barcode },
+      });
+    });
+  });
+
+  it("does not trust an arbitrary valid GTIN when neither its canonical nor exact non-GTIN key is admitted", async () => {
+    const unindexedValidGtin = "4006381333931";
+    expect(canonicalGtin(unindexedValidGtin)).not.toBeNull();
+
+    await expect(lookupTrustedExactBarcode(unindexedValidGtin, { authenticatedBossCorpus: true })).resolves.toBeNull();
   });
 
   it("blocks every leading-zero spelling of the excluded case pack before legacy lookup", async () => {

@@ -461,7 +461,7 @@ export function trustedExactProbeCandidate(code: string): boolean {
   // from source evidence, and bounded scanner-safe mixed labels. Merely probing these shapes grants no
   // trust: settlement still requires the server attestation, opaque canonical id, and index digest.
   return /^\d{3,14}$/.test(value)
-    || (/^(?=.{5,64}$)(?=.*\d)[A-Za-z0-9._%+:/-]+$/.test(value));
+    || (/^(?=.{5,64}$)(?=.*\d)[A-Za-z0-9 ._%+'():/-]+$/.test(value));
 }
 
 function trustedExactCanonicalId(data: {
@@ -1281,6 +1281,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
     get: () => ScanState,
   ): ScanState => {
     const seed = getSeed();
+    // Per-store, non-persisted marker for the narrow deterministic-only request. A rapid repeat can
+    // then distinguish its own trusted-exact lookup from an ordinary AI decode that happens to share
+    // the same provisional row/review shape.
+    const trustedExactProbeReviewIds = new Set<string>();
 
     const enqueueAndSync = (items: PendingSyncItem[]) => {
       set((s) => ({ pendingSyncQueue: [...s.pendingSyncQueue, ...items] }));
@@ -2506,6 +2510,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).some((c) => !!c && ids.includes(c)),
             )?.id ?? null;
         }
+        const pendingTrustedExactReview = provMatchId
+          ? get().needsReviewQueue.find(
+              (review) =>
+                trustedExactProbeReviewIds.has(review.id)
+                && review.provisionalProductId === provMatchId
+                && review.sessionId === sessionId
+                && review.cleanCode === cleaned.cleanCode
+                && review.status === "open"
+                && review.decodeStatus === "decoding",
+            )
+          : undefined;
         const effectiveProductId = resolution.productId ?? provMatchId;
         const effectiveCountable = countable || !!provMatchId;
         if (knownConflict === "category_context_conflict") {
@@ -2526,8 +2541,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             status: effectiveCountable ? "known" : resolution.resolverStatus === "conflict" ? "conflict" : "needs_review",
             resolverStatus: resolution.resolverStatus,
             codeType: resolution.codeType,
-            reason: provMatchId ? "Counted (suggested - awaiting your confirmation)." : resolution.reason,
-            decodeStatus: provMatchId ? "suggested" : undefined,
+            reason: pendingTrustedExactReview?.reason
+              ?? (provMatchId ? "Counted (suggested - awaiting your confirmation)." : resolution.reason),
+            decodeStatus: pendingTrustedExactReview ? "decoding" : provMatchId ? "suggested" : undefined,
             quantityDelta: effectiveCountable ? 1 : 0,
             quantityAfterScan: 0,
             createdAt,
@@ -2905,7 +2921,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // Boss trusted-exact short codes get a bounded, deterministic-only request before any local,
           // global, or paid lookup seam. A miss remains counted and reviewable; it never falls through.
           if (deterministicLookupEligible) {
-            void get().liveDecode(review.id, { deterministicOnly: true });
+            trustedExactProbeReviewIds.add(review.id);
+            void get().liveDecode(review.id, { deterministicOnly: true }).then(
+              () => trustedExactProbeReviewIds.delete(review.id),
+              () => trustedExactProbeReviewIds.delete(review.id),
+            );
             return event;
           }
 
