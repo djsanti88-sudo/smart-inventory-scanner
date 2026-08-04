@@ -379,8 +379,9 @@ const trustedExactDecodeQueue: DecodeQueue = {
   active: 0,
   limit: MAX_CONCURRENT_TRUSTED_EXACT_DECODES,
 };
-// Dedupe: a reviewId already queued OR in flight resolves to the SAME promise instead of being queued
-// twice - a duplicate liveDecode call for a review already being decoded is a no-op, not a second fetch.
+// Dedupe within each stage: a review already queued OR in flight resolves to the SAME promise instead
+// of being queued twice. The stage is part of the key because an exact miss must be allowed to enqueue
+// exactly one ordinary decode for the same review without either stage duplicating itself.
 const decodeTaskPromises = new Map<string, Promise<void>>();
 
 function drainDecodeQueue(queue: DecodeQueue): void {
@@ -401,15 +402,16 @@ function drainDecodeQueue(queue: DecodeQueue): void {
 }
 
 function enqueueDecode(reviewId: string, run: () => Promise<void>, deterministicOnly = false): Promise<void> {
-  const existing = decodeTaskPromises.get(reviewId);
+  const taskKey = `${deterministicOnly ? "trusted-exact" : "general"}:${reviewId}`;
+  const existing = decodeTaskPromises.get(taskKey);
   if (existing) return existing;
   const queue = deterministicOnly ? trustedExactDecodeQueue : generalDecodeQueue;
   const promise = new Promise<void>((resolve, reject) => {
     queue.pendingIds.push(reviewId);
     queue.tasks.set(reviewId, { run, resolve, reject });
   });
-  decodeTaskPromises.set(reviewId, promise);
-  const cleanup = () => decodeTaskPromises.delete(reviewId);
+  decodeTaskPromises.set(taskKey, promise);
+  const cleanup = () => decodeTaskPromises.delete(taskKey);
   promise.then(cleanup, cleanup);
   drainDecodeQueue(queue);
   return promise;
@@ -2828,11 +2830,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const deterministicCandidate = trustedExactProbeCandidate(cleaned.cleanCode);
         const deterministicLookupEligible = trustedExactProbeEnabled
           && get().online
-          && deterministicCandidate
-          // A valid GTIN with ordinary decode enabled keeps its existing catalog/decode behavior; the
-          // route still attempts trusted exact first. Non-GTIN/invalid shapes and gate-blocked GTINs use
-          // the no-egress deterministic-only request so an exact miss stays reviewable and free.
-          && (!autoGate.allowed || canonicalGtin(cleaned.cleanCode) === null);
+          && deterministicCandidate;
         const lookupPending = autoGate.allowed || deterministicLookupEligible;
 
         const existingOpen = get().needsReviewQueue.find(
@@ -2933,8 +2931,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             get().recordFeedback("conflict_detected", { code: cleaned.cleanCode });
           }
 
-          // Boss trusted-exact short codes get a bounded, deterministic-only request before any local,
-          // global, or paid lookup seam. A miss remains counted and reviewable; it never falls through.
+          // Every trusted-exact candidate gets the isolated deterministic-only request first. A valid
+          // GTIN miss may later enter the unchanged ordinary queue; non-GTIN, misread, and gate-blocked
+          // misses remain counted/reviewable without provider egress.
           if (deterministicLookupEligible) {
             trustedExactProbeReviewIds.add(review.id);
             void get().liveDecode(review.id, { deterministicOnly: true }).then(
@@ -3619,6 +3618,29 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             return;
           }
           if (deterministicOnly) {
+            const current = get();
+            const currentSettings = current.settings;
+            const currentNow = new Date(now()).getTime();
+            const currentToday = now().slice(0, 10);
+            const currentDailyCount = currentSettings.lastResetDate === currentToday
+              ? currentSettings.dailyLookupCount
+              : 0;
+            const ordinaryGate = evaluateAutoDecode({
+              aiEnabled: currentSettings.aiLookupEnabled,
+              status: current.aiStatus,
+              online: current.online,
+              dailyCount: currentDailyCount,
+              dailyLimit: currentSettings.dailyLookupLimit,
+              breaker: current.breaker,
+              now: currentNow,
+            });
+            const shouldFallbackToOrdinary = ordinaryGate.allowed
+              && canonicalGtin(review.cleanCode) !== null
+              && !isLikelyMisreadGtin(review.cleanCode);
+            if (shouldFallbackToOrdinary) {
+              void get().liveDecode(reviewId);
+              return;
+            }
             const missReason = decision?.reason || "No trusted exact match was found.";
             set((current) => ({
               scanFeed: current.scanFeed.map((event) =>

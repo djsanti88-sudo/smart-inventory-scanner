@@ -6,6 +6,7 @@ import type { PendingSyncItem, ScanEvent } from "@/types";
 
 const SHORT_CODE = "3220017438";
 const OTHER_SHORT_CODE = "3220017439";
+const VALID_GTIN = "036000291452";
 const CANONICAL_ID = `trusted-exact:v1:${"B".repeat(32)}`;
 const FINGERPRINT = { schemaVersion: "1.0.0", contentDigest: "A".repeat(64) };
 const originalFetch = globalThis.fetch;
@@ -50,7 +51,7 @@ function response(code = SHORT_CODE, canonicalId = CANONICAL_ID): Response {
         trustedExactCanonicalProductId: canonicalId,
         crossCheck: { decision: "single_provider" },
       },
-      trustedExact: { path: "boss_trusted_exact_barcode", index: FINGERPRINT },
+      trustedExact: { path: "boss_trusted_exact_barcode", index: { ...FINGERPRINT } },
     }),
   } as Response;
 }
@@ -93,7 +94,10 @@ class StrictValidationDb extends MockDb {
   }
 }
 
-afterEach(() => {
+afterEach(async () => {
+  // Queue finalizers run after the review state mutation awaited by most tests. Let those module-level
+  // finalizers release their slots before the next fresh store replaces the global fetch double.
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
   globalThis.fetch = originalFetch;
 });
 
@@ -341,6 +345,54 @@ describe("authenticated trusted-exact scan settlement", () => {
     await vi.waitFor(() => expect(store.getState().needsReviewQueue[0]?.decodeStatus).toBe("needs_review"));
     expect(store.getState().needsReviewQueue[0]?.status).toBe("open");
     expect(store.getState().products.find((item) => item.primaryBarcode === "3182206")).toMatchObject({ verified: false });
+    expect(store.getState().finalCounts.reduce((sum, row) => sum + row.quantity, 0)).toBe(1);
+  });
+
+  it("probes a valid GTIN through trusted exact first and stops before ordinary decode on an exact hit", async () => {
+    const store = createTestScanStore({ db: new MockDb(), trustedExactProbeEnabled: true });
+    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().updateSettings({ aiLookupEnabled: true });
+    const fetchSpy = vi.fn(async () => response(VALID_GTIN));
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    store.getState().processScan(VALID_GTIN);
+
+    await vi.waitFor(() => expect(store.getState().needsReviewQueue[0]?.status).toBe("resolved"));
+    const bodies = decodeCalls(fetchSpy).map(([, init]) => JSON.parse(String(init?.body)));
+    expect(bodies.map((body) => ({ mode: body.mode, code: body.cleanCode, deterministicOnly: body.deterministicOnly }))).toEqual([
+      { mode: "decode", code: VALID_GTIN, deterministicOnly: true },
+    ]);
+    expect(store.getState().finalCounts.reduce((sum, row) => sum + row.quantity, 0)).toBe(1);
+  });
+
+  it("falls back exactly once through ordinary decode after a valid GTIN trusted-exact miss", async () => {
+    const store = createTestScanStore({ db: new MockDb(), trustedExactProbeEnabled: true });
+    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().updateSettings({ aiLookupEnabled: true });
+    const fetchSpy = vi.fn(async () => missResponse());
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    store.getState().processScan(VALID_GTIN);
+
+    await vi.waitFor(() => expect(decodeCalls(fetchSpy)).toHaveLength(2));
+    const bodies = decodeCalls(fetchSpy).map(([, init]) => JSON.parse(String(init?.body)));
+    expect(bodies.map((body) => body.deterministicOnly)).toEqual([true, false]);
+    expect(store.getState().needsReviewQueue[0]).toMatchObject({ status: "open", decodeStatus: "needs_review" });
+    expect(store.getState().finalCounts.reduce((sum, row) => sum + row.quantity, 0)).toBe(1);
+  });
+
+  it("does not fall through to ordinary decode when a non-GTIN trusted-exact probe misses", async () => {
+    const store = createTestScanStore({ db: new MockDb(), trustedExactProbeEnabled: true });
+    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().updateSettings({ aiLookupEnabled: true });
+    const fetchSpy = vi.fn(async () => missResponse());
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    store.getState().processScan("TST21018");
+
+    await vi.waitFor(() => expect(store.getState().needsReviewQueue[0]?.decodeStatus).toBe("needs_review"));
+    const bodies = decodeCalls(fetchSpy).map(([, init]) => JSON.parse(String(init?.body)));
+    expect(bodies.map((body) => body.deterministicOnly)).toEqual([true]);
     expect(store.getState().finalCounts.reduce((sum, row) => sum + row.quantity, 0)).toBe(1);
   });
 
