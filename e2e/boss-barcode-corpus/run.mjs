@@ -1,5 +1,7 @@
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const WINDOWS_FIREBASE_COMMAND = "emulators:exec --project demo-smart-inventory --only auth,firestore npx.cmd playwright test --config=playwright.corpus.config.ts";
 export function spawnSpec({ platform = process.platform, firebase = process.env.FIREBASE_BIN || "", comspec = process.env.ComSpec || "cmd.exe" } = {}) {
@@ -17,4 +19,7 @@ export function main(env = process.env) {
   if (result.error) throw result.error;
   return result.status ?? 1;
 }
-if (import.meta.url === new URL(process.argv[1], "file:").href) process.exitCode = main();
+export function isCliEntrypoint(moduleUrl, argvPath) {
+  return Boolean(argvPath) && moduleUrl === pathToFileURL(resolve(argvPath)).href;
+}
+if (isCliEntrypoint(import.meta.url, process.argv[1])) process.exitCode = main();
