@@ -142,6 +142,24 @@ describe("Task 5 trusted exact identity with incomplete optional tire metadata",
     expect(new Set(terminal.map((item) => item.idempotencyKey)).size).toBe(terminal.length);
   });
 
+  it("does not settle an unrelated unmatched event when the review has no provisional linkage", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().setOnline(false);
+    const intended = store.getState().processScan(UPC_A)!;
+    const review = store.getState().needsReviewQueue[0]!;
+    const unrelated = { ...intended, id: "unrelated-unmatched-event", rawCode: "unrelated", cleanCode: "unrelated", matchedProductId: null };
+    store.setState((state) => ({
+      scanFeed: state.scanFeed.map((event) => event.id === intended.id ? { ...event, matchedProductId: null } : event).concat(unrelated),
+      needsReviewQueue: state.needsReviewQueue.map((item) => item.id === review.id ? { ...item, provisionalProductId: null } : item),
+    }));
+
+    store.getState().settleTrustedExactIdentity(review.id, CANONICAL_ID, { name: `Known tire - ${UPC_A}`, category: "Tire" }, "Trusted exact index match.");
+
+    const state = store.getState();
+    expect(state.scanFeed.find((event) => event.id === intended.id)).toMatchObject({ status: "known", decodeStatus: "verified" });
+    expect(state.scanFeed.find((event) => event.id === unrelated.id)).toMatchObject({ matchedProductId: null, status: intended.status, decodeStatus: intended.decodeStatus });
+  });
+
   it("persists terminal trusted-exact state for every spelling after canonical transfers", () => {
     const db = new MockDb();
     const store = createTestScanStore({ db });

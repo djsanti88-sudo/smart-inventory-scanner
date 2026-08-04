@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { __resetTrustedExactMembershipCacheForTest } from "@/services/security/trustedExactMembershipCache";
-import { __resetTrustedExactAuthorizationCacheForTest } from "@/services/security/trustedExactAuthorizationCache";
 
 // MANDATORY pipeline mock: the route must reach its auth/policy gates deterministically with zero
 // pipeline/provider work, and e2eMode must report false or the live-mode gates are skipped entirely.
@@ -64,7 +63,6 @@ vi.mock("@/lib/firebaseAdmin", () => ({
 const ORIG = { ...process.env };
 beforeEach(() => {
   __resetTrustedExactMembershipCacheForTest();
-  __resetTrustedExactAuthorizationCacheForTest();
   process.env.NEXT_PUBLIC_AUTH_MODE = "live";
   delete process.env.IS_E2E;
   delete process.env.AI_LIVE_SCAN_CONTEXT;
@@ -328,6 +326,17 @@ describe("ai-lookup D4 live-mode trust", () => {
     const response = await POST(decodeReq({ deterministicOnly: true }));
     expect(response.status).toBe(200);
     expect(runDecodePipeline).toHaveBeenCalledWith(expect.objectContaining({ deterministicOnly: true }));
+  });
+
+  it.each(["0000000000000", "1234567890123"])("keeps an unindexed malformed or placeholder-shaped deterministic request local (%s)", async (cleanCode) => {
+    const { POST } = await import("./route");
+    const response = await POST(decodeReq({ cleanCode, deterministicOnly: true }));
+
+    expect(response.status).toBe(200);
+    expect(tryTrustedExactDecode).toHaveBeenCalledWith(expect.objectContaining({ code: cleanCode }), undefined);
+    expect(runDecodePipeline).toHaveBeenCalledWith(expect.objectContaining({ code: cleanCode, deterministicOnly: true }));
+    expect(ladderStorage).not.toHaveBeenCalled();
+    expect(checkRateLimit).not.toHaveBeenCalled();
   });
 
   it.each([undefined, "lookup"])("rejects deterministicOnly for normalized non-decode mode %s before downstream work", async (mode) => {

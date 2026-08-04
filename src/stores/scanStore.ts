@@ -3420,7 +3420,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           idempotencyKey: resolvedReviewIdempotencyKey,
         };
         const affectedEventIds = new Set(state.scanFeed
-          .filter((event) => event.matchedProductId === provisionalId || event.cleanCode === review.cleanCode)
+          .filter((event) => event.cleanCode === review.cleanCode || (
+            provisionalId !== null && event.matchedProductId === provisionalId
+          ))
           .map((event) => event.id));
         const repointedFeed = state.scanFeed.map((event) => affectedEventIds.has(event.id)
           ? { ...event, matchedProductId: targetId, status: "known" as const, resolverStatus: "known" as const, decodeStatus: "verified" as const, reason, provenance: "app_verified" as const }

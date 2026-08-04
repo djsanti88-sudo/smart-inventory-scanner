@@ -53,6 +53,10 @@ describe("trusted tire exact index", () => {
     });
   });
 
+  it.each(["0000000000000", "1234567890123"])("fails closed on unindexed malformed or placeholder-shaped input %s", async (code) => {
+    await expect(lookupTrustedExactBarcode(code, { authenticatedBossCorpus: true })).resolves.toBeNull();
+  });
+
   it("blocks every leading-zero spelling of the excluded case pack before legacy lookup", async () => {
     await expect(lookupTrustedExactBarcode("30029885620210", { authenticatedBossCorpus: true })).resolves.toEqual({
       kind: "blocked_package",
