@@ -63,6 +63,9 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
   const fixtureModule = await import("./fixtures.mjs");
   const fixtures = fixtureModule.loadCorpusFixtures(process.env.BOSS_RECONCILIATION_PATH, manifest());
   const selected = fixtureModule.selectUiCorpusSample(fixtures);
+  const selectedCodes = new Set(selected.map((entry) => entry.code));
+  const warmEntry = [...fixtures.spellings.entries()].map(([code, value]) => ({ code, ...value })).find((entry) => !selectedCodes.has(entry.code));
+  if (!warmEntry) throw new Error("Private corpus did not contain a distinct source-derived warm-up spelling.");
   const expectedIdentities = new Map(selected.map((entry) => [entry.code, fixtureModule.runtimeCanonicalIdFor(entry)]));
   const blocked = await blockExternalEgress(page);
   const consoleErrors: string[] = [];
@@ -70,11 +73,20 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
   await login(page);
   const input = page.getByTestId("scanner-input");
   const feed = page.getByTestId("scan-feed-body");
+  // This authenticated UI warm-up primes the exact index and route without being included in the
+  // measured burst. Its persisted event/count is an explicit baseline, not silently discarded.
+  await page.keyboard.insertText(warmEntry.code); await page.keyboard.press("Enter");
+  await expect(page.getByText("1 scans", { exact: true })).toBeVisible({ timeout: 2_000 });
+  await expect.poll(async () => /Verified \(app-confirmed\)|Counted/.test(await feed.locator("tr").first().textContent() ?? ""), { timeout: SETTLEMENT_TIMEOUT_MS, intervals: [10, 20, 50] }).toBe(true);
+  await expect(page.getByTestId("pending-count")).toHaveText(/^(?:Waiting to save|All saved): 0$/, { timeout: 30_000 });
+  const warmExpected = new Map([[warmEntry.code, fixtureModule.runtimeCanonicalIdFor(warmEntry)]]);
+  await settledCount(1, warmExpected);
+  await expect(input).toBeFocused();
   const history = await page.evaluate((codes) => {
     const root = document.querySelector('[data-testid="scan-feed-body"]'); if (!root) throw new Error("scan feed missing");
     const value = { forbidden: false, observer: null as MutationObserver | null, marks: {} as Record<string, { immediate?: number; settled?: number }> };
     const inspect = () => { for (const row of root.querySelectorAll("tr")) for (const code of codes) { const text = row.textContent ?? ""; if (!text.includes(code)) continue; const mark = value.marks[code] ?? (value.marks[code] = {}); mark.immediate ??= performance.now(); if (/Verified \(app-confirmed\)|Counted/.test(text)) mark.settled ??= performance.now(); if (/Suggested|Needs Review|Conflict|Vendor/i.test(text)) value.forbidden = true; } };
-    value.observer = new MutationObserver(inspect); inspect();
+    value.observer = new MutationObserver(inspect);
     value.observer.observe(root, { childList: true, subtree: true, characterData: true }); (window as Window & { __localCorpusHistory?: typeof value }).__localCorpusHistory = value;
     return true;
   }, selected.map((entry) => entry.code));
@@ -88,13 +100,15 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
     const entry = selected[index]; starts.set(entry.code, await page.evaluate(() => performance.now()));
     await page.keyboard.insertText(entry.code); await page.keyboard.press("Enter");
   }
-  await expect(page.getByText(`${selected.length} scans`, { exact: true })).toBeVisible({ timeout: 2_000 });
+  await expect(page.getByText(`${selected.length + 1} scans`, { exact: true })).toBeVisible({ timeout: 2_000 });
   await expect.poll(async () => await page.evaluate(() => Object.values((window as Window & { __localCorpusHistory?: { marks: Record<string, { settled?: number }> } }).__localCorpusHistory?.marks ?? {}).filter((mark) => mark.settled !== undefined).length), { timeout: SETTLEMENT_TIMEOUT_MS, intervals: [10, 20, 50] }).toBe(selected.length);
   const marks = await page.evaluate(() => (window as Window & { __localCorpusHistory?: { marks: Record<string, { immediate?: number; settled?: number }> } }).__localCorpusHistory?.marks ?? {});
   const immediateMs = selected.map((entry) => Number(marks[entry.code]?.immediate) - Number(starts.get(entry.code)));
   const settledMs = selected.map((entry) => Number(marks[entry.code]?.settled) - Number(starts.get(entry.code)));
   const queueMs = selected.map((entry) => Number(marks[entry.code]?.settled) - Number(marks[entry.code]?.immediate));
   const latencyGate = fixtureModule.trustedExactLatencyGate(settledMs);
+  const latencyByFixtureClass = fixtureModule.summarizeMeasuredLatency(selected, immediateMs, settledMs, queueMs);
+  await testInfo.attach("local-corpus-latency-diagnostic", { contentType: "application/json", body: Buffer.from(JSON.stringify({ latencyGate, latencyByFixtureClass })) });
   expect(latencyGate.maxMs, "every trusted exact scanner burst entry must settle within 2 seconds").toBeLessThanOrEqual(2_000);
   expect(latencyGate.warmP95Ms, "warm trusted exact P95 must remain under 500ms; the first measured scan is cold").toBeLessThanOrEqual(500);
   await expect(input).toBeFocused();
@@ -122,7 +136,8 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
     throw error;
   }
   let settled;
-  try { settled = await settledCount(selected.length, expectedIdentities); }
+  const allExpectedIdentities = new Map([...expectedIdentities, [warmEntry.code, fixtureModule.runtimeCanonicalIdFor(warmEntry)]]);
+  try { settled = await settledCount(selected.length + 1, allExpectedIdentities); }
   catch (error) {
     const diagnostic = error as Error & { settlementDiagnostic?: unknown };
     await testInfo.attach("local-corpus-settlement-diagnostic", { contentType: "application/json", body: Buffer.from(JSON.stringify(diagnostic.settlementDiagnostic ?? { unavailable: true })) });
@@ -132,8 +147,8 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
   expect(visual, "trusted exact UI must not transiently show Suggested, Needs Review, Conflict, or Vendor").toBe(false);
   expect(page.url()).toContain("/scan");
   await page.reload(); await expect(input).toBeFocused({ timeout: 30_000 });
-  await expect(page.getByText(`${selected.length} scans`, { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(`${selected.length + 1} scans`, { exact: true })).toBeVisible({ timeout: 30_000 });
   expect(blocked, "local proof must make no external browser requests").toEqual([]);
-  const summary = { scope: "synthetic-normal-member-local-emulator", selected: selected.length, shortest: 20, boundary: selected.length - 20, events: settled.events, counted: settled.counted, activeReviews: settled.activeReviews, identities: [...expectedIdentities.entries()].map(([code, canonicalId]) => ({ code: fixtureModule.redactForReceipt(code), canonicalId: fixtureModule.redactForReceipt(canonicalId) })), scannerIntervalMs: SCANNER_INTERVAL_MS, latencyGate, latencyByFixtureClass: fixtureModule.summarizeMeasuredLatency(selected, immediateMs, settledMs, queueMs), latencyMs: { immediate: { p50: fixtureModule.percentile(immediateMs, .5), p95: fixtureModule.percentile(immediateMs, .95) }, settlement: { p50: fixtureModule.percentile(settledMs, .5), p95: fixtureModule.percentile(settledMs, .95), max: Math.max(...settledMs) }, queue: { p50: fixtureModule.percentile(queueMs, .5), p95: fixtureModule.percentile(queueMs, .95) } } };
+  const summary = { scope: "synthetic-normal-member-local-emulator", measured: { events: selected.length, counted: selected.length }, warmupBaseline: { events: 1, counted: 1 }, shortest: 20, boundary: selected.length - 20, persisted: { events: settled.events, counted: settled.counted, activeReviews: settled.activeReviews }, identities: [...expectedIdentities.entries()].map(([code, canonicalId]) => ({ code: fixtureModule.redactForReceipt(code), canonicalId: fixtureModule.redactForReceipt(canonicalId) })), scannerIntervalMs: SCANNER_INTERVAL_MS, latencyGate, latencyByFixtureClass, latencyMs: { immediate: { p50: fixtureModule.percentile(immediateMs, .5), p95: fixtureModule.percentile(immediateMs, .95) }, settlement: { p50: fixtureModule.percentile(settledMs, .5), p95: fixtureModule.percentile(settledMs, .95), max: Math.max(...settledMs) }, queue: { p50: fixtureModule.percentile(queueMs, .5), p95: fixtureModule.percentile(queueMs, .95) } } };
   await testInfo.attach("local-corpus-summary", { contentType: "application/json", body: Buffer.from(JSON.stringify(summary)) });
 });
