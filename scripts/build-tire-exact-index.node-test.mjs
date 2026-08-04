@@ -240,6 +240,7 @@ test("production build contract pins all three supplied inputs and fixed cardina
   assert.equal(result.manifest.nonGtinApprovedRows, 314);
   assert.equal(result.manifest.nonGtinApprovedIdentifiers, 310);
   assert.equal(result.manifest.nonGtinBlankAliasConflicts, 193);
+  assert.equal(result.manifest.sourceDerivedNonGtinSampleSha256, "C4BCC4CC75A6BC3DF7773265BE5A3291C00D35F69E5281460032BDCF6CD09F0E", "the source-derived shortest-20 sample binding detects a changed selection");
   assert.equal(result.manifest.excludedCasePacks, 1);
   assert.equal(result.manifest.collisionDispositionCount, 42);
   assert.match(result.manifest.collisionDispositionLedgerSha256, /^[A-F0-9]{64}$/);
