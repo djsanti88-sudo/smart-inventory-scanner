@@ -98,11 +98,13 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
       selectedBusiness: window.localStorage.getItem("sis-selected-business-v1"),
       queue: (() => {
         try {
-          const state = JSON.parse(window.localStorage.getItem("sis-scan-v1") ?? "{}").state;
+          const exposed = (window as Window & { __scanStore?: { getState?: () => unknown } }).__scanStore;
+          const liveState = exposed?.getState?.() as { pendingSyncQueue?: unknown[] } | undefined;
+          const state = liveState ?? JSON.parse(window.localStorage.getItem("sis-scan-v1") ?? "{}").state;
           const items = Array.isArray(state?.pendingSyncQueue) ? state.pendingSyncQueue : [];
           const byOperation: Record<string, number> = {}; const byStatus: Record<string, number> = {}; const errors: Record<string, number> = {};
           for (const item of items) { byOperation[String(item.operation)] = (byOperation[String(item.operation)] ?? 0) + 1; byStatus[String(item.status)] = (byStatus[String(item.status)] ?? 0) + 1; if (item.lastError) errors[String(item.lastError).replace(/\d{5,}/g, "[redacted]").slice(0, 160)] = (errors[String(item.lastError)] ?? 0) + 1; }
-          return { total: items.length, byOperation, byStatus, errors };
+          return { source: liveState ? "window.__scanStore" : "localStorage", total: items.length, byOperation, byStatus, errors };
         } catch { return { unreadable: true }; }
       })(),
       consoleErrors: browserConsoleErrors,
