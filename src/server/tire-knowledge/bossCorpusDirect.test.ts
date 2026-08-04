@@ -15,8 +15,11 @@ describe("Boss trusted-exact local certification", () => {
     vi.stubGlobal("fetch", fetchSpy);
     const latencyMs: number[] = [];
     try {
+      const unreachable = [...fixtures.spellings.keys()].filter((spelling) => !trustedExactProbeCandidate(spelling));
+      // Aggregate-only diagnostic: never print private spellings. This catches every mismatch
+      // between the source-admitted corpus and the client-side deterministic probe gate.
+      expect(unreachable.length, `source-admitted spellings excluded from trustedExactProbeCandidate: ${unreachable.length}`).toBe(0);
       for (const [spelling, expected] of fixtures.spellings) {
-        expect(trustedExactProbeCandidate(spelling), "every source-admitted spelling must reach the trusted exact probe").toBe(true);
         const started = performance.now();
         const outcome = await resolveTrustedExactBarcodeDecision(spelling, { authenticatedBossCorpus: true });
         latencyMs.push(performance.now() - started);
