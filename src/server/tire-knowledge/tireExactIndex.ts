@@ -208,12 +208,19 @@ function toTireKnowledgeRow(row: ExactIndexRow): TireKnowledgeRow {
   };
 }
 
+function exactLookupKey(code: string): string | null {
+  const gtin = canonicalGtin(code);
+  if (gtin) return gtin;
+  const identifier = code.trim();
+  return identifier ? `nongtin:${identifier}` : null;
+}
+
 /** Reads exactly one authenticated, hash-verified shard. Asset faults fail closed, distinct from a miss. */
 export async function lookupTrustedExactBarcode(
   code: string,
   access: { authenticatedBossCorpus: boolean },
 ): Promise<TrustedExactBarcodeResult> {
-  const canonicalKey = canonicalGtin(code);
+  const canonicalKey = exactLookupKey(code);
   if (!canonicalKey) return null;
   const manifestResult = await getManifest();
   if (manifestResult.kind === "unavailable") return manifestResult;

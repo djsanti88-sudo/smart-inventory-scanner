@@ -11,16 +11,23 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const mockLookupByExactPartNumber = vi.fn();
 const mockLookupByExactBarcode = vi.fn();
+const mockLookupExactBarcodeDecision = vi.fn();
+const mockLookupTrustedExactBarcode = vi.fn();
 vi.mock("@/server/tire-knowledge/tireKnowledgeIndex", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/tire-knowledge/tireKnowledgeIndex")>();
   return {
     ...actual,
     lookupByExactPartNumber: (pn: string) => mockLookupByExactPartNumber(pn),
     lookupByExactBarcode: (code: string) => mockLookupByExactBarcode(code),
+    lookupExactBarcodeDecision: (code: string, access: unknown) => mockLookupExactBarcodeDecision(code, access),
   };
 });
+vi.mock("@/server/tire-knowledge/tireExactIndex", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/tire-knowledge/tireExactIndex")>();
+  return { ...actual, lookupTrustedExactBarcode: (code: string, access: unknown) => mockLookupTrustedExactBarcode(code, access) };
+});
 
-import { resolveExactPartNumber, resolveExactBarcode } from "@/server/tire-knowledge/TireKnowledgeProvider";
+import { resolveExactPartNumber, resolveExactBarcode, resolveExactBarcodeDecision, resolveTrustedExactBarcodeDecision } from "@/server/tire-knowledge/TireKnowledgeProvider";
 
 const CORPUS_ROW = {
   canonical_product_uid: "uid-1",
@@ -48,6 +55,50 @@ const CORPUS_ROW = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockLookupExactBarcodeDecision.mockReset();
+  mockLookupTrustedExactBarcode.mockReset();
+  mockLookupTrustedExactBarcode.mockResolvedValue(null);
+  mockLookupExactBarcodeDecision.mockImplementation(async (code: string) => {
+    const row = await mockLookupByExactBarcode(code);
+    return row ? { kind: "legacy_hit", row } : { kind: "miss" };
+  });
+});
+
+describe("trusted exact pre-guard boundary", () => {
+  it("returns a pure miss from the generated index without invoking the legacy decision", async () => {
+    mockLookupExactBarcodeDecision.mockRejectedValueOnce(new Error("legacy SQLite/Turso/JSON must remain untouched"));
+
+    const result = await resolveTrustedExactBarcodeDecision("900000000003", { authenticatedBossCorpus: false });
+
+    expect(result).toEqual({ kind: "miss" });
+    expect(mockLookupTrustedExactBarcode).toHaveBeenCalledWith("900000000003", { authenticatedBossCorpus: false });
+    expect(mockLookupExactBarcodeDecision).not.toHaveBeenCalled();
+  });
+
+  it("retains the legacy exact decision only after the pre-guard miss", async () => {
+    mockLookupExactBarcodeDecision.mockResolvedValueOnce({ kind: "legacy_hit", row: CORPUS_ROW });
+
+    const result = await resolveExactBarcodeDecision("029142869880", { authenticatedBossCorpus: false });
+
+    expect(result).toMatchObject({ kind: "hit", sourceScope: "global_corpus", result: { decision: { status: "verified" } } });
+    expect(mockLookupExactBarcodeDecision).toHaveBeenCalledOnce();
+  });
+
+  it("mints the server canonical product identity for an approved non-GTIN Boss hit", async () => {
+    mockLookupTrustedExactBarcode.mockResolvedValueOnce({
+      kind: "hit",
+      sourceScope: "authenticated_boss_corpus",
+      row: { ...CORPUS_ROW, barcode: "3220017438", canonical_product_uid: "TIRE_D0F7590DC52EB30084BC" },
+    });
+
+    const result = await resolveTrustedExactBarcodeDecision("3220017438", { authenticatedBossCorpus: true });
+
+    expect(result).toMatchObject({
+      kind: "hit",
+      sourceScope: "authenticated_boss_corpus",
+      result: { decision: { status: "verified", trustedExactCanonicalProductId: "trusted-exact:canonical:TIRE_D0F7590DC52EB30084BC" } },
+    });
+  });
 });
 
 describe("resolveExactPartNumber - confidence tiers (RC4)", () => {

@@ -1,9 +1,11 @@
 import "server-only";
 import type { AiLookupResult, DecodeDecision, EvidenceResult } from "@/types";
 import { emptyResult } from "@/services/ai/provider";
-import { lookupByExactBarcode, lookupByExactPartNumber, type TireKnowledgeRow } from "@/server/tire-knowledge/tireKnowledgeIndex";
+import { lookupExactBarcodeDecision, lookupByExactPartNumber, type TireKnowledgeRow } from "@/server/tire-knowledge/tireKnowledgeIndex";
+import { lookupTrustedExactBarcode } from "@/server/tire-knowledge/tireExactIndex";
 import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
 import { basePartNumberKey } from "@/services/catalog/tirePartNumber";
+import { canonicalGtin } from "@/services/upc/gtin";
 
 // SERVER-ONLY deterministic tire-knowledge provider. It turns an EXACT trusted-corpus hit into a decode
 // result WITHOUT any AI call or page fetch. It runs in the /api/ai-lookup route BEFORE the AI providers and
@@ -19,6 +21,12 @@ export interface CorpusDecodeResult {
   providerNames: string[];
   path: "corpus_exact_barcode" | "corpus_exact_part_number";
 }
+
+export type ExactBarcodeProviderDecision =
+  | { kind: "hit"; result: CorpusDecodeResult; sourceScope: "global_corpus" | "authenticated_boss_corpus" }
+  | { kind: "blocked_package"; canonicalKey: string }
+  | { kind: "exact_index_unavailable" }
+  | { kind: "miss" };
 
 // verified_2src is the strongest tier (independent two-source). verified_1src_strong is strong single
 // source. Both clear the store's >=0.8 gate; nothing weaker reaches this code (the generator only ingests
@@ -93,8 +101,14 @@ function verifiedEvidence(code: string): EvidenceResult {
  * downstream store gate) or null on a miss. No AI, no page fetch.
  */
 export async function resolveExactBarcode(code: string): Promise<CorpusDecodeResult | null> {
-  const row = await lookupByExactBarcode(code);
-  if (!row) return null;
+  const exact = await resolveExactBarcodeDecision(code);
+  return exact.kind === "hit" ? exact.result : null;
+}
+
+function trustedCorpusDecision(
+  row: TireKnowledgeRow,
+  sourceScope: "global_corpus" | "authenticated_boss_corpus",
+): Extract<ExactBarcodeProviderDecision, { kind: "hit" }> {
   const result = toResult(row);
   const confidence = result.confidence;
   const decision: DecodeDecision = {
@@ -105,8 +119,47 @@ export async function resolveExactBarcode(code: string): Promise<CorpusDecodeRes
     exactCodeEvidenceVerifiedByApp: true,
     crossCheck: { decision: "single_provider", confidence, reason: "Trusted corpus exact barcode.", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
     corroborationPath: "corpus_exact_barcode",
+    ...(sourceScope === "authenticated_boss_corpus"
+      ? { trustedExactCanonicalProductId: canonicalGtin(row.barcode)
+        ? `trusted-exact:${canonicalGtin(row.barcode)}`
+        : `trusted-exact:canonical:${row.canonical_product_uid}` }
+      : {}),
   };
-  return { decision, results: [result], evidences: [verifiedEvidence(row.barcode)], providerNames: ["tire-corpus"], path: "corpus_exact_barcode" };
+  return {
+    kind: "hit",
+    result: { decision, results: [result], evidences: [verifiedEvidence(row.barcode)], providerNames: ["tire-corpus"], path: "corpus_exact_barcode" },
+    sourceScope,
+  };
+}
+
+/**
+ * Index-only exact decision for the route's pre-guard path. A miss is deliberately pure: it must
+ * not open SQLite, Turso, legacy JSON, storage, or any downstream resolver before AI controls run.
+ */
+export async function resolveTrustedExactBarcodeDecision(
+  code: string,
+  access: { authenticatedBossCorpus: boolean } = { authenticatedBossCorpus: false },
+): Promise<ExactBarcodeProviderDecision> {
+  const trusted = await lookupTrustedExactBarcode(code, access);
+  if (!trusted) return { kind: "miss" };
+  if (trusted.kind === "blocked_package") return trusted;
+  if (trusted.kind === "unavailable") return { kind: "exact_index_unavailable" };
+  return trustedCorpusDecision(trusted.row, trusted.sourceScope);
+}
+
+/** Internal full decision retained for the post-guard legacy pipeline. */
+export async function resolveExactBarcodeDecision(
+  code: string,
+  access: { authenticatedBossCorpus: boolean } = { authenticatedBossCorpus: false },
+): Promise<ExactBarcodeProviderDecision> {
+  const trusted = await resolveTrustedExactBarcodeDecision(code, access);
+  if (trusted.kind !== "miss") return trusted;
+
+  const lookup = await lookupExactBarcodeDecision(code, access);
+  if (lookup.kind === "blocked_package") return lookup;
+  if (lookup.kind === "exact_index_unavailable") return lookup;
+  if (lookup.kind === "miss") return lookup;
+  return trustedCorpusDecision(lookup.row, lookup.kind === "trusted_hit" ? lookup.sourceScope : "global_corpus");
 }
 
 // RC4 (owner-ratified, pilot PN recall): "if only the distributor affix differs and the digits are

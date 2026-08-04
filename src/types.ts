@@ -28,6 +28,12 @@ export type ScanStatus = "known" | "unknown" | "needs_review" | "resolved" | "ig
 /** Sync state shared by entities that get pushed to the (mock) database. */
 export type SyncStatus = "synced" | "pending" | "error";
 
+/** Request mode for a store-initiated decode. Deterministic-only lookup may inspect trusted local
+ * indexes but must stop before any external/provider continuation. */
+export interface LiveDecodeOptions {
+  deterministicOnly?: boolean;
+}
+
 /** Detected shape of a scanned code (a hint, not an authority). */
 export type CodeType =
   | "upc_a"
@@ -73,7 +79,8 @@ export type SyncOperation =
   | "SAVE_UNKNOWN_SCAN"
   | "RESOLVE_ALIAS"
   | "SAVE_PRODUCT"
-  | "SAVE_SESSION";
+  | "SAVE_SESSION"
+  | "SETTLE_TRUSTED_EXACT";
 
 export type PendingItemStatus = "pending" | "syncing" | "synced" | "error" | "quarantined";
 
@@ -121,6 +128,8 @@ export interface Product {
   // True only for trusted identity: seed/manual or human-created. AI never sets this true.
   // The resolver may return "known" from a product identifier ONLY when verified is true.
   verified: boolean;
+  /** Opaque, server-issued identity for an authenticated trusted-exact barcode result. Never user input. */
+  trustedExactCanonicalId?: string;
   // PHASE 2 (Suggested provisional count): true ONLY for a product born from a weak AI suggestion that is
   // counted but unconfirmed (verified:false, NO approved alias). A re-scan increments it deterministically
   // (processScan provMatch) without re-deciding, and it stays in Needs Review until a human confirms it
@@ -353,6 +362,7 @@ export interface UnknownCodeReview {
 export type ResolutionAction =
   | "link_existing"
   | "create_new"
+  | "trusted_exact"
   | "ignore"
   | "add_alias"
   | "reject_suggestion";
@@ -616,6 +626,7 @@ export type CorroborationPath =
   | "page_fetch_model_agreement"
   | "deterministic_prefix"
   | "corpus_exact_barcode"
+  | "boss_trusted_exact_barcode"
   | "corpus_exact_part_number"
   | "internet_two_source_size"
   | "non_public_trusted_source"
@@ -629,4 +640,6 @@ export interface DecodeDecision {
   exactCodeEvidenceVerifiedByApp: boolean; // set ONLY from EvidenceVerifier output, never the model
   crossCheck: CrossCheckResult;
   corroborationPath?: CorroborationPath; // set only when status === "verified"
+  /** Opaque canonical identity minted by the trusted exact-index server path only. */
+  trustedExactCanonicalProductId?: string;
 }

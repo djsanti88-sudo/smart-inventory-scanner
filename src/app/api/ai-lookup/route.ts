@@ -14,10 +14,14 @@ import { ladderStorage } from "@/server/upc/storage";
 // cap/breaker gating and the L1/L2 cache write-through) now lives in @/server/decode/pipeline. This
 // route keeps only HTTP concerns: request parsing, the abuse/mock-mode guards, response shaping, the
 // legacy 'lookup' back-compat path, and the GET status endpoint. e2eMode is shared from the pipeline.
-import { runDecodePipeline, e2eMode } from "@/server/decode/pipeline";
+import { runDecodePipeline, tryTrustedExactDecode, deriveTrustedExactAccessForVerifiedRoute, e2eMode } from "@/server/decode/pipeline";
+import { maskTrustedExactIdentifier, trustedExactRateLimiter } from "@/services/security/trustedExactRateLimit";
+import { isPlatformOwnerServer } from "@/services/security/roleAccess";
+import { getTireExactIndexFingerprint } from "@/server/tire-knowledge/tireExactIndex";
 import { clampDecodeBudgetMs } from "@/services/ai/decodeBudget";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
+import { trustedExactMembershipCache } from "@/services/security/trustedExactMembershipCache";
 import { isLiveAuth } from "@/services/auth/authMode";
 import { clampConfidenceThreshold } from "@/services/security/decodePolicy";
 import { readDailyUsedForAccount, chargeDailySlotForAccount } from "@/services/security/aiSpendGuard";
@@ -44,6 +48,26 @@ const OPENAI_DECODE_MODEL = process.env.OPENAI_DECODE_MODEL || "gpt-5"; // pro e
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs"; // Admin SDK requires the Node runtime (same as resolve-scan/route.ts:25)
+
+const BUSINESS_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const PREVIEW_CERTIFICATION_BUSINESS_ID = /^boss-preview-[a-z0-9-]{16,64}-lane-(?:0\d|1\d)$/;
+
+function isPreviewCertificationBusiness(businessId: string): boolean {
+  return process.env.VERCEL_ENV === "preview" &&
+    process.env.FIREBASE_PROJECT_ID === "smart-inventory-preview" &&
+    PREVIEW_CERTIFICATION_BUSINESS_ID.test(businessId);
+}
+
+function trustedBossAllowlist(): Set<string> {
+  const values = [
+    process.env.TRUSTED_EXACT_BOSS_BUSINESS_IDS,
+    process.env.BOSS_SHOP_CODE_ALIAS_BUSINESS_IDS,
+  ].flatMap((raw) => typeof raw === "string"
+    ? raw.split(",").map((value) => value.trim()).filter(Boolean)
+    : []);
+  if (!values.length || values.some((value) => !BUSINESS_ID.test(value))) return new Set();
+  return new Set(values);
+}
 
 function selectProvider(name: string): AiProvider {
   switch (name) {
@@ -232,42 +256,6 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  // Server-side abuse + spend guard (auth DEFERRED by owner). Bounds bill-drain without login:
-  // kill switch (503) and per-IP rate limit (429) here; the hard daily cap is checked at the decode
-  // path below. Each control makes ZERO provider calls when it blocks. Local-first state; a deployed
-  // multi-instance setup needs a shared store (see services/security/aiSpendGuard.ts). Inert under E2E
-  // mock mode (no real provider spend to bound), so deterministic test runs are unaffected.
-  if (!e2eMode()) {
-    if (killSwitchOn()) {
-      logServerEvent({ route: "/api/ai-lookup", event: "kill_switch", reasonCode: "kill_switch", status: 503 });
-      return Response.json({ error: "AI lookup is temporarily disabled.", reasonCode: "kill_switch" }, { status: 503 });
-    }
-    const clientIp =
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      request.headers.get("x-real-ip") ||
-      "local";
-    // B1: durable, storage-backed rate limiting - see the GET handler's comment above.
-    //
-    // FINDING C (P6 fix wave): the whole rate-limit block is wrapped so a storage INIT throw (e.g.
-    // Turso/libsql unreachable) never crashes the request into a raw 500 - it logs rate_limit_unavailable
-    // and falls through WITHOUT rate limiting instead, mirroring the export route's now-standard fail-open
-    // pattern (src/app/api/account/export/route.ts). checkRateLimit already fails open on a storage error
-    // once storage is in hand; this closes the remaining hole where `await ladderStorage()` ITSELF throws
-    // before checkRateLimit is even called. A storage hiccup must never take the whole app down.
-    try {
-      const rl = await checkRateLimit(clientIp, { storage: await ladderStorage() });
-      if (!rl.allowed) {
-        logServerEvent({ route: "/api/ai-lookup", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
-        return Response.json(
-          { error: "Too many requests. Slow down and try again.", reasonCode: "rate_limited" },
-          { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } }
-        );
-      }
-    } catch {
-      logServerEvent({ route: "/api/ai-lookup", event: "rate_limit_unavailable", reasonCode: "storage_error", status: 200 });
-    }
-  }
-
   let body: {
     rawCode?: string;
     cleanCode?: string;
@@ -293,11 +281,20 @@ export async function POST(request: Request) {
     // Ignored entirely in mock mode (today's open-demo behavior is unchanged).
     idToken?: string;
     businessId?: string;
+    deterministicOnly?: boolean;
   };
   try {
     body = await request.json();
   } catch {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const normalizedMode = body.mode === "decode-deep" ? "refresh" : (body.mode ?? "lookup");
+  if (body.deterministicOnly === true && normalizedMode !== "decode" && normalizedMode !== "refresh") {
+    return Response.json(
+      { error: "deterministicOnly requires decode or refresh mode.", reasonCode: "invalid_deterministic_mode" },
+      { status: 400 },
+    );
   }
 
   // LIVE-MODE AUTH (D4). In mock mode this whole block is skipped, so the open-demo behavior and every
@@ -306,6 +303,9 @@ export async function POST(request: Request) {
   // (locked by route.d4.test.ts): this gate completes BEFORE any quota read or charge, global or
   // per-account - a 401/403 request must never touch a counter key.
   let authedBusinessId: string | null = null;
+  let authedUid: string | null = null;
+  let authenticatedBossCorpus = false;
+  let lacksVerifiedMembership = false;
   if (isLiveAuth() && !e2eMode()) {
     const idToken = (body as { idToken?: string }).idToken ?? "";
     const bizId = (body as { businessId?: string }).businessId ?? "";
@@ -315,10 +315,12 @@ export async function POST(request: Request) {
     if (!bizId.trim()) {
       return Response.json({ error: "Missing businessId.", reasonCode: "no_business" }, { status: 400 });
     }
-    let uid = "";
+    if (!BUSINESS_ID.test(bizId)) {
+      return Response.json({ error: "Invalid businessId.", reasonCode: "bad_business" }, { status: 400 });
+    }
+    let identity: { uid: string; email?: string | null; exp?: number } | null = null;
     try {
-      const decoded = await getAdminAuth().verifyIdToken(idToken);
-      uid = decoded.uid;
+      identity = await getAdminAuth().verifyIdToken(idToken);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (/credential|GOOGLE_APPLICATION_CREDENTIALS|default credentials|service account|ENOENT/i.test(msg)) {
@@ -326,11 +328,22 @@ export async function POST(request: Request) {
       }
       return Response.json({ error: "Invalid or expired sign-in.", reasonCode: "bad_token" }, { status: 401 });
     }
-    const member = await getAdminDb().doc(`${COLLECTIONS.businessMembers}/${memberDocId(bizId, uid)}`).get();
-    if (!member.exists) {
+    const uid = identity.uid;
+    const platformOwner = isPlatformOwnerServer(identity);
+    const hasVerifiedMembership = await trustedExactMembershipCache.get(
+      uid,
+      bizId,
+      async () => (await getAdminDb().doc(`${COLLECTIONS.businessMembers}/${memberDocId(bizId, uid)}`).get()).exists,
+    );
+    lacksVerifiedMembership = !hasVerifiedMembership;
+    if (lacksVerifiedMembership && !platformOwner) {
       return Response.json({ error: "Not a member of this business.", reasonCode: "not_member" }, { status: 403 });
     }
     authedBusinessId = bizId;
+    authedUid = uid;
+    authenticatedBossCorpus = platformOwner || (hasVerifiedMembership && (
+      trustedBossAllowlist().has(bizId) || isPreviewCertificationBusiness(bizId)
+    ));
   }
 
   // Defense in depth: sanitize again on the server before anything reaches a provider.
@@ -372,6 +385,81 @@ export async function POST(request: Request) {
     brandPrefixHint: body.brandPrefixHint,
   };
 
+  const isDecodeMode = normalizedMode === "decode" || normalizedMode === "refresh";
+  const forceRetry = body.forceRetry === true;
+  // This is an opaque, identity-registered capability, not a request-shaped boolean. It is minted
+  // only after the verified Firebase identity/membership + server-side policy derivation above.
+  const trustedExactAccess = deriveTrustedExactAccessForVerifiedRoute(authenticatedBossCorpus);
+  if (isDecodeMode) {
+    // Apply the identity-and-business-scoped scanner limiter before every authorized exact attempt,
+    // so hits and misses have identical access/cost controls. Foreign/non-member requests returned
+    // above never consume this bucket or touch the index.
+    if (authenticatedBossCorpus && authedUid && authedBusinessId) {
+      const exactRate = trustedExactRateLimiter.check(authedUid, authedBusinessId);
+      if (!exactRate.allowed) {
+        logServerEvent({
+          route: "/api/ai-lookup",
+          event: "trusted_exact_rate_limited",
+          reasonCode: "trusted_exact_rate_limited",
+          businessId: maskTrustedExactIdentifier(authedBusinessId),
+          status: 429,
+        });
+        return Response.json({ error: "Too many trusted barcode lookups. Slow down and try again.", reasonCode: "trusted_exact_rate_limited" }, { status: 429, headers: { "Retry-After": String(Math.ceil(exactRate.retryAfterMs / 1000)) } });
+      }
+    }
+    const trusted = await tryTrustedExactDecode({ code, rawCodeSanitized, cleanCodeSanitized }, trustedExactAccess);
+    if (trusted) {
+      const verified = trusted.payload.decision.status === "verified";
+      const fingerprint = verified && authedBusinessId ? await getTireExactIndexFingerprint() : null;
+      const publicFingerprint = fingerprint
+        ? { schemaVersion: fingerprint.schemaVersion, contentDigest: fingerprint.contentDigest }
+        : null;
+      const debug = publicFingerprint
+        ? { ...trusted.payload.debug, trustedExactIndex: publicFingerprint }
+        : trusted.payload.debug;
+      return Response.json({ ...trusted.payload, debug });
+    }
+    // Platform owners may query the trusted exact corpus without joining every tenant, but an exact
+    // miss must never grant access to that tenant's deterministic or provider-backed decode path.
+    if (lacksVerifiedMembership) {
+      return Response.json({ error: "Not a member of this business.", reasonCode: "not_member" }, { status: 403 });
+    }
+    // A verified exact alias is a local, read-only lookup and must stay scanner-fast even during an
+    // inventory sweep.  Retain the per-identity defense-in-depth limiter for genuine exact misses,
+    // which are the only privileged requests that can continue into the deterministic/legacy work.
+    if (body.deterministicOnly === true) {
+      const deterministic = await runDecodePipeline({
+        code, codeType, rawCodeSanitized, cleanCodeSanitized, threshold: clampConfidenceThreshold(body.confidenceThreshold),
+        allowNonPublicAutoCount, forceRetry, scanContext, deterministicOnly: true,
+        trustedExactAccess,
+      });
+      if (deterministic.kind !== "computed") throw new Error("deterministic-only decode must compute a local miss");
+      return Response.json(deterministic.payload);
+    }
+  }
+
+  if (lacksVerifiedMembership) {
+    return Response.json({ error: "Not a member of this business.", reasonCode: "not_member" }, { status: 403 });
+  }
+
+  // A trusted exact result returns above. A genuine miss retains the legacy kill/rate/cap behavior.
+  if (!e2eMode()) {
+    if (killSwitchOn()) {
+      logServerEvent({ route: "/api/ai-lookup", event: "kill_switch", reasonCode: "kill_switch", status: 503 });
+      return Response.json({ error: "AI lookup is temporarily disabled.", reasonCode: "kill_switch" }, { status: 503 });
+    }
+    const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "local";
+    try {
+      const rl = await checkRateLimit(clientIp, { storage: await ladderStorage() });
+      if (!rl.allowed) {
+        logServerEvent({ route: "/api/ai-lookup", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
+        return Response.json({ error: "Too many requests. Slow down and try again.", reasonCode: "rate_limited" }, { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } });
+      }
+    } catch {
+      logServerEvent({ route: "/api/ai-lookup", event: "rate_limit_unavailable", reasonCode: "storage_error", status: 200 });
+    }
+  }
+
   // Hard server-side daily spend cap (auth DEFERRED) for the LEGACY lookup path. The decode modes run
   // their own cap check below (after the decode-cache peek) so a zero-spend cached repeat scan never
   // consumes a cap slot - checking here for decode too would double-count every decode POST (each scan
@@ -390,8 +478,6 @@ export async function POST(request: Request) {
   // (no authedBusinessId) has no per-account bucket at all, so it keeps today's behavior unchanged:
   // gated by the plain AI_LOOKUP_DAILY_LIMIT global cap. L12 unchanged: exactly one global charge +
   // one account charge per genuine paid compute, only after every applicable check passes.
-  const isDecodeMode = body.mode === "decode" || body.mode === "decode-deep";
-  const forceRetry = body.forceRetry === true;
   if (!e2eMode() && !isDecodeMode) {
     const ladderStore = await ladderStorage();
     const limit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 2000);
@@ -517,6 +603,7 @@ export async function POST(request: Request) {
       // GC-A: undefined for anonymous traffic (pipeline default behavior unchanged); set for authed
       // traffic once the per-account gate above has run (accountCapCleared reflects the gate's outcome).
       capContext: authedBusinessId ? { authedBusinessId, accountCapCleared } : undefined,
+      trustedExactAccess,
     });
     if (outcome.kind === "persisted") {
       // FIX 4 (review MEDIUM, stale-verified replay + transaction storm): NEVER appends here. A cached/

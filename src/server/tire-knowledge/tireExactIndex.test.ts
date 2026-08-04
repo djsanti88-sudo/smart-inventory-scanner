@@ -44,6 +44,15 @@ describe("trusted tire exact index", () => {
     await expect(lookupTrustedExactBarcode("191563001655", { authenticatedBossCorpus: false })).resolves.toBeNull();
   });
 
+  it("resolves an approved non-GTIN Boss identifier only with the internal capability", async () => {
+    await expect(lookupTrustedExactBarcode("3220017438", { authenticatedBossCorpus: false })).resolves.toBeNull();
+    await expect(lookupTrustedExactBarcode("3220017438", { authenticatedBossCorpus: true })).resolves.toMatchObject({
+      kind: "hit",
+      sourceScope: "authenticated_boss_corpus",
+      row: { barcode: "3220017438", canonical_product_uid: "TIRE_D0F7590DC52EB30084BC" },
+    });
+  });
+
   it("blocks every leading-zero spelling of the excluded case pack before legacy lookup", async () => {
     await expect(lookupTrustedExactBarcode("30029885620210", { authenticatedBossCorpus: true })).resolves.toEqual({
       kind: "blocked_package",

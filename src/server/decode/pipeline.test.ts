@@ -16,14 +16,24 @@ vi.mock("server-only", () => ({}));
 // factories then populate; the holder itself is safe to reference inside the hoisted factories.
 const realImpls = vi.hoisted(() => ({
   resolveExactBarcode: undefined as unknown as typeof import("@/server/tire-knowledge/TireKnowledgeProvider").resolveExactBarcode,
+  resolveExactBarcodeDecision: undefined as unknown as typeof import("@/server/tire-knowledge/TireKnowledgeProvider").resolveExactBarcodeDecision,
+  resolveTrustedExactBarcodeDecision: undefined as unknown as typeof import("@/server/tire-knowledge/TireKnowledgeProvider").resolveTrustedExactBarcodeDecision,
   resolveExactPartNumber: undefined as unknown as typeof import("@/server/tire-knowledge/TireKnowledgeProvider").resolveExactPartNumber,
   getPersistedDecode: undefined as unknown as typeof import("@/server/decodeCacheStore").getPersistedDecode,
 }));
 vi.mock("@/server/tire-knowledge/TireKnowledgeProvider", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/tire-knowledge/TireKnowledgeProvider")>();
   realImpls.resolveExactBarcode = actual.resolveExactBarcode;
+  realImpls.resolveExactBarcodeDecision = actual.resolveExactBarcodeDecision;
+  realImpls.resolveTrustedExactBarcodeDecision = actual.resolveTrustedExactBarcodeDecision;
   realImpls.resolveExactPartNumber = actual.resolveExactPartNumber;
-  return { ...actual, resolveExactBarcode: vi.fn(actual.resolveExactBarcode), resolveExactPartNumber: vi.fn(actual.resolveExactPartNumber) };
+  return {
+    ...actual,
+    resolveExactBarcode: vi.fn(actual.resolveExactBarcode),
+    resolveExactBarcodeDecision: vi.fn(actual.resolveExactBarcodeDecision),
+    resolveTrustedExactBarcodeDecision: vi.fn(actual.resolveTrustedExactBarcodeDecision),
+    resolveExactPartNumber: vi.fn(actual.resolveExactPartNumber),
+  };
 });
 vi.mock("@/server/decodeCacheStore", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/decodeCacheStore")>();
@@ -137,14 +147,22 @@ vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
   };
 });
 
-import { runDecodePipeline, DailyCapExceededError, classifySourceTier } from "@/server/decode/pipeline";
+import {
+  runDecodePipeline,
+  tryTrustedExactDecode,
+  createTrustedExactAccessForTest,
+  DailyCapExceededError,
+  classifySourceTier,
+  type DecodePipelineRequest,
+  type TrustedExactAccess,
+} from "@/server/decode/pipeline";
 import { detectCodeType } from "@/services/codeTypeDetector";
 import { __resetForTest, readDailyUsed, recordGptLadderSpend, recordGptLadderCall } from "@/services/security/aiSpendGuard";
 import { ladderStorage } from "@/server/upc/storage";
 import * as decodeCacheModule from "@/services/ai/decodeCache";
 import { clearDecodeCache } from "@/services/ai/decodeCache";
 import { __resetForTest as __resetDecodeCacheStoreForTest, getPersistedDecode, type PersistedDecode } from "@/server/decodeCacheStore";
-import { resolveExactBarcode, resolveExactPartNumber, type CorpusDecodeResult } from "@/server/tire-knowledge/TireKnowledgeProvider";
+import { resolveExactBarcode, resolveExactBarcodeDecision, resolveTrustedExactBarcodeDecision, resolveExactPartNumber, type CorpusDecodeResult } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { resolveUnknownFast } from "@/services/ai/parallelResolve";
 import { getLearnedProduct, upsertLearnedProduct, siblingPrefixConflict, __resetLearnedProductsForTest, type LearnedProductRow } from "@/server/learnedProducts";
 import { fetchV2 } from "@/services/fetchV2/index";
@@ -199,6 +217,8 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     // Task 6: restore the pass-through implementations so each test starts from real behavior; a test
     // that wants a synthetic corpus hit / persisted receipt uses mockResolvedValueOnce explicitly.
     vi.mocked(resolveExactBarcode).mockReset().mockImplementation(realImpls.resolveExactBarcode);
+    vi.mocked(resolveExactBarcodeDecision).mockReset().mockImplementation(realImpls.resolveExactBarcodeDecision);
+    vi.mocked(resolveTrustedExactBarcodeDecision).mockReset().mockImplementation(realImpls.resolveTrustedExactBarcodeDecision);
     vi.mocked(resolveExactPartNumber).mockReset().mockImplementation(realImpls.resolveExactPartNumber);
     vi.mocked(getPersistedDecode).mockReset().mockImplementation(realImpls.getPersistedDecode);
     vi.mocked(resolveUnknownFast).mockReset().mockImplementation(realParallel.resolveUnknownFast);
@@ -247,6 +267,117 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
   });
 
   const hitAnAiProvider = () => fetchSpy.mock.calls.some(([u]) => AI_PROVIDER_HOSTS.some((h) => String(u).includes(h)));
+
+  it("stops deterministic decode on a package block without reading downstream seams", async () => {
+    vi.mocked(resolveTrustedExactBarcodeDecision).mockResolvedValueOnce({ kind: "blocked_package", canonicalKey: "0030029885620210" });
+    const result = await tryTrustedExactDecode(makeReq("30029885620210"));
+    expect(result).toMatchObject({ kind: "computed", payload: { decision: { status: "needs_review" }, reasonCode: "blocked_package" } });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(getPersistedDecode).not.toHaveBeenCalled();
+    expect(lookupRetailBarcodeAsync).not.toHaveBeenCalled();
+    expect(lookupMasterCatalog).not.toHaveBeenCalled();
+  });
+
+  it("defaults direct pipeline access to unprivileged and rejects a JSON-shaped capability spoof", async () => {
+    const directRequest: DecodePipelineRequest = {
+      ...makeReq("029142337393"),
+      // @ts-expect-error A request-shaped boolean is not a privileged capability.
+      trustedExactAccess: { authenticatedBossCorpus: true },
+    };
+    void directRequest;
+    const spoof = JSON.parse('{"authenticatedBossCorpus":true}') as TrustedExactAccess;
+
+    await tryTrustedExactDecode(makeReq("029142337393"));
+    await tryTrustedExactDecode(makeReq("029142337393"), spoof);
+    await runDecodePipeline({ ...makeReq("029142337393"), deterministicOnly: true, trustedExactAccess: spoof });
+
+    expect(resolveTrustedExactBarcodeDecision).toHaveBeenNthCalledWith(1, "029142337393", { authenticatedBossCorpus: false });
+    expect(resolveTrustedExactBarcodeDecision).toHaveBeenNthCalledWith(2, "029142337393", { authenticatedBossCorpus: false });
+    expect(resolveTrustedExactBarcodeDecision).toHaveBeenNthCalledWith(3, "029142337393", { authenticatedBossCorpus: false });
+  });
+
+  it("accepts only the opaque local certification capability and rejects its factory in production", async () => {
+    const capability = createTrustedExactAccessForTest();
+    await tryTrustedExactDecode(makeReq("029142337393"), capability);
+    expect(resolveTrustedExactBarcodeDecision).toHaveBeenCalledWith("029142337393", { authenticatedBossCorpus: true });
+
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("TRUSTED_EXACT_BOSS_BUSINESS_IDS", "b1");
+    try {
+      expect(() => createTrustedExactAccessForTest()).toThrow("not available in production");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("uses the honest Boss fallback only for incomplete authenticated exact tire identities", async () => {
+    const incomplete = makeCorpusHit();
+    incomplete.results[0] = {
+      ...incomplete.results[0],
+      productName: "", brand: "Boss", specsShort: "", primaryBarcode: "012345678905",
+    };
+    const complete = makeCorpusHit();
+    complete.results[0] = {
+      ...complete.results[0],
+      productName: "Boss Roadmaster 235/60R18", brand: "Boss", specsShort: "235/60R18", primaryBarcode: "012345678905",
+    };
+    const bossHit = (result: CorpusDecodeResult) => ({ kind: "hit" as const, sourceScope: "authenticated_boss_corpus" as const, result });
+    vi.mocked(resolveTrustedExactBarcodeDecision)
+      .mockResolvedValueOnce(bossHit(incomplete))
+      .mockResolvedValueOnce(bossHit(complete));
+
+    const capability = createTrustedExactAccessForTest();
+    const fallback = await tryTrustedExactDecode(makeReq("012345678905"), capability);
+    const retained = await tryTrustedExactDecode(makeReq("012345678905"), capability);
+
+    expect(fallback).toMatchObject({ kind: "computed", payload: { results: [{ productName: "Known tire - 012345678905" }], decision: { corroborationPath: "boss_trusted_exact_barcode" } } });
+    expect(retained).toMatchObject({ kind: "computed", payload: { results: [{ productName: "Boss Roadmaster 235/60R18" }] } });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(getPersistedDecode).not.toHaveBeenCalled();
+    expect(lookupRetailBarcodeAsync).not.toHaveBeenCalled();
+    expect(lookupMasterCatalog).not.toHaveBeenCalled();
+  });
+
+  it("stops deterministic decode on an unavailable exact index", async () => {
+    vi.mocked(resolveTrustedExactBarcodeDecision).mockResolvedValueOnce({ kind: "exact_index_unavailable" });
+    const result = await tryTrustedExactDecode(makeReq("029142337393"));
+    expect(result).toMatchObject({ kind: "computed", payload: { decision: { status: "needs_review" }, reasonCode: "exact_index_unavailable" } });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(getPersistedDecode).not.toHaveBeenCalled();
+  });
+
+  it("uses an index-only decision for a pre-guard miss and never accepts a legacy fallback", async () => {
+    // A legacy hit is intentionally available at the old decision seam. The pre-guard path must
+    // ignore it: accepting it here would read SQLite/Turso/JSON before kill/rate/cap controls.
+    vi.mocked(resolveExactBarcodeDecision).mockResolvedValueOnce({
+      kind: "hit",
+      sourceScope: "global_corpus",
+      result: makeCorpusHit(),
+    });
+
+    const result = await tryTrustedExactDecode(makeReq("not-a-barcode"));
+
+    expect(result).toBeNull();
+    expect(resolveExactBarcodeDecision).not.toHaveBeenCalled();
+    expect(resolveTrustedExactBarcodeDecision).toHaveBeenCalledOnce();
+    expect(resolveExactBarcode).not.toHaveBeenCalled();
+    expect(getPersistedDecode).not.toHaveBeenCalled();
+    expect(lookupRetailBarcodeAsync).not.toHaveBeenCalled();
+    expect(lookupMasterCatalog).not.toHaveBeenCalled();
+  });
+
+  it("keeps the legacy barcode corpus rung after an index-only miss", async () => {
+    vi.mocked(resolveTrustedExactBarcodeDecision).mockResolvedValueOnce({ kind: "miss" });
+    vi.mocked(resolveExactBarcode).mockResolvedValueOnce(makeCorpusHit());
+
+    const result = await runDecodePipeline(makeReq("848983006257"));
+
+    expect(result).toMatchObject({ kind: "computed", payload: { decision: { status: "verified" } } });
+    expect(resolveTrustedExactBarcodeDecision).toHaveBeenCalledOnce();
+    expect(resolveExactBarcode).toHaveBeenCalledOnce();
+    expect(getPersistedDecode).not.toHaveBeenCalled();
+    expect(lookupRetailBarcodeAsync).not.toHaveBeenCalled();
+  });
 
   it("all-miss ladder returns an unresolved payload whose reason chain names every rung that came back empty", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "100"; // plenty of cap; the point is the miss, not the block

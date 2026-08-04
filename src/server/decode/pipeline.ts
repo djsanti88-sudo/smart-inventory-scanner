@@ -3,6 +3,7 @@ import type { AiLookupResult, EvidenceResult, DecodeDecision } from "@/types";
 import { emptyResult } from "@/services/ai/provider";
 import { type ProviderStatus } from "@/services/ai/decodeOrchestrator";
 import { decideDecode, isUsableProductName, isExampleOrTestRow } from "@/services/ai/decode";
+import { hasCountableTireIdentity } from "@/services/ai/tireSpecs";
 import { firecrawlScrapeCheap, searchIdentifyByBarcode, firecrawlKeysFromEnv } from "@/services/ai/firecrawlProvider";
 import { lookupBarcodeDb } from "@/server/retail-knowledge/barcodeDbProvider";
 import { groundIdentify, getLastGroundingStatus } from "@/services/ai/flashLiteGrounding";
@@ -10,7 +11,7 @@ import { verifyCodeOnPage } from "@/services/ai/verifyCodeOnPage";
 import { resolveUnknownFast } from "@/services/ai/parallelResolve";
 import { decodeReasonCode, REASON_TEXT, sanitizeCustomerReason, allMissReasonCode, MISS_REASON_TEXT } from "@/services/ai/decodeFallback";
 import { withDecodeCache, getDecodeCache } from "@/services/ai/decodeCache";
-import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
+import { resolveExactBarcode, resolveTrustedExactBarcodeDecision, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { isLikelyMisreadGtin } from "@/services/upc/misread";
 import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
 import { lookupPrefixFull as lookupPrefix, candidateKnownPrefixesFull as candidateKnownPrefixes, prefixFloorNameFull as prefixFloorName } from "@/server/catalog/prefixIndexServer";
@@ -498,6 +499,10 @@ export interface DecodePipelineRequest {
    *  Undefined for anonymous/unauthenticated requests - the gate falls back to today's plain global cap,
    *  byte-identical to pre-A2 behavior. */
   capContext?: { authedBusinessId?: string; accountCapCleared: boolean };
+  /** Work-reduction request only. It never grants access and stops on a trusted-index miss. */
+  deterministicOnly?: boolean;
+  /** Opaque server capability. Plain objects and request JSON are unprivileged at runtime. */
+  trustedExactAccess?: TrustedExactAccess;
 }
 
 /** The settled decode payload (the response body the route serializes; debug is loose because each
@@ -523,6 +528,99 @@ export type DecodePipelineResult =
   | { kind: "cap_blocked"; message: string; floor?: import("@/services/catalog/prefixFloor").PrefixFloorResult }
   | { kind: "computed"; payload: DecodePayload; cached: boolean; paidComputeCharged: boolean };
 
+export type ComputedPipelineOutcome = Extract<DecodePipelineResult, { kind: "computed" }>;
+
+declare const trustedExactAccessBrand: unique symbol;
+
+/**
+ * An identity-registered server capability, intentionally not a data bag. Its private brand prevents
+ * TypeScript callers from constructing it, and the WeakSet registry rejects cast/JSON/plain-object
+ * spoofs at runtime. Only the verified route derivation and local non-production certification factory
+ * below can mint one.
+ */
+export interface TrustedExactAccess {
+  readonly [trustedExactAccessBrand]: "trusted_exact_access";
+}
+
+const trustedExactAccessRegistry = new WeakSet<object>();
+
+function mintTrustedExactAccess(): TrustedExactAccess {
+  const access = Object.freeze({}) as TrustedExactAccess;
+  trustedExactAccessRegistry.add(access);
+  return access;
+}
+
+/** Called only after Firebase identity, membership, and server-side policy verification in the route. */
+export function deriveTrustedExactAccessForVerifiedRoute(authorized: boolean): TrustedExactAccess | undefined {
+  return authorized ? mintTrustedExactAccess() : undefined;
+}
+
+/** Local certification only. No request or environment value can enable this production capability. */
+export function createTrustedExactAccessForTest(): TrustedExactAccess {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("Trusted exact test capability is not available in production.");
+  }
+  return mintTrustedExactAccess();
+}
+
+function hasTrustedExactAccess(access: TrustedExactAccess | undefined): boolean {
+  return Boolean(access && trustedExactAccessRegistry.has(access));
+}
+
+function deterministicMissPayload(req: Pick<DecodePipelineRequest, "rawCodeSanitized" | "cleanCodeSanitized">, reasonCode: string): DecodePayload {
+  const reason = reasonCode === "blocked_package"
+    ? "This barcode identifies a package configuration that requires review."
+    : reasonCode === "exact_index_unavailable"
+      ? "Trusted barcode verification is temporarily unavailable."
+      : "No trusted exact barcode match was found.";
+  return {
+    mode: "decode",
+    providerNames: [],
+    results: [],
+    evidences: [],
+    providerStatuses: [],
+    decision: {
+      status: "needs_review",
+      confidence: 0,
+      reason,
+      evidenceStrength: "none",
+      exactCodeEvidenceVerifiedByApp: false,
+      crossCheck: { decision: "weak", confidence: 0, reason, brandSimilarity: 0, nameSimilarity: 0, contradictions: [] },
+    },
+    reasonCode,
+    reasonText: reason,
+    timedOut: false,
+    debug: { providersAttempted: [], evidenceStrengths: [], sourceCounts: [], aiCalled: false, pageFetched: false, cached: false },
+    sanitizedInput: { rawCodeSanitized: req.rawCodeSanitized, cleanCodeSanitized: req.cleanCodeSanitized },
+  };
+}
+
+/**
+ * The sole trusted-exact boundary. It consumes all discriminated exact-index results before any
+ * cache, storage, telemetry, retail, learned, catalog, or provider rung can be touched.
+ */
+export async function tryTrustedExactDecode(
+  req: Pick<DecodePipelineRequest, "code" | "rawCodeSanitized" | "cleanCodeSanitized">,
+  access?: TrustedExactAccess,
+): Promise<ComputedPipelineOutcome | null> {
+  const exact = await resolveTrustedExactBarcodeDecision(req.code, { authenticatedBossCorpus: hasTrustedExactAccess(access) });
+  if (exact.kind === "blocked_package" || exact.kind === "exact_index_unavailable") {
+    return { kind: "computed", payload: deterministicMissPayload(req, exact.kind), cached: false, paidComputeCharged: false };
+  }
+  if (exact.kind !== "hit") return null;
+  const corpus = exact.result;
+  const isBoss = exact.sourceScope === "authenticated_boss_corpus";
+  const result = isBoss && !hasCountableTireIdentity(corpus.results[0])
+    ? { ...corpus.results[0], productName: `Known tire - ${req.code}` }
+    : corpus.results[0];
+  const decision = isBoss
+    ? { ...corpus.decision, corroborationPath: "boss_trusted_exact_barcode" as const }
+    : corpus.decision;
+  const payload = corpusPayload({ ...corpus, results: result ? [result] : [], decision, path: isBoss ? "corpus_exact_barcode" : corpus.path }, req.rawCodeSanitized, req.cleanCodeSanitized);
+  if (isBoss) payload.debug.corroborationPath = "boss_trusted_exact_barcode";
+  return { kind: "computed", payload, cached: false, paidComputeCharged: false };
+}
+
 /**
  * Run the full decode pipeline for one request. Encapsulates the L1/L2 cache peek, the free
  * corpus/retail/Plan-D stages, the lazy daily-cap gate, the spec-v6 ladder (Go-UPC -> Fetch V2 ->
@@ -531,6 +629,14 @@ export type DecodePipelineResult =
  */
 export async function runDecodePipeline(req: DecodePipelineRequest): Promise<DecodePipelineResult> {
   const { code, codeType, rawCodeSanitized, cleanCodeSanitized, threshold, allowNonPublicAutoCount, forceRetry, budgetMs, capContext } = req;
+
+  // Keep direct callers and the authenticated route on the same fail-closed exact boundary. Direct
+  // callers never receive authenticated boss corpus capability unless a server test injects it.
+  const trusted = await tryTrustedExactDecode(req, req.trustedExactAccess);
+  if (trusted) return trusted;
+  if (req.deterministicOnly) {
+    return { kind: "computed", payload: deterministicMissPayload(req, "no_result"), cached: false, paidComputeCharged: false };
+  }
 
   // A4 (owner-ratified 2026-07-15, "trace every non-decode"): started at the very TOP of the OUTER
   // function (not computeDecode) so durationMs covers the corpus peek, the L2 persisted-decode peek,
@@ -674,6 +780,8 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     const gtinShaped = isGtinShaped(code);
     // `misread` (QA HARDENING FIX #6) is computed once at the top of runDecodePipeline - see there.
     const skuShaped = !gtinShaped && codeType !== "empty";
+    // The pre-guard trusted-index miss above deliberately did not consult legacy backends. Once
+    // the original route guards have cleared, preserve the historical barcode corpus rung.
     const corpus = (!misread ? await resolveExactBarcode(code) : null) ?? (skuShaped ? await resolveExactPartNumber(code) : null);
     if (corpus) {
       appendDecodeOutcome({ settledBy: "tire-corpus", status: corpus.decision.status, reasons: [], sourceTier: null });

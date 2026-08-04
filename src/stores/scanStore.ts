@@ -9,6 +9,7 @@ import type {
   DecodeDecision,
   InventoryCount,
   InventorySession,
+  LiveDecodeOptions,
   PendingSyncItem,
   Product,
   ProvenanceTier,
@@ -31,7 +32,7 @@ import { resolveScanToProductTiered } from "@/services/aliasMatcher";
 import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/services/productDedup";
 import { incrementInventoryCount } from "@/services/inventory";
 import { buildIdempotencyKey } from "@/services/idempotency";
-import { MockDb, getMockDb, type IncrementPayload, type SyncResult } from "@/services/mockDb";
+import { MockDb, getMockDb, type IncrementPayload, type SyncResult, type TrustedExactSettlementPayload } from "@/services/mockDb";
 import type { SyncTarget } from "@/services/db/syncTarget";
 import { FirebaseSyncTarget } from "@/services/db/firebase/firebaseSyncTarget";
 import { loadBusinessData } from "@/services/db/firebase/businessDataLoader";
@@ -227,6 +228,15 @@ export class DecodeAbortedError extends Error {
   }
 }
 
+/** A free trusted-exact request may retry once after a transient transport/server failure. This is
+ * deliberately distinct from a successful deterministic miss, auth failure, or any paid decode. */
+class RetryableDeterministicDecodeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RetryableDeterministicDecodeError";
+  }
+}
+
 const DEFAULT_AI_STATUS: AiStatus = {
   liveEnabled: true,
   autoDecodeOnScan: true,
@@ -294,6 +304,38 @@ function tireAutoCountOk(best: AiLookupResult | null | undefined): boolean {
   return !isTireContext(best) || hasCountableTireIdentity(best);
 }
 
+/** The trusted-exact server route is the only incomplete-tire exception. Generic corpus/provider/AI
+ * payloads remain subject to normal tire completeness gates even if they copy its fields. */
+function trustedBossExactCanonicalId(decision: DecodeDecision | undefined, debug: unknown): string | null {
+  const id = decision?.trustedExactCanonicalProductId;
+  const fingerprint = debug && typeof debug === "object"
+    ? (debug as { trustedExactIndex?: unknown }).trustedExactIndex
+    : undefined;
+  const validFingerprint = fingerprint && typeof fingerprint === "object" &&
+    /^\d+\.\d+\.\d+$/.test((fingerprint as { schemaVersion?: unknown }).schemaVersion as string ?? "") &&
+    /^[a-f\d]{64}$/i.test((fingerprint as { contentDigest?: unknown }).contentDigest as string ?? "");
+  return decision?.status === "verified" &&
+    decision.exactCodeEvidenceVerifiedByApp === true &&
+    decision.corroborationPath === "boss_trusted_exact_barcode" &&
+    validFingerprint &&
+    typeof id === "string" && (
+      /^trusted-exact:\d{14}$/.test(id) ||
+      /^trusted-exact:canonical:[A-Z0-9_]{12,128}$/.test(id)
+    )
+    ? id
+    : null;
+}
+
+function deterministicExactLookupEligible(code: string): boolean {
+  const grade = gradeBarcode({ barcode: code });
+  // Do not weaken GTIN validation: malformed/placeholder GTINs remain rejected. The only additional
+  // candidate shape is a bounded shop label, which the server maps to its private `nongtin:` allowlist
+  // and otherwise returns as a deterministic miss without catalog/provider egress.
+  return grade.verdict !== "rejected" || (
+    !grade.gtinShaped && !grade.placeholder && /^[A-Za-z0-9._-]{1,64}$/.test(code.trim())
+  );
+}
+
 /**
  * BUG FIX (badge/reason contradiction, live-proven 115-code preview run): a raw decode `decision.reason`
  * describes the SOURCE's own confidence tier ("Verified from the trusted tire knowledge base (exact
@@ -357,47 +399,60 @@ function autoSuggestApplyOk(params: {
 /**
  * Bounded decode queue (Task 5): a rapid multi-scan burst must not fire unlimited concurrent
  * `/api/ai-lookup` network calls. The public `liveDecode` action is a thin wrapper that ENQUEUES the
- * real decode work (`runLiveDecodeOnce`) here; `drainDecodeQueue` runs at most MAX_CONCURRENT_DECODES
- * tasks at a time, FIFO. Module-level (not per-store-instance) is intentional and harmless: review ids
+ * real decode work (`runLiveDecodeOnce`) here. Ordinary/provider-capable work runs at most
+ * MAX_CONCURRENT_DECODES tasks at a time; deterministic-only trusted-exact work uses its own four-slot
+ * lane so it cannot wait behind provider work or consume its budget. Module-level (not per-store-instance) is intentional and harmless: review ids
  * are globally unique per scan, and the queue always fully drains, so nothing leaks across store
  * instances or tests. Counting/persistence NEVER waits on this queue - `ensureProvisionalCount` already
  * ran SYNCHRONOUSLY at scan time, before `liveDecode` is ever invoked (see `processScan`), so a
  * queued/delayed decode only delays the AI enrichment, never the count or the "Decoding..." badge.
  */
 const MAX_CONCURRENT_DECODES = 2;
+const MAX_CONCURRENT_DETERMINISTIC_EXACT_DECODES = 4;
+const MAX_DETERMINISTIC_EXACT_RECOVERY_CYCLES = 3;
+const DETERMINISTIC_EXACT_RECOVERY_BACKOFF_MS = 250;
 // Task 3.5: cap the count-snapshot ring buffer (same pattern as FEEDBACK_EVENT_CAP) so the variance/
 // shrinkage report's history stays useful without growing localStorage unbounded.
 const COUNT_SNAPSHOT_CAP = 12;
 const pendingDecodeIds: string[] = [];
+const pendingDeterministicExactDecodeIds: string[] = [];
 let activeDecodes = 0;
-const decodeTasks = new Map<string, { run: () => Promise<void>; resolve: () => void; reject: (e: unknown) => void }>();
+let activeDeterministicExactDecodes = 0;
+const decodeTasks = new Map<string, { run: () => Promise<void>; resolve: () => void; reject: (e: unknown) => void; deterministicOnly: boolean }>();
 // Dedupe: a reviewId already queued OR in flight resolves to the SAME promise instead of being queued
 // twice - a duplicate liveDecode call for a review already being decoded is a no-op, not a second fetch.
 const decodeTaskPromises = new Map<string, Promise<void>>();
 
 function drainDecodeQueue(): void {
-  while (activeDecodes < MAX_CONCURRENT_DECODES && pendingDecodeIds.length > 0) {
-    const reviewId = pendingDecodeIds.shift()!;
+  const start = (reviewId: string, deterministicOnly: boolean) => {
     const task = decodeTasks.get(reviewId);
     decodeTasks.delete(reviewId);
-    if (!task) continue;
-    activeDecodes++;
+    if (!task) return;
+    if (deterministicOnly) activeDeterministicExactDecodes++;
+    else activeDecodes++;
     task
       .run()
       .then(task.resolve, task.reject)
       .finally(() => {
-        activeDecodes--;
+        if (deterministicOnly) activeDeterministicExactDecodes--;
+        else activeDecodes--;
         drainDecodeQueue();
       });
+  };
+  while (activeDecodes < MAX_CONCURRENT_DECODES && pendingDecodeIds.length > 0) {
+    start(pendingDecodeIds.shift()!, false);
+  }
+  while (activeDeterministicExactDecodes < MAX_CONCURRENT_DETERMINISTIC_EXACT_DECODES && pendingDeterministicExactDecodeIds.length > 0) {
+    start(pendingDeterministicExactDecodeIds.shift()!, true);
   }
 }
 
-function enqueueDecode(reviewId: string, run: () => Promise<void>): Promise<void> {
+function enqueueDecode(reviewId: string, run: () => Promise<void>, deterministicOnly: boolean): Promise<void> {
   const existing = decodeTaskPromises.get(reviewId);
   if (existing) return existing;
   const promise = new Promise<void>((resolve, reject) => {
-    pendingDecodeIds.push(reviewId);
-    decodeTasks.set(reviewId, { run, resolve, reject });
+    (deterministicOnly ? pendingDeterministicExactDecodeIds : pendingDecodeIds).push(reviewId);
+    decodeTasks.set(reviewId, { run, resolve, reject, deterministicOnly });
   });
   decodeTaskPromises.set(reviewId, promise);
   const cleanup = () => decodeTaskPromises.delete(reviewId);
@@ -485,11 +540,6 @@ function carriedProvisionalBarcode(params: {
  * primarySku) were stripped by the customer-role localStorage split (buildPersistedScanState /
  * CUSTOMER_SAFE_PRODUCT_FIELDS never persists those product-identity fields to a customer's disk).
  */
-// F5 bundle-surgery: productIds with an /api/prefix-floor enrichment round-trip currently in flight.
-// Module-level (not store state - transient network bookkeeping, never persisted): multiple call sites
-// can request enrichment for the same freshly minted row in one scan flow; only one fetch ever fires.
-const enrichInFlight = new Set<string>();
-
 function provisionalPlaceholderName(code: string): string {
   const ct = detectCodeType(code);
   const struct = decodeBarcodeStructure(code, ct);
@@ -713,10 +763,12 @@ export interface ScanState {
   /** Public entry point: ENQUEUES the decode (see the module-level bounded decode queue) and resolves
    *  once it actually runs. Never call `runLiveDecodeOnce` directly outside this queue - that would
    *  bypass the MAX_CONCURRENT_DECODES bound a rapid scan burst relies on. */
-  liveDecode: (reviewId: string) => Promise<void>;
+  liveDecode: (reviewId: string, options?: LiveDecodeOptions) => Promise<void>;
   /** The real decode work (network call + evidence gate + count/needs-review routing). Only ever
    *  invoked FROM the `liveDecode` queue wrapper - see the module-level `enqueueDecode`/`drainDecodeQueue`. */
-  runLiveDecodeOnce: (reviewId: string) => Promise<void>;
+  runLiveDecodeOnce: (reviewId: string, options?: LiveDecodeOptions) => Promise<void>;
+  /** Server-issued trusted exact settlement. This intentionally never learns an alias or catalog entry. */
+  settleTrustedExactIdentity: (reviewId: string, canonicalId: string, product: Partial<Product>, reason: string) => void;
   /** DECODE-EVERYTHING fallback: when the AI decode is SKIPPED (circuit breaker open / rate-limited / AI
    *  unavailable / offline / cap), still COUNT the scan as an UNVERIFIED, reviewable provisional row with a
    *  SAFE label (never fabricated manufacturer anatomy for non-GS1 codes; never an approved alias / verified
@@ -732,7 +784,7 @@ export interface ScanState {
   ensureProvisionalCount: (
     code: string,
     reason: string,
-    opts?: { freshTransferKeys?: boolean; countIfFeedMissing?: boolean },
+    opts?: { freshTransferKeys?: boolean; countIfFeedMissing?: boolean; deferPrefixFloorEnrichment?: boolean },
   ) => string;
   /** F5 bundle-surgery (wave 2, 2026-07-20): fire-and-forget enrichment for a provisional row's bare
    *  "Unidentified item (...)" label. Called AFTER the row already appears + counts (never before -
@@ -761,7 +813,7 @@ export interface ScanState {
    *  Awaits deps.lookupGlobalCatalog, applies the Phase-8C firewall, merges a verified hit into
    *  the in-memory catalog, records "found_from_catalog" feedback, and resolves via resolveUnknown.
    *  Falls through to AI on a miss, pending entry, firewall conflict, or dep absence. Fire-and-forget. */
-  cloudCatalogResolve: (reviewId: string, codes: string[]) => Promise<void>;
+  cloudCatalogResolve: (reviewId: string, codes: string[], options?: { skipDeterministicRetry?: boolean }) => Promise<void>;
   setAiStatus: (partial: Partial<AiStatus>) => void;
   refreshAiStatus: () => Promise<void>;
   setEmergencyStop: (on: boolean) => void;
@@ -1236,6 +1288,56 @@ function idForReview(r: UnknownCodeReview): string {
   return parts[2] ?? r.id;
 }
 
+const CLOUD_DRAIN_CONCURRENCY = 24;
+const CLOUD_SYNC_BURST_DEBOUNCE_MS = 300;
+
+// Parallel cloud writes are safe only when their durable targets differ. Count increments also read
+// their target row inside a transaction, so repeated scans of one product must retain queue order.
+function cloudWriteTargets(item: PendingSyncItem): string[] {
+  const key = (entityType: string, entityId: string) => `${item.businessId}\u0000${entityType}\u0000${entityId}`;
+  if (item.operation === "INCREMENT_COUNT") {
+    const payload = item.payload as IncrementPayload;
+    return [
+      key("inventoryCounts", `${payload.sessionId}\u0000${payload.productId}`),
+      ...(payload.scanEvent ? [key("ScanEvent", payload.scanEvent.id)] : []),
+      ...(payload.product ? [key("Product", payload.product.id)] : []),
+    ];
+  }
+  if (item.operation === "SETTLE_TRUSTED_EXACT") {
+    const payload = item.payload as TrustedExactSettlementPayload;
+    return [
+      key("UnknownCodeReview", payload.review.id),
+      key("Product", payload.product.id),
+      ...(payload.archivedProduct ? [key("Product", payload.archivedProduct.id)] : []),
+      ...payload.terminalEvents.map((event) => key("ScanEvent", event.id)),
+      ...(payload.countTransfers ?? []).flatMap((transfer) => [
+        key("inventoryCounts", `${transfer.sessionId}\u0000${transfer.fromProductId}`),
+        key("inventoryCounts", `${transfer.sessionId}\u0000${transfer.toProductId}`),
+      ]),
+    ];
+  }
+  return [key(item.entityType, item.entityId)];
+}
+
+function nextCloudDrainChunk(items: PendingSyncItem[], limit = CLOUD_DRAIN_CONCURRENCY): { chunk: PendingSyncItem[]; remaining: PendingSyncItem[] } {
+  const targets = new Set<string>();
+  const blockedTargets = new Set<string>();
+  const chunk: PendingSyncItem[] = [];
+  const remaining: PendingSyncItem[] = [];
+  for (const item of items) {
+    const itemTargets = cloudWriteTargets(item);
+    const conflicts = itemTargets.some((target) => targets.has(target) || blockedTargets.has(target));
+    if (chunk.length < limit && !conflicts) {
+      for (const target of itemTargets) targets.add(target);
+      chunk.push(item);
+    } else {
+      for (const target of itemTargets) blockedTargets.add(target);
+      remaining.push(item);
+    }
+  }
+  return { chunk, remaining };
+}
+
 export function buildScanInitializer(deps: ScanStoreDeps) {
   const { db, idFactory, now } = deps;
   const cloudBackend = deps.cloudBackend ?? false;
@@ -1245,11 +1347,28 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
     get: () => ScanState,
   ): ScanState => {
     const seed = getSeed();
+    let cloudSyncDebounce: ReturnType<typeof setTimeout> | null = null;
+    // Transient, per-store network bookkeeping. Keeping this inside the initializer prevents one
+    // tenant/store instance (or test store) from suppressing another instance that happens to mint
+    // the same local product id, while still deduplicating all call sites within a scan flow.
+    const enrichInFlight = new Set<string>();
 
     const enqueueAndSync = (items: PendingSyncItem[]) => {
       set((s) => ({ pendingSyncQueue: [...s.pendingSyncQueue, ...items] }));
-      // Optimistic UI is already updated by the caller; attempt sync afterward.
-      get().syncPending();
+      // Keep exact lookup latency isolated from Firestore during a hardware-scanner burst. Every
+      // physical fact is already durable in the local pending queue and counted in the UI; once the
+      // burst pauses, the dependency-safe 24-slot cloud drain starts. Conflicting document targets
+      // still serialize; only independent transactions use the additional parallelism. Manual retrySync remains
+      // immediate, and mock/local sync stays synchronous for deterministic tests.
+      if (!cloudBackend) {
+        get().syncPending();
+        return;
+      }
+      if (cloudSyncDebounce) clearTimeout(cloudSyncDebounce);
+      cloudSyncDebounce = setTimeout(() => {
+        cloudSyncDebounce = null;
+        get().syncPending();
+      }, CLOUD_SYNC_BURST_DEBOUNCE_MS);
     };
 
     // Live decode is tenant-scoped. Mock/E2E mode remains token-free.
@@ -1327,16 +1446,32 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
     };
 
     // Serialize cloud drains: rapid scans each call syncPending, and overlapping async drains would
-    // contend on the same _appliedKeys doc (self-inflicted "already-exists"). A promise-chain mutex runs
-    // each drain after the previous completes; every enqueue still triggers a drain that picks up the
-    // latest queue. Per-item idempotency (transaction + ledger) remains the guarantee against true retries.
-    let drainChain: Promise<void> = Promise.resolve();
+    // contend on the same _appliedKeys doc (self-inflicted "already-exists"). Coalesce those wakeups
+    // into one worker: after a pass it re-reads the queue when new work arrived during the await. This
+    // avoids one empty promise-chain pass per scan while retaining serial per-item db.apply calls.
+    let cloudDrainPromise: Promise<void> | null = null;
+    let cloudDrainRequestedGeneration = 0;
+    let cloudDrainCompletedGeneration = 0;
+    let cloudDrainForceRequested = false;
     let businessLoadGeneration = 0;
     const queueItemIdentity = (item: PendingSyncItem) =>
       `${item.businessId}\u0000${item.id}\u0000${item.idempotencyKey}`;
     const syncPendingCloud = (force: boolean): Promise<void> => {
-      drainChain = drainChain.then(() => drainCloudOnce(force)).catch(() => {});
-      return drainChain;
+      cloudDrainRequestedGeneration++;
+      cloudDrainForceRequested ||= force;
+      if (cloudDrainPromise) return cloudDrainPromise;
+      cloudDrainPromise = (async () => {
+        while (cloudDrainCompletedGeneration < cloudDrainRequestedGeneration) {
+          const generation = cloudDrainRequestedGeneration;
+          const passForce = cloudDrainForceRequested;
+          cloudDrainForceRequested = false;
+          await drainCloudOnce(passForce);
+          cloudDrainCompletedGeneration = generation;
+        }
+      })().catch(() => {}).finally(() => {
+        cloudDrainPromise = null;
+      });
+      return cloudDrainPromise;
     };
 
     // Cloud drain (one pass): async, awaits db.apply, and REQUIRES a real business context first (no
@@ -1362,7 +1497,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       const appliedItems = new Set<string>();
       const erroredItems = new Map<string, PendingSyncItem>();
       let lastErr: string | null = null;
-      for (const item of batch) {
+      let remaining = batch;
+      let firstChunk = true;
+      while (remaining.length > 0) {
         const live = get();
         if (
           !live.businessContextReady ||
@@ -1371,57 +1508,66 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         ) {
           break;
         }
-        const itemIdentity = queueItemIdentity(item);
-        let res;
-        try {
-          res = await db.apply(item);
-        } catch (e) {
-          res = {
-            ok: false,
-            alreadyApplied: false,
-            error: e instanceof Error ? e.message : String(e),
-            retryable: true,
-          };
+        // Start every drain with one item so an in-flight tenant switch can stop before any later
+        // active-tenant write starts. Once that context boundary completes, disjoint writes may fan out.
+        const selected = nextCloudDrainChunk(remaining, firstChunk ? 1 : CLOUD_DRAIN_CONCURRENCY);
+        firstChunk = false;
+        remaining = selected.remaining;
+        const outcomes = await Promise.all(selected.chunk.map(async (item) => {
+          let res: SyncResult;
+          try {
+            res = await db.apply(item);
+          } catch (e) {
+            res = {
+              ok: false,
+              alreadyApplied: false,
+              error: e instanceof Error ? e.message : String(e),
+              retryable: true,
+            };
+          }
+          return { item, res };
+        }));
+        for (const { item, res } of outcomes) {
+          const itemIdentity = queueItemIdentity(item);
+          if (res.ok) {
+            appliedItems.add(itemIdentity);
+            if (item.scanEventId) syncedIds.add(item.scanEventId);
+          } else {
+            erroredItems.set(itemIdentity, {
+              ...item,
+              status: res.retryable === false ? "quarantined" : "error",
+              retryCount: item.retryCount + 1,
+              lastError: res.error ?? "sync failed",
+              updatedAt: now(),
+            });
+            lastErr = res.error ?? "sync failed";
+          }
         }
-        if (res.ok) {
-          appliedItems.add(itemIdentity);
-          if (item.scanEventId) syncedIds.add(item.scanEventId);
-        } else {
-          erroredItems.set(itemIdentity, {
-            ...item,
-            status: res.retryable === false ? "quarantined" : "error",
-            retryCount: item.retryCount + 1,
-            lastError: res.error ?? "sync failed",
-            updatedAt: now(),
+        set((cur) => {
+          // Reconcile every bounded chunk against the CURRENT queue: drop applied items, replace errored
+          // items, and keep work enqueued during awaits for the mutex's next pass.
+          const nextQueue = cur.pendingSyncQueue
+            .filter((it) => !appliedItems.has(queueItemIdentity(it)))
+            .map((it) => erroredItems.get(queueItemIdentity(it)) ?? it);
+          const recomputed = recomputeSyncStatus({
+            businessId: cur.businessId,
+            scanFeed: cur.scanFeed,
+            finalCounts: cur.finalCounts,
+            needsReviewQueue: cur.needsReviewQueue,
+            pendingSyncQueue: nextQueue,
           });
-          lastErr = res.error ?? "sync failed";
-        }
-      }
-      set((cur) => {
-        // Reconcile against the CURRENT queue: drop applied items, replace errored with their updated
-        // version, and KEEP any items enqueued while this pass was awaiting (the mutex's next pass drains
-        // them). This avoids the read-modify-write race that previously dropped concurrent scans.
-        const nextQueue = cur.pendingSyncQueue
-          .filter((it) => !appliedItems.has(queueItemIdentity(it)))
-          .map((it) => erroredItems.get(queueItemIdentity(it)) ?? it);
-        const recomputed = recomputeSyncStatus({
-          businessId: cur.businessId,
-          scanFeed: cur.scanFeed,
-          finalCounts: cur.finalCounts,
-          needsReviewQueue: cur.needsReviewQueue,
-          pendingSyncQueue: nextQueue,
+          const contextStillMatches =
+            cur.businessContextReady &&
+            cur.businessId === activeBusinessId &&
+            cur.userId === activeUserId;
+          return {
+            pendingSyncQueue: nextQueue,
+            syncedScanEventIds: [...syncedIds],
+            lastSyncError: contextStillMatches ? lastErr : cur.lastSyncError,
+            ...recomputed,
+          };
         });
-        const contextStillMatches =
-          cur.businessContextReady &&
-          cur.businessId === activeBusinessId &&
-          cur.userId === activeUserId;
-        return {
-          pendingSyncQueue: nextQueue,
-          syncedScanEventIds: [...syncedIds],
-          lastSyncError: contextStillMatches ? lastErr : cur.lastSyncError,
-          ...recomputed,
-        };
-      });
+      }
     };
 
     return {
@@ -2282,6 +2428,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // identifier, count THAT product (exact identifier match only, never fuzzy, no AI). A human approval
         // later flips it verified + approved, after which the resolver matches it as a normal Known.
         let provMatchId: string | null = null;
+        let provisionalExactPending = false;
         if (!countable && !knownConflict) {
           const countedIds = new Set(get().finalCounts.map((c) => c.productId));
           const ids = [cleaned.cleanCode, ...(cleaned.normalizedCandidates ?? [])];
@@ -2293,6 +2440,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 p.provisional === true &&
                 [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).some((c) => !!c && ids.includes(c)),
             )?.id ?? null;
+          // A repeated or zero-padded spelling can arrive while this provisional product's trusted-
+          // exact request is still resolving. Count it on the same provisional ledger row, but keep
+          // the UI honest as `decoding` rather than downgrading it to Suggested. The first exact
+          // settlement repoints every physical event/count on this provisional id atomically.
+          provisionalExactPending = Boolean(
+            provMatchId &&
+              get().needsReviewQueue.some(
+                (review) => review.provisionalProductId === provMatchId && review.status === "open" && review.decodeStatus === "decoding",
+              ),
+          );
         }
         const effectiveProductId = resolution.productId ?? provMatchId;
         const effectiveCountable = countable || !!provMatchId;
@@ -2314,8 +2471,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             status: effectiveCountable ? "known" : resolution.resolverStatus === "conflict" ? "conflict" : "needs_review",
             resolverStatus: resolution.resolverStatus,
             codeType: resolution.codeType,
-            reason: provMatchId ? "Counted (suggested - awaiting your confirmation)." : resolution.reason,
-            decodeStatus: provMatchId ? "suggested" : undefined,
+            reason: provisionalExactPending
+              ? "Trusted exact lookup in progress."
+              : provMatchId
+                ? "Counted (suggested - awaiting your confirmation)."
+                : resolution.reason,
+            decodeStatus: provisionalExactPending ? "decoding" : provMatchId ? "suggested" : undefined,
             quantityDelta: effectiveCountable ? 1 : 0,
             quantityAfterScan: 0,
             createdAt,
@@ -2345,6 +2506,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // P6 C2: written AFTER the count above is applied - never before (TOP-LEVEL LAW).
           markFirstScanIfNeeded();
 
+          const productSnapshot = get().products.find((product) => product.id === effectiveProductId);
           const incPayload: IncrementPayload = {
             businessId,
             sessionId,
@@ -2352,20 +2514,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             scanEventId,
             quantityDelta: 1,
             idempotencyKey: keyFor("INCREMENT_COUNT"),
+            scanEvent: event,
+            ...(productSnapshot ? { product: productSnapshot } : {}),
           };
           enqueueAndSync([
-            makeQueueItem({
-              idFactory,
-              now,
-              businessId,
-              sessionId,
-              entityType: "ScanEvent",
-              entityId: scanEventId,
-              operation: "SAVE_SCAN_EVENT",
-              payload: event,
-              idempotencyKey: keyFor("SAVE_SCAN_EVENT"),
-              scanEventId,
-            }),
             makeQueueItem({
               idFactory,
               now,
@@ -2582,6 +2734,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (misread) {
           autoGate = { allowed: false, reason: "Scan misread - decode was not attempted." };
         }
+        // The free trusted-exact request runs independently of the paid AI gate. With provider keys
+        // disabled, a valid online Boss barcode is still actively resolving and must render as
+        // `decoding`, never flash `needs_review` before the exact response arrives.
+        const deterministicLookupEligible =
+          !misread && get().online && deterministicExactLookupEligible(cleaned.cleanCode);
+        const lookupPending = autoGate.allowed || deterministicLookupEligible;
 
         const existingOpen = get().needsReviewQueue.find(
           (r) => r.cleanCode === cleaned.cleanCode && r.status === "open",
@@ -2591,7 +2749,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // facing, no AI/provider/Settings mechanics). The auto-decode "why" (e.g. lookup not configured)
         // goes to decodeNote, which LiveScanFeed shows ONLY to platformOwner. The internal gate reason
         // text is unchanged (still used for aiLookupLogs/diagnostics).
-        event.decodeStatus = existingOpen?.decodeStatus ?? (autoGate.allowed ? "decoding" : "needs_review");
+        event.decodeStatus = existingOpen?.decodeStatus ?? (lookupPending ? "decoding" : "needs_review");
         event.reason = existingOpen?.reason ?? resolution.reason;
         event.decodeNote = existingOpen?.decodeNote ?? autoGate.reason;
 
@@ -2601,7 +2759,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // network work. The AI/catalog lookup below only ENRICHES this provisional row (name/verified); it
         // can never again decide whether the scan counts. ensureProvisionalCount is idempotent, so the later
         // decode handlers (which filter on status !== "known") find nothing to re-count.
-        get().ensureProvisionalCount(cleaned.cleanCode, resolution.reason);
+        get().ensureProvisionalCount(cleaned.cleanCode, resolution.reason, {
+          // A valid online code is about to use the authenticated exact route. Do not launch the
+          // lower-value prefix-floor request beside it; exact misses/failures already invoke the
+          // enrichment fallback later. This keeps known-database scans off the 429-prone side route.
+          deferPrefixFloorEnrichment: deterministicLookupEligible,
+        });
 
         if (!existingOpen) {
           // STABLE-ID FIX: ensureProvisionalCount just ran synchronously above, so this code's placeholder
@@ -2639,7 +2802,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             providerName: resolution.resolverStatus === "conflict" ? "conflict" : "",
             confidence: 0,
             hasSuggestion: false,
-            decodeStatus: autoGate.allowed ? "decoding" : "needs_review",
+            decodeStatus: lookupPending ? "decoding" : "needs_review",
             evidenceStrength: "none",
             exactCodeEvidenceVerifiedByApp: false,
             crossCheckDecision: "",
@@ -2731,14 +2894,54 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             return event;
           }
 
-          // Fall back to live AI decode (subject to the existing gate). A human still approves anything
-          // not auto-accepted. AI is never called for a known/approved scan or a verified catalog hit.
-          // Option 1 wiring: if the cloud dep is present and we're online, try the global catalog first;
-          // cloudCatalogResolve falls through to AI internally on a miss / firewall conflict.
-          if (deps.lookupGlobalCatalog && get().online) {
-            // FIX 5: swallow a rejection here (e.g. a dev-assert throw from the GC1 hard invariant)
-            // so it never becomes an unhandled promise rejection - siblings already do this (line ~1138).
-            void get().cloudCatalogResolve(review.id, codes).catch(() => {});
+          // Valid online GTINs must use the trusted exact index before a cloud catalog round-trip. This
+          // is both the Boss-code correctness path and the fast path: a trusted exact hit settles the
+          // review before any global-catalog or paid/deep decode work can begin.
+          if (deterministicLookupEligible) {
+            const runDeterministicExactRecovery = async (cycle = 0): Promise<void> => {
+              try {
+                await get().liveDecode(review.id, { deterministicOnly: true });
+              } catch (error) {
+                const retryableTransport = error instanceof DecodeAbortedError || error instanceof RetryableDeterministicDecodeError;
+                const currentReview = get().needsReviewQueue.find((item) => item.id === review.id);
+                if (
+                  !retryableTransport ||
+                  cycle >= MAX_DETERMINISTIC_EXACT_RECOVERY_CYCLES ||
+                  !get().online ||
+                  currentReview?.status !== "open"
+                ) {
+                  throw error;
+                }
+                // This repeats the full exact-only chain after its two bounded request attempts.
+                // It never reaches catalog/AI and stops immediately if the review was settled or the
+                // scanner went offline while the backoff timer was pending.
+                await new Promise<void>((resolve) => setTimeout(resolve, DETERMINISTIC_EXACT_RECOVERY_BACKOFF_MS));
+                const afterBackoff = get().needsReviewQueue.find((item) => item.id === review.id);
+                if (!get().online || afterBackoff?.status !== "open") return;
+                return runDeterministicExactRecovery(cycle + 1);
+              }
+            };
+            void runDeterministicExactRecovery().then(() => {
+              // The exact response may have settled this review while its request was in flight. Only
+              // an honest deterministic miss may reach the slower global catalog fallback.
+              if (get().needsReviewQueue.find((item) => item.id === review.id)?.status !== "open") return;
+              if (deps.lookupGlobalCatalog && get().online) {
+                // We already made the deterministic request above. A closed-AI catalog miss must not
+                // enqueue that same exact request again; an open AI gate may still continue to AI.
+                void get().cloudCatalogResolve(review.id, codes, { skipDeterministicRetry: true }).catch(() => {});
+              } else if (autoGate.allowed) {
+                void get().liveDecode(review.id);
+              }
+            }).catch(() => {
+              // The exact transport exhausted its bounded retries. Re-arm only the cheap naming aid
+              // that was deferred while exact identity was in flight; never do this after a trusted
+              // hit settled the review, and never let it alter counting or verification.
+              const stillOpen = get().needsReviewQueue.find((item) => item.id === review.id && item.status === "open");
+              const provisionalId = stillOpen?.provisionalProductId ?? get().products.find(
+                (product) => product.provisional === true && product.status !== "archived" && product.primaryBarcode === cleaned.cleanCode,
+              )?.id;
+              if (stillOpen && provisionalId) get().enrichPrefixFloorLabel(cleaned.cleanCode, provisionalId);
+            });
           } else if (autoGate.allowed) {
             void get().liveDecode(review.id);
           } else {
@@ -3019,7 +3222,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }
       },
 
-      cloudCatalogResolve: async (reviewId, codes) => {
+      cloudCatalogResolve: async (reviewId, codes, options) => {
         if (!deps.lookupGlobalCatalog) return;
         let entry: CatalogEntry | null = null;
         try {
@@ -3145,19 +3348,121 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         });
         // A3 (owner-ratified 2026-07-15): same misread gate as processScan's direct dispatch - a
         // bad-check-digit code cannot decode via any GTIN rung even after a cloud-catalog miss.
-        if (autoGate.allowed && !isLikelyMisreadGtin(review.cleanCode)) void get().liveDecode(reviewId);
+        const deterministicLookupEligible =
+          state.online && deterministicExactLookupEligible(review.cleanCode);
+        if (autoGate.allowed && !isLikelyMisreadGtin(review.cleanCode)) {
+          void get().liveDecode(reviewId);
+        } else if (!options?.skipDeterministicRetry && deterministicLookupEligible && !isLikelyMisreadGtin(review.cleanCode)) {
+          void get().liveDecode(reviewId, { deterministicOnly: true });
+        }
       },
 
       // Thin wrapper: enqueue the real work on the bounded decode queue (module-level, MAX_CONCURRENT_DECODES
       // = 2) so a burst of unknown scans never fires unlimited concurrent /api/ai-lookup calls. Resolves once
       // the queued task actually runs and completes. Counting/persistence never waits on this - see the
       // queue doc comment above `decodeCorroborated`.
-      liveDecode: (reviewId) => enqueueDecode(reviewId, () => get().runLiveDecodeOnce(reviewId)),
+      liveDecode: (reviewId, options) => enqueueDecode(reviewId, () => get().runLiveDecodeOnce(reviewId, options), options?.deterministicOnly === true),
 
-      runLiveDecodeOnce: async (reviewId) => {
+      settleTrustedExactIdentity: (reviewId, canonicalId, product, reason) => {
+        const state = get();
+        const review = state.needsReviewQueue.find((item) => item.id === reviewId);
+        if (!review || (review.status !== "open" && review.status !== "suggested")) return;
+
+        const provisionalId = review.provisionalProductId ?? state.scanFeed.find((event) => event.cleanCode === review.cleanCode)?.matchedProductId ?? null;
+        const existing = state.products.find((item) => item.trustedExactCanonicalId === canonicalId && item.status !== "archived");
+        const targetId = existing?.id ?? provisionalId ?? `prod-${idFactory()}`;
+        const nowIso = now();
+        const target = existing ?? state.products.find((item) => item.id === provisionalId);
+        const settled: Product = target
+          ? {
+              ...target,
+              name: product.name || target.name,
+              brand: product.brand || target.brand,
+              category: product.category || target.category,
+              specsShort: product.specsShort || target.specsShort,
+              specsFull: product.specsFull || target.specsFull,
+              primarySku: product.primarySku || target.primarySku,
+              gtin: product.gtin || target.gtin,
+              upc: product.upc || target.upc,
+              ean: product.ean || target.ean,
+              trustedExactCanonicalId: canonicalId,
+              verified: true,
+              provisional: false,
+              confidence: 1,
+              updatedAt: nowIso,
+              updatedBy: "system:trusted_exact",
+            }
+          : {
+              id: targetId, businessId: state.businessId, name: product.name || `Known tire - ${review.cleanCode}`,
+              brand: product.brand || "", category: product.category || "Tire", specsShort: product.specsShort || "",
+              specsFull: product.specsFull || "", primarySku: product.primarySku || "", primaryBarcode: review.cleanCode,
+              gtin: product.gtin || "", upc: product.upc || "", ean: product.ean || "", vendorCodes: [], aliases: [],
+              imageUrl: "", productUrl: "", location: "", notes: "", status: "active", source: "scan", confidence: 1,
+              verified: true, provisional: false, trustedExactCanonicalId: canonicalId, createdAt: nowIso, updatedAt: nowIso,
+              createdBy: "system:trusted_exact", updatedBy: "system:trusted_exact",
+            };
+        const products = existing
+          ? state.products.map((item) => item.id === targetId ? settled : item).filter((item) => item.id !== provisionalId || item.id === targetId)
+          : state.products.map((item) => item.id === targetId ? settled : item);
+        const finalCounts = provisionalId && provisionalId !== targetId
+          ? transferOrphanCount(state.finalCounts, provisionalId, targetId, nowIso)
+          : state.finalCounts;
+        const version = `${review.id}:${targetId}:${canonicalId}:${nowIso}`;
+        const resolvedReviewIdempotencyKey = buildIdempotencyKey(
+          state.businessId,
+          review.sessionId,
+          `${review.id}:trusted-exact:${version}`,
+          "SAVE_UNKNOWN_SCAN",
+        );
+        const resolvedReview: UnknownCodeReview = {
+          ...review, status: "resolved", resolvedAt: nowIso, resolvedBy: "system:trusted_exact",
+          resolutionAction: "trusted_exact", hasSuggestion: false, syncStatus: "pending",
+          idempotencyKey: resolvedReviewIdempotencyKey,
+        };
+        const affectedEventIds = new Set(state.scanFeed
+          .filter((event) => event.matchedProductId === provisionalId || event.cleanCode === review.cleanCode)
+          .map((event) => event.id));
+        const repointedFeed = state.scanFeed.map((event) => affectedEventIds.has(event.id)
+          ? { ...event, matchedProductId: targetId, status: "known" as const, resolverStatus: "known" as const, decodeStatus: "verified" as const, reason, provenance: "app_verified" as const }
+          : event);
+        // Transfer ops are built from the pre-settlement feed and therefore deliberately preserve the
+        // prior decode badge. They must be followed by a terminal save for EVERY affected physical
+        // event, not merely the first spelling, or a backend reload can resurrect stale suggested
+        // state even though the count has already coalesced onto this canonical product.
+        const terminalEvents = repointedFeed.filter((event) => affectedEventIds.has(event.id));
+        const archive = existing && provisionalId && provisionalId !== targetId
+          ? state.products.find((item) => item.id === provisionalId)
+          : undefined;
+        const archivedProduct = archive ? { ...archive, status: "archived" as const, updatedAt: nowIso, updatedBy: "system:trusted_exact" } : undefined;
+        const countTransfers = provisionalId && provisionalId !== targetId
+          ? state.finalCounts.filter((count) => count.productId === provisionalId && count.quantity > 0).map((count) => ({ sessionId: count.sessionId, fromProductId: provisionalId, toProductId: targetId, quantity: count.quantity }))
+          : [];
+        // Each transaction writes one marker, product/review/archive, two count rows per transfer,
+        // and its terminal events. Keep generous headroom below Firestore's 500-write ceiling.
+        const eventChunks = Array.from({ length: Math.max(1, Math.ceil(terminalEvents.length / 350)) }, (_, index) => terminalEvents.slice(index * 350, (index + 1) * 350));
+        const transferChunks = Array.from({ length: Math.max(1, Math.ceil(countTransfers.length / 50)) }, (_, index) => countTransfers.slice(index * 50, (index + 1) * 50));
+        const chunkCount = Math.max(eventChunks.length, transferChunks.length);
+        const settlementOps: PendingSyncItem[] = Array.from({ length: chunkCount }, (_, index) => {
+          const payload: TrustedExactSettlementPayload = { businessId: state.businessId, product: settled, review: resolvedReview, ...(archivedProduct ? { archivedProduct } : {}), terminalEvents: eventChunks[index] ?? [], countTransfers: transferChunks[index] ?? [] };
+          return makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: review.sessionId, entityType: "UnknownCodeReview", entityId: review.id, operation: "SETTLE_TRUSTED_EXACT", payload, idempotencyKey: buildIdempotencyKey(state.businessId, review.sessionId, `${review.id}:trusted-exact:${version}:chunk-${index}`, "SETTLE_TRUSTED_EXACT"), scanEventId: null });
+        });
+        set({
+          products: target ? products : [...products, settled],
+          finalCounts,
+          // No call to resolveUnknown: trusted-exact settlement must never create a learned alias/catalog entry.
+          needsReviewQueue: state.needsReviewQueue.map((item) => item.id === reviewId
+            ? resolvedReview
+            : item),
+          scanFeed: repointedFeed,
+        });
+        enqueueAndSync(settlementOps);
+      },
+
+      runLiveDecodeOnce: async (reviewId, options) => {
         const state = get();
         const review = state.needsReviewQueue.find((r) => r.id === reviewId);
         if (!review || review.status !== "open") return;
+        const deterministicOnly = options?.deterministicOnly === true;
 
         const s = state.settings;
         const nowIso = now();
@@ -3194,7 +3499,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           breaker: state.breaker,
           now: nowMs,
         });
-        if (!gate.allowed) {
+        // A deterministic-only request is allowed through every AI/cost gate while online: the
+        // route stops before external decode on an exact-index miss. Offline remains a hard no-request
+        // boundary, and ordinary decode keeps every existing gate intact.
+        if (!gate.allowed && (!deterministicOnly || !state.online)) {
           const blockStatus: AiLookupLog["status"] = gate.reason === "offline" ? "blocked_offline" : "blocked_cap";
           set((st) => ({
             aiLookupLogs: [mkLog(blockStatus, s.primaryProvider, 0, gate.breaker), ...st.aiLookupLogs],
@@ -3240,21 +3548,24 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // AM-9: clamp a possibly-stale persisted decodeBudgetMs (e.g. an old 13000 default) into the
           // real [5000, 8000] server-enforced range before using it for anything client-side.
           const clampedBudgetMs = clampDecodeBudgetMs(s.decodeBudgetMs);
-          const abortController = new AbortController();
-          const abortTimer = setTimeout(() => abortController.abort(), clampedBudgetMs + 7000);
           // D4-follow-up: live-auth mode requires idToken + businessId on every POST
           // (route.ts:294-324) or this 401s "unauthenticated"; mock mode resolves {} and both call
           // legs are unaffected. aiRequestAuth is resolved inline on each leg below.
-          const decodeOnce = async () => {
-            let res: Response;
+          const fetchDecodeAttempt = async (includeAutoCountPolicy: boolean) => {
+            // Every HTTP attempt gets an independent bounded deadline. This covers the legacy 429
+            // retry as well as the deterministic cold-start retry; a prior abort can never poison a
+            // later attempt with an already-aborted signal.
+            const abortController = new AbortController();
+            const abortTimer = setTimeout(() => abortController.abort(), clampedBudgetMs + 7000);
             try {
-              res = await fetch("/api/ai-lookup", {
+              return await fetch("/api/ai-lookup", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 signal: abortController.signal,
                 body: JSON.stringify({
                   ...(await aiRequestAuth(state.businessId)),
                   mode: "decode",
+                  deterministicOnly,
                   proRecheck: review.reopenedFromWrong === true, // auto-escalate a marked-wrong code to the stronger model
                   rawCode: rawCodeSanitized,
                   cleanCode: cleanCodeSanitized,
@@ -3264,18 +3575,26 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   budgetMs: clampedBudgetMs,
                   scanContext,
                   brandPrefixHint,
-                  autoCountNonPublicWithEvidence: s.autoCountNonPublicWithEvidence ?? true,
+                  ...(includeAutoCountPolicy ? { autoCountNonPublicWithEvidence: s.autoCountNonPublicWithEvidence ?? true } : {}),
                 }),
               });
             } catch (fetchErr) {
-              // An abort is NEVER a retry case (there is nowhere to retry TO - the decode keeps
-              // running server-side and the client just gave up waiting). Every other fetch-level
-              // failure (network down, DNS, etc.) falls through to the existing generic catch below.
+              // Full decode never retries an abort: the server may keep computing. The outer caller
+              // makes the sole exception for the free deterministic trusted-exact path, with a fresh
+              // bounded attempt. Other transport failures stay on the existing generic failure path.
               if (fetchErr instanceof Error && fetchErr.name === "AbortError") {
                 throw new DecodeAbortedError();
               }
+              if (deterministicOnly) {
+                throw new RetryableDeterministicDecodeError("Transient deterministic lookup transport failure");
+              }
               throw fetchErr;
+            } finally {
+              clearTimeout(abortTimer);
             }
+          };
+          const decodeOnce = async () => {
+            const res = await fetchDecodeAttempt(true);
             // 429 has two distinct causes that must NOT be treated the same:
             //  - daily_cap: the server-side daily AI spend cap is reached. There is no automatic
             //    decode-on-cap-reset queue anywhere in the app, so retrying now is pointless (it will
@@ -3293,35 +3612,39 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               if (body?.reasonCode === "daily_cap") throw new DailyCapReachedError(undefined, body?.floor);
               const retryAfterSec = Math.min(Number(res.headers.get("Retry-After") || "5"), 30);
               await new Promise((r) => setTimeout(r, retryAfterSec * 1000));
-              const retry = await fetch("/api/ai-lookup", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                // Review hardening 2026-07-15: the retry leg carries the same abort signal as the
-                // initial call so a hung retry can never block the scanner past the abort window.
-                signal: abortController.signal,
-                body: JSON.stringify({
-                  ...(await aiRequestAuth(state.businessId)),
-                  mode: "decode", proRecheck: review.reopenedFromWrong === true,
-                  rawCode: rawCodeSanitized, cleanCode: cleanCodeSanitized, codeType,
-                  confidenceThreshold: 0.8, allowImageSuggestions: s.allowImageSuggestions,
-                  budgetMs: clampedBudgetMs, scanContext, brandPrefixHint,
-                }),
-              });
-              if (!retry.ok) throw new Error(`decode failed ${retry.status} after 429 retry`);
-              return retry.json();
+              try {
+                const retry = await fetchDecodeAttempt(false);
+                if (!retry.ok) throw new Error(`decode failed ${retry.status} after 429 retry`);
+                return retry.json();
+              } catch (retryError) {
+                // A 429 consumes this run's sole retry slot. In particular, do not let a
+                // deterministic transport/abort marker escape to the outer cold-start retry,
+                // which would otherwise issue an unintended third request.
+                if (retryError instanceof DecodeAbortedError || retryError instanceof RetryableDeterministicDecodeError) {
+                  throw new Error("decode failed after 429 retry");
+                }
+                throw retryError;
+              }
             }
-            if (!res.ok) throw new Error(`decode failed ${res.status}`);
+            if (!res.ok) {
+              if (deterministicOnly && res.status >= 500) {
+                throw new RetryableDeterministicDecodeError(`Transient deterministic lookup server failure ${res.status}`);
+              }
+              throw new Error(`decode failed ${res.status}`);
+            }
             return res.json();
           };
-          // Owner cost rule: NO client retry. The old "retry once on a miss" doubled both the wait (up
-          // to ~70s, which dropped the browser connection -> "Failed to fetch") and the token spend. One
-          // call only; a miss is shown fast with its honest reason and is briefly miss-cached server-side
-          // so an immediate re-scan does not re-pay.
+          // A successful deterministic miss is final and must never retry. The narrow exception is one
+          // free, deterministic retry after a transient fetch/abort/5xx failure, which protects the first
+          // physical scans during a cold local/Preview route start without spending a paid provider call.
           let data: Awaited<ReturnType<typeof decodeOnce>>;
           try {
             data = await decodeOnce();
-          } finally {
-            clearTimeout(abortTimer);
+          } catch (error) {
+            if (!deterministicOnly || !(error instanceof DecodeAbortedError || error instanceof RetryableDeterministicDecodeError)) {
+              throw error;
+            }
+            data = await decodeOnce();
           }
           // BUG #14 (QA hardening 2026-07-16): CLIENT-SIDE defense in depth. The server already
           // sanitizes reasonText/decision.reason (pipeline.ts) before responding, but this store must
@@ -3402,7 +3725,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 suggestedImageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? "") : "",
                 suggestedProductUrl: best?.productUrl ?? "",
                 suggestedAliases: best?.aliases ?? [],
-                hasSuggestion: true,
+                // An exact-only miss has no result payload. Keep its review countable and open, but
+                // never label blank fields as a suggestion; that would surface a false actionable
+                // identity and suppress the honest no-match state.
+                hasSuggestion: Boolean(best && isUsableProductName(best.productName)),
               };
 
           set((st) => ({
@@ -3472,10 +3798,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 decodeNote: decodeNoteUpdate || undefined,
               };
             }),
-            aiLookupLogs: [mkLog("success", providerName, decision?.confidence ?? 0, recordSuccess()), ...st.aiLookupLogs],
-            breaker: recordSuccess(),
-            aiStatus: { ...st.aiStatus, lastAttemptAt: nowIso, lastProvider: providerName, lastFailureReason: "" },
-            settings: { ...st.settings, dailyLookupCount: dailyCount + 1, lastResetDate: today },
+            ...(deterministicOnly ? {} : {
+              aiLookupLogs: [mkLog("success", providerName, decision?.confidence ?? 0, recordSuccess()), ...st.aiLookupLogs],
+              breaker: recordSuccess(),
+              aiStatus: { ...st.aiStatus, lastAttemptAt: nowIso, lastProvider: providerName, lastFailureReason: "" },
+              settings: { ...st.settings, dailyLookupCount: dailyCount + 1, lastResetDate: today },
+            }),
           }));
 
           // CONFIDENCE-BASED AUTO-VERIFY (no extra network calls - scores the evidence the decode
@@ -3519,6 +3847,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             imageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? "") : "",
             productUrl: best?.productUrl ?? "",
           };
+
+          const bossTrustedCanonicalId = trustedBossExactCanonicalId(decision, data.debug);
+          if (bossTrustedCanonicalId) {
+            get().settleTrustedExactIdentity(reviewId, bossTrustedCanonicalId, newProduct, decision?.reason ?? "");
+            return;
+          }
 
           const autoAddOn = s.autoAddDecodedProducts ?? true; // master gate: false = manual review for all
           // Phase 7 EVIDENCE GATE: auto-count ONLY on the app's independent exact-code verification +
@@ -3979,6 +4313,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             const multiVariantIdentity = enrichProductIdentity({ payload: { name: best?.productName ?? "" } }).multiVariant;
             const autoSuggestApplied =
               !multiVariantIdentity &&
+              !tireIncomplete &&
               autoSuggestApplyOk({
                 autoAddOn,
                 contextConflict,
@@ -4014,7 +4349,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             const tireScan =
               (s.scanContext ?? "any") === "tire" && (isTireContext(best) || lookupTirePrefix(review.cleanCode) !== null);
             const fastWasVerified = decision?.status === "verified";
-            if (tireScan && !fastWasVerified && !contextConflict && !autoSuggestApplied) {
+            if (!deterministicOnly && tireScan && !fastWasVerified && !contextConflict && !autoSuggestApplied) {
               // Fire-and-forget: it must NEVER block the scan UI or throw into this flow. The action
               // self-guards on the review still being open (idempotent against a late/duplicate response).
               void get().backgroundVerifyDeep(reviewId);
@@ -4061,10 +4396,34 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             syncDecodedState(reviewId);
           }
         } catch (e) {
-          const nextBreaker = recordFailure(gate.breaker, nowMs);
+          const deterministicTransportFailure =
+            deterministicOnly &&
+            (e instanceof DecodeAbortedError || e instanceof RetryableDeterministicDecodeError);
+          if (deterministicTransportFailure) {
+            // A transport failure is not an exact-index miss. Keep the already-counted physical
+            // scan in the honest in-flight state and reject this action so processScan's `.then`
+            // cannot fall through to the global catalog and manufacture a Suggested identity.
+            // The operator can retry the exact lookup without ever moving this known-database
+            // candidate into Needs Review solely because the browser connection was interrupted.
+            const recoveryReason = "Trusted exact lookup was interrupted. Scan is counted; retrying exact identity is safe.";
+            set((st) => ({
+              needsReviewQueue: st.needsReviewQueue.map((item) =>
+                item.id === reviewId && item.status === "open"
+                  ? { ...item, decodeStatus: "decoding" as const, reason: recoveryReason }
+                  : item,
+              ),
+              scanFeed: st.scanFeed.map((event) =>
+                event.cleanCode === review.cleanCode && event.decodeStatus !== "verified"
+                  ? { ...event, decodeStatus: "decoding" as const, reason: recoveryReason }
+                  : event,
+              ),
+            }));
+            throw e;
+          }
+          const nextBreaker = deterministicOnly ? gate.breaker : recordFailure(gate.breaker, nowMs);
           // Emit only on the closed/half-open -> open transition. This best-effort request must not
           // participate in the scan/decode control flow or report a raw scan/provider error.
-          if (gate.breaker.state !== "open" && nextBreaker.state === "open") {
+          if (!deterministicOnly && gate.breaker.state !== "open" && nextBreaker.state === "open") {
             void postTelemetry("breaker_open", "decode_failure_threshold_reached");
           }
           // Task 2: a daily_cap 429 gets its own honest, non-retry-promising copy - there is no
@@ -4168,10 +4527,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   ? { ...ev, decodeStatus: "needs_review", reason: failReason }
                   : ev,
             ),
-            aiLookupLogs: [mkLog("error", s.primaryProvider, 0, nextBreaker), ...st.aiLookupLogs],
-            breaker: nextBreaker,
-            aiStatus: { ...st.aiStatus, lastAttemptAt: nowIso, lastFailureReason: failReason },
-            settings: { ...st.settings, dailyLookupCount: dailyCount, lastResetDate: today },
+            ...(deterministicOnly ? {} : {
+              aiLookupLogs: [mkLog("error", s.primaryProvider, 0, nextBreaker), ...st.aiLookupLogs],
+              breaker: nextBreaker,
+              aiStatus: { ...st.aiStatus, lastAttemptAt: nowIso, lastFailureReason: failReason },
+              settings: { ...st.settings, dailyLookupCount: dailyCount, lastResetDate: today },
+            }),
           }));
           // F5 bundle-surgery: only worth enriching when neither the server-authoritative cap floor nor
           // the client-safe (SEED/LEARNED) lookup found a brand - capFloor already used the FULL index.
@@ -4329,25 +4690,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const incPayload: IncrementPayload = {
             businessId: bId, sessionId: sId, productId: provId, scanEventId: countedEvent.id,
             quantityDelta: 1, idempotencyKey: countedEvent.idempotencyKey,
+            scanEvent: countedEvent,
+            product: provProduct,
           };
-          // F-03: the SAVE_SCAN_EVENT key normally reconstructs deterministically from the event's own id
-          // (safe on the FIRST-ever sync of that id). A freshTransferKeys repoint reuses an id that may
-          // ALREADY be synced under the previous identity, so it needs the SAME `:transfer:${provId}`
-          // suffix as the INCREMENT_COUNT key above (never the bare id) or Firestore's applied-key dedupe
-          // rejects the corrected payload as idempotency_conflict.
-          const saveScanEventKey = freshTransferKeys
-            ? buildIdempotencyKey(bId, sId, `${countedEvent.id}:transfer:${provId}`, "SAVE_SCAN_EVENT")
-            : buildIdempotencyKey(bId, sId, countedEvent.id, "SAVE_SCAN_EVENT");
           enqueueAndSync([
-            // Task 1b fix (same recipe as correctProduct, commit 024c849): a bare
-            // `businessId:sessionId:provId:SAVE_PRODUCT` key collides with resolveUnknown's later
-            // orphan-merge SAVE_PRODUCT for this SAME id (it reuses provOrphanId - scanStore.ts ~4791),
-            // which would otherwise be swallowed as "alreadyApplied" and the resolved identity would
-            // never reach the backend. Suffix `:provisional` so the first (placeholder) write and any
-            // later distinct write to this id mint different keys; the key is still minted once here and
-            // reused verbatim on every retry of THIS item, so retry dedupe is unaffected.
-            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "Product", entityId: provId, operation: "SAVE_PRODUCT", payload: provProduct, idempotencyKey: buildIdempotencyKey(bId, sId, `${provId}:provisional`, "SAVE_PRODUCT"), scanEventId: null }),
-            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "ScanEvent", entityId: countedEvent.id, operation: "SAVE_SCAN_EVENT", payload: countedEvent, idempotencyKey: saveScanEventKey, scanEventId: countedEvent.id }),
             makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "InventoryCount", entityId: countId, operation: "INCREMENT_COUNT", payload: incPayload, idempotencyKey: countedEvent.idempotencyKey, scanEventId: countedEvent.id }),
           ]);
         } else if (!countedEvent) {
@@ -4371,23 +4717,32 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // F5 bundle-surgery: the row already appeared + counted above (TOP-LEVEL LAW unaffected). Only
         // worth an enrichment fetch when the client-safe (SEED/LEARNED) lookup found nothing - a
         // DERIVED-tier hit is still possible server-side.
-        if (!floor) get().enrichPrefixFloorLabel(code, provId);
+        if (!floor && !opts?.deferPrefixFloorEnrichment) get().enrichPrefixFloorLabel(code, provId);
         return provId;
       },
 
       enrichPrefixFloorLabel: (code, productId) => {
+        // Reserve synchronously. Multiple exact-miss/fallback continuations can request the same aid
+        // before either deferred timer runs; claiming here closes that race and guarantees at most one
+        // side-route request per product row.
+        if (enrichInFlight.has(productId)) return;
+        enrichInFlight.add(productId);
         // Fire-and-forget: never awaited by any caller, never blocks/delays the row that already
         // appeared + counted synchronously. Deferred a tick so any SYNCHRONOUS same-call resolution
         // (catalog-first hit, deterministic alias, a decode landing in the same stack) renames the row
         // first and the pre-fetch bare-label check below skips the network call entirely - the fetch
         // only fires for a row that genuinely settled as a bare "Unidentified item".
         setTimeout(() => {
-          if (!get().online) return; // offline: no fetch, label silently stays (retry is not needed - naming aid only)
-          if (enrichInFlight.has(productId)) return; // one enrichment round-trip per row, never a duplicate fetch
+          if (!get().online) {
+            enrichInFlight.delete(productId);
+            return; // offline: no fetch, label silently stays (retry is not needed - naming aid only)
+          }
           const before = get().products.find((p) => p.id === productId);
-          if (!before || !isBareUnidentifiedLabel(before.name, code)) return; // already identified: no fetch
-          enrichInFlight.add(productId);
-          void fetchPrefixFloorEnrichment(code).finally(() => enrichInFlight.delete(productId)).then((floor) => {
+          if (!before || !isBareUnidentifiedLabel(before.name, code)) {
+            enrichInFlight.delete(productId);
+            return; // already identified: no fetch
+          }
+          void fetchPrefixFloorEnrichment(code).then((floor) => {
             if (!floor) return; // offline / no derived-tier hit / non-barcode-shaped code: silent no-op
             const prod = get().products.find((p) => p.id === productId);
             // Re-check after the round-trip too: only upgrade if the row STILL carries the exact bare
@@ -4399,7 +4754,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 p.id === productId ? { ...p, name: floor.name, brand: floor.brand } : p,
               ),
             }));
-          });
+          }).finally(() => enrichInFlight.delete(productId));
         }, 0);
       },
 
@@ -4463,6 +4818,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         let data: {
           decision?: DecodeDecision;
           results?: AiLookupResult[];
+          debug?: unknown;
         };
         try {
           // D4-follow-up: live-auth mode requires idToken + businessId on every POST (route.ts:294-324)
@@ -4631,6 +4987,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           productUrl: best?.productUrl ?? "",
         };
 
+        const bossTrustedCanonicalId = trustedBossExactCanonicalId(decision, data.debug);
+        if (bossTrustedCanonicalId) {
+          get().settleTrustedExactIdentity(reviewId, bossTrustedCanonicalId, newProduct, decision.reason ?? "");
+          return;
+        }
+
         const autoAddOn = s.autoAddDecodedProducts ?? true; // master gate (unchanged): false -> manual review
         // SAME Phase 7 evidence gate + Phase 8 firewall as liveDecode. A non-verified result never reaches
         // here, and a firewall/brand-prefix conflict (poison in tire context) still blocks the count.
@@ -4742,7 +5104,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // exact decode (Go-UPC exact class). Apply the identity onto the existing provisional row IN
           // PLACE - product stays provisional:true/verified:false - and close the review. TRUST RULES:
           // no alias created, markFeedRowVerified never called, feed badge stays "suggested".
-          const autoSuggestApplied = autoSuggestApplyOk({
+          const deepTireIncomplete = isUsableProductName(best?.productName ?? "") && isTireContext(best) && !hasRequiredTireSpecs(best);
+          const autoSuggestApplied = !deepTireIncomplete && autoSuggestApplyOk({
             autoAddOn,
             contextConflict,
             productName: best?.productName ?? "",
@@ -5019,7 +5382,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // ~scanStore.ts:5282) - canonicalGtin strips leading zeros then re-pads to 14 digits for any
           // GTIN-shaped code; a non-GTIN-shaped code (e.g. a part number) falls through unchanged, so a
           // part number's leading zeros still carry meaning and are never canonicalized away.
-          const canon = (c: string): string => c; // TEMP: verify RED
+          const canon = (c: string): string => canonicalGtin(c) ?? c;
           const identityCodesCanonical = identityCodes.map(canon);
           const countedProductIds = new Set(state.finalCounts.map((c) => c.productId));
           for (const p of state.products) {
