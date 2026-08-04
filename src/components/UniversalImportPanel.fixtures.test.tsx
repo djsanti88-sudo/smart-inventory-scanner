@@ -26,7 +26,9 @@ afterEach(() => {
   cleanup();
 });
 
-const FIXTURES = path.join(process.cwd(), ".superpowers", "stress", "fixtures");
+// Keep these bytes with the test instead of under an ignored workflow directory.
+// That makes this regression suite reproducible in a fresh checkout and in CI.
+const FIXTURES = path.join(__dirname, "fixtures");
 
 function fixtureFile(name: string): UploadFileLike & File {
   const content = fs.readFileSync(path.join(FIXTURES, name), "utf8");

@@ -18,7 +18,13 @@ describe("openFoodFactsUsage", () => {
   let dir: string;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(AT_12_34());
     dir = freshDir();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("fresh store: allowed with used 0, limit 10 (buffer under OFF's ~15/min read limit)", async () => {
