@@ -6,7 +6,6 @@ import { adminDb, LOCAL_CORPUS_BUSINESS_ID, LOCAL_CORPUS_EMAIL, LOCAL_CORPUS_PAS
 const ALLOWED_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const SCANNER_INTERVAL_MS = 100; // declared local keyboard-wedge arrival rate: 10 scans/s
 const SETTLEMENT_TIMEOUT_MS = 2_000;
-const redactedCode = (value: string) => Buffer.from(value).toString("base64url").slice(0, 16);
 
 function manifest() { return JSON.parse(readFileSync(join(process.cwd(), "src", "server", "tire-knowledge", "exact-index", "manifest.json"), "utf8")); }
 function percentile(values: number[], fraction: number) { const sorted = [...values].sort((a, b) => a - b); return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1)] ?? 0; }
@@ -134,6 +133,6 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
   await page.reload(); await expect(input).toBeFocused({ timeout: 30_000 });
   await expect(page.getByText(`${selected.length} scans`, { exact: true })).toBeVisible({ timeout: 30_000 });
   expect(blocked, "local proof must make no external browser requests").toEqual([]);
-  const summary = { scope: "synthetic-normal-member-local-emulator", selected: selected.length, shortest: 20, boundary: selected.length - 20, events: settled.events, counted: settled.counted, activeReviews: settled.activeReviews, identities: [...expectedIdentities.entries()].map(([code, canonicalId]) => ({ code: redactedCode(code), canonicalId: redactedCode(canonicalId) })), scannerIntervalMs: SCANNER_INTERVAL_MS, latencyMs: { immediate: { p50: percentile(immediateMs, .5), p95: percentile(immediateMs, .95) }, settlement: { p50: percentile(settledMs, .5), p95: percentile(settledMs, .95), max: Math.max(...settledMs) }, queue: { p50: percentile(queueMs, .5), p95: percentile(queueMs, .95) } } };
+  const summary = { scope: "synthetic-normal-member-local-emulator", selected: selected.length, shortest: 20, boundary: selected.length - 20, events: settled.events, counted: settled.counted, activeReviews: settled.activeReviews, identities: [...expectedIdentities.entries()].map(([code, canonicalId]) => ({ code: fixtureModule.redactForReceipt(code), canonicalId: fixtureModule.redactForReceipt(canonicalId) })), scannerIntervalMs: SCANNER_INTERVAL_MS, latencyMs: { immediate: { p50: percentile(immediateMs, .5), p95: percentile(immediateMs, .95) }, settlement: { p50: percentile(settledMs, .5), p95: percentile(settledMs, .95), max: Math.max(...settledMs) }, queue: { p50: percentile(queueMs, .5), p95: percentile(queueMs, .95) } } };
   await testInfo.attach("local-corpus-summary", { contentType: "application/json", body: Buffer.from(JSON.stringify(summary)) });
 });

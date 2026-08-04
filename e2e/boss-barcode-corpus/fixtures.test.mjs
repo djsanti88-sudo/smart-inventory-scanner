@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deriveCorpusFixtures, opaqueTrustedExactCanonicalId } from "./fixtures.mjs";
+import { deriveCorpusFixtures, opaqueTrustedExactCanonicalId, redactForReceipt } from "./fixtures.mjs";
 
 const manifest = {
   admittedBossCodes: 2,
@@ -41,4 +41,9 @@ test("deriveCorpusFixtures rejects an accepted spelling that is not canonical-eq
 
 test("opaque trusted exact identity matches the provider contract", () => {
   assert.equal(opaqueTrustedExactCanonicalId("product-a"), "trusted-exact:v1:2898B41B903D0EBB491452B44A103968");
+});
+
+test("receipt redaction is an irreversible digest, not a reversible transport encoding", () => {
+  const raw = "123456789"; const redacted = redactForReceipt(raw);
+  assert.match(redacted, /^[A-F0-9]{16}$/); assert.notEqual(redacted, raw); assert.equal(redacted.includes("MTIzNDU2Nzg5"), false);
 });

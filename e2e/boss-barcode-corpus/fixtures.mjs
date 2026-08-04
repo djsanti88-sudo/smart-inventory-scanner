@@ -195,3 +195,8 @@ export function runtimeCanonicalIdFor(entry) {
 export function opaqueTrustedExactCanonicalId(canonicalProductUid) {
   return `trusted-exact:v1:${createHash("sha256").update(canonicalProductUid).digest("hex").slice(0, 32).toUpperCase()}`;
 }
+
+/** One-way receipt identifier: never use reversible encodings for private code material. */
+export function redactForReceipt(value) {
+  return createHash("sha256").update(String(value)).digest("hex").slice(0, 16).toUpperCase();
+}
