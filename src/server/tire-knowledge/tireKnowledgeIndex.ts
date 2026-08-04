@@ -6,6 +6,7 @@ import { getKnowledgeDb } from "@/server/knowledgeDb";
 import { getTursoClient as getRetailTursoClient, type TursoClient } from "@/server/retail-knowledge/retailKnowledgeIndex";
 import { lookupCandidates } from "@/services/upc/gtin";
 import { tirePartNumberVariants } from "@/services/catalog/tirePartNumber";
+import { lookupTrustedExactBarcode, __resetTireExactIndexCacheForTests } from "@/server/tire-knowledge/tireExactIndex";
 
 // SERVER-ONLY tire knowledge index reader. Uses SQLite for microsecond lookups with ~5MB memory.
 // The `server-only` import makes this a BUILD ERROR if imported from a client component.
@@ -245,31 +246,52 @@ async function lookupPartNumberTurso(key: string): Promise<TireKnowledgeRow | nu
   }
 }
 
-/** EXACT trusted barcode lookup. Order: local SQLite (fast, dev) -> Turso (Vercel) -> in-memory JSON
- *  (last-ditch dev fallback; the file is .vercelignored so it never exists on Vercel). Never near-matches. */
-export async function lookupByExactBarcode(code: string): Promise<TireKnowledgeRow | null> {
+/** EXACT barcode lookup. Order: authenticated shard index -> local SQLite -> Turso -> legacy JSON.
+ *  Index blocks or integrity failures deliberately stop before every legacy backend. Never near-matches. */
+export type ExactBarcodeDecision =
+  | { kind: "trusted_hit"; row: TireKnowledgeRow; sourceScope: "global_corpus" | "authenticated_boss_corpus" }
+  | { kind: "blocked_package"; canonicalKey: string }
+  | { kind: "exact_index_unavailable" }
+  | { kind: "legacy_hit"; row: TireKnowledgeRow }
+  | { kind: "miss" };
+
+/** Internal decision API: package blocks deliberately stop before every legacy backend. */
+export async function lookupExactBarcodeDecision(
+  code: string,
+  access: { authenticatedBossCorpus: boolean } = { authenticatedBossCorpus: false },
+): Promise<ExactBarcodeDecision> {
   const key = normBarcodeKey(code);
-  if (!key) return null;
+  if (!key) return { kind: "miss" };
+  const trusted = await lookupTrustedExactBarcode(key, access);
+  if (trusted?.kind === "blocked_package") return trusted;
+  if (trusted?.kind === "unavailable") return { kind: "exact_index_unavailable" };
+  if (trusted?.kind === "hit") return { kind: "trusted_hit", row: trusted.row, sourceScope: trusted.sourceScope };
   const candidates = lookupCandidates(key);
   const stmt = getStmtBarcode();
   if (stmt) {
     for (const c of candidates) {
       const row = (stmt.get(c) as TireKnowledgeRow | undefined) ?? null;
-      if (row) return row;
+      if (row) return { kind: "legacy_hit", row };
     }
-    return null;
+    return { kind: "miss" };
   }
   for (const c of candidates) {
     const tursoRow = await lookupBarcodeTurso(c);
-    if (tursoRow) return tursoRow;
+    if (tursoRow) return { kind: "legacy_hit", row: tursoRow };
   }
   const idx = getJsonIndex();
-  if (!idx) return null;
+  if (!idx) return { kind: "miss" };
   for (const c of candidates) {
     const row = idx.barcodeIndex[c] ?? null;
-    if (row) return row;
+    if (row) return { kind: "legacy_hit", row };
   }
-  return null;
+  return { kind: "miss" };
+}
+
+/** Source-compatible legacy wrapper. Package blocks return null but never enter legacy fallback. */
+export async function lookupByExactBarcode(code: string): Promise<TireKnowledgeRow | null> {
+  const decision = await lookupExactBarcodeDecision(code);
+  return decision.kind === "trusted_hit" || decision.kind === "legacy_hit" ? decision.row : null;
 }
 
 /**
@@ -485,4 +507,6 @@ export function __resetTireKnowledgeCacheForTests(): void {
   _uidToRow = null;
   _tursoClient = null;
   _tursoClientPromise = null;
+  // The exact shard cache is part of the same test-visible corpus reset seam.
+  __resetTireExactIndexCacheForTests();
 }

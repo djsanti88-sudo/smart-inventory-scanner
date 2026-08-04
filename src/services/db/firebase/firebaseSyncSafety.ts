@@ -215,6 +215,28 @@ export function validatePendingSyncItem(item: PendingSyncItem): FirebaseSyncVali
       }
       return null;
     }
+    case "SETTLE_TRUSTED_EXACT": {
+      if (item.entityType !== "UnknownCodeReview") return { errorCode: "invalid_entity_type", message: "SETTLE_TRUSTED_EXACT requires entityType UnknownCodeReview" };
+      const product = payload.product as Record<string, unknown> | undefined;
+      const review = payload.review as Record<string, unknown> | undefined;
+      const terminalEvents = payload.terminalEvents;
+      const archivedProduct = payload.archivedProduct as Record<string, unknown> | undefined;
+      const countTransfers = payload.countTransfers ?? [];
+      if (!product || !review || !Array.isArray(terminalEvents) || !Array.isArray(countTransfers) || terminalEvents.length > 400 || countTransfers.length > 50 || terminalEvents.length + (countTransfers.length * 2) > 490) return { errorCode: "missing_payload", message: "trusted settlement requires bounded product, review, terminalEvents, and countTransfers payloads" };
+      if (product.id === undefined || product.businessId !== item.businessId || review.id !== item.entityId || review.businessId !== item.businessId || review.sessionId !== item.sessionId) return { errorCode: "payload_entity_mismatch", message: "trusted settlement payload does not bind to its queue item" };
+      if (archivedProduct && (archivedProduct.businessId !== item.businessId || archivedProduct.id === product.id || !isValidFirestoreDocumentId(String(archivedProduct.id ?? "")))) return { errorCode: "payload_entity_mismatch", message: "archived product does not bind safely to trusted settlement" };
+      for (const event of terminalEvents) {
+        if (!event || typeof event !== "object" || Array.isArray(event)) return { errorCode: "missing_payload", message: "terminal events must be objects" };
+        const record = event as Record<string, unknown>;
+        if (record.businessId !== item.businessId || !isValidFirestoreDocumentId(String(record.id ?? "")) || record.sessionId !== item.sessionId || record.matchedProductId !== product.id) return { errorCode: "payload_entity_mismatch", message: "terminal event does not bind to trusted settlement" };
+      }
+      for (const transfer of countTransfers) {
+        if (!transfer || typeof transfer !== "object" || Array.isArray(transfer)) return { errorCode: "missing_payload", message: "count transfers must be objects" };
+        const record = transfer as Record<string, unknown>;
+        if (record.sessionId !== item.sessionId || record.fromProductId === record.toProductId || !isValidFirestoreDocumentId(String(record.fromProductId ?? "")) || record.toProductId !== product.id || !Number.isInteger(record.quantity) || Number(record.quantity) <= 0) return { errorCode: "payload_entity_mismatch", message: "count transfer does not bind to trusted settlement" };
+      }
+      return null;
+    }
     case "INCREMENT_COUNT": {
       if (item.entityType !== "InventoryCount") {
         return {
@@ -253,6 +275,42 @@ export function validatePendingSyncItem(item: PendingSyncItem): FirebaseSyncVali
           errorCode: "invalid_quantity_delta",
           message: "payload.quantityDelta must be a nonzero finite integer",
         };
+      }
+      if (payload.scanEvent !== undefined) {
+        const scanEvent = payload.scanEvent;
+        if (!scanEvent || typeof scanEvent !== "object" || Array.isArray(scanEvent)) {
+          return { errorCode: "missing_payload", message: "payload.scanEvent must be an object when present" };
+        }
+        const embedded = scanEvent as Record<string, unknown>;
+        const embeddedIdError = invalidId(embedded.id, "invalid_scan_event_id", "payload.scanEvent.id");
+        if (embeddedIdError) return embeddedIdError;
+        if (embedded.id !== payload.scanEventId) {
+          return { errorCode: "payload_scan_event_mismatch", message: "payload.scanEvent.id must match payload.scanEventId" };
+        }
+        if (embedded.businessId !== item.businessId) {
+          return { errorCode: "payload_business_mismatch", message: "payload.scanEvent.businessId must match businessId" };
+        }
+        if (embedded.sessionId !== item.sessionId) {
+          return { errorCode: "payload_session_mismatch", message: "payload.scanEvent.sessionId must match sessionId" };
+        }
+        if (embedded.matchedProductId !== payload.productId) {
+          return { errorCode: "payload_entity_mismatch", message: "payload.scanEvent.matchedProductId must match productId" };
+        }
+      }
+      if (payload.product !== undefined) {
+        const product = payload.product;
+        if (!product || typeof product !== "object" || Array.isArray(product)) {
+          return { errorCode: "missing_payload", message: "payload.product must be an object when present" };
+        }
+        const embedded = product as Record<string, unknown>;
+        const embeddedIdError = invalidId(embedded.id, "invalid_product_id", "payload.product.id");
+        if (embeddedIdError) return embeddedIdError;
+        if (embedded.id !== payload.productId) {
+          return { errorCode: "payload_entity_mismatch", message: "payload.product.id must match productId" };
+        }
+        if (embedded.businessId !== item.businessId) {
+          return { errorCode: "payload_business_mismatch", message: "payload.product.businessId must match businessId" };
+        }
       }
       return invalidId(
         `${payload.sessionId as string}_${payload.productId as string}`,

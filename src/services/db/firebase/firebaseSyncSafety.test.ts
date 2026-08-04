@@ -211,4 +211,34 @@ describe("Firebase sync safety", () => {
       });
     }
   });
+
+  it("strictly binds trusted settlement archives, events, transfers, and write bounds", () => {
+    const event = (index: number) => ({
+      id: `event-${index}`,
+      businessId: "business-1",
+      sessionId: "session-1",
+      matchedProductId: "product-1",
+    });
+    const settlement = (payload: Record<string, unknown>): PendingSyncItem => productItem({
+      entityType: "UnknownCodeReview",
+      entityId: "review-1",
+      operation: "SETTLE_TRUSTED_EXACT",
+      payload: {
+        businessId: "business-1",
+        product: { id: "product-1", businessId: "business-1" },
+        archivedProduct: { id: "provisional-1", businessId: "business-1" },
+        review: { id: "review-1", businessId: "business-1", sessionId: "session-1" },
+        terminalEvents: [event(1)],
+        countTransfers: [{ sessionId: "session-1", fromProductId: "provisional-1", toProductId: "product-1", quantity: 1 }],
+        ...payload,
+      },
+    });
+
+    expect(validatePendingSyncItem(settlement({}))).toBeNull();
+    expect(validatePendingSyncItem(settlement({ archivedProduct: { id: "product-1", businessId: "business-1" } }))).toMatchObject({ errorCode: "payload_entity_mismatch" });
+    expect(validatePendingSyncItem(settlement({ terminalEvents: [{ ...event(1), sessionId: "session-2" }] }))).toMatchObject({ errorCode: "payload_entity_mismatch" });
+    expect(validatePendingSyncItem(settlement({ terminalEvents: [{ ...event(1), matchedProductId: "product-2" }] }))).toMatchObject({ errorCode: "payload_entity_mismatch" });
+    expect(validatePendingSyncItem(settlement({ terminalEvents: Array.from({ length: 400 }, (_, index) => event(index)), countTransfers: [] }))).toBeNull();
+    expect(validatePendingSyncItem(settlement({ terminalEvents: Array.from({ length: 401 }, (_, index) => event(index)), countTransfers: [] }))).toMatchObject({ errorCode: "missing_payload" });
+  });
 });

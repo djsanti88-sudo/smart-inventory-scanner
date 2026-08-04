@@ -1,6 +1,6 @@
 import { type Firestore, collection, doc, getDocs, orderBy, query, runTransaction, serverTimestamp, where } from "firebase/firestore";
 import type { PendingSyncItem, ScanEvent, Alias, UnknownCodeReview, Product, InventorySession } from "@/types";
-import type { SyncResult, IncrementPayload } from "@/services/mockDb";
+import type { SyncResult, IncrementPayload, TrustedExactSettlementPayload } from "@/services/mockDb";
 import type { SyncTarget } from "@/services/db/syncTarget";
 import { COLLECTIONS } from "@/services/db/types";
 import {
@@ -152,6 +152,32 @@ export class FirebaseSyncTarget implements SyncTarget {
             scanEventAlreadyCounted = prevScanIds.includes(p.scanEventId);
           }
         }
+        const settlementCounts = new Map<string, {
+          ref: ReturnType<typeof sub>;
+          sessionId: string;
+          productId: string;
+          quantity: number;
+          scanEventIds: string[];
+        }>();
+        if (item.operation === "SETTLE_TRUSTED_EXACT") {
+          const p = item.payload as TrustedExactSettlementPayload;
+          const ids = new Map<string, { sessionId: string; productId: string }>();
+          for (const transfer of p.countTransfers ?? []) {
+            ids.set(`${transfer.sessionId}_${transfer.fromProductId}`, { sessionId: transfer.sessionId, productId: transfer.fromProductId });
+            ids.set(`${transfer.sessionId}_${transfer.toProductId}`, { sessionId: transfer.sessionId, productId: transfer.toProductId });
+          }
+          for (const [id, identity] of ids) {
+            const ref = sub(COLLECTIONS.inventoryCounts, id);
+            const snap = await tx.get(ref);
+            const data = snap.exists() ? snap.data() as { countedQuantity?: number; quantity?: number; scanEventIds?: string[] } : {};
+            settlementCounts.set(id, {
+              ref,
+              ...identity,
+              quantity: Number(data.countedQuantity ?? data.quantity ?? 0),
+              scanEventIds: Array.isArray(data.scanEventIds) ? data.scanEventIds : [],
+            });
+          }
+        }
 
         // ----- THEN WRITES -----
         tx.set(keyRef, {
@@ -214,6 +240,58 @@ export class FirebaseSyncTarget implements SyncTarget {
               },
               { merge: true },
             );
+            // New physical-scan queue items carry their immutable event and current product snapshot so
+            // the marker, event, product, and count commit together. Legacy increment items omit both.
+            if (p.scanEvent) {
+              tx.set(
+                sub(COLLECTIONS.scanEvents, p.scanEvent.id),
+                withoutUndefined({ ...p.scanEvent, businessId: bid, syncedAt: serverTimestamp() }),
+              );
+            }
+            if (p.product) {
+              tx.set(
+                sub(COLLECTIONS.products, p.product.id),
+                withoutUndefined({ ...p.product, businessId: bid, updatedAt: serverTimestamp() }),
+                { merge: true },
+              );
+            }
+            break;
+          }
+          case "SETTLE_TRUSTED_EXACT": {
+            const p = item.payload as TrustedExactSettlementPayload;
+            const settlementDeltas = new Map<string, number>();
+            for (const transfer of p.countTransfers ?? []) {
+              const sourceId = `${transfer.sessionId}_${transfer.fromProductId}`;
+              const targetId = `${transfer.sessionId}_${transfer.toProductId}`;
+              const source = settlementCounts.get(sourceId)!;
+              const target = settlementCounts.get(targetId)!;
+              const moved = Math.min(source.quantity, transfer.quantity);
+              source.quantity -= moved;
+              target.quantity += moved;
+              target.scanEventIds = [...new Set([...target.scanEventIds, ...source.scanEventIds])];
+              settlementDeltas.set(sourceId, (settlementDeltas.get(sourceId) ?? 0) - moved);
+              settlementDeltas.set(targetId, (settlementDeltas.get(targetId) ?? 0) + moved);
+            }
+            // Write every touched count document once, after all transfers have been folded into the
+            // transaction snapshot. This prevents two provisional sources targeting the same canonical
+            // count from computing against the same stale target quantity and overwriting one another.
+            for (const [countId, delta] of settlementDeltas) {
+              const count = settlementCounts.get(countId)!;
+              tx.set(count.ref, {
+                businessId: bid,
+                countSessionId: count.sessionId,
+                productId: count.productId,
+                countedQuantity: count.quantity,
+                scanEventIds: count.scanEventIds,
+                appliedKeyId: keyId,
+                lastQuantityDelta: delta,
+                updatedAt: serverTimestamp(),
+              }, { merge: true });
+            }
+            tx.set(sub(COLLECTIONS.products, p.product.id), withoutUndefined({ ...p.product, businessId: bid, updatedAt: serverTimestamp() }), { merge: true });
+            if (p.archivedProduct) tx.set(sub(COLLECTIONS.products, p.archivedProduct.id), withoutUndefined({ ...p.archivedProduct, businessId: bid, updatedAt: serverTimestamp() }), { merge: true });
+            tx.set(sub(COLLECTIONS.unknownCodeReviews, p.review.id), withoutUndefined({ ...p.review, businessId: bid, createdAt: serverTimestamp() }));
+            for (const event of p.terminalEvents) tx.set(sub(COLLECTIONS.scanEvents, event.id), withoutUndefined({ ...event, businessId: bid, syncedAt: serverTimestamp() }));
             break;
           }
           default:

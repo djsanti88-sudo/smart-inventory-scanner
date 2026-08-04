@@ -57,6 +57,7 @@ export function toStoreProduct(id: string, data: Record<string, unknown>, busine
     source: (data.source as Product["source"]) ?? "human_review",
     confidence: typeof data.confidence === "number" ? data.confidence : 1,
     verified: data.verified === true,
+    trustedExactCanonicalId: str(data.trustedExactCanonicalId) || undefined,
     createdAt: str(data.createdAt),
     updatedAt: str(data.updatedAt),
     createdBy: str(data.createdBy, "human"),

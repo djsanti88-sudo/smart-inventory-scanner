@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { MockDb, type IncrementPayload } from "@/services/mockDb";
+import { MockDb, type IncrementPayload, type TrustedExactSettlementPayload } from "@/services/mockDb";
 import { buildIdempotencyKey } from "@/services/idempotency";
-import type { Alias, PendingSyncItem, ScanEvent } from "@/types";
+import type { Alias, PendingSyncItem, Product, ScanEvent, UnknownCodeReview } from "@/types";
 
 function incrementItem(scanEventId: string): PendingSyncItem {
   const idempotencyKey = buildIdempotencyKey("biz", "sess", scanEventId, "INCREMENT_COUNT");
@@ -37,6 +37,20 @@ describe("MockDb idempotent increments", () => {
     const r = db.apply(incrementItem("e1"));
     expect(r.ok).toBe(true);
     expect(r.alreadyApplied).toBe(false);
+    expect(db.getServerCount("sess", "prod-nokian")?.quantity).toBe(1);
+  });
+
+  it("persists an optional physical scan and product snapshot with its increment", () => {
+    const db = new MockDb();
+    const item = incrementItem("e-snapshot");
+    const event = { id: "e-snapshot", businessId: "biz", sessionId: "sess", createdAt: "2026-08-04T00:00:00.000Z" } as ScanEvent;
+    const product = { id: "prod-nokian", businessId: "biz", name: "Nokian", verified: true } as Product;
+    (item.payload as IncrementPayload).scanEvent = event;
+    (item.payload as IncrementPayload).product = product;
+
+    expect(db.apply(item).ok).toBe(true);
+    expect(db.getScanEvent("e-snapshot")).toMatchObject({ id: "e-snapshot", createdAt: "2026-08-04T00:00:00.000Z" });
+    expect(db.snapshot().products["prod-nokian"]).toMatchObject({ id: "prod-nokian", name: "Nokian" });
     expect(db.getServerCount("sess", "prod-nokian")?.quantity).toBe(1);
   });
 
@@ -110,6 +124,36 @@ describe("MockDb idempotent upserts", () => {
     db.apply(item);
     db.apply(item);
     expect(db.getAlias("biz", "7262", "prod-nokian")).toBeDefined();
+  });
+});
+
+describe("MockDb trusted exact settlement", () => {
+  it("atomically persists the canonical product, terminal event and review while transferring a count once", () => {
+    const db = new MockDb();
+    db.apply({ ...incrementItem("event-before-settlement"), payload: { ...incrementItem("event-before-settlement").payload as IncrementPayload, productId: "provisional-1" } });
+    const product = { id: "canonical-1", businessId: "biz", name: "Known tire", verified: true } as Product;
+    const review = { id: "review-1", businessId: "biz", sessionId: "sess", status: "resolved", resolutionAction: "trusted_exact" } as UnknownCodeReview;
+    const terminalEvent: ScanEvent = { ...ev("event-before-settlement", "biz", "sess", "2026-08-04T00:00:00.000Z"), matchedProductId: "canonical-1", status: "known", decodeStatus: "verified" };
+    const payload: TrustedExactSettlementPayload = {
+      businessId: "biz", product, review, terminalEvents: [terminalEvent],
+      archivedProduct: { id: "provisional-1", businessId: "biz", name: "Provisional", status: "archived" } as Product,
+      countTransfers: [{ sessionId: "sess", fromProductId: "provisional-1", toProductId: "canonical-1", quantity: 1 }],
+    };
+    const item: PendingSyncItem = {
+      id: "settlement-1", businessId: "biz", sessionId: "sess", entityType: "UnknownCodeReview", entityId: review.id,
+      operation: "SETTLE_TRUSTED_EXACT", payload, status: "pending", retryCount: 0, lastError: null,
+      createdAt: "2026-08-04T00:00:00.000Z", updatedAt: "2026-08-04T00:00:00.000Z", idempotencyKey: "settlement-key", scanEventId: null,
+    };
+
+    expect(db.apply(item)).toMatchObject({ ok: true, alreadyApplied: false });
+    expect(db.apply(item)).toMatchObject({ ok: true, alreadyApplied: true });
+    expect(db.getServerCount("sess", "provisional-1")?.quantity).toBe(0);
+    expect(db.getServerCount("sess", "canonical-1")?.quantity).toBe(1);
+    expect(db.snapshot()).toMatchObject({
+      products: { "canonical-1": { verified: true }, "provisional-1": { status: "archived" } },
+      reviews: { "review-1": { resolutionAction: "trusted_exact" } },
+      scanEvents: { "event-before-settlement": { matchedProductId: "canonical-1", decodeStatus: "verified" } },
+    });
   });
 });
 

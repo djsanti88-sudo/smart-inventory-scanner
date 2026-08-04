@@ -102,6 +102,9 @@ export class MockDb {
         // path stays predictable and idempotent, matching FirebaseSyncTarget's countSessions write.
         this.upsertSession(item.payload as InventorySession);
         break;
+      case "SETTLE_TRUSTED_EXACT":
+        this.applyTrustedExactSettlement(item.payload as TrustedExactSettlementPayload);
+        break;
       default:
         return { ok: false, alreadyApplied: false, error: `Unknown operation ${item.operation}` };
     }
@@ -138,6 +141,9 @@ export class MockDb {
       return;
     }
 
+    if (p.scanEvent) this.upsertScanEvent(p.scanEvent);
+    if (p.product) this.upsertProduct(p.product);
+
     this.state.counts[key] = {
       ...existing,
       quantity: existing.quantity + (p.quantityDelta ?? 1),
@@ -146,6 +152,28 @@ export class MockDb {
         ? [...existing.appliedIdempotencyKeys, p.idempotencyKey]
         : existing.appliedIdempotencyKeys,
     };
+  }
+
+  applyTrustedExactSettlement(payload: TrustedExactSettlementPayload) {
+    for (const transfer of payload.countTransfers ?? []) {
+      const sourceKey = countKey(transfer.sessionId, transfer.fromProductId);
+      const targetKey = countKey(transfer.sessionId, transfer.toProductId);
+      const source = this.state.counts[sourceKey];
+      const target = this.state.counts[targetKey] ?? {
+        businessId: payload.businessId,
+        sessionId: transfer.sessionId,
+        productId: transfer.toProductId,
+        quantity: 0,
+        scanEventIds: [],
+        appliedIdempotencyKeys: [],
+      };
+      if (source) this.state.counts[sourceKey] = { ...source, quantity: source.quantity - transfer.quantity };
+      this.state.counts[targetKey] = { ...target, quantity: target.quantity + transfer.quantity };
+    }
+    this.upsertProduct(payload.product);
+    if (payload.archivedProduct) this.upsertProduct(payload.archivedProduct);
+    this.upsertReview(payload.review);
+    for (const event of payload.terminalEvents) this.upsertScanEvent(event);
   }
 
   upsertProduct(product: Product) {
@@ -233,6 +261,23 @@ export interface IncrementPayload {
   scanEventId: string;
   quantityDelta: number;
   idempotencyKey: string;
+  /** New scan path folds these durable snapshots into the increment transaction; legacy items omit them. */
+  scanEvent?: ScanEvent;
+  product?: Product;
+}
+
+export interface TrustedExactSettlementPayload {
+  businessId: string;
+  product: Product;
+  review: UnknownCodeReview;
+  archivedProduct?: Product;
+  terminalEvents: ScanEvent[];
+  countTransfers?: Array<{
+    sessionId: string;
+    fromProductId: string;
+    toProductId: string;
+    quantity: number;
+  }>;
 }
 
 /** A shared singleton for the app (browser-persisted). Tests construct their own instances. */

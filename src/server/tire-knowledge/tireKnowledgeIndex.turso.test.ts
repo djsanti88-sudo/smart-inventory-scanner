@@ -18,8 +18,15 @@ vi.mock("@/server/retail-knowledge/retailKnowledgeIndex", () => ({
   getTursoClient: () => mockGetRetailTursoClient(),
 }));
 
+const mockTrustedExactLookup = vi.hoisted(() => vi.fn());
+vi.mock("@/server/tire-knowledge/tireExactIndex", () => ({
+  lookupTrustedExactBarcode: mockTrustedExactLookup,
+  __resetTireExactIndexCacheForTests: () => {},
+}));
+
 import {
   lookupByExactBarcode,
+  lookupExactBarcodeDecision,
   lookupByExactPartNumber,
   __resetTireKnowledgeCacheForTests,
 } from "@/server/tire-knowledge/tireKnowledgeIndex";
@@ -38,7 +45,7 @@ const TIRE_ROW = {
   type: "all_season",
   season: "all_season",
   manufacturer_part_number: "90000027117",
-  barcode: "029142869870",
+  barcode: "123456789012",
   barcode_type: "upc_a",
   confidence: "verified_2src",
   current_status: "active",
@@ -83,6 +90,9 @@ function fakeTursoClient(options: {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockTrustedExactLookup.mockImplementation(async (code: string) => code === "30029885620210"
+    ? { kind: "blocked_package", canonicalKey: code }
+    : null);
   __resetTireKnowledgeCacheForTests();
 });
 
@@ -100,24 +110,24 @@ describe("tireKnowledgeIndex - Turso lookup path (SQLite absent, the Vercel case
 
   it("(b) SQLite absent + Turso has the barcode -> Turso row returned, mapped correctly (source_count numeric)", async () => {
     mockGetKnowledgeDb.mockReturnValue(null);
-    const client = fakeTursoClient({ tiresByBarcode: { "029142869870": TIRE_ROW } });
+    const client = fakeTursoClient({ tiresByBarcode: { "123456789012": TIRE_ROW } });
     mockGetRetailTursoClient.mockResolvedValue(client);
 
-    const row = await lookupByExactBarcode("029142869870");
+    const row = await lookupByExactBarcode("123456789012");
 
     expect(row).not.toBeNull();
     expect(row!.brand).toBe("cooper");
-    expect(row!.barcode).toBe("029142869870");
+    expect(row!.barcode).toBe("123456789012");
     expect(row!.source_count).toBe(2);
     expect(typeof row!.source_count).toBe("number");
   });
 
   it("normalizes scanner separators before querying Turso", async () => {
     mockGetKnowledgeDb.mockReturnValue(null);
-    const client = fakeTursoClient({ tiresByBarcode: { "029142869870": TIRE_ROW } });
+    const client = fakeTursoClient({ tiresByBarcode: { "123456789012": TIRE_ROW } });
     mockGetRetailTursoClient.mockResolvedValue(client);
 
-    const row = await lookupByExactBarcode("0 29142-869870");
+    const row = await lookupByExactBarcode("123 456-789012");
     expect(row?.brand).toBe("cooper");
   });
 
@@ -128,6 +138,32 @@ describe("tireKnowledgeIndex - Turso lookup path (SQLite absent, the Vercel case
 
     const row = await lookupByExactBarcode("000000000000");
     expect(row).toBeNull();
+  });
+
+  it("package blocks stop before Turso and remain discriminated internally", async () => {
+    mockGetKnowledgeDb.mockReturnValue(null);
+    const client = fakeTursoClient({ throwOnExecute: true });
+    mockGetRetailTursoClient.mockResolvedValue(client);
+
+    await expect(lookupExactBarcodeDecision("30029885620210")).resolves.toEqual({
+      kind: "blocked_package",
+      canonicalKey: "30029885620210",
+    });
+    await expect(lookupByExactBarcode("30029885620210")).resolves.toBeNull();
+    expect(mockGetRetailTursoClient).not.toHaveBeenCalled();
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it("a corrupt or unavailable exact index stops before Turso rather than becoming a legacy miss", async () => {
+    mockGetKnowledgeDb.mockReturnValue(null);
+    const client = fakeTursoClient({ throwOnExecute: true });
+    mockGetRetailTursoClient.mockResolvedValue(client);
+    mockTrustedExactLookup.mockResolvedValue({ kind: "unavailable" });
+
+    await expect(lookupExactBarcodeDecision("123456789012")).resolves.toEqual({ kind: "exact_index_unavailable" });
+    await expect(lookupByExactBarcode("123456789012")).resolves.toBeNull();
+    expect(mockGetRetailTursoClient).not.toHaveBeenCalled();
+    expect(client.calls).toHaveLength(0);
   });
 
   it("(d) part-number two-step via Turso returns the right row", async () => {
@@ -183,22 +219,22 @@ describe("tireKnowledgeIndex - Turso lookup path (SQLite absent, the Vercel case
 
   it("(f) __resetTireKnowledgeCacheForTests resets the Turso client/stmt cache too", async () => {
     mockGetKnowledgeDb.mockReturnValue(null);
-    const client1 = fakeTursoClient({ tiresByBarcode: { "029142869870": TIRE_ROW } });
+    const client1 = fakeTursoClient({ tiresByBarcode: { "123456789012": TIRE_ROW } });
     mockGetRetailTursoClient.mockResolvedValueOnce(client1);
 
-    await lookupByExactBarcode("029142869870");
+    await lookupByExactBarcode("123456789012");
     expect(mockGetRetailTursoClient).toHaveBeenCalledTimes(1);
 
     // Without a reset, the client should stay cached (no second getTursoClient() call).
-    const client2 = fakeTursoClient({ tiresByBarcode: { "029142869870": TIRE_ROW } });
+    const client2 = fakeTursoClient({ tiresByBarcode: { "123456789012": TIRE_ROW } });
     mockGetRetailTursoClient.mockResolvedValueOnce(client2);
-    await lookupByExactBarcode("029142869870");
+    await lookupByExactBarcode("123456789012");
     expect(mockGetRetailTursoClient).toHaveBeenCalledTimes(1); // still cached, not re-fetched
 
     // After a reset, the getter must be called again (cache cleared).
     __resetTireKnowledgeCacheForTests();
     mockGetRetailTursoClient.mockResolvedValueOnce(client2);
-    await lookupByExactBarcode("029142869870");
+    await lookupByExactBarcode("123456789012");
     expect(mockGetRetailTursoClient).toHaveBeenCalledTimes(2);
   });
 });

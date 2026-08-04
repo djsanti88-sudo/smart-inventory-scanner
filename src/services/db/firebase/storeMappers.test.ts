@@ -18,6 +18,11 @@ describe("toStoreProduct", () => {
     expect(p.verified).toBe(false);
     expect(p.status).toBe("archived");
   });
+
+  it("preserves a trusted exact canonical identity for a second-device reload", () => {
+    const p = toStoreProduct("p3", { trustedExactCanonicalId: "trusted-exact:00012345678905" }, BIZ);
+    expect(p.trustedExactCanonicalId).toBe("trusted-exact:00012345678905");
+  });
 });
 
 describe("toStoreAlias", () => {
