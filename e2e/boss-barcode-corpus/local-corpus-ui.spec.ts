@@ -58,6 +58,8 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
   const selected = fixtureModule.selectUiCorpusSample(fixtures);
   const expectedIdentities = new Map(selected.map((entry) => [entry.code, fixtureModule.runtimeCanonicalIdFor(entry)]));
   const blocked = await blockExternalEgress(page);
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text().replace(/\d{5,}/g, "[redacted]").slice(0, 240)); });
   await login(page);
   const input = page.getByTestId("scanner-input");
   const feed = page.getByTestId("scan-feed-body");
@@ -90,11 +92,21 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
   try {
     await expect(page.getByTestId("pending-count")).toHaveText(/^(?:Waiting to save|All saved): 0$/, { timeout: 30_000 });
   } catch (error) {
-    const diagnostic = await page.evaluate(() => ({
+    const diagnostic = await page.evaluate((browserConsoleErrors) => ({
       pending: document.querySelector('[data-testid="pending-count"]')?.textContent ?? "",
       syncError: document.querySelector('[data-testid="sync-error"]')?.textContent ?? "",
       selectedBusiness: window.localStorage.getItem("sis-selected-business-v1"),
-    }));
+      queue: (() => {
+        try {
+          const state = JSON.parse(window.localStorage.getItem("sis-scan-v1") ?? "{}").state;
+          const items = Array.isArray(state?.pendingSyncQueue) ? state.pendingSyncQueue : [];
+          const byOperation: Record<string, number> = {}; const byStatus: Record<string, number> = {}; const errors: Record<string, number> = {};
+          for (const item of items) { byOperation[String(item.operation)] = (byOperation[String(item.operation)] ?? 0) + 1; byStatus[String(item.status)] = (byStatus[String(item.status)] ?? 0) + 1; if (item.lastError) errors[String(item.lastError).replace(/\d{5,}/g, "[redacted]").slice(0, 160)] = (errors[String(item.lastError)] ?? 0) + 1; }
+          return { total: items.length, byOperation, byStatus, errors };
+        } catch { return { unreadable: true }; }
+      })(),
+      consoleErrors: browserConsoleErrors,
+    }), consoleErrors);
     await testInfo.attach("local-corpus-persistence-diagnostic", { contentType: "application/json", body: Buffer.from(JSON.stringify(diagnostic)) });
     throw error;
   }
