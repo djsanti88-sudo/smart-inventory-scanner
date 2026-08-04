@@ -355,54 +355,63 @@ function autoSuggestApplyOk(params: {
 }
 
 /**
- * Bounded decode queue (Task 5): a rapid multi-scan burst must not fire unlimited concurrent
- * `/api/ai-lookup` network calls. The public `liveDecode` action is a thin wrapper that ENQUEUES the
- * real decode work (`runLiveDecodeOnce`) here; `drainDecodeQueue` runs at most MAX_CONCURRENT_DECODES
- * tasks at a time, FIFO. Module-level (not per-store-instance) is intentional and harmless: review ids
- * are globally unique per scan, and the queue always fully drains, so nothing leaks across store
- * instances or tests. Counting/persistence NEVER waits on this queue - `ensureProvisionalCount` already
- * ran SYNCHRONOUSLY at scan time, before `liveDecode` is ever invoked (see `processScan`), so a
- * queued/delayed decode only delays the AI enrichment, never the count or the "Decoding..." badge.
+ * Bounded decode queues (Task 5): ordinary decode retains its two-wide FIFO lane. Authenticated
+ * deterministic-only trusted-exact probes use a separate four-wide FIFO lane so a corpus burst cannot
+ * sit behind general enrichment. Counting/persistence NEVER waits on either queue -
+ * `ensureProvisionalCount` already ran SYNCHRONOUSLY at scan time, before `liveDecode` is ever invoked.
  */
 const MAX_CONCURRENT_DECODES = 2;
+const MAX_CONCURRENT_TRUSTED_EXACT_DECODES = 4;
 // Task 3.5: cap the count-snapshot ring buffer (same pattern as FEEDBACK_EVENT_CAP) so the variance/
 // shrinkage report's history stays useful without growing localStorage unbounded.
 const COUNT_SNAPSHOT_CAP = 12;
-const pendingDecodeIds: string[] = [];
-let activeDecodes = 0;
-const decodeTasks = new Map<string, { run: () => Promise<void>; resolve: () => void; reject: (e: unknown) => void }>();
+type DecodeTask = { run: () => Promise<void>; resolve: () => void; reject: (e: unknown) => void };
+type DecodeQueue = { pendingIds: string[]; tasks: Map<string, DecodeTask>; active: number; limit: number };
+const generalDecodeQueue: DecodeQueue = {
+  pendingIds: [],
+  tasks: new Map(),
+  active: 0,
+  limit: MAX_CONCURRENT_DECODES,
+};
+const trustedExactDecodeQueue: DecodeQueue = {
+  pendingIds: [],
+  tasks: new Map(),
+  active: 0,
+  limit: MAX_CONCURRENT_TRUSTED_EXACT_DECODES,
+};
 // Dedupe: a reviewId already queued OR in flight resolves to the SAME promise instead of being queued
 // twice - a duplicate liveDecode call for a review already being decoded is a no-op, not a second fetch.
 const decodeTaskPromises = new Map<string, Promise<void>>();
 
-function drainDecodeQueue(): void {
-  while (activeDecodes < MAX_CONCURRENT_DECODES && pendingDecodeIds.length > 0) {
-    const reviewId = pendingDecodeIds.shift()!;
-    const task = decodeTasks.get(reviewId);
-    decodeTasks.delete(reviewId);
+function drainDecodeQueue(queue: DecodeQueue): void {
+  while (queue.active < queue.limit && queue.pendingIds.length > 0) {
+    const reviewId = queue.pendingIds.shift()!;
+    const task = queue.tasks.get(reviewId);
+    queue.tasks.delete(reviewId);
     if (!task) continue;
-    activeDecodes++;
+    queue.active++;
     task
       .run()
       .then(task.resolve, task.reject)
       .finally(() => {
-        activeDecodes--;
-        drainDecodeQueue();
+        queue.active--;
+        drainDecodeQueue(queue);
       });
   }
 }
 
-function enqueueDecode(reviewId: string, run: () => Promise<void>): Promise<void> {
+function enqueueDecode(reviewId: string, run: () => Promise<void>, deterministicOnly = false): Promise<void> {
   const existing = decodeTaskPromises.get(reviewId);
   if (existing) return existing;
+  const queue = deterministicOnly ? trustedExactDecodeQueue : generalDecodeQueue;
   const promise = new Promise<void>((resolve, reject) => {
-    pendingDecodeIds.push(reviewId);
-    decodeTasks.set(reviewId, { run, resolve, reject });
+    queue.pendingIds.push(reviewId);
+    queue.tasks.set(reviewId, { run, resolve, reject });
   });
   decodeTaskPromises.set(reviewId, promise);
   const cleanup = () => decodeTaskPromises.delete(reviewId);
   promise.then(cleanup, cleanup);
-  drainDecodeQueue();
+  drainDecodeQueue(queue);
   return promise;
 }
 
@@ -3406,7 +3415,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       // = 2) so a burst of unknown scans never fires unlimited concurrent /api/ai-lookup calls. Resolves once
       // the queued task actually runs and completes. Counting/persistence never waits on this - see the
       // queue doc comment above `decodeCorroborated`.
-      liveDecode: (reviewId, options) => enqueueDecode(reviewId, () => get().runLiveDecodeOnce(reviewId, options)),
+      liveDecode: (reviewId, options) => enqueueDecode(
+        reviewId,
+        () => get().runLiveDecodeOnce(reviewId, options),
+        options?.deterministicOnly === true,
+      ),
 
       runLiveDecodeOnce: async (reviewId, options) => {
         const state = get();

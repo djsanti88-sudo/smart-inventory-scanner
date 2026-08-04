@@ -358,4 +358,65 @@ describe("authenticated trusted-exact scan settlement", () => {
     expect(decodeCalls(fetchSpy)).toHaveLength(0);
     expect(store.getState().finalCounts.reduce((sum, row) => sum + row.quantity, 0)).toBe(3);
   });
+
+  it("runs a trusted-exact burst in its own four-wide lane and releases a failed slot", async () => {
+    // The production queues are module-scoped; allow finalizers from the preceding independent test to
+    // drain before this test replaces fetch and measures only this burst.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    // Create passive reviews first, then invoke the public deterministic-only entry point. This isolates
+    // lane scheduling from catalog/resolver data and makes the concurrency observation deterministic.
+    const store = createTestScanStore({ db: new MockDb(), trustedExactProbeEnabled: false });
+    store.getState().updateSettings({ aiLookupEnabled: false });
+
+    type Pending = { code: string; settle: (outcome: "ok" | "reject") => void };
+    const pending: Pending[] = [];
+    const started: Array<{ code: string; deterministicOnly: boolean }> = [];
+    let concurrent = 0;
+    let maxConcurrent = 0;
+    const fetchSpy = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      started.push({ code: body.cleanCode, deterministicOnly: body.deterministicOnly });
+      concurrent++;
+      maxConcurrent = Math.max(maxConcurrent, concurrent);
+      const outcome = await new Promise<"ok" | "reject">((settle) => pending.push({ code: body.cleanCode, settle }));
+      concurrent--;
+      if (outcome === "reject") throw new Error(`trusted exact probe failed for ${body.cleanCode}`);
+      return response(body.cleanCode, CANONICAL_ID);
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const codes = ["QTP1", "QTP2", "QTP3", "QTP4", "QTP5", "QTP6"];
+    for (const code of codes) store.getState().processScan(code);
+    // A duplicate physical scan must count, but it must share the in-flight review/probe rather than
+    // enqueueing a seventh trusted-exact request or flashing an ordinary Suggested presentation.
+    store.getState().processScan(codes[0]);
+    const reviewIds = codes.map((code) => store.getState().needsReviewQueue.find((review) => review.cleanCode === code)!.id);
+    const done = Promise.all(reviewIds.map((reviewId) => store.getState().liveDecode(reviewId, { deterministicOnly: true })));
+    const duplicate = store.getState().liveDecode(reviewIds[0], { deterministicOnly: true });
+
+    await vi.waitFor(() => expect(pending).toHaveLength(4));
+    expect(maxConcurrent).toBe(4);
+    expect(started).toEqual(codes.slice(0, 4).map((code) => ({ code, deterministicOnly: true })));
+    expect(store.getState().needsReviewQueue.every((review) => review.status !== "suggested")).toBe(true);
+
+    const reject = pending.find((item) => item.code === codes[1])!;
+    pending.splice(pending.indexOf(reject), 1);
+    reject.settle("reject");
+    await vi.waitFor(() => expect(started).toHaveLength(5));
+    expect(maxConcurrent).toBeLessThanOrEqual(4);
+
+    while (pending.length > 0) {
+      const item = pending.shift()!;
+      item.settle("ok");
+      await Promise.resolve();
+    }
+    await vi.waitFor(() => expect(started).toHaveLength(6));
+    while (pending.length > 0) pending.shift()!.settle("ok");
+    await done;
+    await duplicate;
+
+    expect(maxConcurrent).toBeLessThanOrEqual(4);
+    expect(decodeCalls(fetchSpy)).toHaveLength(6);
+    expect(store.getState().finalCounts.reduce((sum, row) => sum + row.quantity, 0)).toBe(7);
+  });
 });
