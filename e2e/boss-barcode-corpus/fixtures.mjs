@@ -153,3 +153,40 @@ export function loadCorpusFixtures(reconciliationPath, manifest) {
   }
   return fixtures;
 }
+
+/**
+ * A deliberately small UI set.  It is derived at run time from the pinned private
+ * source, so neither barcodes nor product labels enter git or the receipt.  The
+ * shortest spellings exercise the bug class that used to be filtered before the
+ * trusted-exact route; the boundary set covers opaque and GTIN-shaped keys.
+ */
+export function selectUiCorpusSample(fixtures, { shortest = 20, boundary = 12 } = {}) {
+  const entries = [...fixtures.spellings.entries()].map(([code, value]) => ({ code, ...value }));
+  const byLengthThenHash = [...entries].sort((left, right) =>
+    left.code.length - right.code.length || sha256(left.code).localeCompare(sha256(right.code)),
+  );
+  const selected = byLengthThenHash.slice(0, shortest);
+  const selectedCodes = new Set(selected.map(({ code }) => code));
+  const classes = new Map();
+  for (const entry of entries) {
+    if (selectedCodes.has(entry.code)) continue;
+    const key = entry.lookupKey.startsWith("nongtin:")
+      ? "opaque"
+      : entry.code.length <= 8 ? "gtin-short" : entry.code.length === 12 ? "upc" : entry.code.length === 13 ? "ean" : "gtin-long";
+    if (!classes.has(key)) classes.set(key, entry);
+  }
+  for (const entry of classes.values()) {
+    if (selected.length >= shortest + boundary) break;
+    selected.push(entry);
+  }
+  if (selected.length < shortest) throw new Error("Private corpus did not contain the required shortest UI sample.");
+  return selected;
+}
+
+export function runtimeCanonicalIdFor(entry) {
+  const shard = (createHash("sha256").update(entry.lookupKey).digest()[0] % 64).toString(16).padStart(2, "0");
+  const rows = JSON.parse(readFileSync(join(process.cwd(), "src", "server", "tire-knowledge", "exact-index", `${shard}.json`), "utf8"));
+  const row = rows[entry.lookupKey];
+  if (!row || row.bossTrusted !== true || typeof row.canonical_product_uid !== "string" || !row.canonical_product_uid) throw new Error("Selected UI spelling lacks a trusted exact runtime identity.");
+  return row.canonical_product_uid;
+}

@@ -21,6 +21,8 @@
     "test:watch": "vitest",
     "test:golden": "vitest run src/eval/goldenBaseline.test.ts",
     "certify:boss-barcodes:direct": "node scripts/certify-boss-barcodes.mjs --target direct --max-provider-calls 0",
+    "certify:boss-barcodes:ui-local": "node e2e/boss-barcode-corpus/run.mjs",
+    "test:certify:boss-barcodes:ui-local": "node --test e2e/boss-barcode-corpus/fixtures.test.mjs e2e/boss-barcode-corpus/local-sample.test.mjs e2e/boss-barcode-corpus/receipt.test.mjs",
     "test:certify:boss-barcodes": "node --test scripts/certify-boss-barcodes.node-test.mjs e2e/boss-barcode-corpus/fixtures.test.mjs",
     "test:corpus-drift": "vitest run src/server/tire-knowledge/corpusDrift.test.ts",
     "test:refresh-tire-meta": "node --test scripts/refresh-tire-meta.test.mjs",
