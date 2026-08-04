@@ -200,3 +200,28 @@ export function opaqueTrustedExactCanonicalId(canonicalProductUid) {
 export function redactForReceipt(value) {
   return createHash("sha256").update(String(value)).digest("hex").slice(0, 16).toUpperCase();
 }
+
+export function percentile(values, fraction) {
+  const sorted = [...values].filter(Number.isFinite).sort((left, right) => left - right);
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1)] ?? Number.NaN;
+}
+
+export function summarizeMeasuredLatency(entries, immediateMs, settlementMs, queueMs) {
+  const byClass = {};
+  for (let index = 0; index < entries.length; index += 1) {
+    const fixtureClass = entries[index].lookupKey.startsWith("nongtin:") ? "opaque_nongtin" : `gtin_length_${entries[index].code.length}`;
+    const bucket = byClass[fixtureClass] ?? (byClass[fixtureClass] = { n: 0, immediateMs: [], settlementMs: [], queueMs: [] });
+    bucket.n++; bucket.immediateMs.push(immediateMs[index]); bucket.settlementMs.push(settlementMs[index]); bucket.queueMs.push(queueMs[index]);
+  }
+  return Object.fromEntries(Object.entries(byClass).map(([key, bucket]) => [key, {
+    n: bucket.n,
+    immediate: { p50: percentile(bucket.immediateMs, .5), p95: percentile(bucket.immediateMs, .95) },
+    settlement: { p50: percentile(bucket.settlementMs, .5), p95: percentile(bucket.settlementMs, .95), max: Math.max(...bucket.settlementMs) },
+    queue: { p50: percentile(bucket.queueMs, .5), p95: percentile(bucket.queueMs, .95) },
+  }]));
+}
+
+export function trustedExactLatencyGate(settlementMs) {
+  const warm = settlementMs.slice(1); // first measured scan is cold; it is reported but excluded from the warm gate.
+  return { maxMs: Math.max(...settlementMs), warmP95Ms: percentile(warm, .95), maxPass: Math.max(...settlementMs) <= 2_000, warmP95Pass: percentile(warm, .95) <= 500 };
+}

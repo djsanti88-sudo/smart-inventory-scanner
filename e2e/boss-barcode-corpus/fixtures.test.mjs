@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deriveCorpusFixtures, opaqueTrustedExactCanonicalId, redactForReceipt } from "./fixtures.mjs";
+import { deriveCorpusFixtures, opaqueTrustedExactCanonicalId, redactForReceipt, summarizeMeasuredLatency, trustedExactLatencyGate } from "./fixtures.mjs";
 
 const manifest = {
   admittedBossCodes: 2,
@@ -46,4 +46,11 @@ test("opaque trusted exact identity matches the provider contract", () => {
 test("receipt redaction is an irreversible digest, not a reversible transport encoding", () => {
   const raw = "123456789"; const redacted = redactForReceipt(raw);
   assert.match(redacted, /^[A-F0-9]{16}$/); assert.notEqual(redacted, raw); assert.equal(redacted.includes("MTIzNDU2Nzg5"), false);
+});
+
+test("trusted exact latency gate excludes only cold first scan and reports fixture-class aggregates", () => {
+  const latency = trustedExactLatencyGate([1900, 100, 400, 550]);
+  assert.equal(latency.maxPass, true); assert.equal(latency.warmP95Pass, false);
+  const classes = summarizeMeasuredLatency([{ code: "a", lookupKey: "nongtin:a" }, { code: "12345678", lookupKey: "00000000000000" }], [1, 2], [3, 4], [2, 2]);
+  assert.equal(classes.opaque_nongtin.n, 1); assert.equal(classes.gtin_length_8.n, 1);
 });

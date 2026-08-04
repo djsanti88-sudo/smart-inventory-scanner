@@ -8,7 +8,6 @@ const SCANNER_INTERVAL_MS = 100; // declared local keyboard-wedge arrival rate: 
 const SETTLEMENT_TIMEOUT_MS = 2_000;
 
 function manifest() { return JSON.parse(readFileSync(join(process.cwd(), "src", "server", "tire-knowledge", "exact-index", "manifest.json"), "utf8")); }
-function percentile(values: number[], fraction: number) { const sorted = [...values].sort((a, b) => a - b); return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1)] ?? 0; }
 
 async function blockExternalEgress(page: Page) {
   const blocked: Array<{ method: string; hostname: string; pathname: string }> = [];
@@ -95,6 +94,9 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
   const immediateMs = selected.map((entry) => Number(marks[entry.code]?.immediate) - Number(starts.get(entry.code)));
   const settledMs = selected.map((entry) => Number(marks[entry.code]?.settled) - Number(starts.get(entry.code)));
   const queueMs = selected.map((entry) => Number(marks[entry.code]?.settled) - Number(marks[entry.code]?.immediate));
+  const latencyGate = fixtureModule.trustedExactLatencyGate(settledMs);
+  expect(latencyGate.maxMs, "every trusted exact scanner burst entry must settle within 2 seconds").toBeLessThanOrEqual(2_000);
+  expect(latencyGate.warmP95Ms, "warm trusted exact P95 must remain under 500ms; the first measured scan is cold").toBeLessThanOrEqual(500);
   await expect(input).toBeFocused();
   try {
     await expect(page.getByTestId("pending-count")).toHaveText(/^(?:Waiting to save|All saved): 0$/, { timeout: 30_000 });
@@ -132,6 +134,6 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
   await page.reload(); await expect(input).toBeFocused({ timeout: 30_000 });
   await expect(page.getByText(`${selected.length} scans`, { exact: true })).toBeVisible({ timeout: 30_000 });
   expect(blocked, "local proof must make no external browser requests").toEqual([]);
-  const summary = { scope: "synthetic-normal-member-local-emulator", selected: selected.length, shortest: 20, boundary: selected.length - 20, events: settled.events, counted: settled.counted, activeReviews: settled.activeReviews, identities: [...expectedIdentities.entries()].map(([code, canonicalId]) => ({ code: fixtureModule.redactForReceipt(code), canonicalId: fixtureModule.redactForReceipt(canonicalId) })), scannerIntervalMs: SCANNER_INTERVAL_MS, latencyMs: { immediate: { p50: percentile(immediateMs, .5), p95: percentile(immediateMs, .95) }, settlement: { p50: percentile(settledMs, .5), p95: percentile(settledMs, .95), max: Math.max(...settledMs) }, queue: { p50: percentile(queueMs, .5), p95: percentile(queueMs, .95) } } };
+  const summary = { scope: "synthetic-normal-member-local-emulator", selected: selected.length, shortest: 20, boundary: selected.length - 20, events: settled.events, counted: settled.counted, activeReviews: settled.activeReviews, identities: [...expectedIdentities.entries()].map(([code, canonicalId]) => ({ code: fixtureModule.redactForReceipt(code), canonicalId: fixtureModule.redactForReceipt(canonicalId) })), scannerIntervalMs: SCANNER_INTERVAL_MS, latencyGate, latencyByFixtureClass: fixtureModule.summarizeMeasuredLatency(selected, immediateMs, settledMs, queueMs), latencyMs: { immediate: { p50: fixtureModule.percentile(immediateMs, .5), p95: fixtureModule.percentile(immediateMs, .95) }, settlement: { p50: fixtureModule.percentile(settledMs, .5), p95: fixtureModule.percentile(settledMs, .95), max: Math.max(...settledMs) }, queue: { p50: fixtureModule.percentile(queueMs, .5), p95: fixtureModule.percentile(queueMs, .95) } } };
   await testInfo.attach("local-corpus-summary", { contentType: "application/json", body: Buffer.from(JSON.stringify(summary)) });
 });
