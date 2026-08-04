@@ -71,31 +71,30 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
   await login(page);
   const input = page.getByTestId("scanner-input");
   const feed = page.getByTestId("scan-feed-body");
-  const history = await page.evaluate(() => {
+  const history = await page.evaluate((codes) => {
     const root = document.querySelector('[data-testid="scan-feed-body"]'); if (!root) throw new Error("scan feed missing");
-    const value = { forbidden: false, observer: null as MutationObserver | null };
-    value.observer = new MutationObserver((mutations) => { for (const mutation of mutations) for (const node of mutation.addedNodes) if (/Suggested|Needs Review|Conflict|Vendor/i.test(node.textContent ?? "")) value.forbidden = true; });
+    const value = { forbidden: false, observer: null as MutationObserver | null, marks: {} as Record<string, { immediate?: number; settled?: number }> };
+    const inspect = () => { for (const row of root.querySelectorAll("tr")) for (const code of codes) { const text = row.textContent ?? ""; if (!text.includes(code)) continue; const mark = value.marks[code] ?? (value.marks[code] = {}); mark.immediate ??= performance.now(); if (/Verified \(app-confirmed\)|Counted/.test(text)) mark.settled ??= performance.now(); if (/Suggested|Needs Review|Conflict|Vendor/i.test(text)) value.forbidden = true; } };
+    value.observer = new MutationObserver(inspect); inspect();
     value.observer.observe(root, { childList: true, subtree: true, characterData: true }); (window as Window & { __localCorpusHistory?: typeof value }).__localCorpusHistory = value;
     return true;
-  });
+  }, selected.map((entry) => entry.code));
   expect(history).toBe(true);
-  const immediateMs: number[] = []; const settledMs: number[] = []; const queueMs: number[] = [];
+  const starts = new Map<string, number>();
+  const burstStart = performance.now();
   for (let index = 0; index < selected.length; index += 1) {
     if (index % 20 === 0) await expect(input).toBeFocused();
-    const entry = selected[index]; const started = performance.now();
+    const deadline = burstStart + index * SCANNER_INTERVAL_MS;
+    const remaining = deadline - performance.now(); if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+    const entry = selected[index]; starts.set(entry.code, await page.evaluate(() => performance.now()));
     await page.keyboard.insertText(entry.code); await page.keyboard.press("Enter");
-    await expect(page.getByText(`${index + 1} scans`, { exact: true })).toBeVisible({ timeout: 2_000 });
-    immediateMs.push(performance.now() - started);
-    const settleStart = performance.now();
-    await expect.poll(async () => {
-      // The feed's semantic status is rendered as ordinary row text (not a nested test id).
-      // We assert its terminal vocabulary without relying on an implementation-only cell layout.
-      const status = await feed.locator("tr").first().textContent();
-      return /Verified \(app-confirmed\)|Counted/.test(status ?? "");
-    }, { timeout: SETTLEMENT_TIMEOUT_MS, intervals: [10, 20, 50] }).toBe(true);
-    settledMs.push(performance.now() - started); queueMs.push(performance.now() - settleStart);
-    await new Promise((resolve) => setTimeout(resolve, SCANNER_INTERVAL_MS));
   }
+  await expect(page.getByText(`${selected.length} scans`, { exact: true })).toBeVisible({ timeout: 2_000 });
+  await expect.poll(async () => await page.evaluate(() => Object.values((window as Window & { __localCorpusHistory?: { marks: Record<string, { settled?: number }> } }).__localCorpusHistory?.marks ?? {}).filter((mark) => mark.settled !== undefined).length), { timeout: SETTLEMENT_TIMEOUT_MS, intervals: [10, 20, 50] }).toBe(selected.length);
+  const marks = await page.evaluate(() => (window as Window & { __localCorpusHistory?: { marks: Record<string, { immediate?: number; settled?: number }> } }).__localCorpusHistory?.marks ?? {});
+  const immediateMs = selected.map((entry) => Number(marks[entry.code]?.immediate) - Number(starts.get(entry.code)));
+  const settledMs = selected.map((entry) => Number(marks[entry.code]?.settled) - Number(starts.get(entry.code)));
+  const queueMs = selected.map((entry) => Number(marks[entry.code]?.settled) - Number(marks[entry.code]?.immediate));
   await expect(input).toBeFocused();
   try {
     await expect(page.getByTestId("pending-count")).toHaveText(/^(?:Waiting to save|All saved): 0$/, { timeout: 30_000 });
