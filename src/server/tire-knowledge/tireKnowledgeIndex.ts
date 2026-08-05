@@ -49,6 +49,7 @@ interface TireJsonIndex {
   partNumberIndex: Record<string, string>;
 }
 let _jsonIndex: TireJsonIndex | null | "missing" = null;
+let _jsonIndexError: string | null = null;
 let _uidToRow: Map<string, TireKnowledgeRow> | null = null;
 
 /** Load the committed tire JSON into memory once (cached for the process lifetime). Used when the
@@ -64,9 +65,18 @@ function getJsonIndex(): TireJsonIndex | null {
     return _jsonIndex;
   } catch (e) {
     console.warn("[tire-knowledge] in-memory JSON index load failed:", (e as Error).message);
+    _jsonIndexError = (e as Error).message;
     _jsonIndex = "missing";
     return null;
   }
+}
+
+/** Operational visibility: the JSON fallback swallows load failures into a process-lifetime miss.
+ *  This status lets /api/health surface that state instead of decoding silently returning nothing. */
+export function tireJsonIndexStatus(): { state: "not_loaded" | "loaded" | "failed"; barcodeRows: number; message: string | null } {
+  if (_jsonIndex === "missing") return { state: "failed", barcodeRows: 0, message: _jsonIndexError };
+  if (_jsonIndex) return { state: "loaded", barcodeRows: Object.keys(_jsonIndex.barcodeIndex).length, message: null };
+  return { state: "not_loaded", barcodeRows: 0, message: null };
 }
 
 // SQLite prepared statements (created lazily, cached for process lifetime)
@@ -482,6 +492,7 @@ export function __resetTireKnowledgeCacheForTests(): void {
   _stmtPartNumberAlias = null;
   _stmtByUid = null;
   _jsonIndex = null;
+  _jsonIndexError = null;
   _uidToRow = null;
   _tursoClient = null;
   _tursoClientPromise = null;
