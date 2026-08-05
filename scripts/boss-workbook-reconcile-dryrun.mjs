@@ -22,11 +22,35 @@ export function classifyRows(rows) {
   return { accepted, needsReview, blanks };
 }
 
+export function parseRfc4180Line(line) {
+  const cells = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === "," && !inQuotes) {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
 function parseCsv(text) {
   const [header, ...lines] = text.split(/\r?\n/).filter(Boolean);
   const cols = header.split(",").map((c) => c.trim());
   return lines.map((line) => {
-    const cells = line.split(",");
+    const cells = parseRfc4180Line(line);
     return Object.fromEntries(cols.map((c, i) => [c, (cells[i] ?? "").trim()]));
   });
 }
