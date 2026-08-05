@@ -64,6 +64,18 @@
 //   node scripts/boss-override-2026-08-05.mjs verify  [--dry-run] --manifest <path> --expected-manifest-sha256 <sha>  (orchestrator)
 //   node scripts/boss-override-2026-08-05.mjs promote [--dry-run] --manifest <path> --expected-manifest-sha256 <sha>  (orchestrator, PROMOTE_CONFIRM=YES)
 //   node scripts/boss-override-2026-08-05.mjs rollback --ts <backup-ts> [--dry-run]   (orchestrator, PROMOTE_CONFIRM=YES)
+//
+// NOTE ON annotate-drops (added 2026-08-05, second-reviewer finding, LIVE backfill documentation):
+//   node scripts/boss-override-2026-08-05.mjs annotate-drops [--dry-run]              (orchestrator, PROMOTE_CONFIRM=YES)
+// The 18 old_keys_to_drop barcodes removed by the already-executed promotion (ts=20260805_184504)
+// predate the drop-provenance fix in applyLedgerStatements and currently have no in-database trace -
+// only boss_override_actions.jsonl records why they were dropped. This command connects to LIVE
+// Turso (promotion already swapped staging_boss_override_* into the live table names, so there is no
+// staging clone left to write into) and inserts exactly the missing documentation rows into live
+// `provenance` (evidence_level=superseded_placeholder_dropped), idempotently. Implemented and
+// unit-tested with a mocked client (boss-override-2026-08-05.test.mjs) but was NOT run live by the
+// implementer session that added it - the orchestrator runs it for real:
+//   $env:PROMOTE_CONFIRM="YES"; node scripts/boss-override-2026-08-05.mjs annotate-drops
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { join, dirname, isAbsolute } from "node:path";
@@ -193,8 +205,26 @@ function isAllowedTableName(name) {
   return false;
 }
 
+/** Replace the CONTENTS of every single-quoted SQL string literal with nothing, leaving the
+ *  surrounding quotes - so free-text VALUES (e.g. a decision_reason carried into a provenance
+ *  license_note) can never be misread as a keyword/table reference by extractTableNames' regexes.
+ *  Handles '' as an escaped literal quote inside a string, matching sqlStr()'s own encoding
+ *  (`value.replace(/'/g, "''")`), so a value containing a real apostrophe still parses as one
+ *  literal, not as closing the string early. */
+function stripSqlStringLiterals(sql) {
+  return sql.replace(/'(?:[^']|'')*'/g, "''");
+}
+
 function extractTableNames(statement) {
   const names = new Set();
+  // Real bug found 2026-08-05: a live decision_reason value containing the ordinary English phrase
+  // "...trusted-imported from the OLD, now-superseded boss workbook..." was matched by the FROM
+  // pattern below (scanning the RAW statement, including inside its own quoted string literals) and
+  // "the" was captured as a bogus table name, making assertAllowedTables refuse an entirely
+  // legitimate provenance INSERT. Scanning the string-literal-stripped statement instead means only
+  // bareword SQL identifiers (which never appear inside this script's own quoted values) can ever be
+  // captured as a table name.
+  const scanTarget = stripSqlStringLiterals(statement);
   const patterns = [
     /CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?\w+["'`]?\s+ON\s+["'`]?(\w+)["'`]?/gi,
     /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?(\w+)["'`]?/gi,
@@ -209,7 +239,7 @@ function extractTableNames(statement) {
   ];
   for (const re of patterns) {
     let m;
-    while ((m = re.exec(statement)) !== null) names.add(m[1]);
+    while ((m = re.exec(scanTarget)) !== null) names.add(m[1]);
   }
   return names;
 }
@@ -505,6 +535,78 @@ export function unresolvedConflictRows(ledger) {
   return ledger.filter((r) => r.action === "review_cross_uid_conflict");
 }
 
+/** Codex ultra-review MEDIUM finding (2026-08-05): `ledger`'s printed conflict summary previously
+ *  derived from `match_basis === "both_conflict"` alone, so a row an owner had already resolved (by
+ *  hand-editing `action`) or explicitly deferred was STILL printed as "unresolved - BLOCKS promote",
+ *  a dishonest log versus the real gate (unresolvedConflictRows, keyed on `action`). This pure
+ *  function is the single source of truth for the honest three-way split, reused by `cmdLedger`'s
+ *  console output so the printed labels can never drift from unresolvedConflictRows again:
+ *    - blocking: action still "review_cross_uid_conflict" (matches unresolvedConflictRows exactly).
+ *    - resolved: action changed to an apply action (update_blank_fill / insert_preserve_uid /
+ *      insert_new_uid) - match_basis stays "both_conflict" as the audit trail, but it no longer blocks.
+ *    - deferred: action explicitly set to "defer_review" - a no-op this run, not a resolution. */
+export function summarizeConflictLabels(ledger) {
+  const bothConflictRows = ledger.filter((r) => r.match_basis === "both_conflict");
+  const blocking = unresolvedConflictRows(bothConflictRows);
+  const deferred = bothConflictRows.filter((r) => r.action === "defer_review");
+  const resolved = bothConflictRows.filter(
+    (r) => r.action !== "review_cross_uid_conflict" && r.action !== "defer_review"
+  );
+  return { blocking, resolved, deferred };
+}
+
+// =============================================================================================
+// STALE-LEDGER GUARD (Codex ultra-review HIGH finding, 2026-08-05). Protects every FUTURE rerun of
+// `stage`: once this ledger's batch has been promoted live, its insert_preserve_uid/insert_new_uid
+// target barcodes now exist live and are carried forward by the full-clone, so blindly re-applying
+// the ledger would let INSERT OR REPLACE overwrite richer live rows with this ledger's sparse
+// constructed record, and append duplicate provenance evidence under the same batch. Two
+// independent, either-sufficient signals decide staleness - the decision logic here is a pure
+// function so it is unit-testable with fixture inputs; the actual DB queries that produce those
+// inputs live in cmdStage (real client, not exercised by the offline test suite).
+// =============================================================================================
+
+/** Deterministic (order-preserving, no RNG), evenly-strided sample of up to `sampleSize` desired
+ *  barcodes from this ledger's insert_preserve_uid/insert_new_uid rows - same striding technique as
+ *  verify gate H_pure_boss_uid_preservation_sampled. Pure, no I/O. */
+export function sampleInsertBarcodesForStaleCheck(ledger, sampleSize = 25) {
+  const insertRows = ledger.filter((r) => r.action === "insert_preserve_uid" || r.action === "insert_new_uid");
+  if (insertRows.length === 0) return [];
+  const n = Math.min(sampleSize, insertRows.length);
+  const step = Math.floor(insertRows.length / n) || 1;
+  const sample = [];
+  for (let i = 0; i < insertRows.length && sample.length < n; i += step) sample.push(insertRows[i].desired_barcode);
+  return sample;
+}
+
+/** Pure decision function: given what the two staleness queries found (issued by cmdStage against
+ *  the just-cloned staging tables), decide whether `stage` must refuse to run. Kept separate from
+ *  the DB queries themselves so the decision logic is unit-testable without a live client or mock. */
+export function detectStaleLedger({ batchAlreadyExists, existingSampledBarcodes }) {
+  const sampled = existingSampledBarcodes || [];
+  const stale = Boolean(batchAlreadyExists) || sampled.length > 0;
+  if (!stale) return { stale: false, reason: "" };
+  const reasons = [];
+  if (batchAlreadyExists) {
+    reasons.push(
+      `provenance batch ${SOURCE_NAME}/${BATCH_ID} already exists in the staging clone (this ledger was already promoted live)`
+    );
+  }
+  if (sampled.length > 0) {
+    reasons.push(
+      `${sampled.length} sampled insert-target barcode(s) already exist in the staging clone: ` +
+        `${sampled.slice(0, 10).join(", ")}${sampled.length > 10 ? ", ..." : ""}`
+    );
+  }
+  return {
+    stale: true,
+    reason:
+      `REFUSING to stage a STALE ledger - ${reasons.join("; ")}. Re-run "ledger" against current ` +
+      `live data and re-apply any hand-rulings (both_conflict resolutions / defer_review) onto the ` +
+      `fresh ledger before staging again.`,
+  };
+}
+
 // =============================================================================================
 // Live data loaders (full keyset-paginated reads).
 // =============================================================================================
@@ -583,9 +685,21 @@ async function cmdLedger() {
   console.log(`\nledger: ${dropRows.length} row(s) propose an old_keys_to_drop (requires orchestrator/owner sign-off before promote):`);
   for (const r of dropRows) console.log(`  ${r.item_number}: drop ${JSON.stringify(r.old_keys_to_drop)} (preserve uid ${r.current_uid})`);
 
-  const conflictRows = ledger.filter((r) => r.match_basis === "both_conflict");
-  console.log(`\nledger: ${conflictRows.length} row(s) are unresolved cross-UID conflicts (BLOCKS promote):`);
-  for (const r of conflictRows) console.log(`  ${r.item_number} / ${r.desired_barcode}: ${r.decision_reason}`);
+  // PRE-LIVE REVIEW FIX (Codex ultra-review MEDIUM finding, 2026-08-05): report blocking/resolved/
+  // deferred by CURRENT action via summarizeConflictLabels, never by the immutable match_basis alone
+  // - otherwise a row an owner already resolved or deferred is printed as "unresolved - BLOCKS
+  // promote" even though the real gate (unresolvedConflictRows) no longer blocks it.
+  const { blocking, resolved, deferred } = summarizeConflictLabels(ledger);
+  console.log(`\nledger: ${blocking.length} row(s) are unresolved cross-UID conflicts (action=review_cross_uid_conflict, BLOCKS promote):`);
+  for (const r of blocking) console.log(`  ${r.item_number} / ${r.desired_barcode}: ${r.decision_reason}`);
+  if (resolved.length > 0) {
+    console.log(`\nledger: ${resolved.length} historical both_conflict row(s) have been RESOLVED and no longer block promote:`);
+    for (const r of resolved) console.log(`  ${r.item_number} / ${r.desired_barcode}: action=${r.action}, current_uid=${r.current_uid}`);
+  }
+  if (deferred.length > 0) {
+    console.log(`\nledger: ${deferred.length} historical both_conflict row(s) are DEFERRED (action=defer_review) - left untouched this run, does not block promote:`);
+    for (const r of deferred) console.log(`  ${r.item_number} / ${r.desired_barcode}`);
+  }
 
   client.close();
   return { ledger, buckets };
@@ -799,8 +913,22 @@ async function cloneTableStatements(client, table) {
 
 /** Apply the ledger's per-row actions to the ALREADY-CLONED staging_boss_override_tires /
  *  _tire_part_numbers / _provenance tables. Never touches staging_boss_override_aliases or
- *  staging_boss_override_canonical_products (no boss action ever targets them). */
-export function applyLedgerStatements(ledger, bossRows, provenanceStartId, importedAt) {
+ *  staging_boss_override_canonical_products (no boss action ever targets them).
+ *  `existingProvenanceKeys` (Codex ultra-review HIGH finding, 2026-08-05): a Set of
+ *  `${batch_id}::${product_id}::${row}::${barcode}` strings already present in staging - any
+ *  provenance row this call would otherwise emit whose key is already in the set is skipped
+ *  (idempotent per source line per batch per documented barcode), so a retried `stage` never appends
+ *  duplicate evidence rows. Caller (cmdStage) supplies this from a live query; defaults to empty
+ *  (no-op) for the pure-function unit tests. The barcode is part of the key (not just batch/product/
+ *  row) because a single ledger entry's old_keys_to_drop can list MULTIPLE dropped barcodes under
+ *  the same product_id+row - each needs its own row, not a single deduped one.
+ *
+ *  DROP-PROVENANCE FIX (second-reviewer finding, 2026-08-05): every barcode listed in an entry's
+ *  old_keys_to_drop previously vanished from staging with NO in-database trace - only the external
+ *  boss_override_actions.jsonl recorded why. Each drop now also gets its own provenance row
+ *  (evidence_level "superseded_placeholder_dropped", license_note = the ledger row's decision_reason)
+ *  so the removal is permanently auditable from the database itself, not only the JSONL. */
+export function applyLedgerStatements(ledger, bossRows, provenanceStartId, importedAt, existingProvenanceKeys = new Set()) {
   const bossRowByItemNumber = new Map(bossRows.map((r) => [r.item_number, r]));
   const statements = [];
   const tiresTuples = [];
@@ -813,7 +941,16 @@ export function applyLedgerStatements(ledger, bossRows, provenanceStartId, impor
     if (entry.action === "review_cross_uid_conflict" || entry.action === "defer_review") continue; // never written to staging content
 
     const boss = bossRowByItemNumber.get(entry.item_number);
-    for (const oldKey of entry.old_keys_to_drop) dropBarcodes.push(oldKey);
+    for (const oldKey of entry.old_keys_to_drop) {
+      dropBarcodes.push(oldKey);
+      // Document the removal itself as its own provenance row. sourceBarcode stays the BOSS row's
+      // own barcode (for the row/sheet lookup below) even though the documented `barcode` column is
+      // the DROPPED (old) barcode, not the boss row's desired one.
+      provenanceTuples.push({
+        id: nextId++, product_id: entry.current_uid, barcode: oldKey, sourceBarcode: entry.desired_barcode,
+        evidenceLevel: "superseded_placeholder_dropped", licenseNote: entry.decision_reason || "",
+      });
+    }
 
     if (entry.action === "update_blank_fill") {
       // Blank-only field fill is expressed as an UPDATE ... SET against the already-cloned row
@@ -831,7 +968,7 @@ export function applyLedgerStatements(ledger, bossRows, provenanceStartId, impor
           ` WHERE barcode = ${sqlStr(entry.desired_barcode)};`
       );
       if (entry.part_number_alias_to_add) pnTuples.push({ normalized_part_number: entry.part_number_alias_to_add, canonical_product_uid: entry.current_uid });
-      provenanceTuples.push({ id: nextId++, product_id: entry.current_uid, barcode: entry.desired_barcode });
+      provenanceTuples.push({ id: nextId++, product_id: entry.current_uid, barcode: entry.desired_barcode, sourceBarcode: entry.desired_barcode });
     } else if (entry.action === "insert_preserve_uid" || entry.action === "insert_new_uid") {
       const parsed = parseBossItemName(boss.item_name, boss.brand);
       const shape = barcodeShape(entry.desired_barcode);
@@ -847,7 +984,7 @@ export function applyLedgerStatements(ledger, bossRows, provenanceStartId, impor
       };
       tiresTuples.push(fields);
       if (entry.part_number_alias_to_add) pnTuples.push({ normalized_part_number: entry.part_number_alias_to_add, canonical_product_uid: entry.current_uid });
-      provenanceTuples.push({ id: nextId++, product_id: entry.current_uid, barcode: entry.desired_barcode });
+      provenanceTuples.push({ id: nextId++, product_id: entry.current_uid, barcode: entry.desired_barcode, sourceBarcode: entry.desired_barcode });
     }
   }
 
@@ -873,19 +1010,32 @@ export function applyLedgerStatements(ledger, bossRows, provenanceStartId, impor
   const provColumns = ["id", "product_id", "barcode", "source_name", "source_ref", "sheet", "row", "batch_id", "imported_at", "evidence_level", "license_note", "content_hash"];
   const bossRowSheetLookup = new Map(bossRows.map((r) => [r.barcode, r.item_number]));
   const sheet1RowIndex = loadSheet1RowIndex();
-  const provValueTuples = provenanceTuples.map((r) => valueTuple({
-    ...r, source_name: SOURCE_NAME, source_ref: SOURCE_REF, sheet: "Sheet1",
-    row: String(sheet1RowIndex.get(bossRowSheetLookup.get(r.barcode)) ?? ""),
-    batch_id: BATCH_ID, imported_at: importedAt, evidence_level: "trusted_exact_barcode",
-    license_note: "", content_hash: "",
-  }, provColumns));
+  const provenanceRows = provenanceTuples.map((r) => ({
+    id: r.id, product_id: r.product_id, barcode: r.barcode,
+    source_name: SOURCE_NAME, source_ref: SOURCE_REF, sheet: "Sheet1",
+    row: String(sheet1RowIndex.get(bossRowSheetLookup.get(r.sourceBarcode)) ?? ""),
+    batch_id: BATCH_ID, imported_at: importedAt,
+    evidence_level: r.evidenceLevel ?? "trusted_exact_barcode",
+    license_note: r.licenseNote ?? "", content_hash: "",
+  }));
+  // Idempotency guard (Codex ultra-review HIGH finding, 2026-08-05; barcode added to the key for the
+  // drop-provenance fix): drop any provenance row whose (batch_id, product_id, row, barcode)
+  // quadruple is already present per `existingProvenanceKeys` - see the function-level doc comment.
+  const provenanceKeyOf = (r) => `${r.batch_id}::${r.product_id}::${r.row}::${r.barcode}`;
+  const newProvenanceRows = provenanceRows.filter((r) => !existingProvenanceKeys.has(provenanceKeyOf(r)));
+  const provenanceSkippedDuplicate = provenanceRows.length - newProvenanceRows.length;
+  const provValueTuples = newProvenanceRows.map((r) => valueTuple(r, provColumns));
   for (let i = 0; i < provValueTuples.length; i += 200) {
     statements.push(`INSERT OR REPLACE INTO ${STAGING_TABLE_FOR.provenance} (${provColumns.join(", ")}) VALUES ${provValueTuples.slice(i, i + 200).join(", ")};`);
   }
 
   return {
     statements,
-    counts: { tiresInserted: tiresTuples.length, pnInserted: pnValueTuples.length, provenanceInserted: provValueTuples.length, droppedBarcodes: dropBarcodes.length },
+    counts: {
+      tiresInserted: tiresTuples.length, pnInserted: pnValueTuples.length,
+      provenanceInserted: provValueTuples.length, droppedBarcodes: dropBarcodes.length,
+      provenanceSkippedDuplicate,
+    },
   };
 }
 
@@ -899,7 +1049,7 @@ async function cmdStage({ dryRun, manifestArg, expectedManifestSha256 }) {
   const bossRows = loadBossRows();
 
   if (dryRun) {
-    console.log(`[dry-run] stage: NOT EVALUATED. Would DROP + CREATE TABLE IF NOT EXISTS + full-clone all 5 live tables (${SWAPPED_TABLES.join(", ")}) into staging_boss_override_*, then apply ${ledger.length} ledger row actions (update_blank_fill / insert_preserve_uid / insert_new_uid; skipping review_cross_uid_conflict and defer_review rows) inside staging only.`);
+    console.log(`[dry-run] stage: NOT EVALUATED. Would DROP + CREATE TABLE IF NOT EXISTS + full-clone all 5 live tables (${SWAPPED_TABLES.join(", ")}) into staging_boss_override_*, run the stale-ledger guard (abort if this ledger's provenance batch or a sample of its insert-target barcodes already exist in the clone), then apply ${ledger.length} ledger row actions (update_blank_fill / insert_preserve_uid / insert_new_uid; skipping review_cross_uid_conflict and defer_review rows) inside staging only.`);
     return;
   }
 
@@ -918,12 +1068,49 @@ async function cmdStage({ dryRun, manifestArg, expectedManifestSha256 }) {
     console.log(`stage: cloned ${clonedCount} rows into ${STAGING_TABLE_FOR[table]}.`);
   }
 
+  // STALE-LEDGER GUARD (Codex ultra-review HIGH finding, 2026-08-05): must run AFTER the full clone
+  // completes above (so staging_boss_override_provenance/_tires reflect CURRENT live content) and
+  // BEFORE any ledger action is applied. See detectStaleLedger's doc comment for the rationale.
+  const batchExistsRes = await client.execute({
+    sql: `SELECT COUNT(*) c FROM ${STAGING_TABLE_FOR.provenance} WHERE source_name = ? AND batch_id = ?`,
+    args: [SOURCE_NAME, BATCH_ID],
+  });
+  const batchAlreadyExists = Number(batchExistsRes.rows[0].c) > 0;
+  const sampledBarcodes = sampleInsertBarcodesForStaleCheck(ledger);
+  let existingSampledBarcodes = [];
+  if (sampledBarcodes.length > 0) {
+    const sampleRes = await client.execute({
+      sql: `SELECT barcode FROM ${STAGING_TABLE_FOR.tires} WHERE barcode IN (${sampledBarcodes.map(() => "?").join(",")})`,
+      args: sampledBarcodes,
+    });
+    existingSampledBarcodes = sampleRes.rows.map((r) => String(r.barcode));
+  }
+  const staleCheck = detectStaleLedger({ batchAlreadyExists, existingSampledBarcodes });
+  if (staleCheck.stale) {
+    client.close();
+    throw new Error(`stage: ${staleCheck.reason}`);
+  }
+  console.log(
+    `stage: staleness guard passed (provenance batch ${SOURCE_NAME}/${BATCH_ID} not yet present; ` +
+      `0/${sampledBarcodes.length} sampled insert-target barcodes pre-exist in the clone).`
+  );
+
   const maxIdRes = await client.execute(`SELECT MAX(id) m FROM provenance`);
   const provenanceStartId = Number(maxIdRes.rows[0].m ?? 0) + 1;
   const importedAt = new Date().toISOString();
 
+  // Idempotent-provenance guard (defense in depth alongside the staleness guard above - covers a
+  // partial-failure retry of `stage` itself, not just a rerun against already-promoted live data).
+  // Key includes `barcode` (not just batch/product/row) so a drop-documentation row and its sibling
+  // apply-documentation row under the same entry never collide - see applyLedgerStatements' doc.
+  const existingProvRes = await client.execute({
+    sql: `SELECT batch_id, product_id, row, barcode FROM ${STAGING_TABLE_FOR.provenance} WHERE batch_id = ?`,
+    args: [BATCH_ID],
+  });
+  const existingProvenanceKeys = new Set(existingProvRes.rows.map((r) => `${r.batch_id}::${r.product_id}::${r.row}::${r.barcode}`));
+
   console.log("stage: applying ledger actions inside staging...");
-  const { statements: applyStatements, counts: applyCounts } = applyLedgerStatements(ledger, bossRows, provenanceStartId, importedAt);
+  const { statements: applyStatements, counts: applyCounts } = applyLedgerStatements(ledger, bossRows, provenanceStartId, importedAt, existingProvenanceKeys);
   await execBatchChunked(client, applyStatements, { dryRun: false, label: "stage (apply ledger)" });
   console.log(`stage: applied ${JSON.stringify(applyCounts)}`);
 
@@ -1196,6 +1383,113 @@ async function cmdRollback({ dryRun, ts }) {
 }
 
 // =============================================================================================
+// annotate-drops: LIVE backfill documentation for the (as of 2026-08-05) 18 old_keys_to_drop
+// barcodes removed by the ALREADY-EXECUTED promotion (ts=20260805_184504), which ran before the
+// drop-provenance fix in applyLedgerStatements existed. Second-reviewer finding (2026-08-05): those
+// removals currently leave NO in-database trace - the justification lives only in the external
+// boss_override_actions.jsonl. This subcommand targets LIVE `provenance` directly (not staging -
+// staging_boss_override_* no longer exists post-promote) and inserts exactly the missing
+// documentation rows, idempotently (skips any (batch_id, product_id, row, barcode) quadruple already
+// present, matching the same evidence_level this backfill writes). Gated identically to
+// backup/stage/verify/promote (requireConfirmOrExit) - implemented and unit-tested with a mocked
+// client below, but NOT run for real by this implementer session; see the exact orchestrator command
+// printed at the end of this block.
+// =============================================================================================
+
+/** Pure planning function for `annotate-drops`: given the ledger, the boss source rows (for the
+ *  row/sheet lookup), a Set of `${batch_id}::${product_id}::${row}::${barcode}` keys already present
+ *  in LIVE provenance, a starting id, and an imported_at timestamp, return the exact provenance row
+ *  objects to insert (idempotency already applied) plus how many were skipped as already-documented.
+ *  No I/O - unit-testable with fixture inputs alone, exactly like detectStaleLedger above. */
+export function buildDropAnnotationPlan(ledger, bossRows, existingLiveProvenanceKeys, provenanceStartId, importedAt) {
+  const bossRowSheetLookup = new Map(bossRows.map((r) => [r.barcode, r.item_number]));
+  const sheet1RowIndex = loadSheet1RowIndex();
+  let nextId = provenanceStartId;
+  const candidateRows = [];
+  for (const entry of ledger) {
+    if (entry.action === "review_cross_uid_conflict" || entry.action === "defer_review") continue; // never staged/live under these actions - nothing to document
+    for (const oldKey of entry.old_keys_to_drop) {
+      candidateRows.push({
+        id: nextId++, product_id: entry.current_uid, barcode: oldKey,
+        source_name: SOURCE_NAME, source_ref: SOURCE_REF, sheet: "Sheet1",
+        row: String(sheet1RowIndex.get(bossRowSheetLookup.get(entry.desired_barcode)) ?? ""),
+        batch_id: BATCH_ID, imported_at: importedAt,
+        evidence_level: "superseded_placeholder_dropped", license_note: entry.decision_reason || "",
+        content_hash: "",
+      });
+    }
+  }
+  const keyOf = (r) => `${r.batch_id}::${r.product_id}::${r.row}::${r.barcode}`;
+  const toInsert = candidateRows.filter((r) => !existingLiveProvenanceKeys.has(keyOf(r)));
+  const skipped = candidateRows.length - toInsert.length;
+  return { toInsert, skipped, totalCandidates: candidateRows.length };
+}
+
+const ANNOTATE_DROPS_PROV_COLUMNS = [
+  "id", "product_id", "barcode", "source_name", "source_ref", "sheet", "row", "batch_id",
+  "imported_at", "evidence_level", "license_note", "content_hash",
+];
+
+/** `makeClientFn` defaults to the real `makeClient` (live Turso) but is injectable so this command
+ *  can be exercised end-to-end in tests against a mocked client - no real network, no live writes -
+ *  without weakening the requireConfirmOrExit gate real orchestrator runs still go through. */
+export async function cmdAnnotateDrops({ dryRun } = {}, makeClientFn = makeClient) {
+  requireConfirmOrExit(dryRun);
+  if (!existsSync(LEDGER_PATH)) {
+    throw new Error(`annotate-drops: REFUSING to run - ${rel(LEDGER_PATH)} does not exist. Run "ledger" first.`);
+  }
+  const ledger = readFileSync(LEDGER_PATH, "utf8").split(/\r?\n/).filter(Boolean).map((l) => JSON.parse(l));
+  assertKnownLedgerActions(ledger);
+  const bossRows = loadBossRows();
+  const totalDropsInLedger = ledger.reduce((sum, r) => sum + r.old_keys_to_drop.length, 0);
+
+  if (dryRun) {
+    console.log(
+      `[dry-run] annotate-drops: NOT EVALUATED. Would insert up to ${totalDropsInLedger} documentation-only ` +
+        `provenance row(s) (evidence_level=superseded_placeholder_dropped) into LIVE provenance for every ` +
+        `old_keys_to_drop barcode in the ledger, skipping any (batch_id, product_id, row, barcode) already present.`
+    );
+    return;
+  }
+
+  const client = await makeClientFn();
+  const existingRes = await client.execute({
+    sql: `SELECT batch_id, product_id, row, barcode FROM provenance WHERE batch_id = ? AND evidence_level = ?`,
+    args: [BATCH_ID, "superseded_placeholder_dropped"],
+  });
+  const existingLiveProvenanceKeys = new Set(
+    existingRes.rows.map((r) => `${r.batch_id}::${r.product_id}::${r.row}::${r.barcode}`)
+  );
+  const maxIdRes = await client.execute(`SELECT MAX(id) m FROM provenance`);
+  const provenanceStartId = Number(maxIdRes.rows[0].m ?? 0) + 1;
+  const importedAt = new Date().toISOString();
+
+  const { toInsert, skipped, totalCandidates } = buildDropAnnotationPlan(
+    ledger, bossRows, existingLiveProvenanceKeys, provenanceStartId, importedAt
+  );
+  console.log(`annotate-drops: ${totalCandidates} total drop(s) in the ledger, ${skipped} already documented (skipped), ${toInsert.length} to insert.`);
+
+  if (toInsert.length === 0) {
+    console.log("annotate-drops: nothing to insert - already fully documented.");
+    client.close();
+    return { toInsert: [], skipped, totalCandidates };
+  }
+
+  const valueTuples = toInsert.map((r) => valueTuple(r, ANNOTATE_DROPS_PROV_COLUMNS));
+  const statements = [];
+  for (let i = 0; i < valueTuples.length; i += 200) {
+    statements.push(
+      `INSERT OR REPLACE INTO provenance (${ANNOTATE_DROPS_PROV_COLUMNS.join(", ")}) VALUES ${valueTuples.slice(i, i + 200).join(", ")};`
+    );
+  }
+  assertAllowedTables(statements, "annotate-drops");
+  await client.batch(statements, "write");
+  console.log(`annotate-drops: inserted ${toInsert.length} documentation row(s) into LIVE provenance.`);
+  client.close();
+  return { toInsert, skipped, totalCandidates };
+}
+
+// =============================================================================================
 async function main() {
   const args = parseArgs(process.argv);
   switch (args.subcommand) {
@@ -1205,8 +1499,9 @@ async function main() {
     case "verify": return cmdVerify(args);
     case "promote": return cmdPromote(args);
     case "rollback": return cmdRollback(args);
+    case "annotate-drops": return cmdAnnotateDrops(args);
     default:
-      console.error("Usage: node scripts/boss-override-2026-08-05.mjs <ledger|backup|stage|verify|promote|rollback> [--dry-run] [--manifest <path>] [--expected-manifest-sha256 <sha>] [--ts <ts>]");
+      console.error("Usage: node scripts/boss-override-2026-08-05.mjs <ledger|backup|stage|verify|promote|rollback|annotate-drops> [--dry-run] [--manifest <path>] [--expected-manifest-sha256 <sha>] [--ts <ts>]");
       process.exit(1);
   }
 }

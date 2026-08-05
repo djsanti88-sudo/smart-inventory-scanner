@@ -4,6 +4,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   classifyBossRows,
   buildUidToBarcodes,
@@ -19,6 +20,15 @@ import {
   assertKnownLedgerActions,
   unresolvedConflictRows,
   applyLedgerStatements,
+  summarizeConflictLabels,
+  sampleInsertBarcodesForStaleCheck,
+  detectStaleLedger,
+  loadSheet1RowIndex,
+  loadBossRows,
+  buildDropAnnotationPlan,
+  cmdAnnotateDrops,
+  SOURCE_NAME,
+  BATCH_ID,
 } from "./boss-override-2026-08-05.mjs";
 
 function bossRow(overrides = {}) {
@@ -394,4 +404,347 @@ test("KNOWN_LEDGER_ACTIONS is exactly the five documented dispositions", () => {
     new Set(KNOWN_LEDGER_ACTIONS),
     new Set(["update_blank_fill", "insert_preserve_uid", "insert_new_uid", "review_cross_uid_conflict", "defer_review"])
   );
+});
+
+// =============================================================================================
+// FINDING 2 FIX (Codex ultra-review MEDIUM, 2026-08-05): `ledger`'s printed conflict summary must
+// report blocking/resolved/deferred honestly, matching unresolvedConflictRows (keyed on `action`)
+// rather than the immutable `match_basis` alone.
+// =============================================================================================
+
+test("summarizeConflictLabels: an unedited both_conflict row is blocking, not resolved or deferred", () => {
+  const ledger = [conflictLedgerRow()];
+  const { blocking, resolved, deferred } = summarizeConflictLabels(ledger);
+  assert.equal(blocking.length, 1);
+  assert.equal(resolved.length, 0);
+  assert.equal(deferred.length, 0);
+});
+
+test("summarizeConflictLabels: a hand-resolved both_conflict row (action=update_blank_fill) is reported RESOLVED, not blocking", () => {
+  const resolved = conflictLedgerRow({ action: "update_blank_fill", current_uid: "TIRE_WINNER" });
+  const labels = summarizeConflictLabels([resolved]);
+  assert.equal(labels.blocking.length, 0, "must not appear in the blocking list Codex flagged as dishonest");
+  assert.equal(labels.resolved.length, 1);
+  assert.equal(labels.resolved[0].item_number, "BH1600462");
+  assert.equal(labels.deferred.length, 0);
+});
+
+test("summarizeConflictLabels: a deferred both_conflict row (action=defer_review) is reported DEFERRED, not blocking or resolved", () => {
+  const deferred = conflictLedgerRow({ item_number: "NX10557", action: "defer_review" });
+  const labels = summarizeConflictLabels([deferred]);
+  assert.equal(labels.blocking.length, 0);
+  assert.equal(labels.resolved.length, 0);
+  assert.equal(labels.deferred.length, 1);
+  assert.equal(labels.deferred[0].item_number, "NX10557");
+});
+
+test("summarizeConflictLabels: mixed set splits into exactly blocking/resolved/deferred, agrees with unresolvedConflictRows for blocking, and ignores non-conflict rows entirely", () => {
+  const stillOpen = conflictLedgerRow({ item_number: "BH1600467" });
+  const resolvedRow = conflictLedgerRow({ item_number: "BH1600462", action: "insert_preserve_uid", current_uid: "TIRE_X" });
+  const deferredRow = conflictLedgerRow({ item_number: "NX10557", action: "defer_review" });
+  const nonConflict = { item_number: "BH0000099", desired_barcode: "1", current_barcodes: [], match_basis: "none", current_uid: "TIRE_NEW", action: "insert_new_uid", old_keys_to_drop: [], part_number_alias_to_add: "BH0000099", source_row: 1, decision_reason: "n/a" };
+  const ledger = [stillOpen, resolvedRow, deferredRow, nonConflict];
+  const { blocking, resolved, deferred } = summarizeConflictLabels(ledger);
+  assert.deepEqual(blocking.map((r) => r.item_number), ["BH1600467"]);
+  assert.deepEqual(resolved.map((r) => r.item_number), ["BH1600462"]);
+  assert.deepEqual(deferred.map((r) => r.item_number), ["NX10557"]);
+  assert.deepEqual(
+    blocking.map((r) => r.item_number),
+    unresolvedConflictRows(ledger).map((r) => r.item_number),
+    "blocking list must always agree with the real promote gate (unresolvedConflictRows)"
+  );
+});
+
+// =============================================================================================
+// FINDING 1 FIX (Codex ultra-review HIGH, 2026-08-05): stale-ledger rerun guard - protects a future
+// `stage` run against re-applying an already-promoted ledger.
+// =============================================================================================
+
+function insertLedgerRow(overrides = {}) {
+  return {
+    item_number: "BH9999001", desired_barcode: "8848199990010", current_barcodes: [],
+    match_basis: "none", current_uid: "TIRE_FRESH", action: "insert_new_uid",
+    old_keys_to_drop: [], part_number_alias_to_add: "BH9999001", source_row: 100,
+    decision_reason: "n/a",
+    ...overrides,
+  };
+}
+
+test("sampleInsertBarcodesForStaleCheck: returns [] when the ledger has no insert_* rows", () => {
+  const ledger = [conflictLedgerRow()]; // review_cross_uid_conflict, not insert_*
+  assert.deepEqual(sampleInsertBarcodesForStaleCheck(ledger), []);
+});
+
+test("sampleInsertBarcodesForStaleCheck: returns every barcode when the insert_* count is below sampleSize, excluding non-insert_* rows", () => {
+  const ledger = [
+    insertLedgerRow({ item_number: "A", desired_barcode: "1" }),
+    insertLedgerRow({ item_number: "B", desired_barcode: "2", action: "insert_preserve_uid" }),
+    conflictLedgerRow(), // must be excluded - not insert_*
+  ];
+  const sample = sampleInsertBarcodesForStaleCheck(ledger, 25);
+  assert.deepEqual(new Set(sample), new Set(["1", "2"]));
+});
+
+test("sampleInsertBarcodesForStaleCheck: caps at sampleSize and is deterministic across repeated calls (no randomness)", () => {
+  const ledger = [];
+  for (let i = 0; i < 100; i++) ledger.push(insertLedgerRow({ item_number: `I${i}`, desired_barcode: `BC${i}` }));
+  const first = sampleInsertBarcodesForStaleCheck(ledger, 10);
+  const second = sampleInsertBarcodesForStaleCheck(ledger, 10);
+  assert.equal(first.length, 10);
+  assert.deepEqual(first, second, "sampling must be deterministic - no randomness");
+});
+
+test("detectStaleLedger: neither signal present -> not stale", () => {
+  const result = detectStaleLedger({ batchAlreadyExists: false, existingSampledBarcodes: [] });
+  assert.equal(result.stale, false);
+  assert.equal(result.reason, "");
+});
+
+test("detectStaleLedger: provenance batch already exists in the clone -> stale, ABORT reason names the batch and instructs a fresh ledger re-run", () => {
+  const result = detectStaleLedger({ batchAlreadyExists: true, existingSampledBarcodes: [] });
+  assert.equal(result.stale, true);
+  assert.ok(result.reason.includes(`${SOURCE_NAME}/${BATCH_ID}`));
+  assert.match(result.reason, /Re-run "ledger"/);
+});
+
+test("detectStaleLedger: >0 sampled insert targets already exist in the clone -> stale, ABORT reason lists the offending barcodes", () => {
+  const result = detectStaleLedger({ batchAlreadyExists: false, existingSampledBarcodes: ["8848100000010", "8848100000020"] });
+  assert.equal(result.stale, true);
+  assert.match(result.reason, /8848100000010/);
+  assert.match(result.reason, /8848100000020/);
+});
+
+test("detectStaleLedger: either signal alone is sufficient to ABORT (and both together also stale)", () => {
+  assert.equal(detectStaleLedger({ batchAlreadyExists: true, existingSampledBarcodes: [] }).stale, true);
+  assert.equal(detectStaleLedger({ batchAlreadyExists: false, existingSampledBarcodes: ["x"] }).stale, true);
+  assert.equal(detectStaleLedger({ batchAlreadyExists: true, existingSampledBarcodes: ["x"] }).stale, true);
+});
+
+test("applyLedgerStatements: existingProvenanceKeys default (empty) inserts provenance normally - no behavior change for a fresh stage run", () => {
+  const bossRows = [bossRow()];
+  const entry = insertLedgerRow({ item_number: "BH0000001", desired_barcode: "8848100000010", current_uid: "TIRE_NEW", part_number_alias_to_add: "BH0000001" });
+  const { statements, counts } = applyLedgerStatements([entry], bossRows, 1, "2026-08-05T00:00:00.000Z");
+  assert.equal(counts.provenanceInserted, 1);
+  assert.equal(counts.provenanceSkippedDuplicate, 0);
+  assert.ok(statements.some((s) => s.startsWith("INSERT OR REPLACE INTO staging_boss_override_provenance")));
+});
+
+test("applyLedgerStatements: a provenance row whose (batch_id, product_id, row, barcode) key already exists is skipped (idempotent), while a non-matching row in the same call still inserts", () => {
+  const sheet1 = loadSheet1RowIndex();
+  const itemA = "BH0000001";
+  const itemB = "BH0000002";
+  const rowA = String(sheet1.get(itemA) ?? "");
+  const bossRows = [bossRow({ item_number: itemA, barcode: "8848100000010" }), bossRow({ item_number: itemB, barcode: "8848100000020" })];
+  const entryA = insertLedgerRow({ item_number: itemA, desired_barcode: "8848100000010", current_uid: "TIRE_NEW_A", part_number_alias_to_add: itemA });
+  const entryB = insertLedgerRow({ item_number: itemB, desired_barcode: "8848100000020", current_uid: "TIRE_NEW_B", part_number_alias_to_add: itemB });
+  const existingProvenanceKeys = new Set([`${BATCH_ID}::TIRE_NEW_A::${rowA}::8848100000010`]);
+  const { statements, counts } = applyLedgerStatements([entryA, entryB], bossRows, 1, "2026-08-05T00:00:00.000Z", existingProvenanceKeys);
+  assert.equal(counts.provenanceInserted, 1, "only entryB's provenance row should be inserted");
+  assert.equal(counts.provenanceSkippedDuplicate, 1, "entryA's duplicate provenance row must be skipped");
+  const provStmt = statements.find((s) => s.startsWith("INSERT OR REPLACE INTO staging_boss_override_provenance"));
+  assert.ok(provStmt);
+  assert.match(provStmt, /'TIRE_NEW_B'/);
+  assert.ok(!provStmt.includes("'TIRE_NEW_A'"), "the deduped row's product_id must not appear in the provenance INSERT");
+});
+
+test("applyLedgerStatements: idempotency guard is per-key, not all-or-nothing - both rows insert when neither key matches an unrelated existing key", () => {
+  const bossRows = [bossRow({ item_number: "BH0000001", barcode: "8848100000010" }), bossRow({ item_number: "BH0000002", barcode: "8848100000020" })];
+  const entryA = insertLedgerRow({ item_number: "BH0000001", desired_barcode: "8848100000010", current_uid: "TIRE_NEW_A", part_number_alias_to_add: "BH0000001" });
+  const entryB = insertLedgerRow({ item_number: "BH0000002", desired_barcode: "8848100000020", current_uid: "TIRE_NEW_B", part_number_alias_to_add: "BH0000002" });
+  const existingProvenanceKeys = new Set(["SOME_OTHER_BATCH::TIRE_UNRELATED::999::0"]);
+  const { counts } = applyLedgerStatements([entryA, entryB], bossRows, 1, "2026-08-05T00:00:00.000Z", existingProvenanceKeys);
+  assert.equal(counts.provenanceInserted, 2);
+  assert.equal(counts.provenanceSkippedDuplicate, 0);
+});
+
+// =============================================================================================
+// DROP-PROVENANCE FIX (second-reviewer finding, 2026-08-05): every old_keys_to_drop barcode must get
+// its own provenance documentation row (evidence_level=superseded_placeholder_dropped), so the
+// removal has an in-database trace, not only the external boss_override_actions.jsonl.
+// =============================================================================================
+
+test("applyLedgerStatements: every old_keys_to_drop barcode gets its own provenance documentation row (evidence_level=superseded_placeholder_dropped, license_note=decision_reason)", () => {
+  const bossRows = [bossRow({ item_number: "BH1600462", barcode: "8848116004626", brand: "Blackhawk", size_raw: "2755520" })];
+  const decisionReason = "RESOLVED (owner decision): repoint to the barcode-holding uid; drop losing uid's placeholders.";
+  const resolved = conflictLedgerRow({
+    action: "update_blank_fill",
+    current_uid: "TIRE_E244BE67DF8DBFDEFC72",
+    old_keys_to_drop: ["0003220017209", "003220017209"],
+    part_number_alias_to_add: "BH1600462",
+    decision_reason: decisionReason,
+  });
+  const { statements, counts } = applyLedgerStatements([resolved], bossRows, 1, "2026-08-05T00:00:00.000Z");
+  // 1 provenance row for the update_blank_fill itself + 2 for the 2 dropped barcodes = 3 total.
+  assert.equal(counts.provenanceInserted, 3);
+  const provStmt = statements.find((s) => s.startsWith("INSERT OR REPLACE INTO staging_boss_override_provenance"));
+  assert.ok(provStmt);
+  assert.match(provStmt, /superseded_placeholder_dropped/);
+  assert.match(provStmt, /'0003220017209'/);
+  assert.match(provStmt, /'003220017209'/);
+  const escapedReason = decisionReason.replace(/'/g, "''");
+  assert.ok(provStmt.includes(escapedReason), "decision_reason must be carried into license_note (SQL-escaped)");
+});
+
+test("applyLedgerStatements: drop-provenance rows record product_id=current_uid (the surviving uid), same as the row's own apply-provenance row", () => {
+  const bossRows = [bossRow({ item_number: "BH1600462", barcode: "8848116004626" })];
+  const resolved = conflictLedgerRow({ action: "update_blank_fill", current_uid: "TIRE_WINNER", old_keys_to_drop: ["0003220017209"] });
+  const { statements } = applyLedgerStatements([resolved], bossRows, 1, "2026-08-05T00:00:00.000Z");
+  const provStmt = statements.find((s) => s.startsWith("INSERT OR REPLACE INTO staging_boss_override_provenance"));
+  const winnerCount = (provStmt.match(/'TIRE_WINNER'/g) || []).length;
+  assert.equal(winnerCount, 2, "both the apply row and the drop-documentation row must be attributed to the surviving uid");
+});
+
+test("applyLedgerStatements: an entry with NO old_keys_to_drop produces no extra drop-documentation rows", () => {
+  const bossRows = [bossRow()];
+  const entry = insertLedgerRow({ item_number: "BH0000001", desired_barcode: "8848100000010", current_uid: "TIRE_NEW", part_number_alias_to_add: "BH0000001" });
+  const { counts } = applyLedgerStatements([entry], bossRows, 1, "2026-08-05T00:00:00.000Z");
+  assert.equal(counts.provenanceInserted, 1, "only the row's own apply-provenance row - no drops means no drop rows");
+});
+
+// =============================================================================================
+// annotate-drops (second-reviewer finding, 2026-08-05): LIVE backfill documentation for the
+// already-promoted run's 18 old_keys_to_drop barcodes, which predate the drop-provenance fix above
+// and currently have no in-database trace. buildDropAnnotationPlan is pure (fixture-testable);
+// cmdAnnotateDrops is exercised end-to-end against a MOCKED client (no live Turso, no network).
+// =============================================================================================
+
+test("buildDropAnnotationPlan: builds one row per old_keys_to_drop barcode, with the entry's decision_reason as license_note and evidence_level=superseded_placeholder_dropped", () => {
+  const bossRows = [bossRow({ item_number: "BH1600462", barcode: "8848116004626" })];
+  const ledger = [conflictLedgerRow({
+    action: "update_blank_fill", current_uid: "TIRE_WINNER",
+    old_keys_to_drop: ["0003220017209", "003220017209"],
+    decision_reason: "already-promoted drop, backfilled",
+  })];
+  const { toInsert, skipped, totalCandidates } = buildDropAnnotationPlan(ledger, bossRows, new Set(), 500, "2026-08-05T12:00:00.000Z");
+  assert.equal(totalCandidates, 2);
+  assert.equal(skipped, 0);
+  assert.equal(toInsert.length, 2);
+  assert.deepEqual(new Set(toInsert.map((r) => r.barcode)), new Set(["0003220017209", "003220017209"]));
+  for (const r of toInsert) {
+    assert.equal(r.product_id, "TIRE_WINNER");
+    assert.equal(r.evidence_level, "superseded_placeholder_dropped");
+    assert.equal(r.license_note, "already-promoted drop, backfilled");
+    assert.equal(r.batch_id, BATCH_ID);
+    assert.equal(r.source_name, SOURCE_NAME);
+  }
+  assert.deepEqual(new Set(toInsert.map((r) => r.id)), new Set([500, 501]));
+});
+
+test("buildDropAnnotationPlan: skips any (batch_id, product_id, row, barcode) already present in existingLiveProvenanceKeys - idempotent for a rerun", () => {
+  const bossRows = [bossRow({ item_number: "BH1600462", barcode: "8848116004626" })];
+  const ledger = [conflictLedgerRow({ action: "update_blank_fill", current_uid: "TIRE_WINNER", old_keys_to_drop: ["0003220017209", "003220017209"] })];
+  const sheet1 = loadSheet1RowIndex();
+  const row = String(sheet1.get("BH1600462") ?? "");
+  const existingKeys = new Set([`${BATCH_ID}::TIRE_WINNER::${row}::0003220017209`]);
+  const { toInsert, skipped, totalCandidates } = buildDropAnnotationPlan(ledger, bossRows, existingKeys, 1, "2026-08-05T12:00:00.000Z");
+  assert.equal(totalCandidates, 2);
+  assert.equal(skipped, 1);
+  assert.equal(toInsert.length, 1);
+  assert.equal(toInsert[0].barcode, "003220017209");
+});
+
+test("buildDropAnnotationPlan: entries with no drops contribute nothing; review_cross_uid_conflict / defer_review entries are excluded even if they carried old_keys_to_drop", () => {
+  const bossRows = [bossRow({ item_number: "BH0000001", barcode: "8848100000010" })];
+  const noDrops = insertLedgerRow({ item_number: "BH0000001", desired_barcode: "8848100000010", current_uid: "TIRE_NEW", part_number_alias_to_add: "BH0000001" });
+  const stillBlocking = conflictLedgerRow({ old_keys_to_drop: ["SHOULD_NOT_APPEAR"] }); // action still review_cross_uid_conflict
+  const deferred = conflictLedgerRow({ item_number: "NX10557", action: "defer_review", old_keys_to_drop: ["ALSO_SHOULD_NOT_APPEAR"] });
+  const { toInsert, totalCandidates } = buildDropAnnotationPlan([noDrops, stillBlocking, deferred], bossRows, new Set(), 1, "2026-08-05T12:00:00.000Z");
+  assert.equal(totalCandidates, 0);
+  assert.equal(toInsert.length, 0);
+});
+
+function makeMockProvenanceClient({ existingRows = [], maxId = 999999 } = {}) {
+  const batchCalls = [];
+  const executeCalls = [];
+  const client = {
+    async execute(query) {
+      const sql = typeof query === "string" ? query : query.sql;
+      executeCalls.push(sql);
+      if (sql.includes("MAX(id)")) return { rows: [{ m: maxId }] };
+      if (sql.includes("FROM provenance WHERE batch_id")) return { rows: existingRows };
+      throw new Error(`mock provenance client: unexpected query: ${sql}`);
+    },
+    async batch(statements) {
+      batchCalls.push(statements);
+      return statements.map(() => ({}));
+    },
+    close() {},
+  };
+  return { client, batchCalls, executeCalls };
+}
+
+function loadRealBossLedgerForTest() {
+  const lines = readFileSync("backups/boss-export-2026-08-05/boss_override_actions.jsonl", "utf8").split(/\r?\n/).filter(Boolean);
+  return lines.map((l) => JSON.parse(l));
+}
+
+test("cmdAnnotateDrops (mocked client, NO live Turso): a fresh run with nothing pre-documented inserts all 18 real drop rows in one batch() call targeting LIVE provenance", async () => {
+  const prevConfirm = process.env.PROMOTE_CONFIRM;
+  process.env.PROMOTE_CONFIRM = "YES";
+  try {
+    const { client, batchCalls } = makeMockProvenanceClient({ existingRows: [] });
+    const result = await cmdAnnotateDrops({ dryRun: false }, async () => client);
+    assert.equal(result.totalCandidates, 18, "the real 2026-08-05 boss ledger has exactly 18 old_keys_to_drop barcodes across 9 both_conflict resolutions");
+    assert.equal(result.skipped, 0);
+    assert.equal(result.toInsert.length, 18);
+    assert.equal(batchCalls.length, 1, "18 rows fit in a single 200-tuple chunk - exactly one client.batch() call");
+    const [statements] = batchCalls;
+    assert.ok(statements.every((s) => s.startsWith("INSERT OR REPLACE INTO provenance")), "must target LIVE provenance, not a staging_boss_override_* table");
+    assert.ok(statements.some((s) => s.includes("superseded_placeholder_dropped")));
+  } finally {
+    if (prevConfirm === undefined) delete process.env.PROMOTE_CONFIRM;
+    else process.env.PROMOTE_CONFIRM = prevConfirm;
+  }
+});
+
+test("cmdAnnotateDrops (mocked client, NO live Turso): a rerun where every candidate is already documented inserts nothing and never calls client.batch() (idempotent)", async () => {
+  const prevConfirm = process.env.PROMOTE_CONFIRM;
+  process.env.PROMOTE_CONFIRM = "YES";
+  try {
+    const ledger = loadRealBossLedgerForTest();
+    const bossRows = loadBossRows();
+    const { toInsert: allCandidates } = buildDropAnnotationPlan(ledger, bossRows, new Set(), 1, "2026-08-05T00:00:00.000Z");
+    assert.equal(allCandidates.length, 18);
+    const alreadyDocumentedRows = allCandidates.map((r) => ({ batch_id: r.batch_id, product_id: r.product_id, row: r.row, barcode: r.barcode }));
+    const { client, batchCalls } = makeMockProvenanceClient({ existingRows: alreadyDocumentedRows });
+    const result = await cmdAnnotateDrops({ dryRun: false }, async () => client);
+    assert.equal(result.totalCandidates, 18);
+    assert.equal(result.skipped, 18);
+    assert.equal(result.toInsert.length, 0);
+    assert.equal(batchCalls.length, 0, "nothing to insert means client.batch() must never be called");
+  } finally {
+    if (prevConfirm === undefined) delete process.env.PROMOTE_CONFIRM;
+    else process.env.PROMOTE_CONFIRM = prevConfirm;
+  }
+});
+
+test("cmdAnnotateDrops: dry-run never touches the client at all (no execute, no batch) and does not require PROMOTE_CONFIRM", async () => {
+  const prevConfirm = process.env.PROMOTE_CONFIRM;
+  delete process.env.PROMOTE_CONFIRM;
+  try {
+    const { client, batchCalls, executeCalls } = makeMockProvenanceClient();
+    await cmdAnnotateDrops({ dryRun: true }, async () => client);
+    assert.equal(executeCalls.length, 0);
+    assert.equal(batchCalls.length, 0);
+  } finally {
+    if (prevConfirm === undefined) delete process.env.PROMOTE_CONFIRM;
+    else process.env.PROMOTE_CONFIRM = prevConfirm;
+  }
+});
+
+test("cmdAnnotateDrops: without --dry-run and without PROMOTE_CONFIRM=YES, refuses to run (same live-write gate as backup/stage/verify/promote/rollback)", async () => {
+  const prevConfirm = process.env.PROMOTE_CONFIRM;
+  delete process.env.PROMOTE_CONFIRM;
+  const prevExit = process.exit;
+  let exitCode = null;
+  process.exit = (code) => { exitCode = code; throw new Error("__mock_process_exit__"); };
+  try {
+    const { client } = makeMockProvenanceClient();
+    await assert.rejects(() => cmdAnnotateDrops({ dryRun: false }, async () => client), /__mock_process_exit__/);
+    assert.equal(exitCode, 3);
+  } finally {
+    process.exit = prevExit;
+    if (prevConfirm === undefined) delete process.env.PROMOTE_CONFIRM;
+    else process.env.PROMOTE_CONFIRM = prevConfirm;
+  }
 });
