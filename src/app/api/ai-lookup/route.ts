@@ -351,7 +351,12 @@ export async function POST(request: Request) {
   // Defense in depth: sanitize again on the server before anything reaches a provider.
   const rawCodeSanitized = sanitizeForAiLookup(body.rawCode ?? "").clean;
   const cleanCodeSanitized = sanitizeForAiLookup(body.cleanCode ?? "").clean;
-  const code = cleanCodeSanitized || rawCodeSanitized;
+  // A scanned identifier that is one bare digit run of 8 to 14 digits is a lookup code, not free
+  // text. The phone sanitizer masks bare 10-digit runs, which made every downstream rung search
+  // for the literal string "[redacted-phone]" instead of the real code. Formatted phone numbers
+  // (separators, letters, extra words) never match this shape and stay masked.
+  const bareNumericCode = /^\d{8,14}$/.test(exactCode) ? exactCode : null;
+  const code = bareNumericCode ?? (cleanCodeSanitized || rawCodeSanitized);
   // D4: never trust the client's codeType. Always recompute from the sanitized code server-side.
   const codeType = detectCodeType(code);
   // W3 (v1.0.0): app-derived GS1 numbering-authority region hint for PUBLIC barcodes (null otherwise).
@@ -379,8 +384,8 @@ export async function POST(request: Request) {
       ? process.env.AI_ALLOW_NONPUBLIC_AUTOCOUNT === "1"
       : body.autoCountNonPublicWithEvidence !== false;
   const req = {
-    rawCodeSanitized,
-    cleanCodeSanitized,
+    rawCodeSanitized: bareNumericCode ?? rawCodeSanitized,
+    cleanCodeSanitized: bareNumericCode ?? cleanCodeSanitized,
     allowImageSuggestions: body.allowImageSuggestions ?? false,
     gs1RegionHint,
     scanContext,
@@ -616,8 +621,8 @@ export async function POST(request: Request) {
     const outcome = await runDecodePipeline({
       code,
       codeType,
-      rawCodeSanitized,
-      cleanCodeSanitized,
+      rawCodeSanitized: bareNumericCode ?? rawCodeSanitized,
+      cleanCodeSanitized: bareNumericCode ?? cleanCodeSanitized,
       threshold,
       allowNonPublicAutoCount,
       forceRetry,
