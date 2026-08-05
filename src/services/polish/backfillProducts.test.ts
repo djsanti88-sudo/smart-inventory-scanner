@@ -130,4 +130,58 @@ describe("backfillProducts", () => {
       expect(products[0].name).toBe(p.name);
     });
   });
+
+  // MEDIUM review finding (2026-08-05, follow-up to commit cd9e7c51 "floor-guess brands never beat
+  // verified decode identity (class fix)"): that commit propagated `existingBrandIsFloorGuess` to the
+  // three scanStore.ts call sites but MISSED this 4th call site (backfillProducts, which runs on every
+  // localStorage rehydrate via scanStore's migrate v5->v6, and scripts/polish-backfill.mts). Its own
+  // gate `if (!p.brand && enriched.brand)` only fires for an EMPTY brand, so a row already poisoned by
+  // the floor-guess bug (a non-empty statistical GS1-prefix guess like "Coca-Cola") never self-heals on
+  // rehydrate even after the class fix shipped - it needed ITS OWN pass of the same fix.
+  describe("floor-guess brand self-heal (review follow-up to cd9e7c51, 2026-08-05)", () => {
+    it("heals a poisoned brand when the row's own floor-suffixed name carries a derivable real brand", () => {
+      // The row's name is the ONLY identity source backfillProducts has (no separate decode payload
+      // like the live scanStore call sites get) - so the fixture puts the real, derivable identity
+      // directly in the floor-suffixed name itself: a later (correct) floor-guess pass overwrote the
+      // NAME with "Michelin ... / product unconfirmed" but the earlier bug left `brand` stuck on the
+      // FIRST (wrong) guess, "Coca-Cola" (GS1 prefix 049000 collides between Coca-Cola and Michelin).
+      const p = product({
+        id: "p-poisoned",
+        name: "Michelin X-Ice North 4 225/60R18 104T / product unconfirmed",
+        brand: "Coca-Cola",
+        primaryBarcode: "049000026603",
+      });
+      const { products, changedIds } = backfillProducts([p]);
+      expect(products[0].brand).toBe("Michelin");
+      expect(changedIds).toEqual(["p-poisoned"]);
+    });
+
+    it("leaves a poisoned brand UNCHANGED when the floor-suffixed name carries no derivable real brand (naming aid preserved)", () => {
+      const p = product({
+        id: "p-no-better-data",
+        name: "United Solutions / product unconfirmed",
+        brand: "United Solutions",
+        primaryBarcode: "051596000004",
+      });
+      const { products } = backfillProducts([p]);
+      // No known tire brand parses out of "United Solutions / product unconfirmed" - the naming aid
+      // must stay exactly as-is rather than being blanked or altered.
+      expect(products[0].brand).toBe("United Solutions");
+      expect(products[0].name).toBe("United Solutions / product unconfirmed");
+    });
+
+    it("never touches a healthy row's brand when it is a genuine (non-floor-guess) identity, even though structuring still fills in the row's other empty structured fields", () => {
+      const p = product({
+        id: "p-healthy",
+        name: "Michelin Defender LTX M/S 265/70R17",
+        brand: "Michelin",
+        primaryBarcode: "099999999999",
+      });
+      const { products } = backfillProducts([p]);
+      // Brand is a real prior identity (name is NOT a floor-guess label), so it must win untouched -
+      // the widened gate must never fire just because the row is otherwise unstructured.
+      expect(products[0].brand).toBe("Michelin");
+      expect(products[0].name).toBe("Michelin Defender LTX M/S 265/70R17");
+    });
+  });
 });
