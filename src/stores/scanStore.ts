@@ -3556,7 +3556,18 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           now: nowMs,
         });
         if (!gate.allowed && (!deterministicOnly || !state.online)) {
-          const blockStatus: AiLookupLog["status"] = gate.reason === "offline" ? "blocked_offline" : "blocked_cap";
+          // Fix-wave 2026-08-04: distinguish WHY this gate blocked instead of collapsing "disabled"
+          // and "circuit_open" into the same "blocked_cap" label as a real daily-cap block - an
+          // engineer reading aiLookupLogs needs to tell "the owner turned AI off" apart from "the
+          // circuit breaker tripped" apart from "the daily spend cap is spent".
+          const blockStatusByReason: Record<AiGateReason, AiLookupLog["status"]> = {
+            ok: "success",
+            disabled: "blocked_disabled",
+            offline: "blocked_offline",
+            daily_cap: "blocked_cap",
+            circuit_open: "blocked_circuit",
+          };
+          const blockStatus: AiLookupLog["status"] = blockStatusByReason[gate.reason];
           // OWNER RULE follow-up (2026-08-05): a non-deterministic call blocked at THIS gate (e.g. the
           // trusted-exact continuation handing off into the ordinary ladder while the daily cap is
           // genuinely spent) must resolve the row honestly instead of leaving it stuck at decodeStatus
@@ -3601,8 +3612,25 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           return;
         }
 
-        const rawCodeSanitized = deterministicOnly ? review.rawCode : sanitizeForAiLookup(review.rawCode).clean;
-        const cleanCodeSanitized = deterministicOnly ? review.cleanCode : sanitizeForAiLookup(review.cleanCode).clean;
+        // Fix-wave 2026-08-04 (BLOCKER): mirror route.ts's bareNumericCode carve-out here, client-side.
+        // The phone sanitizer masks bare 10-digit runs (sanitizer.ts's PHONE pattern), so a scanned
+        // UPC/EAN-shaped bare code was being sent to the server as the literal string
+        // "[redacted-phone]" instead of real digits. The server has its own carve-out (route.ts's
+        // bareNumericCode), but it only recovers real digits from body.cleanCode/body.rawCode - once
+        // the client had already masked them, the server never saw anything to recover. A bare
+        // separator-free 8-14 digit run is a lookup code, not free text; everything else (formatted
+        // phone numbers, letters, extra words) still gets sanitized exactly as before. The
+        // deterministicOnly branch already sends the untouched review.rawCode/review.cleanCode (the
+        // trusted-exact corpus probe never reaches a third-party AI provider - see route.ts's
+        // deterministicOnly early return before any provider code), so it is unaffected here.
+        const exactCodeForBareCheck = cleanScanCode(review.cleanCode || review.rawCode || "").cleanCode;
+        const bareNumericCode = /^\d{8,14}$/.test(exactCodeForBareCheck) ? exactCodeForBareCheck : null;
+        const rawCodeSanitized = deterministicOnly
+          ? review.rawCode
+          : (bareNumericCode ?? sanitizeForAiLookup(review.rawCode).clean);
+        const cleanCodeSanitized = deterministicOnly
+          ? review.cleanCode
+          : (bareNumericCode ?? sanitizeForAiLookup(review.cleanCode).clean);
         const codeType = detectCodeType(review.cleanCode);
         // Phase 8B: app-derived prompt hints (advisory only - the Phase 8 firewall stays the hard gate).
         const scanContext = s.scanContext ?? "any";

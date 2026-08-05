@@ -366,7 +366,10 @@ export interface AiLookupLog {
   rawCode: string;
   cleanCode: string;
   providerName: string;
-  status: "success" | "error" | "blocked_offline" | "blocked_cap" | "cache_hit";
+  // Fix-wave 2026-08-04: "blocked_cap" used to also stand in for a disabled AI toggle and an open
+  // circuit breaker, which hid the real block reason from anyone reading the log. "blocked_disabled"
+  // and "blocked_circuit" split those out; "blocked_cap" now means the daily AI lookup cap only.
+  status: "success" | "error" | "blocked_offline" | "blocked_cap" | "blocked_disabled" | "blocked_circuit" | "cache_hit";
   confidence: number;
   estimatedInputTokens: number;
   estimatedOutputTokens: number;

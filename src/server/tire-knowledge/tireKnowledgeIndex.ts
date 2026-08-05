@@ -51,6 +51,10 @@ interface TireJsonIndex {
 let _jsonIndex: TireJsonIndex | null | "missing" = null;
 let _jsonIndexError: string | null = null;
 let _uidToRow: Map<string, TireKnowledgeRow> | null = null;
+// Fix-wave 2026-08-04: cache the barcode row COUNT once at load time instead of re-enumerating
+// Object.keys(_jsonIndex.barcodeIndex) on every tireJsonIndexStatus() call (the index has tens of
+// thousands of rows; /api/health may be polled by an uptime monitor every few seconds).
+let _jsonIndexBarcodeRowCount = 0;
 
 /** Load the committed tire JSON into memory once (cached for the process lifetime). Used when the
  *  SQLite knowledge DB is unavailable (the normal case on Vercel, where the .db file is not bundled). */
@@ -62,6 +66,7 @@ function getJsonIndex(): TireJsonIndex | null {
     _jsonIndex = { barcodeIndex: parsed.barcodeIndex ?? {}, partNumberIndex: parsed.partNumberIndex ?? {} };
     _uidToRow = new Map();
     for (const row of Object.values(_jsonIndex.barcodeIndex)) _uidToRow.set(row.canonical_product_uid, row);
+    _jsonIndexBarcodeRowCount = Object.keys(_jsonIndex.barcodeIndex).length;
     return _jsonIndex;
   } catch (e) {
     console.warn("[tire-knowledge] in-memory JSON index load failed:", (e as Error).message);
@@ -72,10 +77,12 @@ function getJsonIndex(): TireJsonIndex | null {
 }
 
 /** Operational visibility: the JSON fallback swallows load failures into a process-lifetime miss.
- *  This status lets /api/health surface that state instead of decoding silently returning nothing. */
+ *  This status lets /api/health surface that state instead of decoding silently returning nothing.
+ *  `message` is for SERVER-SIDE logging only - /api/health (a public, unauthenticated endpoint) must
+ *  never forward raw exception text to a caller, so it strips this field before responding. */
 export function tireJsonIndexStatus(): { state: "not_loaded" | "loaded" | "failed"; barcodeRows: number; message: string | null } {
   if (_jsonIndex === "missing") return { state: "failed", barcodeRows: 0, message: _jsonIndexError };
-  if (_jsonIndex) return { state: "loaded", barcodeRows: Object.keys(_jsonIndex.barcodeIndex).length, message: null };
+  if (_jsonIndex) return { state: "loaded", barcodeRows: _jsonIndexBarcodeRowCount, message: null };
   return { state: "not_loaded", barcodeRows: 0, message: null };
 }
 
@@ -494,6 +501,7 @@ export function __resetTireKnowledgeCacheForTests(): void {
   _jsonIndex = null;
   _jsonIndexError = null;
   _uidToRow = null;
+  _jsonIndexBarcodeRowCount = 0;
   _tursoClient = null;
   _tursoClientPromise = null;
 }

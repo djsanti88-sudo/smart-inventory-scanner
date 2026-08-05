@@ -100,7 +100,18 @@ describe("trusted-exact ladder continuation", () => {
     expect(store.getState().finalCounts.reduce((sum, row) => sum + row.quantity, 0)).toBe(1);
     expect(store.getState().scanFeed).toHaveLength(1);
     expect(store.getState().needsReviewQueue[0]?.decodeStatus).toBe("decoding");
-    expect(JSON.parse(String(decodeCalls(fetchSpy)[1]?.[1]?.body))).not.toMatchObject({ deterministicOnly: true });
+    const continuationBody = JSON.parse(String(decodeCalls(fetchSpy)[1]?.[1]?.body)) as {
+      deterministicOnly?: boolean;
+      rawCode?: string;
+      cleanCode?: string;
+    };
+    expect(continuationBody).not.toMatchObject({ deterministicOnly: true });
+    // Fix-wave 2026-08-04: a bare separator-free 8-14 digit scan code must reach the server as real
+    // digits, not the phone sanitizer's "[redacted-phone]" placeholder (sanitizer.ts PHONE pattern
+    // masks bare 10-digit runs). Mirrors route.ts's own bareNumericCode carve-out client-side.
+    expect(continuationBody.cleanCode).toBe(NON_GTIN_CODE);
+    expect(continuationBody.rawCode).toBe(NON_GTIN_CODE);
+    expect(continuationBody.cleanCode).not.toBe("[redacted-phone]");
 
     release!(verifiedResponse());
     await vi.waitFor(() => expect(store.getState().scanFeed[0]?.decodeStatus).toBe("verified"));
@@ -202,5 +213,44 @@ describe("trusted-exact ladder continuation", () => {
     expect(reviewReason.toLowerCase()).toMatch(/daily ai lookup cap/);
     expect(feedReason.toLowerCase()).toMatch(/daily ai lookup cap/);
     expect(store.getState().finalCounts.reduce((sum, row) => sum + row.quantity, 0)).toBe(1);
+    // Fix-wave 2026-08-04: the log entry for a genuine daily-cap block must say "blocked_cap", not
+    // a generic label shared with a disabled-AI or open-circuit-breaker block.
+    expect(store.getState().aiLookupLogs[0]?.status).toBe("blocked_cap");
+  });
+
+  it("labels the inner-gate block honestly as blocked_disabled when AI lookup is turned off, not blocked_cap", async () => {
+    // Deliberately a PLAIN store (no trusted-exact probe involved) - this is the same shared inner
+    // gate (evaluateAiGate at the top of runLiveDecodeOnce) that every decode call goes through, so
+    // it is exercised directly here rather than through the trusted-exact continuation's own outer
+    // gate (evaluateAutoDecode), which already blocks on a disabled aiLookupEnabled BEFORE ever
+    // calling liveDecode - the only way to deterministically reach the INNER gate's own "disabled"
+    // branch is to call runLiveDecodeOnce directly, after seeding a real needsReviewQueue row.
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ aiLookupEnabled: true });
+    store.getState().setAiStatus({
+      geminiConfigured: true,
+      openaiConfigured: true,
+      freeDecodeAvailable: true,
+      missingKeys: [],
+      autoDecodeOnScan: false, // keep processScan from auto-firing decode so the row is seeded, not resolved
+    });
+    store.setState((state) => ({ ...state, online: true }));
+    const fetchSpy = vi.fn(async () => {
+      throw new Error("decode fetch must never fire once the inner gate blocks it");
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    store.getState().processScan(NON_GTIN_CODE);
+    const reviewId = store.getState().needsReviewQueue[0]?.id;
+    expect(reviewId).toBeTruthy();
+    expect(fetchSpy).not.toHaveBeenCalled(); // autoDecodeOnScan:false kept this from auto-firing
+
+    store.getState().updateSettings({ aiLookupEnabled: false });
+    await store.getState().runLiveDecodeOnce(reviewId!);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const reviewReason = store.getState().needsReviewQueue[0]?.reason ?? "";
+    expect(reviewReason.toLowerCase()).toMatch(/ai lookup is off/);
+    expect(store.getState().aiLookupLogs[0]?.status).toBe("blocked_disabled");
   });
 });

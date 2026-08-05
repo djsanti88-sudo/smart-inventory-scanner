@@ -293,8 +293,14 @@ describe("authenticated Boss trusted-exact route", () => {
     const shortMiss = await POST(request("SAFE-SHORT-MISS"));
     const malformedMiss = await POST(request("???"));
 
-    expect((await shortMiss.json()).reasonCode).toBe("trusted_exact_miss");
-    expect((await malformedMiss.json()).reasonCode).toBe("trusted_exact_miss");
+    const shortMissBody = await shortMiss.json();
+    const malformedMissBody = await malformedMiss.json();
+    expect(shortMissBody.reasonCode).toBe("trusted_exact_miss");
+    expect(malformedMissBody.reasonCode).toBe("trusted_exact_miss");
+    // Fix-wave 2026-08-04: a genuinely checked-and-missed lookup keeps the original path value -
+    // this is the one honest-miss case that really did reach the trusted index.
+    expect(shortMissBody.trustedExact).toEqual({ path: "trusted_exact_miss" });
+    expect(malformedMissBody.trustedExact).toEqual({ path: "trusted_exact_miss" });
     expect(runDecodePipeline).not.toHaveBeenCalled();
     expect(ladderStorage).not.toHaveBeenCalled();
     expect(legacyRateLimit).not.toHaveBeenCalled();
@@ -311,9 +317,56 @@ describe("authenticated Boss trusted-exact route", () => {
     expect(body.reasonCode).toBe("trusted_exact_not_available");
     expect(body.reasonText).toBe("Trusted exact lookup is not enabled for this session, so the code was not checked against the trusted index.");
     expect(body.decision.status).toBe("needs_review");
+    // Fix-wave 2026-08-04: distinct from a real checked-and-missed lookup - the code was never
+    // checked against the trusted index at all, so the path must say so honestly.
+    expect(body.trustedExact).toEqual({ path: "trusted_exact_not_checked" });
     expect(runDecodePipeline).not.toHaveBeenCalled();
     expect(ladderStorage).not.toHaveBeenCalled();
     expect(legacyRateLimit).not.toHaveBeenCalled();
+  });
+
+  it("returns trusted_exact_blocked_package for an allowlisted caller's blocked-package outcome", async () => {
+    resolveTrustedExactBarcodeDecision.mockResolvedValueOnce({ kind: "blocked_package" });
+    const { POST } = await import("./route");
+
+    const response = await POST(request("3220017438"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.reasonCode).toBe("blocked_package");
+    expect(body.reasonText).toBe("This package barcode requires review.");
+    expect(body.decision.status).toBe("needs_review");
+    expect(body.trustedExact).toEqual({ path: "trusted_exact_blocked_package" });
+    expect(runDecodePipeline).not.toHaveBeenCalled();
+  });
+
+  it("returns trusted_exact_unavailable for an allowlisted caller's unavailable-index outcome", async () => {
+    resolveTrustedExactBarcodeDecision.mockResolvedValueOnce({ kind: "unavailable" });
+    const { POST } = await import("./route");
+
+    const response = await POST(request("3220017438"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.reasonCode).toBe("exact_index_unavailable");
+    expect(body.reasonText).toBe("Trusted exact lookup requires review.");
+    expect(body.trustedExact).toEqual({ path: "trusted_exact_unavailable" });
+    expect(runDecodePipeline).not.toHaveBeenCalled();
+  });
+
+  it("returns trusted_exact_unavailable when a hit's index fingerprint cannot be verified", async () => {
+    resolveTrustedExactBarcodeDecision.mockResolvedValueOnce(bossHit());
+    getTireExactIndexFingerprint.mockResolvedValueOnce(null);
+    const { POST } = await import("./route");
+
+    const response = await POST(request("3220017438"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.reasonCode).toBe("exact_index_unavailable");
+    expect(body.reasonText).toBe("Trusted exact index verification is unavailable.");
+    expect(body.trustedExact).toEqual({ path: "trusted_exact_unavailable" });
+    expect(runDecodePipeline).not.toHaveBeenCalled();
   });
 
   it("throttles before both exact hits and misses", async () => {

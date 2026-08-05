@@ -22,37 +22,94 @@ export function classifyRows(rows) {
   return { accepted, needsReview, blanks };
 }
 
-export function parseRfc4180Line(line) {
-  const cells = [];
-  let current = "";
+// Single-pass RFC-4180 state machine over the WHOLE text (never pre-split into lines - a naive
+// split-then-parse-per-line approach corrupts any quoted field that legitimately contains a comma
+// AND a newline, since the pre-split cuts the record in half before quote-awareness ever sees it,
+// and an unterminated quote silently absorbs the rest of the file as "one giant field" instead of
+// failing loudly). Handles: commas and newlines inside quoted fields, the "" escaped-quote sequence,
+// and both \n and \r\n line endings. An unterminated quote at EOF throws, naming the record number
+// (1-based, counting the header row as record 1) so the caller can find the bad row in the source file.
+export function parseCsvRows(text) {
+  const rows = [];
+  let row = [];
+  let field = "";
   let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    if (char === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
+  let recordNumber = 1;
+  const len = text.length;
+
+  const endField = () => {
+    row.push(field.trim());
+    field = "";
+  };
+  const endRecord = () => {
+    endField();
+    rows.push(row);
+    row = [];
+    recordNumber++;
+  };
+
+  let i = 0;
+  while (i < len) {
+    const char = text[i];
+    if (inQuotes) {
+      if (char === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i += 2;
+          continue;
+        }
+        inQuotes = false;
         i++;
-      } else {
-        inQuotes = !inQuotes;
+        continue;
       }
-    } else if (char === "," && !inQuotes) {
-      cells.push(current.trim());
-      current = "";
-    } else {
-      current += char;
+      field += char;
+      i++;
+      continue;
     }
+    if (char === '"') {
+      inQuotes = true;
+      i++;
+      continue;
+    }
+    if (char === ",") {
+      endField();
+      i++;
+      continue;
+    }
+    if (char === "\r") {
+      if (text[i + 1] === "\n") i++;
+      endRecord();
+      i++;
+      continue;
+    }
+    if (char === "\n") {
+      endRecord();
+      i++;
+      continue;
+    }
+    field += char;
+    i++;
   }
-  cells.push(current.trim());
-  return cells;
+
+  if (inQuotes) {
+    throw new Error(
+      `Malformed CSV: unterminated quoted field starting in record ${recordNumber} (counting the header row as record 1). Check for a stray or missing closing quote.`
+    );
+  }
+
+  // A trailing newline already closed the last record above and left field/row empty - only flush
+  // a final record here when the file's last line has no trailing newline.
+  if (field !== "" || row.length > 0) endRecord();
+
+  // Drop genuinely blank lines (mirrors the previous behavior of filtering empty lines out of the
+  // raw text before parsing), but never a row that has real column structure (e.g. ",,,,").
+  return rows.filter((r) => !(r.length === 1 && r[0] === ""));
 }
 
-function parseCsv(text) {
-  const [header, ...lines] = text.split(/\r?\n/).filter(Boolean);
-  const cols = header.split(",").map((c) => c.trim());
-  return lines.map((line) => {
-    const cells = parseRfc4180Line(line);
-    return Object.fromEntries(cols.map((c, i) => [c, (cells[i] ?? "").trim()]));
-  });
+export function parseCsv(text) {
+  const [header, ...lines] = parseCsvRows(text);
+  if (!header) return [];
+  return lines.map((cells) => Object.fromEntries(header.map((c, i) => [c, cells[i] ?? ""])));
 }
 
 const csvPath = process.argv[2];

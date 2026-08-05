@@ -58,7 +58,17 @@ function trustedBossBusinessIds(): Set<string> {
   );
 }
 
-function deterministicMissBody(reasonCode = "trusted_exact_miss", reason = "No trusted exact match was found.") {
+// Fix-wave 2026-08-04: `path` used to be hardcoded to "trusted_exact_miss" for every honest-miss
+// body, which meant a not-checked, blocked, or index-unavailable outcome all reported the same path
+// as a real checked-and-missed lookup. The sole client consumer (scanStore.ts trustedExactCanonicalId)
+// only ever compares trustedExact.path against the success value "boss_trusted_exact_barcode", so
+// widening the honest-miss path values here is purely additive observability - it changes no client
+// behavior.
+function deterministicMissBody(
+  reasonCode = "trusted_exact_miss",
+  reason = "No trusted exact match was found.",
+  path = "trusted_exact_miss",
+) {
   return {
     mode: "decode" as const,
     providerNames: [] as string[],
@@ -81,7 +91,7 @@ function deterministicMissBody(reasonCode = "trusted_exact_miss", reason = "No t
     reasonCode,
     reasonText: reason,
     timedOut: false,
-    trustedExact: { path: "trusted_exact_miss" as const },
+    trustedExact: { path },
   };
 }
 
@@ -419,7 +429,7 @@ export async function POST(request: Request) {
       const index = await getTireExactIndexFingerprint();
       const canonicalId = exact.result.decision.trustedExactCanonicalProductId;
       if (!index || (exact.sourceScope === "authenticated_boss_corpus" && !canonicalId)) {
-        return Response.json(deterministicMissBody("exact_index_unavailable", "Trusted exact index verification is unavailable."));
+        return Response.json(deterministicMissBody("exact_index_unavailable", "Trusted exact index verification is unavailable.", "trusted_exact_unavailable"));
       }
       const result = exact.result.results[0];
       return Response.json({
@@ -463,9 +473,11 @@ export async function POST(request: Request) {
         },
       });
     }
-    if (exact.kind === "blocked_package" || exact.kind === "unavailable") {
-      const reasonCode = exact.kind === "blocked_package" ? "blocked_package" : "exact_index_unavailable";
-      return Response.json(deterministicMissBody(reasonCode, "Trusted exact lookup requires review."));
+    if (exact.kind === "blocked_package") {
+      return Response.json(deterministicMissBody("blocked_package", "This package barcode requires review.", "trusted_exact_blocked_package"));
+    }
+    if (exact.kind === "unavailable") {
+      return Response.json(deterministicMissBody("exact_index_unavailable", "Trusted exact lookup requires review.", "trusted_exact_unavailable"));
     }
   }
 
@@ -477,6 +489,7 @@ export async function POST(request: Request) {
         deterministicMissBody(
           "trusted_exact_not_available",
           "Trusted exact lookup is not enabled for this session, so the code was not checked against the trusted index.",
+          "trusted_exact_not_checked",
         ),
       );
     }
