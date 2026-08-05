@@ -445,6 +445,53 @@ describe("authenticated trusted-exact scan settlement", () => {
     expect(state.needsReviewQueue).toEqual([]);
   });
 
+  it.each([
+    ["hit", "clearSession"],
+    ["miss", "clearSession"],
+    ["unavailable error", "clearSession"],
+    ["hit", "clearLocalCache"],
+    ["miss", "clearLocalCache"],
+    ["unavailable error", "clearLocalCache"],
+    ["hit", "startSession"],
+  ] as const)("keeps cleared state authoritative after a late %s when %s runs", async (outcome, clearAction) => {
+    let resolveResponse!: (value: Response) => void;
+    let rejectResponse!: (reason: Error) => void;
+    const pending = new Promise<Response>((resolve, reject) => {
+      resolveResponse = resolve;
+      rejectResponse = reject;
+    });
+    const db = new MockDb();
+    const audit = vi.fn();
+    const store = createTestScanStore({ db, trustedExactProbeEnabled: true, audit });
+    store.setState({ userId: "owner", businessContextReady: true });
+    store.getState().updateSettings({ aiLookupEnabled: false });
+    const fetchSpy = vi.fn(() => pending);
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    store.getState().processScan(SHORT_CODE);
+    await vi.waitFor(() => expect(decodeCalls(fetchSpy)).toHaveLength(1));
+    if (clearAction === "startSession") store.getState().startSession("Fresh session", "Main");
+    else store.getState()[clearAction]();
+    const stateAfterClear = store.getState();
+    const clearedProducts = structuredClone(stateAfterClear.products);
+    const backendAfterClear = structuredClone(db.snapshot());
+    const auditCountAfterClear = audit.mock.calls.length;
+
+    if (outcome === "hit") resolveResponse(response());
+    else if (outcome === "miss") resolveResponse(missResponse());
+    else rejectResponse(new Error("trusted exact unavailable"));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    const settled = store.getState();
+    expect(settled.products).toEqual(clearedProducts);
+    expect(settled.scanFeed).toEqual([]);
+    expect(settled.finalCounts).toEqual([]);
+    expect(settled.needsReviewQueue).toEqual([]);
+    expect(settled.pendingSyncQueue).toEqual([]);
+    expect(db.snapshot()).toEqual(backendAfterClear);
+    expect(audit).toHaveBeenCalledTimes(auditCountAfterClear);
+  });
+
   it("does not dispatch placeholders or arbitrary non-identifier labels", async () => {
     const store = createTestScanStore({ db: new MockDb(), trustedExactProbeEnabled: true });
     store.getState().updateSettings({ aiLookupEnabled: false });

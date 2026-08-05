@@ -759,10 +759,10 @@ export interface ScanState {
   /** Public entry point: ENQUEUES the decode (see the module-level bounded decode queue) and resolves
    *  once it actually runs. Never call `runLiveDecodeOnce` directly outside this queue - that would
    *  bypass the MAX_CONCURRENT_DECODES bound a rapid scan burst relies on. */
-  liveDecode: (reviewId: string, options?: { deterministicOnly?: boolean }) => Promise<void>;
+  liveDecode: (reviewId: string, options?: { deterministicOnly?: boolean; invalidationGeneration?: number }) => Promise<void>;
   /** The real decode work (network call + evidence gate + count/needs-review routing). Only ever
    *  invoked FROM the `liveDecode` queue wrapper - see the module-level `enqueueDecode`/`drainDecodeQueue`. */
-  runLiveDecodeOnce: (reviewId: string, options?: { deterministicOnly?: boolean }) => Promise<void>;
+  runLiveDecodeOnce: (reviewId: string, options?: { deterministicOnly?: boolean; invalidationGeneration?: number }) => Promise<void>;
   /** DECODE-EVERYTHING fallback: when the AI decode is SKIPPED (circuit breaker open / rate-limited / AI
    *  unavailable / offline / cap), still COUNT the scan as an UNVERIFIED, reviewable provisional row with a
    *  SAFE label (never fabricated manufacturer anatomy for non-GS1 codes; never an approved alias / verified
@@ -1301,7 +1301,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
     // authenticated exact hit settles.
     const trustedExactProbes = new Map<string, UnknownCodeReview>();
     const trustedExactProbeIdsByCode = new Map<string, string>();
+    let trustedExactProbeGeneration = 0;
     const clearTrustedExactProbes = () => {
+      trustedExactProbeGeneration++;
       trustedExactProbeReviewIds.clear();
       trustedExactProbes.clear();
       trustedExactProbeIdsByCode.clear();
@@ -2105,6 +2107,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       startSession: (name, location) => {
+        clearTrustedExactProbes();
         // Owner feature (2026-07-22): archive the session being abandoned/rotated away from BEFORE
         // its scanFeed is wiped below - a session with at least one scan is never silently lost.
         archiveCurrentSessionIfAny();
@@ -2262,6 +2265,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             state.sessions.find((candidate) => candidate.id === sessionId) ??
             (state.currentSession?.id === sessionId ? state.currentSession : null);
           if (!session) return false;
+          clearTrustedExactProbes();
           set({
             currentSession: session,
             sessionId: session.id,
@@ -2275,6 +2279,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const db = getMockDb();
         const session = db.getSession(sessionId);
         if (!session || session.businessId !== get().businessId) return false;
+        clearTrustedExactProbes();
         const finalCounts: InventoryCount[] = db.getSessionCounts(sessionId).map((c) => ({
           id: `count-${c.sessionId}-${c.productId}`,
           businessId: c.businessId,
@@ -2351,6 +2356,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // A genuine rotation away from the prior session (fresh session below wipes scanFeed/
         // finalCounts) - archive it first, same as startSession.
         archiveCurrentSessionIfAny();
+        clearTrustedExactProbes();
         const id = `session-${idFactory()}`;
         const businessId = get().businessId;
         const session: InventorySession = {
@@ -2935,7 +2941,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           trustedExactProbes.set(probe.id, probe);
           trustedExactProbeIdsByCode.set(probe.cleanCode, probe.id);
           trustedExactProbeReviewIds.add(probe.id);
-          void get().liveDecode(probe.id, { deterministicOnly: true }).then(
+          void get().liveDecode(probe.id, {
+            deterministicOnly: true,
+            invalidationGeneration: trustedExactProbeGeneration,
+          }).then(
             () => trustedExactProbeReviewIds.delete(probe.id),
             () => trustedExactProbeReviewIds.delete(probe.id),
           );
@@ -3503,6 +3512,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       runLiveDecodeOnce: async (reviewId, options) => {
         const state = get();
         const deterministicOnly = options?.deterministicOnly === true;
+        const invalidationGeneration = options?.invalidationGeneration;
+        const wasInvalidated = () =>
+          invalidationGeneration !== undefined && invalidationGeneration !== trustedExactProbeGeneration;
+        if (wasInvalidated()) return;
         const review = state.needsReviewQueue.find((r) => r.id === reviewId)
           ?? (deterministicOnly ? trustedExactProbes.get(reviewId) : undefined);
         if (!review || review.status !== "open") return;
@@ -3672,6 +3685,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           } finally {
             clearTimeout(abortTimer);
           }
+          // A clear-session/cache/sign-out/tenant-switch action is authoritative. The network request
+          // may still complete, but a response from the previous generation must become a pure no-op
+          // before any product, review, count, audit, or sync mutation can run.
+          if (wasInvalidated()) return;
           // BUG #14 (QA hardening 2026-07-16): CLIENT-SIDE defense in depth. The server already
           // sanitizes reasonText/decision.reason (pipeline.ts) before responding, but this store must
           // not trust that unconditionally - sanitize both here too, ONCE, right at the response
@@ -3720,7 +3737,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               && !isLikelyMisreadGtin(review.cleanCode);
             if (shouldFallbackToOrdinary) {
               const persisted = materializeTrustedExactMiss(reviewId, decision?.reason || "No trusted exact match was found.");
-              if (persisted) void get().liveDecode(persisted.id);
+              if (persisted) void get().liveDecode(persisted.id, { invalidationGeneration });
               return;
             }
             const missReason = decision?.reason || "No trusted exact match was found.";
@@ -4466,6 +4483,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             syncDecodedState(reviewId);
           }
         } catch (e) {
+          if (wasInvalidated()) return;
           if (deterministicOnly && trustedExactProbes.has(reviewId)) {
             materializeTrustedExactMiss(
               reviewId,
@@ -7092,7 +7110,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       pendingCount: () => get().pendingSyncQueue.length,
       getProduct: (id) => (id ? get().products.find((p) => p.id === id) : undefined),
 
-      clearSession: () =>
+      clearSession: () => {
+        clearTrustedExactProbes();
         set({
           scanFeed: [],
           finalCounts: [],
@@ -7100,9 +7119,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           pendingSyncQueue: [],
           syncedScanEventIds: [],
           lastSyncError: null,
-        }),
+        });
+      },
 
       clearLocalCache: () => {
+        clearTrustedExactProbes();
         // Clear ONLY browser-local data. In CLOUD mode we must NEVER call db.reset() (FirebaseSyncTarget
         // guards against a destructive cloud wipe and throws) and must NEVER reseed mock data over the
         // real cloud catalog - the cloud data re-loads on the next page load. In MOCK mode, reset the
