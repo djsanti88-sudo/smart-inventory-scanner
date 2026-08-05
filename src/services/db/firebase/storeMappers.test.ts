@@ -5,8 +5,14 @@ const BIZ = "biz-1";
 
 describe("toStoreProduct", () => {
   it("maps fields and applies safe defaults", () => {
-    const p = toStoreProduct("p1", { name: "Falken Sincera", primarySku: "2881-6861", verified: true }, BIZ);
-    expect(p).toMatchObject({ id: "p1", businessId: BIZ, name: "Falken Sincera", primarySku: "2881-6861", verified: true });
+    const p = toStoreProduct("p1", {
+      name: "Falken Sincera", primarySku: "2881-6861", verified: true,
+      trustedExactCanonicalId: "trusted-exact:v1:tenant-scoped-opaque-id",
+    }, BIZ);
+    expect(p).toMatchObject({
+      id: "p1", businessId: BIZ, name: "Falken Sincera", primarySku: "2881-6861", verified: true,
+      trustedExactCanonicalId: "trusted-exact:v1:tenant-scoped-opaque-id",
+    });
     expect(p.status).toBe("active");
     expect(p.confidence).toBe(1);
     expect(p.vendorCodes).toEqual([]);
@@ -17,6 +23,7 @@ describe("toStoreProduct", () => {
     const p = toStoreProduct("p2", { status: "archived" }, BIZ);
     expect(p.verified).toBe(false);
     expect(p.status).toBe("archived");
+    expect(p.trustedExactCanonicalId).toBeUndefined();
   });
 });
 

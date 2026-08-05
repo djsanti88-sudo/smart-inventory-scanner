@@ -18,6 +18,7 @@ export interface CustomerProduct {
   status: string;
   verified: boolean;
   businessId: string;
+  trustedExactCanonicalId: string;
 }
 
 // Fields whose absence must NOT be coerced to "" - `verified` is a boolean trust flag (defaulting a

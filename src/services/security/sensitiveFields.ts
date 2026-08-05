@@ -71,6 +71,11 @@ export const CUSTOMER_SAFE_PRODUCT_FIELDS = [
   "id", "businessId", "name", "brand", "category", "specsShort", "primarySku", "imageUrl", "location", "notes", "status",
   "primaryBarcode", "gtin", "upc", "ean",
   "provisional", "verified",
+  // Authenticated trusted-exact results carry this opaque, server-issued, tenant-scoped identity solely
+  // to coalesce two accepted spellings onto one customer product after reload. It is neither a scanned
+  // code nor a reusable alias/catalog mapping; omitting it creates a duplicate product/count on the
+  // next accepted spelling. Older products legitimately have no value and remain valid.
+  "trustedExactCanonicalId",
 ] as const;
 
 // A customer's OWN pending Needs-Review item — only the fields they need to SEE + ACT on it, plus their
