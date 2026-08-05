@@ -27,10 +27,6 @@ import { cleanScanCode } from "@/services/scanCleaner";
 import { resolveTrustedExactBarcodeDecision } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { getTireExactIndexFingerprint } from "@/server/tire-knowledge/tireExactIndex";
 import { trustedExactRateLimiter } from "@/services/security/trustedExactRateLimit";
-import {
-  cacheTrustedExactMembership,
-  hasCachedTrustedExactMembership,
-} from "@/services/security/trustedExactMembershipCache";
 
 // FAST-FIRST: cheap/fast models do the first pass (+ page-fetch). The slow PRO models are only used
 // to escalate when the fast pass found no product. All overridable via env. (Reported by GET only;
@@ -337,13 +333,12 @@ export async function POST(request: Request) {
       }
       return Response.json({ error: "Invalid or expired sign-in.", reasonCode: "bad_token" }, { status: 401 });
     }
-    const membershipCheckedAt = Date.now();
-    if (!hasCachedTrustedExactMembership(uid, bizId, membershipCheckedAt)) {
-      const member = await getAdminDb().doc(`${COLLECTIONS.businessMembers}/${memberDocId(bizId, uid)}`).get();
-      if (!member.exists) {
-        return Response.json({ error: "Not a member of this business.", reasonCode: "not_member" }, { status: 403 });
-      }
-      cacheTrustedExactMembership(uid, bizId, membershipCheckedAt);
+    // Private trusted-exact corpus access must reflect revocation immediately. There is no
+    // authoritative revocation signal for this process-local cache, so every request reads the
+    // membership document after verifying its token.
+    const member = await getAdminDb().doc(`${COLLECTIONS.businessMembers}/${memberDocId(bizId, uid)}`).get();
+    if (!member.exists) {
+      return Response.json({ error: "Not a member of this business.", reasonCode: "not_member" }, { status: 403 });
     }
     authedBusinessId = bizId;
     authedUid = uid;
@@ -410,10 +405,10 @@ export async function POST(request: Request) {
       );
     }
     const exact = await resolveTrustedExactBarcodeDecision(exactCode, { authenticatedBossCorpus: true });
-    if (exact.kind === "hit" && exact.sourceScope === "authenticated_boss_corpus") {
+    if (exact.kind === "hit") {
       const index = await getTireExactIndexFingerprint();
       const canonicalId = exact.result.decision.trustedExactCanonicalProductId;
-      if (!index || !canonicalId) {
+      if (!index || (exact.sourceScope === "authenticated_boss_corpus" && !canonicalId)) {
         return Response.json(deterministicMissBody("exact_index_unavailable", "Trusted exact index verification is unavailable."));
       }
       const result = exact.result.results[0];
@@ -438,12 +433,12 @@ export async function POST(request: Request) {
           reason: exact.result.decision.reason,
           evidenceStrength: "fetched_source",
           exactCodeEvidenceVerifiedByApp: true,
-          corroborationPath: "boss_trusted_exact_barcode",
-          trustedExactCanonicalProductId: canonicalId,
+          corroborationPath: exact.result.decision.corroborationPath,
+          ...(canonicalId ? { trustedExactCanonicalProductId: canonicalId } : {}),
           crossCheck: {
             decision: "single_provider",
             confidence: exact.result.decision.confidence,
-            reason: "Authenticated trusted exact corpus match.",
+            reason: exact.result.decision.reason,
             brandSimilarity: 1,
             nameSimilarity: 1,
             contradictions: [],
@@ -452,7 +447,10 @@ export async function POST(request: Request) {
         reasonCode: "trusted_exact_hit",
         reasonText: exact.result.decision.reason,
         timedOut: false,
-        trustedExact: { path: "boss_trusted_exact_barcode", index },
+        trustedExact: {
+          path: exact.sourceScope === "authenticated_boss_corpus" ? "boss_trusted_exact_barcode" : "trusted_exact_barcode",
+          index,
+        },
       });
     }
     if (exact.kind === "blocked_package" || exact.kind === "unavailable") {

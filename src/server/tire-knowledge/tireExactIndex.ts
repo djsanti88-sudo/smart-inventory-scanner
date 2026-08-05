@@ -149,9 +149,9 @@ function validateManifest(value: unknown, key: string): ExactIndexManifest | nul
 }
 
 async function getManifest(): Promise<ManifestResult> {
+  const key = bossHmacKey();
+  if (!key) return { kind: "unavailable" };
   if (!manifestPromise) {
-    const key = bossHmacKey();
-    if (!key) return { kind: "unavailable" };
     manifestPromise = readFile(join(INDEX_DIR, "manifest.json"), "utf8")
       .then((raw): ManifestResult => {
         try {
@@ -163,7 +163,13 @@ async function getManifest(): Promise<ManifestResult> {
       })
       .catch(() => ({ kind: "unavailable" }));
   }
-  return manifestPromise!;
+  const result = await manifestPromise;
+  // The parsed manifest is immutable process-local state, but its Boss binding is not: environment
+  // key rotation must never let a stale validated manifest turn into an ordinary exact-index miss.
+  return result.kind === "manifest"
+    && result.value.bossKeyFingerprint !== keyedDigest(key, "key-fingerprint:v1", "scanbin-boss-exact-index")
+    ? { kind: "unavailable" }
+    : result;
 }
 
 function isValidShardRow(key: string, value: unknown, shard: string): value is ExactIndexRow {

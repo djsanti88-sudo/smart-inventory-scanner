@@ -1,14 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { adminDb, clearLocalCorpusTenant, LOCAL_CORPUS_BUSINESS_ID, LOCAL_CORPUS_EMAIL, LOCAL_CORPUS_PASSWORD, LOCAL_CORPUS_UID } from "./admin";
+import { adminDb, clearLocalCorpusTenant, LOCAL_CORPUS_BUSINESS_ID, LOCAL_CORPUS_EMAIL, LOCAL_CORPUS_PASSWORD } from "./admin";
 
 const ALLOWED_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const SCANNER_INTERVAL_MS = 100; // declared local keyboard-wedge arrival rate: 10 scans/s
 const SETTLEMENT_TIMEOUT_MS = 2_000;
-const LOCAL_CORPUS_PERSIST_KEY = `sis-scan-${LOCAL_CORPUS_UID}`;
-const PREVIOUS_SCANNER_MODE_KEY = "local-corpus-previous-scanner-mode-v1";
-const ABSENT_PERSISTED_VALUE = "__absent__";
 
 function manifest() { return JSON.parse(readFileSync(join(process.cwd(), "src", "server", "tire-knowledge", "exact-index", "manifest.json"), "utf8")); }
 
@@ -23,42 +20,12 @@ async function blockExternalEgress(page: Page) {
 }
 
 async function login(page: Page) {
-  await installPersistedScannerMode(page);
   await page.goto("/login");
   await page.getByTestId("login-email").fill(LOCAL_CORPUS_EMAIL);
   await page.getByTestId("login-password").fill(LOCAL_CORPUS_PASSWORD);
   await page.getByTestId("login-button").click();
   await page.waitForURL("**/scan");
   await expect(page.getByTestId("scanner-input")).toBeFocused({ timeout: 30_000 });
-}
-
-/**
- * The production store reads this uid-namespaced Zustand blob when auth switches persistence from the
- * anonymous key. The init script runs before `/scan` loads, so it uses the real persistence contract
- * instead of the development-only `window.__scanStore` observer omitted from production builds.
- */
-async function installPersistedScannerMode(page: Page) {
-  await page.addInitScript(({ persistKey, previousKey, absentValue }) => {
-    if (window.sessionStorage.getItem(previousKey) !== null) return;
-    const previous = window.localStorage.getItem(persistKey);
-    window.sessionStorage.setItem(previousKey, previous ?? absentValue);
-    window.localStorage.setItem(persistKey, JSON.stringify({
-      state: { settings: { scannerSubmitMode: "both" } },
-      // v13 intentionally invokes the production v14 migration. Zustand's persist merge is shallow,
-      // so this expands the settings-only fixture to the complete Settings object before hydration.
-      version: 13,
-    }));
-  }, { persistKey: LOCAL_CORPUS_PERSIST_KEY, previousKey: PREVIOUS_SCANNER_MODE_KEY, absentValue: ABSENT_PERSISTED_VALUE });
-}
-
-async function restoreScannerSubmitMode(page: Page) {
-  await page.evaluate(({ persistKey, previousKey, absentValue }) => {
-    const previous = window.sessionStorage.getItem(previousKey);
-    if (previous === null) return;
-    if (previous === absentValue) window.localStorage.removeItem(persistKey);
-    else window.localStorage.setItem(persistKey, previous);
-    window.sessionStorage.removeItem(previousKey);
-  }, { persistKey: LOCAL_CORPUS_PERSIST_KEY, previousKey: PREVIOUS_SCANNER_MODE_KEY, absentValue: ABSENT_PERSISTED_VALUE }).catch(() => undefined);
 }
 
 async function assertVisibleUiSettlement(page: Page, expectedCodes: readonly string[], expectedEvents: number) {
@@ -82,8 +49,7 @@ async function assertVisibleUiSettlement(page: Page, expectedCodes: readonly str
   await expect(page.getByTestId("scanner-input")).toBeFocused();
 }
 
-test.afterEach(async ({ page }) => {
-  await restoreScannerSubmitMode(page);
+test.afterEach(async () => {
   await clearLocalCorpusTenant();
 });
 
@@ -136,9 +102,9 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
   const feed = page.getByTestId("scan-feed-body");
   // This authenticated UI warm-up primes the exact index and route without being included in the
   // measured burst. Its persisted event/count is an explicit baseline, not silently discarded.
-  // No Enter: this is the real scanner-mode assertion. The hydrated `both` setting must accept a
-  // keyboard-wedge burst through its debounce path before the measured corpus burst begins.
-  await page.keyboard.insertText(warmEntry.code);
+  // A hardware keyboard wedge terminates each burst with Enter. This works with both user-selectable
+  // production submission modes without reaching into platform-only scanner settings.
+  await page.keyboard.insertText(warmEntry.code); await page.keyboard.press("Enter");
   await expect(page.getByText("1 scans", { exact: true })).toBeVisible({ timeout: 2_000 });
   await expect.poll(async () => /Verified \(app-confirmed\)|Counted/.test(await feed.locator("tr").first().textContent() ?? ""), { timeout: SETTLEMENT_TIMEOUT_MS, intervals: [10, 20, 50] }).toBe(true);
   await expect(page.getByTestId("pending-count")).toHaveText(/^(?:Waiting to save|All saved): 0$/, { timeout: 30_000 });

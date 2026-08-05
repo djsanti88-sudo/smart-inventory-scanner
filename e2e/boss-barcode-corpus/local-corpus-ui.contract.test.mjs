@@ -16,15 +16,6 @@ test("timing observer identifies each scan through an exact barcode cell, not a 
   assert.match(spec, /cell\.textContent === code/);
 });
 
-test("production corpus proof pins scanner mode through the uid-namespaced persisted store", () => {
-  const scannerModeSetup = spec.match(/async function installPersistedScannerMode[\s\S]*?\n}\n\nasync function restoreScannerSubmitMode/);
-  assert.ok(scannerModeSetup, "scanner mode setup helpers must exist");
-  assert.equal(scannerModeSetup[0].includes("__scanStore"), false, "production mode setup cannot require a development-only window observer");
-  assert.match(spec, /page\.addInitScript/);
-  assert.match(spec, /sis-scan-\$\{LOCAL_CORPUS_UID\}/);
-  assert.match(spec, /scannerSubmitMode:\s*["']both["']/);
-  assert.match(spec, /version:\s*13/);
-  assert.match(spec, /await page\.keyboard\.insertText\(warmEntry\.code\);\n\s*await expect\(page\.getByText\("1 scans"/);
-  assert.match(spec, /localStorage\.setItem/);
-  assert.match(spec, /localStorage\.removeItem/);
+test("production corpus proof models a keyboard wedge with an explicit Enter terminator", () => {
+  assert.match(spec, /await page\.keyboard\.insertText\(warmEntry\.code\);\s*await page\.keyboard\.press\("Enter"\);/);
 });

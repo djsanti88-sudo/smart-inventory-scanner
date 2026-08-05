@@ -180,6 +180,24 @@ describe.skipIf(!hasConfiguredBossKey)("trusted tire exact index", () => {
 });
 
 describe("trusted tire exact index key binding", () => {
+  it("fails closed after HMAC key rotation even when the manifest is already cached", async () => {
+    const previous = process.env.BOSS_EXACT_INDEX_HMAC_KEY;
+    if (!hasConfiguredBossKey) return;
+    try {
+      await expect(lookupTrustedExactBarcode("029142337393", { authenticatedBossCorpus: false }))
+        .resolves.toMatchObject({ kind: "hit", sourceScope: "global_corpus" });
+
+      process.env.BOSS_EXACT_INDEX_HMAC_KEY = "synthetic-rotated-key-with-at-least-thirty-two-bytes";
+
+      await expect(lookupTrustedExactBarcode("029142337393", { authenticatedBossCorpus: false }))
+        .resolves.toEqual({ kind: "unavailable" });
+    } finally {
+      if (previous === undefined) delete process.env.BOSS_EXACT_INDEX_HMAC_KEY;
+      else process.env.BOSS_EXACT_INDEX_HMAC_KEY = previous;
+      __resetTireExactIndexCacheForTests();
+    }
+  });
+
   it("fails closed when the server-only HMAC key is absent or does not match the manifest", async () => {
     const previous = process.env.BOSS_EXACT_INDEX_HMAC_KEY;
     try {

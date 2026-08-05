@@ -32,11 +32,12 @@ const ladderStorage = vi.fn();
 vi.mock("@/server/upc/storage", () => ({ ladderStorage: (...args: unknown[]) => ladderStorage(...args) }));
 
 const legacyRateLimit = vi.fn();
+const killSwitch = vi.fn();
 vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
   return {
     ...actual,
-    killSwitchOn: () => false,
+    killSwitchOn: () => killSwitch(),
     checkRateLimit: (...args: unknown[]) => legacyRateLimit(...args),
     readDailyUsedForAccount: vi.fn().mockResolvedValue(0),
     chargeDailySlotForAccount: vi.fn(),
@@ -106,6 +107,19 @@ function bossHit(code = "3220017438") {
   };
 }
 
+function globalHit(code = "029142337393") {
+  const hit = bossHit(code);
+  const { trustedExactCanonicalProductId: _privateCanonicalId, ...decision } = hit.result.decision;
+  return {
+    ...hit,
+    sourceScope: "global_corpus" as const,
+    result: {
+      ...hit.result,
+      decision: { ...decision, corroborationPath: "corpus_exact_barcode" },
+    },
+  };
+}
+
 beforeEach(async () => {
   process.env.NEXT_PUBLIC_AUTH_MODE = "live";
   process.env.TRUSTED_EXACT_BOSS_BUSINESS_IDS = " business-a , business-b ";
@@ -119,8 +133,7 @@ beforeEach(async () => {
   runDecodePipeline.mockReset().mockResolvedValue({ kind: "computed", payload: { debug: {} }, cached: false, paidComputeCharged: false });
   ladderStorage.mockReset().mockResolvedValue({});
   legacyRateLimit.mockReset().mockResolvedValue({ allowed: true, retryAfterMs: 0 });
-  const { resetTrustedExactMembershipCacheForTests } = await import("@/services/security/trustedExactMembershipCache");
-  resetTrustedExactMembershipCacheForTests();
+  killSwitch.mockReset().mockReturnValue(false);
 });
 
 afterEach(() => {
@@ -165,20 +178,44 @@ describe("authenticated Boss trusted-exact route", () => {
     expect(body.results[0]).not.toHaveProperty("sourceUrls");
   });
 
-  it("verifies the token on every request but reuses a positive same-member lookup within 30 seconds", async () => {
+  it("returns an authenticated caller's global trusted exact hit before legacy or provider work", async () => {
+    resolveTrustedExactBarcodeDecision.mockResolvedValueOnce(globalHit());
+    killSwitch.mockReturnValueOnce(true);
+    const { POST } = await import("./route");
+
+    const response = await POST(request("029142337393"));
+
+    expect(response.status).toBe(200);
+    expect(ladderStorage).not.toHaveBeenCalled();
+    expect(legacyRateLimit).not.toHaveBeenCalled();
+    expect(killSwitch).not.toHaveBeenCalled();
+    expect(runDecodePipeline).not.toHaveBeenCalled();
+    const body = await response.json();
+    expect(body).toMatchObject({
+      decision: { status: "verified", corroborationPath: "corpus_exact_barcode" },
+      reasonCode: "trusted_exact_hit",
+      trustedExact: { path: "trusted_exact_barcode", index: fingerprint },
+    });
+    expect(body.decision).not.toHaveProperty("trustedExactCanonicalProductId");
+  });
+
+  it("rechecks membership on every request so a revoked member cannot reuse private exact access", async () => {
     resolveTrustedExactBarcodeDecision
       .mockResolvedValueOnce(bossHit())
       .mockResolvedValueOnce({ kind: "miss" });
+    memberGet
+      .mockResolvedValueOnce({ exists: true })
+      .mockResolvedValueOnce({ exists: false });
     const { POST } = await import("./route");
 
     await POST(request("3220017438"));
-    await POST(request("SAFE-SHORT-MISS"));
+    const revoked = await POST(request("SAFE-SHORT-MISS"));
 
     expect(verifyIdToken).toHaveBeenCalledTimes(2);
-    expect(memberGet).toHaveBeenCalledOnce();
-    expect(trustedExactCheck).toHaveBeenNthCalledWith(1, "uid-a", "business-a");
-    expect(trustedExactCheck).toHaveBeenNthCalledWith(2, "uid-a", "business-a");
-    expect(resolveTrustedExactBarcodeDecision).toHaveBeenCalledTimes(2);
+    expect(memberGet).toHaveBeenCalledTimes(2);
+    expect(revoked.status).toBe(403);
+    expect(trustedExactCheck).toHaveBeenCalledOnce();
+    expect(resolveTrustedExactBarcodeDecision).toHaveBeenCalledOnce();
     expect(runDecodePipeline).not.toHaveBeenCalled();
     expect(ladderStorage).not.toHaveBeenCalled();
   });

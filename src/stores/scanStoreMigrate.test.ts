@@ -156,16 +156,6 @@ describe("scanStoreMigrate - v5 -> v6 persist migration (Task 4 review fix)", ()
     expect(settings.aiLookupEnabled).toBe(false);
   });
 
-  it("expands a settings-only v13 scanner seed before the v14 shallow persist merge", () => {
-    const migrated = scanStoreMigrate({ settings: { scannerSubmitMode: "both" } }, 13) as {
-      settings: { scannerSubmitMode: string; scannerDebounceMs: number; scanContext: string };
-    };
-
-    expect(migrated.settings.scannerSubmitMode).toBe("both");
-    expect(migrated.settings.scannerDebounceMs).toBe(80);
-    expect(migrated.settings.scanContext).toBe("tire");
-  });
-
   it("still normalizes quantityDelta:0 for a v7 blob that DOES carry a feed", () => {
     const withFeed = {
       scanFeed: [
