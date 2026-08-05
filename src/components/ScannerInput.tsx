@@ -66,6 +66,10 @@ export function ScannerInput({
     lastResult ? s.scanFeed.find((e) => e.id === lastResult.id) : undefined,
   );
   const liveDecodeStatus = liveFeedEntry?.decodeStatus ?? lastResult?.decodeStatus;
+  // The store owns the authoritative, settled identity and quantity. Keep lastResult only as an
+  // immediate fallback until its feed row exists, so a completed verification cannot flash stale
+  // unknown/review copy after the lookup panel disappears.
+  const displayResult = liveFeedEntry ?? lastResult;
 
   useEffect(() => {
     if (autoFocus) inputRef.current?.focus();
@@ -117,7 +121,7 @@ export function ScannerInput({
       setFlash("success");
       if (flashTimer.current) clearTimeout(flashTimer.current);
       flashTimer.current = setTimeout(() => setFlash(false), 900);
-    } else if (ev) {
+    } else if (ev && ev.decodeStatus !== "decoding") {
       setFlash("error");
       if (flashTimer.current) clearTimeout(flashTimer.current);
       flashTimer.current = setTimeout(() => setFlash(false), 400);
@@ -210,7 +214,8 @@ export function ScannerInput({
         </p>
       ) : (
         (() => {
-          const style = PANEL_STYLES[lastResult.status];
+          const result = displayResult!;
+          const style = PANEL_STYLES[result.status];
           return (
             <div
               className={`mt-3 flex min-h-[72px] animate-[panel-in_150ms_ease-out] items-center justify-between gap-3 rounded-lg border-2 ${style.border} ${style.bg} px-4 py-3`}
@@ -221,12 +226,12 @@ export function ScannerInput({
               <div className="min-w-0">
                 <p className={`text-lg font-bold ${style.text}`}>{style.heading}</p>
                 <p className={`truncate text-base ${style.text}`} data-testid="scan-status">
-                  {statusMessage(lastResult)}
+                  {statusMessage(result)}
                 </p>
               </div>
               <div className="shrink-0 text-right">
                 <div className={`animate-[count-tick_300ms_ease-out] text-4xl font-extrabold tabular-nums ${style.qty}`}>
-                  {lastResult.quantityAfterScan}
+                  {result.quantityAfterScan}
                 </div>
                 <div className={`text-xs font-medium uppercase tracking-wide ${style.qty}`}>on hand</div>
               </div>
@@ -234,7 +239,7 @@ export function ScannerInput({
           );
         })()
       )}
-      {lastResult?.status === "known" && (
+      {displayResult?.status === "known" && (
         // Kept as a SEPARATE, always-additional marker (not the panel's own testid) so existing
         // tests/E2E asserting scan-success for known scans keep passing unmodified while every
         // other status shares the same scan-counted panel testid above. Purely a stable test

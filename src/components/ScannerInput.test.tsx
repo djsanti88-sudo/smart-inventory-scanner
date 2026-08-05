@@ -154,6 +154,46 @@ describe("ScannerInput status line reset to Ready", () => {
   });
 });
 
+describe("ScannerInput settled live-feed feedback", () => {
+  afterEach(() => {
+    useScanStore.setState({ scanFeed: [] });
+  });
+
+  it("replaces a provisional lookup with the settled verified product confirmation", () => {
+    const provisional: ScanEvent = {
+      ...fakeEvent("TRUSTED-EXACT"),
+      status: "unknown",
+      decodeStatus: "decoding",
+      matchedProductId: null,
+      quantityAfterScan: 1,
+    };
+    const settled: ScanEvent = {
+      ...provisional,
+      status: "known",
+      decodeStatus: "verified",
+      matchedProductId: "prod-nokian",
+      quantityAfterScan: 2,
+    };
+    const onScan = vi.fn(() => provisional);
+    render(<ScannerInput onScan={onScan} submitMode="enter" />);
+    const input = screen.getByTestId("scanner-input");
+
+    fireEvent.change(input, { target: { value: "TRUSTED-EXACT" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByText("Looking up this product... Check the feed below in a moment.")).toBeTruthy();
+    expect(input.className).not.toContain("border-red-400");
+    expect(input.className).not.toContain("shake");
+
+    act(() => {
+      useScanStore.setState({ scanFeed: [settled] });
+    });
+
+    expect(screen.getByTestId("scan-counted").textContent).toContain("Counted:");
+    expect(screen.getByTestId("scan-counted").textContent).toContain("Quantity is now 2.");
+    expect(screen.queryByText(/Check the review list/)).toBeNull();
+  });
+});
+
 describe("ScannerInput every-status feedback panel (TOP-LEVEL LAW: every scan counts and shows it)", () => {
   function eventWith(status: ScanEvent["status"], quantityAfterScan: number): ScanEvent {
     return { ...fakeEvent("CODE1"), status, quantityAfterScan };
@@ -200,5 +240,18 @@ describe("ScannerInput every-status feedback panel (TOP-LEVEL LAW: every scan co
 
     expect(screen.getByTestId("scan-success")).toBeTruthy();
     expect(screen.getByText("Added.")).toBeTruthy();
+  });
+
+  it("keeps the red shake for a terminal unknown scan", () => {
+    const ev = eventWith("unknown", 1);
+    const onScan = vi.fn(() => ev);
+    render(<ScannerInput onScan={onScan} submitMode="enter" />);
+    const input = screen.getByTestId("scanner-input");
+
+    fireEvent.change(input, { target: { value: "UNKNOWN" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input.className).toContain("border-red-400");
+    expect(input.className).toContain("shake");
   });
 });
