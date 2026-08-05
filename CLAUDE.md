@@ -90,8 +90,10 @@ is a plain local `node:test` suite (runs today, not gated); only live-app-drivin
   miss. AI is NEVER called for a known match.
 
 ## Decode Ladder + Evidence Rules (rung order, strengths, firewall detail: `docs/DECODER_ARCHITECTURE.md`; wiring §3)
-- COST-ORDERED LADDER (baseline v2, owner-approved 2026-07-08): the FIRST settled rung (verified OR
-  suggestion) STOPS it - never pay for a rung when an earlier one answered. True order in `pipeline.ts`:
+- COST-ORDERED LADDER (baseline v2, owner-approved 2026-07-08; escalation ruling 2026-08-05): a
+  VERIFIED result stops the ladder immediately. A free rung's SUGGESTION is kept as the stash but MAY
+  escalate into paid rungs seeking verification - the owner ruled this escalation INTENTIONAL
+  (2026-08-05, all environments). Never re-pay a rung that already answered. True order in `pipeline.ts`:
   free stages (L1 cache -> tire corpus -> retail corpus -> learned tier -> L2 Turso cache -> upcitemdb
   -> openfoodfacts) -> lazy daily-cap gate -> paid rungs (goupc, GTIN-gated -> fetchv2 -> gpt); all
   rungs miss -> Needs Review with honest reasons.
