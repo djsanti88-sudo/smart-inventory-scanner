@@ -12,7 +12,7 @@
 | 3100 | Mock Playwright E2E (`playwright.config.ts`, pinned so server and tests never disagree) |
 | 3200 | Firebase-emulator Playwright E2E (`playwright.firebase.config.ts`); also `INTEL_PORT` default |
 | 3300 | QA human-bots (`playwright.bots.config.ts` and `.bots.cloud.config.ts`) |
-| 3400 | Fable 5 measured personas and preview stress runs |
+| 3400 | Fable 5 measured personas, preview stress runs, and the boss corpus certification harness (e2e/boss-barcode-corpus/production-server.mjs). The harness serves a synthetic allowlist; real accounts always get trusted-exact misses here by design. |
 | 8080 / 9099 / 4001 | Firestore emulator / Auth emulator / emulator UI |
 
 ## Fable 5 review engine

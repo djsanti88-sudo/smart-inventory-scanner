@@ -268,6 +268,10 @@ export async function GET(request: Request) {
     // client-side `emergencyStop` preference in aiStatus - this one the shop owner cannot toggle
     // themselves, so Settings must show it as a separate, clearly-labeled condition.
     killSwitchOn: killSwitch,
+    // Task 5 (diagnostic fixes, 2026-08-04): trusted-exact configuration visibility, so nobody wastes
+    // a session testing trust-gated flows against an instance that has no allowlist configured.
+    // Booleans only - the allowlisted business ids themselves are tenant data and are never returned.
+    trustedExact: { allowlistConfigured: trustedBossBusinessIds().size > 0 },
   });
 }
 
