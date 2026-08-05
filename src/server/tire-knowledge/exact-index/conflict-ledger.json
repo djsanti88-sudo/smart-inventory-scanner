@@ -2,1221 +2,1221 @@
   "schemaVersion": "1.0.0",
   "entries": [
     {
-      "sourcePointer": "Sheet1:1000",
+      "sourcePointerHmacSha256": "036173F4D11E054B1529636863C3A234C4800AB0586D133A90B4A29920BADFBB",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:1093",
+      "sourcePointerHmacSha256": "04248B22B25DA0EA355ECE822A2C5008ACC30E4D1FC2E7D04C073154F99DCB76",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:1094",
+      "sourcePointerHmacSha256": "05E42D9E0525395268E5CC22028E9117160957FF9C68029454FB5912E4E0048C",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:1095",
+      "sourcePointerHmacSha256": "079D4173DFF0D2919748775645ED8B3ACCAA1374750C57F6B449459E91DFF080",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:1096",
+      "sourcePointerHmacSha256": "085673BCCEE5B1E463D25E186E8EB62F3CAD6BD28EB3E65A840B713B343A214C",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:1097",
+      "sourcePointerHmacSha256": "08CC53799CB9C24CDAC2A47DF220914C9C8E923CE16639E1D931BBE8F87B997C",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:1098",
+      "sourcePointerHmacSha256": "096AEFC986CBF99BCCD6F6B6243B3FFBA2C6C113E5F80F410348FE42C599042B",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:1099",
+      "sourcePointerHmacSha256": "09F179B0445F0BAF8F9C685CD134230D805D93259549265A3E680C1049C2D048",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:1100",
+      "sourcePointerHmacSha256": "0A4EA0316C7B713CEDA75B388B6FC4BEEFA24E7372D29A1C6B35528BD61A4110",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:1101",
+      "sourcePointerHmacSha256": "0C8A266D30C10EB9A0EBC022E18E990DC68B6314E26104858D04CD83CBEC6525",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:1102",
+      "sourcePointerHmacSha256": "0CB7D9298FD347E0610EC021C1666D83505012376F0827912DC2D7E48A4B8CAB",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:1104",
+      "sourcePointerHmacSha256": "0D245F8F3BD76D7657B60655822C32A732D9F0B558517318755A7208193C2A24",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:1132",
+      "sourcePointerHmacSha256": "0E541BE00CD7F73B458F7A045BC3747A234C09BDBD2EE98DC17F85A920D56280",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:1133",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1134",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1135",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1136",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1137",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1138",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1139",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1140",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1141",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1142",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1143",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1144",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1145",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1146",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1147",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1148",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1149",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1150",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1151",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1152",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1153",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1154",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1155",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1156",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1157",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1158",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1159",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1160",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1161",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1162",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1165",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1166",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1167",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1168",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1170",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1171",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1172",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1173",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1174",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1175",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1176",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1178",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1189",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:140",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:144",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1537",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1547",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1559",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1567",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1568",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1573",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:158",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1589",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1590",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1591",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1592",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1608",
+      "sourcePointerHmacSha256": "11590E87A3F09ED3D6EADCAC7499E53733B104E3BC3099BD47B0DF9646AF20F2",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "CB92DAAD1601CB177DA0D0A8B34BFC499B0770AE0A3DE2FEB9635813674D068D"
+      "identifierHmacSha256": "9239837ADE0E8DB546B98F04A77AC39E66FA7D2D7BEE8888426A79E855D0C3DF"
     },
     {
-      "sourcePointer": "Sheet1:170",
+      "sourcePointerHmacSha256": "137CF28ED7BFAFC32C0BF4A01E1C88CB1B3DAB78AF76C002861FC28665259230",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:1757",
+      "sourcePointerHmacSha256": "15904F7F11639F84EB52C00255019616526E1CE5ABCB3D3A0DD0C51B8E3ED1B0",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:1761",
+      "sourcePointerHmacSha256": "17308AB43C40F6B2874BE25A9B980D76D2949B451733F6A72D88707C1FDC30B3",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:1763",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1778",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1798",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1828",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:1870",
+      "sourcePointerHmacSha256": "17E393BFA452C697A2EB5CB1A5B573E63AF67FFB089EC5EC71C9DF7586651182",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "28303F6C106E1D210541B626A2C1B2E2AE6F8B75EB7418FF7C96B43E26603557"
+      "identifierHmacSha256": "D0926C27A88A701ADEFB9CB6ADE03121A4EE11EFA03A38F1A33A620C816D7577"
     },
     {
-      "sourcePointer": "Sheet1:1871",
+      "sourcePointerHmacSha256": "1997A5FD05177E17CBCBB14960AFB7DBDE605DF1E11F3DCE2AFE98AF1C630309",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "0DDD6BADDDCC3A0C75C1B779E37C9820444481CD16165FBC3CC4984683B0BBDD"
+      "identifierHmacSha256": "4B58E89783D3492947F86E12FD38753DCC4CEC4336A326D6CFE3DA392957E5C3"
     },
     {
-      "sourcePointer": "Sheet1:1877",
+      "sourcePointerHmacSha256": "1B42344C913762475DC4011D6F5CC290F50B09BB59D17336CAAEA2E2712A1DB3",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "1BC7A5C963476DE4514D1A5529077EAB9C11F2AC7A518626EC16FE943E6BF913",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "1C1AC8B353290779FE7029C375C058BC83AA08106566AD357FE281FF3075E9C2",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "1E9233DFE0FE4720007DFCB77FBBBEF480236282252BA76EF6396ADD92E7E381",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "1F97945C56A83017A54BF8106FBE990A3042515A377408F4B27BB62E1466D2F7",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "004AB2259A16F95E118E959495869A5F61141EF0D1FC09ED1C40B4A402FC1A4A"
+      "identifierHmacSha256": "0F170BA78C3322589D29247B57FDF6A379496D55BA5C4B7909208DCD6BFE7D44"
     },
     {
-      "sourcePointer": "Sheet1:1878",
+      "sourcePointerHmacSha256": "2092A1A6924C5F9A9A4E8B0BEE77123579BC52319B2B89AD6A7468C3197D81CA",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "46D20BF65A11D0C249D4B60142070C09B8A3AA0E2F6FC0336E8C10C235CDD7FE"
+      "identifierHmacSha256": "469335B5EBF88BE4AB636C50F2153146EF08D76994345443E9228884B4EBCB5D"
     },
     {
-      "sourcePointer": "Sheet1:1879",
+      "sourcePointerHmacSha256": "20C1C161D52FB42B383C5155CCEB541CD9D328CA464B8954E90D60E034B802A5",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "EF53A866274983AED3D6C36BF53665BC7333284C53BC3E8FC747D914E9575E25"
+      "identifierHmacSha256": "C2B97411CA9580F77C10310E2E82FE854EFD7557AF2ABC9725847A7826A9E74D"
     },
     {
-      "sourcePointer": "Sheet1:1914",
+      "sourcePointerHmacSha256": "2136D9A2194B6623C45A336CC0438C7B66ED51E330974A04B8079D23AC2674B6",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "1DB2E8169EF2A5B3FB9B9CC1B144F3F95A182E22BDCCB92673841F6A6071B4D3"
+      "identifierHmacSha256": "F836770D6CA0C99F5083F858161DF9A97D010423C089E1095F8CC9A2D5487B57"
     },
     {
-      "sourcePointer": "Sheet1:1915",
+      "sourcePointerHmacSha256": "2199D4F6B48EC30947FF2054E477C14468B2FAF983498C61F4C3C8A998F681B5",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "22E78BBCC118A1F04AE9CC5765C2215CF616DB17BE86AF52CAB273D047F23BBC",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "26071203CF86F6ED2268DC59BFEBB8DB70D12C50847FAC6BB9EE01A34CEA8874",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "277B1C2EA5BD819D07636A73AE64E67585E9A0692E997E6DF71867C105E8060E",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "27FF78C0DFE81D3008D7FBEA717C8AB493E8AD9D1854C8CB569BA633B4D805FD",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "77C6ABAF4C4728DB36E3038D3B2B0F10CB0D9D961BAE777D2225FAF63D95BB2B"
+      "identifierHmacSha256": "132FB6CDBAA65FB2EE5D167894CD0153E1FC1BFD525F98CAE956D2BE3DC32B3C"
     },
     {
-      "sourcePointer": "Sheet1:1926",
+      "sourcePointerHmacSha256": "28F6EC93DC7618CB0777B1595D954F4D25E834621195F9D9019D21E577E7EE6B",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "2C10C3F9572F05DD76052E7FA41D3CE25098AD6F7349519C81E9F5C4EB8CE379",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "2C13A33C3BF717DCBADE0589A83BEE302EB54EB3F985965A753681AAE3CFF463",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "2C4B72EAC9E4C25B89E3864D99AC3BED055778915F579EDCEA671A70A3DE7F5E",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "2DADA9E302BCC5698A37F2A27B70B301EDAF77F50015691D87F1C96DA77D1380",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "2E1E65882443D571BFFCAB6B4A9AD6A10160D1CC51C54AF2ACE74699B3D29785",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "2FB1548EF2DD478EF7E81C8C0D7C4F7ADC307E8202151AD4C37A6DA6B616386D",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "2FFCA00CFAE9730A523252DEA037415FFACC6378B0149CB720A1D5469CC7DAF8",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "301F2A0BA505201CCE46D2E39717D2BF1FB689A6A03AFF16E13CD55E28252ED6",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "306F419EB219BF0794A9CCEA6429B1BD8FE47D245B285C2363DBE7A3A05C6779",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "3101AED46680B686258E81D3876AE20A1EF671A4CC6B1B6035E0A571E678EFF8",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "33C4C00B36E0EC98AAB7C2C0E506B6EA9DE138F78921FCEF825344E98D12D89C",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "357BF37FC769D6623B161478477506025AC6C96EC2B40D47C38115D86D960CDE",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "36551681F108BC8C9B20F746381340C9F190E2E26DCECE5DB3EAB690C8F95D65",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "365F470E8CD2E70D65B731D12531829EE7B682609BA95E97D2A504CFA99850E6",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "3672139C810342B4E5AFCD2A2FFD52A89A061066C508B649B8BA5692E0D636D0",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "15F44C4FCFE1407DD99EEB302C4F701C3F7526E655FAAFA5B2261F340360E5A7"
+      "identifierHmacSha256": "B701875C1D75CC41178FE1B8C438CE16BD19294044FB3FFC93118B613B4D40EA"
     },
     {
-      "sourcePointer": "Sheet1:1928",
+      "sourcePointerHmacSha256": "39955E2D4732125164E3E182770255AFF46B2F2C93E28751298815933BE3CA86",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "3CE3E402E34F871F3F07C8B3054AC254987347717374B1E750FA14126F8B5C3B",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "CD7650AD02F9BAD30E28EAC5B453C6BA1F13679B3D35640CBDF0EE39FFF7B1FC"
+      "identifierHmacSha256": "9DBE38F0EFB127A54209A8B4C04BD55B4BB140AC6605BA4D92A4621E07931EBE"
     },
     {
-      "sourcePointer": "Sheet1:1929",
+      "sourcePointerHmacSha256": "3DAF8ED4466728B9EA875F98500F2CDB95C750991C504B46097E0F82F2E428FF",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "B2EB58F831D9A9F0F7A6C79E22305555BF1EABF17E57485EF983B04E7052A624"
+      "identifierHmacSha256": "D7EC926BAF8E69A59050B0D2D03BC05E008564C84758DE6A0495850D53726C87"
     },
     {
-      "sourcePointer": "Sheet1:1933",
+      "sourcePointerHmacSha256": "3DD074FD04E02852BFFA902DED6E59A2DB85AA5799F65BDF7699861F98D245CC",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "3EA547AEEF822D69452C798E2032D1A6F80499823EA3CAE1F802425B0C3B3784",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "3EDD3A2FB3806DB1E8D3B16AF7F3B51DA6ED7A3DADA9AECE99673960B969AC32",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "3F67DF465169769FBD06208A03CF4ABEF97A67ED7ADD4B6604DECA9977EE2AE5",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "4013ECCCE866587CC93E4440EA9319D095B9585E2C8D055331D8E3BAFCA05449",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "0DB35A6C9DD621D43D2B891422E91074D9CDF7120E02C973534FDEE260CA743B"
+      "identifierHmacSha256": "F0199D00963C890A2837687F90140FDE1A9DD0C8054923A8170E4C860A8D71FC"
     },
     {
-      "sourcePointer": "Sheet1:1938",
+      "sourcePointerHmacSha256": "411453188F0A3CDC924DECA0869363720872CD25C9EBCE85D0816A66EE4EA2A2",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "41DEB97EB36901D5DD42B5983D1931BBFAC72A6746E9C1006BEFB94CCDDD69E5",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "4294933265F0343EE3DB31974BAE1B7E47C001E301B4FF6957186464981FB21D",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "43359B6465395F2B5050C1E8B907B9EA119E7C53740FB24DB3526243D90CFAB2",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "4651D236F4D91D5BECFBF8CBB96621E716E0A7DEBA2E94E6B4380B029C717D10",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "3DA572051F493A1C82432581814D22A61E6A644F560F33699060BCABD8584625"
+      "identifierHmacSha256": "07C7CAF88E7474734E9BD432325BEBC393E21488E97C31FD46218E263C0C56B7"
     },
     {
-      "sourcePointer": "Sheet1:1939",
+      "sourcePointerHmacSha256": "4929770C03C068C071096B5A56636067DEBDFA00BBAE30E0FD78CCD1D4DA384B",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "4A567004F184E44C79D8102DE85F24F38B2BEA5FDAE4828299CF6824DD7F084A",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "4ACFA87F4722C7430DDC51E0C9F5A52C863CDA01AC438E80F31095762E4EEE1B",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "4D9FE71C718C49E45DBCED855CC4ECDAD598AF9F208A104793E5B2B602DE1E22",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "4E56372853ED266426AEF7BEDEBC5BE0836C3F6E3418FF743C032A774A1913DA",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "50866B84E3FA1382970A21178912429268F9E7B88B41E0177A384A21D102E7C9",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "52FC2089943A3D8A4E8188318CCD917DB00078370AA54555FF3D7BFCA6B488BE",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "54D1103851B9AFBE3734951736A681FFAB22D8EE80E7B4150FC12E04EBA9760E",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "582E2E9FB7F2C9DF5D27008A5094A815163E080F0D9D6E93245F32A3EC24C698",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "5A2AD4D5A7EA2DB8AACBDF41329750EA10335447A226FEA27B02731D6A00D6A9",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "5B404BFCB892FE905DEDF4912FDBA825919EE219F1A51841D0E428081659BF4B",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "5BFBBDA7B5DC17C127EB337EB8DFA8A122F3B5449186975D91E2EB8F9448EF7D",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "5C557FDE20FB62FCD655F851AF5B186B9E9145FA7A211DDCB39DA0FA003B9569",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "5EEA0C16E5D10C7A04773F5C34CAD14DCB3D50C943015841067C4F650E3B7870",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "5F298D61259959B83671E7484FBC397E0F5D69B3AE4F4A9918D6AFD90D78F72E",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "60320F8A82846DC834566F086D3157BA038C78451AD230D226B9E0DDCAE603E9",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "6070A7BDE06D77D4F744AFBB8CA2AF88F76F809FC1363556AF2C9D245B7D1313",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "627320EE5EE44E9F85A2475DEA3B11196D6E5BC9FB76CEB015A8A0FD19287952",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "65C144307721A32A6FBAD3E67B6817FC6F911B8A9953AF5782BAC07A8ED8CBC2",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "1BA4B818F100A6CD4181056DE72DAEAD1D23BFAC8B7396B8D41273505CD81BAE"
+      "identifierHmacSha256": "0A87AE8650B21B495AD6BA27142BC3D243FE411D1F110EBA5950256A30EEA03A"
     },
     {
-      "sourcePointer": "Sheet1:1940",
+      "sourcePointerHmacSha256": "66A67D7373B48D7A531053B19071CF1A1C01733A90CCC0F9C576907595675E58",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "67125EDA60949D6B17BD4F7286493AE96C12379E995AC7CF389A67F0C1E1DF19",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "5A1E9F1D32218E520562F6D76129E630E9E90AB6A993D365EAE8D3B26085394C"
+      "identifierHmacSha256": "CD846974CD461EBEFC7EE73DA9E94E9C448D0270715468A4F9F624776306D794"
     },
     {
-      "sourcePointer": "Sheet1:1941",
+      "sourcePointerHmacSha256": "69828D4AAD3E68E4710BD34A03EFBA2D660C3A421B2A2F23EA01C54BA7126505",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "6B7879E212B65AAA5C704C2B54982CD7B29330CCB8731A4E446A6E78A17FC092",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "826DFAD57869AF0CE9716E02F7F9CE5D461242CF433EA45A479A863C500238CE"
+      "identifierHmacSha256": "39D8B2D5BECE168296881E3C3F2BCD5AF45075CB710D39ACC09314E2E88C8A11"
     },
     {
-      "sourcePointer": "Sheet1:1943",
+      "sourcePointerHmacSha256": "6C9EC6A2733BECAE58FCA2AADEABEFC764950CB55B3074F1272B5B74C5F64EE5",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "6CD277E9BB0EBF14EFB4B5BAF53AA756472B87DD39D483AD28C54E3F2AC90458",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "6E4B2BF318BB9A2E1438EA1B5A27FB08B744C68803B152041A7B777AFD69B8F6",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "6F9313DA6976A22C34D7F64EF7196E7A1B0A4284FF58C2482397D005A840898D",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "6FD2A8B40AC23E1345C843D273E4D041837D0E47F81037C18D8983EB522CC151",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "7376888C12880AA0C5D4C2CBCABF208565F04D7BF4A9865B205D75E6FB623F61",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "73CA81AFC7048889B988E98E8528E445B610301BA432FFDAB8C942C600D3C1B8",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "6F925D4451012B08612F7654602AC89A0B47FBAA5E8965061455E73900B9F935"
+      "identifierHmacSha256": "47E99B7ED83CA3335154205A471CF0E8405F33B68656FA31B4413468758C5D5D"
     },
     {
-      "sourcePointer": "Sheet1:1944",
+      "sourcePointerHmacSha256": "767311C97A5D35B31EC8ED014D571C5BC44A99A74E3A1500F90A5E81DBD08181",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "7752CE3088816567546AA1288957B45238DF2142D86D953D6B05B33E1D684992",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "783836C005A81FBADA5B142904C6184FFE7026855689BC8AC125A773ADEEC3B5",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "78E5E05AC9FD29F3A425A26D24D3E79E1F8744BF2F5613F8C78717CE8FB3814F",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "797BA0513BED7BF7109537C8B5BAF3B050022DB75D86AD388341E2049EA74635",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "797BBD0C30345628DC6AEF4F53F45478545188298ADE669D8CAEE8A9D6883674",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "7A59244A50528C60E8196AD43FCD7FEED3A714890C6726750057DA4222B337F0",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "7C707DAD0945953A1194430EC98B3A67D08C58969A46E1AAF920CD0556B2B51C",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "7D11F98EDE955D20C813D8611B30A7D65A7044D6C503967F8F2BAC738ADF85FC",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "7D690B74157F296630A308130A83573D171067D0350215B22D84EBD709D5ED76",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "7E6DE68F47B0570F5A057555AFA9660EFF51744365B5A0EEC101657500C08CB7",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "809318C9EF47089789A71DF9A8B4F81B1D9E7E3A33481BF21B6BC49178C9F2A1",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "8193C06414E476292E5631AA0626A50C371DA7D9556C3C5FA4DC91403A79CB0A",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "9B06C37A62C1F8D90C9C4E774C74F60F5F18E1A227FA12585408F208B3E92A94"
+      "identifierHmacSha256": "8C5FF58C29FE13F195366B47694CB9314D07BA2B3CFE3C059033C846A5AC96EC"
     },
     {
-      "sourcePointer": "Sheet1:1954",
+      "sourcePointerHmacSha256": "83294B9D82DF300A285C8D54128ABD3D9B2C650AFF3A43D795B13C582256F3AF",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "837C086022A2893B2BAFC8F34C25BE21A4458FD5D69A3AA74AA4C29F992E91FA",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "D85800F9A0A63F3C0553AA2DB034DF620145DCE6C3B4BE6B68225B2A60C0E47D"
+      "identifierHmacSha256": "34D6089F9EAB7407D0B324879AAE537D69E63B998531336D15B5C14AD9204734"
     },
     {
-      "sourcePointer": "Sheet1:1980",
+      "sourcePointerHmacSha256": "8394A75ED8853E40157D952CCA9FCA9D862DEABE1AD9E3EA4399F8C35F439A45",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "83AD2CB87F7962E09B0A3015EBE3D52F6204C2C9178C67040AD97328179B3DCA",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "852BA75C2C7EE100E93220393E95AFA3964EFC9EAFD3E48CFA2F26A49FBDA913",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "88976F2F6DA384F007CD3E040F670B233077517577D12688B25C1607C6A08394",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "88A5C1BB63C3F713719024B388B8AABA456758EC6DCDFCF1D1999C4A63EFB4C4",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "01FB998840F05A2C1F75C8699800E93F5CE00C1812620D6B3A06C05E12716252"
+      "identifierHmacSha256": "3F4C9421DC4F5EC26D5937B006C8BBBABDED58CB4DAECE2DF7BF5344364F798C"
     },
     {
-      "sourcePointer": "Sheet1:1981",
+      "sourcePointerHmacSha256": "88ACA2C79BF2CC63E98520BF5072BACB090EBB8C116C93428608EF2546E833E1",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "88FF139A14E10FEC47C2ECF61DA48005556B5B8FD6C16584B8FE05E1C65A7AF6",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "89B1BCAA1C892E95943143C4E4D9BDAE734BA351C69CB79E40AA700AE8B703DB",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "89F58350C72AA230FD2DF531AACFB08F8B59D92E2C136F5DD3B72A55EE7E00A7",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "8A11C0355AD8BB3C4BEB0557374EB5DA7F1646B6880DD30613FAD84DD5D73774",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "8B8F0801EF87A2A3C0B74CA4456D39CD93AE2121BB9A8C011238A2794126F301",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "8CDDDCC67AC0F3C249444E56BF397EB68411B089575929E58DF246846C0CE8D7",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "8D0B3620F3B352255E346946948D56F095EC0178DA4A88400CFA16CEBAA367E9",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "8E92F4CA168FFC9E620E72038D07310C921A6C0DA49BACA55309C68618C92797",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "8F540ED2F7A3C13EDE86F156A56ACAC4BA4D98D2C07E9F021FD329AEC7D921C4",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "169C9692AF31C6A44198890D86CF6CA8A06D642DFE00A12FE8C032CF86004D66"
+      "identifierHmacSha256": "C5F2BFA75400A5ED435056B88F168FFFD744B7E278B482F16E0B3EBB3009A425"
     },
     {
-      "sourcePointer": "Sheet1:1989",
+      "sourcePointerHmacSha256": "906741B90C547CC22F6B4055F769DE9D5A79D1E2D22CFC23961D19942F28260D",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "90910BC4E4E1CB7AE9D52F601BA15801C77A373AD4E204FAE0B28C34BE251C4B",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "90DC15868284DE6CA21DE1110BC2B87E890D20BE705A37BD692BE15B6B67FA4E",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "6556F7E8F7519DFCD64947811CA5F34F41DB066659CEF863F6EF15DA81567945"
+      "identifierHmacSha256": "827028D36FB99ACCEF62FADCADBA5AFD7BFDD497E6EB871CDD6B2C353E26D358"
     },
     {
-      "sourcePointer": "Sheet1:1990",
+      "sourcePointerHmacSha256": "91F3B44005BA78147A1C3DCB5F7E2406B297331B81AF6184A20ACC339CA138D6",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "934B2AC45D0174D0088A1CEA5EE0F669DB62DFA14B4F74EDE0D1C4FAEF9E71AA",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "937607C470DF05498F2E6A6CB14D829F11233F3F73345ABAD8382EFF6A512EF3",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "945A38E0EDF834C85D8BAA18A67B95202DCBA15A5C96EA7B937314B1E57C9A3D",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "9504479D1FAF90FE415DC8FC4DFD8A5FCC6FF41A598525C70DF4F9131DB24CF7",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "95B632FF4D3D3ACCDB07449A1113919F1FF1CAA705EA479A198F7D0D42D773BA",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "96369EA67011A972A380947D7EEBF4EF64CAACE404C7C990B2FCE4500E2ADF22",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "E550213CC319A10BB4A2365638E5CDBBAE95230BDA0B6617479507DCC04901EC"
+      "identifierHmacSha256": "E811FF0EFCFB4401089D4B345E354F09C404AE99DCBC4667B7BB2F2188EC4903"
     },
     {
-      "sourcePointer": "Sheet1:200",
+      "sourcePointerHmacSha256": "96A22ABB8AB7A73592008FB637DAC42F3E810E00EE0D423646FDBE23185A0D4F",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:2007",
+      "sourcePointerHmacSha256": "9713DC665751CC06C6E9A72FC86308D5FB1A969D9EC2C88052080525C3FE3DF8",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "9716D37C79B1A3C92248252094B78860AA903A874F53103A2C7F805A0970D420",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "98B535DABB39A0772CFF7268D9E810544DF0B4CBDC0D11233DBEC39B39A16061",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "9A086EFC688F41914D5ABDD617AE624560AFEDD50ABF7BA7D84DA95D915D7F83",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "9A298C42E31CDC4E3B50CB44518340D7301CB84A8F91141FCD061D83AF17B4C9",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "3B1ED573D84B9EB1380B3B1BB38028753054FBCA876706A25BF6026B61AFBB63"
+      "identifierHmacSha256": "1C77A4E78938512A7884A60B2C65546EBF211B451ED8575950B1912EB062682D"
     },
     {
-      "sourcePointer": "Sheet1:2023",
+      "sourcePointerHmacSha256": "9D13E782E910A9FAEE956ABF4020393E8F6F3B821BD9CAEFA8C53E3EDD3673D1",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "9E97575E2D44FEA040E9276841202EEE608684A33546AD574C4A56DC90715FDF",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "B83C24BB37125064E864FEDEF0C803ED69161D659F84E1B51C2B88D9F8536A3B"
+      "identifierHmacSha256": "D9099EFCA599D0E499C85C893E173E271C065A440A75A56537496A4122165EA0"
     },
     {
-      "sourcePointer": "Sheet1:2048",
+      "sourcePointerHmacSha256": "9F428910F0902A2B10DE37A669D45A3326D3734A0868C5BBF6EC472B80A4C790",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "23CA9449511EC1754AEF7C4A5A36F4EB27ABBE3473E33936EB135BFCD86D5DD9"
+      "identifierHmacSha256": "C19F346272DC634923CFEE98F0E3A8AB4C83846F648271DE2A69EC707868F694"
     },
     {
-      "sourcePointer": "Sheet1:2052",
+      "sourcePointerHmacSha256": "9F56A439F719B9965961FA2AB27AE4F5470E88C41360167C5ADF18381F595F8F",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "63334C94E5FEA4BD1ADA4DA79F61D4C909E7EB252B18219E90AD517143AC672F"
+      "identifierHmacSha256": "EFE8AFE6D9600D0024814ED87C258B8759B829901381EC4ABC046195FDF1128E"
     },
     {
-      "sourcePointer": "Sheet1:2153",
+      "sourcePointerHmacSha256": "A199CE605F9ABEC485A6E400BB18C21E51F08DEBF6BA8AE41198C70B2D6F23C4",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "A1EC207AD745A5EC9CB5A7D8634661AAEDFBA485C67D598FCB10F476897E376D",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "4AEB7FF73FA405FFFDEABAEFBA349B348A65C0F4480E67A7A8456B3A5E887DE6"
+      "identifierHmacSha256": "F2D7EB1122DAFC5DF97746DCD30A3A129389D534745A1F8E0226C3DC2B9436D1"
     },
     {
-      "sourcePointer": "Sheet1:2157",
+      "sourcePointerHmacSha256": "A20A1B6ADB144049451C80461425C0E6BCE559AD733D6F5797493CF3B15C4443",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "A2BD44D2D4BF79F7CE4639CCA13BD2A68BC9F02C53AA0DD03CAEE822EBB2EA02",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "A423767BE8DE440827083C8E20BA7F6338C6AC435DEE7B7F0AB5616DADF5F5F5",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "A6652B8E1B030290E713FF9CEE71E4F7D415EF3B70146B4460D0B2D1E4759D64",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "257CA5BD763DE4AAA44DC06C3033A4DFED2981AC92C70590091E08F9B531220D"
+      "identifierHmacSha256": "E78E574453C996E779D64C5FDE444042C056E0A05F0D654E227EE4351F1790E4"
     },
     {
-      "sourcePointer": "Sheet1:2158",
+      "sourcePointerHmacSha256": "A7B1AA2D82A7192180DAA60F7F6E5768F948562D74E016B7956CE61F6AADFDD2",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "6A161DC625FFA5238E1F9139E8593A6850514FFEC49EA35BD7D2B8FD7DDF84BF"
+      "identifierHmacSha256": "DCF52880F034AB076868EC05FA33B08120A39AFE6E51A2F7744DAFB2D182D198"
     },
     {
-      "sourcePointer": "Sheet1:236",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:2420",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:2490",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:2494",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:2500",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:2580",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:2586",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:2589",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:2591",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:2593",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:2626",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:2629",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:2739",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:563",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:564",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:566",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:568",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:569",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:570",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:571",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:576",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:579",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:580",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:582",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:583",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:585",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:586",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:587",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:594",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:595",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:598",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:599",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:600",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:601",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:602",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:603",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:604",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:607",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:608",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:613",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:615",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:616",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:617",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:621",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:622",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:624",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:626",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:629",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:636",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:644",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:652",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:687",
+      "sourcePointerHmacSha256": "AA3CC2654F35D55A2A87A8B383A169C92E8AC80DACCB0395C8B830E50EF2CFC8",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "660B67499CD94117070D075E13787BA05B523F4A935D22C57C7FA691433A4A87"
+      "identifierHmacSha256": "C09ACBCA7440A872CC7A18EFFD256252619165B8F01A85C64AB2547881E8EC1C"
     },
     {
-      "sourcePointer": "Sheet1:689",
+      "sourcePointerHmacSha256": "AA9BDE1CD48E480C70B6EB81AB40CF1C5DE050BB5A485E2AC6B654DAF0490AB2",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "AABB4501CD3142903E5F841A7A34FCA8FD1B86578D59648255E639B78D8E8099",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "ACB124EF5DC7BD34D8A6C263C99B3FFC2E2D9136CA486E73E8AA041764AD9AB2",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "ADA2B769141685A97830C323291423187522D3123D2BA6D8B2C95187A4FD9B14",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "AE9AA0CF846DDFCE8F18D2D2D5F50FA2A9D682345E46D70CDA98AE6FC41031C2",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "AEB351E31DE98DFC33A1F2F62B186E8547530E9F82935280B70039E7391425A2",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "AF90A6F24A4F23A757E9A3FFEDF41ABF5C6D579D33AFDEFC729FA7CE9C7F1891",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "B0F43E6AE8B390935B6B4D05C0163D79B4950FA50D8AF888E56D550C0AACD7D0",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "B2AC6E98F6B6C2CABDE1423AEB7EE6FD98F995617C7FD95B4AC6E975E9CBD20A",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "B51BB57FA6A4AC7770778D32E7693EA6DD28D95F78C866E718FEC317002507D2"
+      "identifierHmacSha256": "DE707EA3CEF3B83BE3D02A356DFF5CA30A26129992FAB16CCE10EAE81BD85372"
     },
     {
-      "sourcePointer": "Sheet1:690",
+      "sourcePointerHmacSha256": "B2D041FCA3CD959E3C207B09AFA45118F6F6A95B0333C52CC2C880076CDA62B8",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "B30811C50E5B9B6180A41B63DA08E77B82F1417338FC605B2C3308AA230D2C4E",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "B312EEDD2D59A95636FE3BDAEEBA7128833A58E555BBCF2F2F782676A408B959",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "B346575FBCD8DEA73AF54F3774C033E0D1CDC422971A1C0FA6DCE3FFB85DA093",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "3264F1DD18FFA6B4EA874ABBCF0BCB569ABFBB8C80C2D5755FF7BE47176F5952"
+      "identifierHmacSha256": "5D5491151FE6C7AAB66BD43802B8DDD5BDFB414D432D9F046BEB5F8D88A6CB9C"
     },
     {
-      "sourcePointer": "Sheet1:691",
+      "sourcePointerHmacSha256": "B47DCF033E0D402DDB0917859E416E1C9FBC3289DB553C5199F6DD701A2D8488",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "B505BE5C42D67CB41E3F0E502F206093E39D9C4F54FFBE140B7A9370ED614864",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "2918BA039D56B9DAA4A1D82E34E2F31E66541D717D6B710FDCB376139716443A"
+      "identifierHmacSha256": "E895301FD4DB7167BBFB6B8CB3698CEEF4DA79052417C84674B69672FEA19685"
     },
     {
-      "sourcePointer": "Sheet1:692",
+      "sourcePointerHmacSha256": "B5B551183C4BA566AC90E6253218BDF4F2D678AD2102F7CD2C798BB722296AE0",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "B66013A4515B539B344290EF0F03ABE4CBDA5A3296DA1D8010BC7E3814BF8E87",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "B6E1B1ED9220A193C6D416621BDDDF0F6326BA87F27C97C047304D2316107BC6",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "B81CDBA4BDDC0EF157D9771196A6F3A474F29091E3FF8020E3BCD7AEBA5FA73C",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "B83C14487EB0FCC2112BCAEA8A2A9D578F0596601D549CB47D3FD26169387873",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "0A034A840F52DB9EE6A1E928A6869CD53710DAD3A56D6AB167AC141F8406FAC7"
+      "identifierHmacSha256": "621C9AEC6CB4C46A24D7A8D6FB5F72FE2EA35297F6D4AE159DCDE9E8C9908056"
     },
     {
-      "sourcePointer": "Sheet1:694",
+      "sourcePointerHmacSha256": "B89AD833448727F244A45993B326AF69A5F9B72CD4ECFCB448F421E616EF3A84",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "B9C4A1FA2997B46575CC88F6318520373F95FD11294A6E5B54D5112EEB6515D1",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "BB9718BCFCB3C9E41073D960F5FD0245721CF052BF4843E9A329897B4CA28186",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "BBB615934FFC81D07727C3C8ADA18AE9C1A51CCEF1FC05F9DCC056588B890D1D",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "BE6D65A25571C10A3CFD44C0E49F9A7886A87F725B019177E08DB6919E2F9B67",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "BEB4767837C66433B16C787E942D6E98D3A8D5D7FB31398A1AFF1D94D7ED42E9",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "C052374B1639A8F094632DA5F53808158D52B5CC47D9438C5DE2A9549A765AC9",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "C0FD7345F3EB6A06E2A30C074BC6D39EECAF0F6FE18D2872E3D2E70C33B6F1D3",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "C1931765D443C7C9D3C6E160A407570FA50EEC274605DAFAEBE3DA6144DC9D37",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "0772A7366C4E27FCE575B3CE18FDA1A957435A56F319A63859B2C8C7D0C1FBE4"
+      "identifierHmacSha256": "A58D050535C5C541CC1626B17CF47A76199C79EAB53F3126A17838A12D74091A"
     },
     {
-      "sourcePointer": "Sheet1:695",
+      "sourcePointerHmacSha256": "C1EFB0D15FCE5A11897BBCE73D8F99BE0AE6A33296A2EB2FF8D22CF2251E5B93",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "C42A6995F156D98D82622D542AF2E1FE2CCAFE6830C9BC7B6F1A37406F7D6C4E",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "C44A844E5EF2BAFF6A1FB41E6974A1661F801BE9419F21FCFB4F9CD6288059F3",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "C4D38EC34D7E1D84F5D326435EA1A12AABEFDF65F5AE746AD1A3662C82D60ED1",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "C56636E79E6F98A4006C87AFE059E1084107DECA3B91E39B6A2250E1EFEB4EF0",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "C7A9DCE9D57F1313AA1E97297C9CEA0E98A93322E6373604E9A338408F24A714",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "C832B1BFD35749AFFF3C5FA2EAFAAF9B73482CE617B0E52E07038C78B6780C4A",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "C90B231CC033882FBE1CDE80C036468F8E01D9C00D4ADABC10136A73BAA4EB78",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "CA0B3A3A463075A687909E27301088DD00B81F6FBEE3C541C12B5A212B90EC5E",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "CC594B180EE52A52AE26DE3AAD0F4FF5C1F79ED5C4DFE288EB58E3DB97FA3EC1",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "CE2C0B891D64582B47CD9C2ACDC4F0419691989846AA1583393F3A7D36EBE8D6",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "D0DAE058357D89B1AF9AC7B819ED767E6D25F9D47FE085A240FAA5CB3840CB68",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "D1BEB4A3AD87936BBE9E2F3602D3214C91DE0E934EEAD93CBFBC471F80DBA3D7",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "D5D29DC6148C34151DA25156F50F30C0908934389AC3EFF9F4006F884EAB620D",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "D614CB114DFE5B627E1F143ABD4960BBA172BFD4C3B3F4F0A8CA9D0FFF61EB75",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "358145B21AABF718575F6C541F322E71BF69BB668732B560BDA28F70F27A7B4F"
+      "identifierHmacSha256": "DB35CD6F56C275B414C3510774D5331662EE6384981723C8301B2C3D6A18DE3B"
     },
     {
-      "sourcePointer": "Sheet1:697",
+      "sourcePointerHmacSha256": "D75B36636455E3E940568A1651C9DDBFDB9AAB07B15A436D65B77908CF26A62F",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "D78F4A141622C8D418E2319631EF75467511325C767BF13319B9887CC66C2792",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "D7E9A8B9C0A88EB7C0A721FB4A85677974360C6E26CA3EA89A36B7894C13A6BB",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "D8E88A1EB9D201B80FD5B244D4FD259E705DB33CC663946070F91739661EDBFD",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "D94A8E702AFC4C4AA575029312B2B9AB79C6908CA6CAD58B5807F859FC52FBFD",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "5E4D18F2E58DEF1C1DE90FC5CE42319C46D3E7E02E7C087305042FC47E7A035E"
+      "identifierHmacSha256": "4D447321313523D625BBAABC89A09BECD14B67A60E994B75D793956008A203E5"
     },
     {
-      "sourcePointer": "Sheet1:699",
+      "sourcePointerHmacSha256": "DA68B685A752CB858D42ECA56453C3C9501C508DDB8E9C490EF53924FE6E761C",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "DA7C68A6C143252164B3F62FA0FBDB2E78558F2D144E4244FCF7C5FE5DEC0D85",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "DC0CB7EBA2036E58A915D828BC6C172A40217CFCE43430D3F69BA28E3E5394A4",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "DC15E2D460E1B555DA08DF64A627364D77CB719939DF4835D65C8D67CAD8D206",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "DCC657D4C1D06DA3344AB0297528F35060B6A8FF577C9052D0E2237DF82B9166",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "DF5BCB7E1B0BBE64D75BABA2C1E1280836A3FB74E4C0C0BF7A31FBB1D19436AC",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "6A648A67176318313B57E01B681FC47728EEC88F4BE72C3AA81CB7E0B7E9F874"
+      "identifierHmacSha256": "02BF226A4041694EB0F1F6575A14A62F76AFE1806E199E14B8677E589059233C"
     },
     {
-      "sourcePointer": "Sheet1:700",
+      "sourcePointerHmacSha256": "E11C108473D607E0FFCC1AA94D2E5E124752BAA0347B13738E836900E4948CB9",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "E2396064A1028697F1E9F5E358391B44B44BB7CF3B8926C495D6443577CBE783",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "E3C2E6F73CD9CCE8A99214E7370B62C57A09B9D817801058B64B61F25637AA95",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "E6EABB73D096F7BA362BAA0BACA504C8082AA342BE26B0EF803460186D8548A2",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "C947011E342C6D04411AECAD5FE6A0864CCBB2048ADA8768A5DCC0E068171406"
+      "identifierHmacSha256": "1F9A450D8E3A476A4459987E959B284D4DA94B1E2FA1AA840C0749AE878B7718"
     },
     {
-      "sourcePointer": "Sheet1:776",
+      "sourcePointerHmacSha256": "E77F5A040AC23CEA1B29E721C5AD97823F88C38B2B02D4E9B6E7628278855E14",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:864",
+      "sourcePointerHmacSha256": "E7F01ED30E656AF350C12F51BF3FEDE154F733F5A59C08B104CBCA4CE79A3555",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:865",
+      "sourcePointerHmacSha256": "E7FD40C959E067D850D991512D65E5C2D1636927CB9CEF55DA56B8D9FD2BA8AF",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:866",
+      "sourcePointerHmacSha256": "E9834D78E2F253463649051C5E6090B958429999FB1795D7765DDFE1F8DB1D8F",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:867",
+      "sourcePointerHmacSha256": "E9C15838F631A294945203B8112BB169AF74C764E102F9842B5170CD9AB11E93",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:868",
+      "sourcePointerHmacSha256": "E9C263171623ADBA6B7E2532D487CB93D069D68EE1F4C2150C2BEC1D07FF5753",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:869",
+      "sourcePointerHmacSha256": "ED1B552AB5F4DB769D3D70B6C2ACCBDD7EE758D0F358F0AA675FC57B040BE0DE",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:870",
+      "sourcePointerHmacSha256": "EED347183C5EAB8123FB035488D03F2639B7D0E794ECA6CCDEB0C6BA29AF62C6",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:871",
+      "sourcePointerHmacSha256": "EF47388515A54B609B0248E43BAA7C6E0999A53AB77751CE8C2BC194A04099E3",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:872",
+      "sourcePointerHmacSha256": "EFC7B06EB7BA90A6FFFFF6AAB970E89B2587B3AEA17EA7621426F2CC65DF530C",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:873",
+      "sourcePointerHmacSha256": "F005283C66D1425C9C44D788DA5E570C3756C394C975BCE293B7C2794EBCE900",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:874",
+      "sourcePointerHmacSha256": "F0CCDE7CF8419D16B90D693AD1E710A429C4D70ACC2ABEEB4E29F790BE3EBA52",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:875",
+      "sourcePointerHmacSha256": "F14CEA49C7B16959536BB36B33759BBBECE2972E19F8B7976BB844D4BFD61E2F",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:876",
+      "sourcePointerHmacSha256": "F1F75D438B07C2C6FADA4C530227701CA1A3DC0F4F1C75B9064EFE7C22D222F3",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:877",
+      "sourcePointerHmacSha256": "F2662C96AEE231B5D17AA18B58406776FBFE20AEAFD9F0C22C93CECBBA515FE1",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:878",
+      "sourcePointerHmacSha256": "F276464F9F6C04D95454640929D98C4E2AC0A66D4D21231A5B93ACF1487CACCA",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:941",
+      "sourcePointerHmacSha256": "F3B0C3DD30378E03CDFF6C14205831119E62E48EBE5D6D1A768D5A9DC1E585AB",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:942",
+      "sourcePointerHmacSha256": "F4BC5F46D6B133B796D648C422D526A7A49036BB7912FC35EE2047F3AF6F9E6E",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:943",
+      "sourcePointerHmacSha256": "F50B0D94569F97ADBBB83169ED2035F31E33C7178B4BCD7A03702FEEE01D1EAE",
       "reason": "blank_non_gtin_identifier",
       "finalStatus": "alias"
     },
     {
-      "sourcePointer": "Sheet1:944",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:945",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:946",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:947",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:948",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:949",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:950",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:951",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:952",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:953",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:954",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:955",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:956",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:957",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:958",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:960",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:961",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:962",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:963",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:964",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:965",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:966",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:967",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:968",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:969",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:970",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:973",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:975",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:977",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:978",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:979",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:980",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:981",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:982",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:983",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:985",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:986",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:989",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:990",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:991",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:993",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:994",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:995",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:996",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:997",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet1:998",
-      "reason": "blank_non_gtin_identifier",
-      "finalStatus": "alias"
-    },
-    {
-      "sourcePointer": "Sheet2:1912",
+      "sourcePointerHmacSha256": "F5DB99F1A0F193C139DD276501157154C26FEA29EA86BC57C02A26BC8C6D1DA5",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "BE0FD736A82A056FC6159D898B0B27D77150354FB2C036D5021450D125710EE3"
+      "identifierHmacSha256": "A8D6E59B33D67A68BC071CE73F08A037B1812FA25B69E1ED0E9FD9E91CCBCB41"
     },
     {
-      "sourcePointer": "Sheet2:769",
+      "sourcePointerHmacSha256": "F6C78DE4BC24AABCD81ADEBA2C30416D9A9F825F65910268EF2459E2F4441B28",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "F7DE425B338DDDF8AB9E0AE48CB8406B63251BC962FC9984CBDAFA2CDCD780B4",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "F8D18908D1F0A8978D4337D9852C547A798EF95C9ABB9324070E7F3C3509D760",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "F9385D8560F7060521A3C7ED26462A8CC8D9C72B8A05412AAAF6A059E37F352C",
       "finalStatus": "accepted",
       "reason": "reviewed_mpn_field_omitted",
-      "identifierHmacSha256": "3CF0EEEF94C5B676B66203853AE368DD08C1264ADF70C0E70D29E13EB72C0CD9"
+      "identifierHmacSha256": "386090D9E7C9BCBB9E95284B9A16F15327E08062C4C7E0CD452FF3ECAF5E1B80"
+    },
+    {
+      "sourcePointerHmacSha256": "FE0B9278FD8DF3019A544FD40771714DB5CBEF19C9544388FED2DFCA3D4EE8B8",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "FE8F961111A67034FC6DA93C4F4D08901775E8C961583F2B925E7D5B2B53784E",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "FEAE104F6EDE14C30F01949FA8D1D7B844740C5F7C5242226B586C155FA6C4F0",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
     }
   ]
 }

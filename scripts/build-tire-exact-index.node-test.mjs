@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -9,8 +9,37 @@ import { pathToFileURL } from "node:url";
 const SCRIPT = resolve("scripts/build-tire-exact-index.mjs");
 const { buildExactIndex, canonicalGtin } = await import(pathToFileURL(SCRIPT).href);
 const TEST_BOSS_HMAC_KEY = "synthetic-test-key-only-not-for-real-artifacts-0001";
+const COLLISION_HMAC_DOMAINS = [
+  "collision-canonical-key:v1", "collision-global-source-pointer:v1", "collision-boss-source-pointer:v1",
+  "collision-global-value:v1", "collision-boss-value:v1",
+];
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex").toUpperCase();
+const hmac = (key, domain, value) => createHmac("sha256", key).update(`${domain}\0${value}`).digest("hex").toUpperCase();
+
+function localEnvValue(name) {
+  const local = existsSync(resolve(".env.local")) ? readFileSync(resolve(".env.local"), "utf8") : "";
+  return process.env[name] ?? local.match(new RegExp(`^${name}=(.+)$`, "m"))?.[1]?.trim();
+}
+
+function requiredProductionHmacKey() {
+  const key = localEnvValue("BOSS_EXACT_INDEX_HMAC_KEY");
+  assert.ok(key && Buffer.byteLength(key, "utf8") >= 32, "offline production proof requires BOSS_EXACT_INDEX_HMAC_KEY");
+  return key;
+}
+
+function requiredProductionInputs() {
+  const globalPath = localEnvValue("BOSS_GLOBAL_CORPUS_PATH");
+  const repairPath = localEnvValue("BOSS_REPAIR_DB_PATH");
+  const reconciliationPath = localEnvValue("BOSS_RECONCILIATION_PATH");
+  assert.ok(globalPath && repairPath && reconciliationPath, "offline production proof requires pinned private input paths");
+  return { globalPath, repairPath, reconciliationPath };
+}
+
+function hasProductionInputs() {
+  try { return Object.values(requiredProductionInputs()).every(existsSync); }
+  catch { return false; }
+}
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "tire-exact-index-"));
@@ -18,6 +47,7 @@ function fixture() {
   const globalPath = join(root, "global.json");
   const repairPath = join(root, "repair.json");
   const reconciliationPath = join(root, "reconciliation.csv");
+  const dispositionPath = join(root, "collision-dispositions.json");
   const global = { barcodeIndex: {
     "036000291452": { canonical_product_uid: "unit", brand: "Acme", model: "Road", size: "225/45R17", manufacturer_part_number: "UNIT-1", barcode: "036000291452", barcode_type: "upc" },
     "30029885620210": { canonical_product_uid: "case", brand: "Acme", model: "Case", size: "225/45R17", manufacturer_part_number: "CASE-1", barcode: "30029885620210", barcode_type: "gtin14" },
@@ -34,13 +64,22 @@ function fixture() {
   writeFileSync(globalPath, JSON.stringify(global));
   writeFileSync(repairPath, JSON.stringify(repair));
   writeFileSync(reconciliationPath, reconciliation);
-  return { root, outputDir, globalPath, repairPath, reconciliationPath, hashes: { global: sha256(readFileSync(globalPath)), repair: sha256(readFileSync(repairPath)), reconciliation: sha256(readFileSync(reconciliationPath)) } };
+  const entries = Array.from({ length: 42 }, (_, index) => ({
+    action: "omit_conflicting_field",
+    canonicalKeyHmacSha256: hmac(TEST_BOSS_HMAC_KEY, COLLISION_HMAC_DOMAINS[0], `synthetic-${index}`),
+    globalSourcePointerHmacSha256: hmac(TEST_BOSS_HMAC_KEY, COLLISION_HMAC_DOMAINS[1], `synthetic-${index}`),
+    bossSourcePointerHmacSha256: hmac(TEST_BOSS_HMAC_KEY, COLLISION_HMAC_DOMAINS[2], `synthetic-${index}`),
+    globalValueHmacSha256: hmac(TEST_BOSS_HMAC_KEY, COLLISION_HMAC_DOMAINS[3], `synthetic-${index}`),
+    bossValueHmacSha256: hmac(TEST_BOSS_HMAC_KEY, COLLISION_HMAC_DOMAINS[4], `synthetic-${index}`),
+  }));
+  writeFileSync(dispositionPath, JSON.stringify({ schemaVersion: "2.0.0", keyFingerprintHmacSha256: hmac(TEST_BOSS_HMAC_KEY, "key-fingerprint:v1", "scanbin-boss-exact-index"), entries }));
+  return { root, outputDir, globalPath, repairPath, reconciliationPath, dispositionPath, hashes: { global: sha256(readFileSync(globalPath)), repair: sha256(readFileSync(repairPath)), reconciliation: sha256(readFileSync(reconciliationPath)) } };
 }
 
 function build(fx, overrides = {}) {
   return buildExactIndex({
     globalPath: fx.globalPath, repairPath: fx.repairPath, reconciliationPath: fx.reconciliationPath,
-    outputDir: fx.outputDir, expectedHashes: fx.hashes, expectedCounts: null, enforceLedgerCompleteness: false,
+    outputDir: fx.outputDir, dispositionPath: fx.dispositionPath, expectedHashes: fx.hashes, expectedCounts: null, enforceLedgerCompleteness: false,
     bossHmacKey: TEST_BOSS_HMAC_KEY, ...overrides,
   });
 }
@@ -60,7 +99,7 @@ test("honors explicit private-source environment paths without copying them into
     process.env.BOSS_RECONCILIATION_PATH = fx.reconciliationPath;
     const result = buildExactIndex({
       outputDir: fx.outputDir, expectedHashes: fx.hashes,
-      expectedCounts: null, enforceLedgerCompleteness: false, bossHmacKey: TEST_BOSS_HMAC_KEY,
+      dispositionPath: fx.dispositionPath, expectedCounts: null, enforceLedgerCompleteness: false, bossHmacKey: TEST_BOSS_HMAC_KEY,
     });
     assert.equal(result.manifest.acceptedSpellings, 4);
   } finally {
@@ -290,10 +329,10 @@ test("overlap normalizers accept only the reviewed Toyo and tire-size spellings"
   } finally { rmSync(fx.root, { recursive: true, force: true }); }
 });
 
-test("production build contract pins all three supplied inputs and fixed cardinalities", () => {
+test("production build contract pins all three supplied inputs and fixed cardinalities", { skip: !hasProductionInputs() }, () => {
   const reviewedLedger = JSON.parse(readFileSync(resolve("scripts/tire-exact-index-collision-dispositions.json"), "utf8"));
   assert.equal(reviewedLedger.entries.length, 42, "the exhaustive reviewed MPN collision census is pinned exactly");
-  const result = buildExactIndex({ root: resolve("."), outputDir: join(mkdtempSync(join(tmpdir(), "tire-exact-production-")), "exact-index"), dryRun: true, bossHmacKey: TEST_BOSS_HMAC_KEY });
+  const result = buildExactIndex({ root: resolve("."), ...requiredProductionInputs(), outputDir: join(mkdtempSync(join(tmpdir(), "tire-exact-production-")), "exact-index"), dryRun: true, bossHmacKey: requiredProductionHmacKey() });
   assert.equal(result.manifest.admittedBossCodes, 5626);
   assert.equal(result.manifest.acceptedSpellings, 13656);
   assert.equal(result.manifest.bossCanonicalProductIds, 5296);
@@ -341,6 +380,60 @@ test("restores the previous complete index when promotion fails after its move",
       },
     }), /injected promotion failure/);
     assert.deepEqual(readFileSync(join(fx.outputDir, "manifest.json")), before);
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test("the committed collision source and generated conflict ledger use only domain-separated HMAC fields", () => {
+  const source = JSON.parse(readFileSync(resolve("scripts/tire-exact-index-collision-dispositions.json"), "utf8"));
+  assert.equal(source.schemaVersion, "2.0.0");
+  assert.equal(source.entries.length, 42);
+  assert.deepEqual(Object.keys(source).sort(), ["entries", "keyFingerprintHmacSha256", "schemaVersion"]);
+  assert.match(source.keyFingerprintHmacSha256, /^[A-F0-9]{64}$/);
+  const sourceKeys = [...new Set(source.entries.flatMap(Object.keys))].sort();
+  assert.deepEqual(sourceKeys, [
+    "action", "bossSourcePointerHmacSha256", "bossValueHmacSha256", "canonicalKeyHmacSha256",
+    "globalSourcePointerHmacSha256", "globalValueHmacSha256",
+  ]);
+  assert.ok(source.entries.every((entry) => Object.entries(entry)
+    .filter(([key]) => key.endsWith("HmacSha256"))
+    .every(([, value]) => /^[A-F0-9]{64}$/.test(value))));
+  assert.ok(source.entries.every((entry) => entry.action === "omit_conflicting_field"));
+
+  const fx = fixture();
+  try {
+    build(fx);
+    const generated = JSON.parse(readFileSync(join(fx.outputDir, "conflict-ledger.json"), "utf8"));
+    const generatedKeys = [...new Set(generated.entries.flatMap(Object.keys))].sort();
+    assert.deepEqual(generatedKeys, ["finalStatus", "identifierHmacSha256", "reason", "sourcePointerHmacSha256"]);
+    assert.ok(generated.entries.every((entry) => Object.entries(entry)
+      .filter(([key]) => key.endsWith("HmacSha256"))
+      .every(([, value]) => /^[A-F0-9]{64}$/.test(value))));
+    assert.ok(generated.entries.every((entry) =>
+      ["accepted", "alias"].includes(entry.finalStatus) &&
+      ["blank_non_gtin_identifier", "reviewed_mpn_field_omitted"].includes(entry.reason)));
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test("a wrong HMAC key cannot validate the committed collision dispositions", () => {
+  const fx = fixture();
+  try {
+    assert.throws(() => buildExactIndex({
+      globalPath: fx.globalPath, repairPath: fx.repairPath, reconciliationPath: fx.reconciliationPath,
+      dispositionPath: resolve("scripts/tire-exact-index-collision-dispositions.json"), outputDir: fx.outputDir,
+      expectedHashes: fx.hashes, expectedCounts: null, enforceLedgerCompleteness: false, dryRun: true,
+      bossHmacKey: TEST_BOSS_HMAC_KEY,
+    }), /collision disposition.*HMAC key mismatch/i);
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test("a missing HMAC key fails before private input processing", () => {
+  const fx = fixture();
+  try {
+    assert.throws(() => buildExactIndex({
+      globalPath: fx.globalPath, repairPath: fx.repairPath, reconciliationPath: fx.reconciliationPath,
+      dispositionPath: fx.dispositionPath, outputDir: fx.outputDir, expectedHashes: fx.hashes,
+      expectedCounts: null, enforceLedgerCompleteness: false, dryRun: true, bossHmacKey: "",
+    }), /BOSS_EXACT_INDEX_HMAC_KEY/i);
   } finally { rmSync(fx.root, { recursive: true, force: true }); }
 });
 

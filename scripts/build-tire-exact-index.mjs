@@ -16,6 +16,15 @@ const MAX_TOTAL = 40 * 1024 * 1024;
 const MAX_SHARD = 1024 * 1024;
 const sha256 = (value) => createHash("sha256").update(value).digest("hex").toUpperCase();
 const OPAQUE_ID_PREFIX = "trusted-exact:v1:";
+const COLLISION_HMAC_DOMAINS = Object.freeze({
+  canonicalKey: "collision-canonical-key:v1",
+  globalSourcePointer: "collision-global-source-pointer:v1",
+  bossSourcePointer: "collision-boss-source-pointer:v1",
+  globalValue: "collision-global-value:v1",
+  bossValue: "collision-boss-value:v1",
+  conflictSourcePointer: "conflict-source-pointer:v1",
+  conflictIdentifier: "conflict-identifier:v1",
+});
 function requireBossHmacKey(value = process.env.BOSS_EXACT_INDEX_HMAC_KEY) {
   const key = String(value ?? "");
   if (Buffer.byteLength(key, "utf8") < 32) throw new Error("BOSS_EXACT_INDEX_HMAC_KEY must be a server-only secret of at least 32 bytes");
@@ -98,32 +107,44 @@ function loadRepair(path) {
   const db = new Database(path, { readonly: true });
   try { return db.prepare("SELECT * FROM tires").all(); } finally { db.close(); }
 }
-function loadDispositionLedger(path) {
+function collisionHmac(key, domain, value) {
+  return keyedDigest(key, domain, String(value ?? ""));
+}
+function loadDispositionLedger(path, bossHmacKey) {
   const bytes = readFileSync(path);
   const parsed = JSON.parse(bytes.toString("utf8"));
-  if (parsed.schemaVersion !== "1.0.0" || !Array.isArray(parsed.entries) || parsed.entries.length !== 42) {
+  if (parsed.schemaVersion !== "2.0.0" || !/^[A-F0-9]{64}$/.test(parsed.keyFingerprintHmacSha256) || !Array.isArray(parsed.entries) || parsed.entries.length !== 42) {
     throw new Error("collision disposition ledger must contain exactly the exhaustive 42 reviewed entries");
+  }
+  if (parsed.keyFingerprintHmacSha256 !== collisionHmac(bossHmacKey, "key-fingerprint:v1", "scanbin-boss-exact-index")) {
+    throw new Error("collision disposition ledger HMAC key mismatch");
   }
   const keys = new Set();
   for (const entry of parsed.entries) {
-    if (!/^\d{14}$/.test(entry.canonicalKey) || keys.has(entry.canonicalKey) || entry.action !== "omit_conflicting_field" ||
-      typeof entry.globalSourcePointer !== "string" || typeof entry.bossSourcePointer !== "string" ||
-      typeof entry.globalValue !== "string" || typeof entry.bossValue !== "string") {
+    const expectedKeys = ["action", "bossSourcePointerHmacSha256", "bossValueHmacSha256", "canonicalKeyHmacSha256", "globalSourcePointerHmacSha256", "globalValueHmacSha256"];
+    if (JSON.stringify(Object.keys(entry).sort()) !== JSON.stringify(expectedKeys) ||
+      !/^[A-F0-9]{64}$/.test(entry.canonicalKeyHmacSha256) || keys.has(entry.canonicalKeyHmacSha256) || entry.action !== "omit_conflicting_field" ||
+      !/^[A-F0-9]{64}$/.test(entry.globalSourcePointerHmacSha256) || !/^[A-F0-9]{64}$/.test(entry.bossSourcePointerHmacSha256) ||
+      !/^[A-F0-9]{64}$/.test(entry.globalValueHmacSha256) || !/^[A-F0-9]{64}$/.test(entry.bossValueHmacSha256)) {
       throw new Error("collision disposition ledger entry is malformed");
     }
-    keys.add(entry.canonicalKey);
+    keys.add(entry.canonicalKeyHmacSha256);
   }
-  return { entries: new Map(parsed.entries.map((entry) => [entry.canonicalKey, entry])), digest: sha256(bytes) };
+  return { entries: new Map(parsed.entries.map((entry) => [entry.canonicalKeyHmacSha256, entry])), digest: sha256(bytes) };
 }
-function resolveReviewedMpnConflict({ key, globalPointer, bossPointer, globalRow, bossRow, fields, ledger }) {
+function resolveReviewedMpnConflict({ key, globalPointer, bossPointer, globalRow, bossRow, fields, ledger, bossHmacKey, reviewedCollisionKeys }) {
   if (fields.length !== 1 || fields[0] !== "manufacturer_part_number") {
-    throw new Error(`Boss/global incompatibility: ${globalPointer} vs ${bossPointer}; fields=${fields.join("|")}`);
+    throw new Error(`Boss/global incompatibility in fields=${fields.join("|")}`);
   }
-  const entry = ledger.get(key);
-  if (!entry || entry.globalSourcePointer !== globalPointer || entry.bossSourcePointer !== bossPointer ||
-    entry.globalValue !== String(globalRow.manufacturer_part_number ?? "") || entry.bossValue !== String(bossRow.manufacturer_part_number ?? "")) {
-    throw new Error(`unreviewed or changed MPN collision disposition at ${bossPointer}`);
+  const canonicalKeyHmacSha256 = collisionHmac(bossHmacKey, COLLISION_HMAC_DOMAINS.canonicalKey, key);
+  const entry = ledger.get(canonicalKeyHmacSha256);
+  if (!entry || entry.globalSourcePointerHmacSha256 !== collisionHmac(bossHmacKey, COLLISION_HMAC_DOMAINS.globalSourcePointer, globalPointer) ||
+    entry.bossSourcePointerHmacSha256 !== collisionHmac(bossHmacKey, COLLISION_HMAC_DOMAINS.bossSourcePointer, bossPointer) ||
+    entry.globalValueHmacSha256 !== collisionHmac(bossHmacKey, COLLISION_HMAC_DOMAINS.globalValue, globalRow.manufacturer_part_number) ||
+    entry.bossValueHmacSha256 !== collisionHmac(bossHmacKey, COLLISION_HMAC_DOMAINS.bossValue, bossRow.manufacturer_part_number)) {
+    throw new Error("unreviewed or changed MPN collision disposition");
   }
+  reviewedCollisionKeys.add(canonicalKeyHmacSha256);
   return { ...globalRow, manufacturer_part_number: "" };
 }
 function requireOutputLimits(dir, manifest) {
@@ -179,6 +200,8 @@ export function buildExactIndex(options = {}) {
   const outputDir = options.outputDir ?? join(root, "src/server/tire-knowledge/exact-index");
   const dispositionPath = options.dispositionPath ?? join(root, "scripts/tire-exact-index-collision-dispositions.json");
   const expected = options.expectedHashes ?? HASHES;
+  const dispositionLedger = loadDispositionLedger(dispositionPath, bossHmacKey);
+  const ledger = dispositionLedger.entries;
   const globalInput = sourceHash(globalPath, expected.global, "global corpus");
   const repairInput = sourceHash(repairPath, expected.repair, "repair DB");
   const reconciliationInput = sourceHash(reconciliationPath, expected.reconciliation, "reconciliation CSV");
@@ -190,16 +213,14 @@ export function buildExactIndex(options = {}) {
   const repair = new Map(loadRepair(verifiedRepairPath).map((row) => [String(row.barcode), row]));
   rmSync(verifiedRepairPath, { force: true });
   const reconciliationRows = csvRows(reconciliationInput.bytes.toString("utf8"));
-  const dispositionLedger = loadDispositionLedger(dispositionPath);
-  const ledger = dispositionLedger.entries;
   const all = new Map(); const bossCanonicals = new Set(); const bossProductIdentities = new Set(); const bossIdentityByLookupKey = new Map();
-  const acceptedSpellingKeys = new Map(); const blockedPackages = new Set();
+  const acceptedSpellingKeys = new Map(); const blockedPackages = new Set(); const reviewedCollisionKeys = new Set();
   let nonGtinApprovedRows = 0;
   const nonGtinConflictLedger = [];
   for (const rec of reconciliationRows) {
     if (rec.final_status !== "packaging_code") continue;
     const packageKey = canonicalGtin(rec.raw_barcode);
-    if (!packageKey || !validCheckDigit(rec.raw_barcode)) throw new Error(`malformed packaging source at ${rec.sheet}:${rec.row}`);
+    if (!packageKey || !validCheckDigit(rec.raw_barcode)) throw new Error("malformed packaging source");
     blockedPackages.add(packageKey);
   }
   for (const value of Object.values(global.barcodeIndex ?? {})) {
@@ -207,12 +228,12 @@ export function buildExactIndex(options = {}) {
     if (!key || !validCheckDigit(row.barcode)) continue;
     if (blockedPackages.has(key)) continue;
     const existing = all.get(key);
-    if (existing && differingFields(existing.row, row).length) throw new Error(`canonical collision for ${key}: global corpus rows disagree`);
+    if (existing && differingFields(existing.row, row).length) throw new Error("canonical collision: global corpus rows disagree");
     all.set(key, { row, pointers: [`tireKnowledge.generated.json:barcodeIndex.${row.barcode}`] });
   }
   const addBossRow = ({ sourceLookupKey, dbRow, bossUid, pointer }) => {
     const priorIdentity = bossIdentityByLookupKey.get(sourceLookupKey);
-    if (priorIdentity && priorIdentity !== bossUid) throw new Error(`conflicting Boss identities for one lookup key at ${pointer}`);
+    if (priorIdentity && priorIdentity !== bossUid) throw new Error("conflicting Boss identities for one lookup key");
     bossIdentityByLookupKey.set(sourceLookupKey, bossUid);
     bossProductIdentities.add(bossUid);
     const privateKey = bossLookupKey(bossHmacKey, sourceLookupKey);
@@ -220,8 +241,8 @@ export function buildExactIndex(options = {}) {
     const row = privateBossRow(dbRow, bossCanonicalId);
     const existing = all.get(privateKey);
     if (existing) {
-      if (existing.row.boss_canonical_product_id !== bossCanonicalId) throw new Error(`conflicting Boss identities for one lookup key at ${pointer}`);
-      if (differingFields(existing.row, row).length) throw new Error(`Boss source rows disagree for one lookup key at ${pointer}`);
+      if (existing.row.boss_canonical_product_id !== bossCanonicalId) throw new Error("conflicting Boss identities for one lookup key");
+      if (differingFields(existing.row, row).length) throw new Error("Boss source rows disagree for one lookup key");
       existing.pointers.push(pointer);
       return;
     }
@@ -234,48 +255,48 @@ export function buildExactIndex(options = {}) {
     if (rec.gtin_valid !== "true") {
       const key = nonGtinKey(rec.raw_barcode);
       if (!key) {
-        nonGtinConflictLedger.push({ sourcePointer: pointer, reason: "blank_non_gtin_identifier", finalStatus: rec.final_status });
+        nonGtinConflictLedger.push({ sourcePointerHmacSha256: collisionHmac(bossHmacKey, COLLISION_HMAC_DOMAINS.conflictSourcePointer, pointer), reason: "blank_non_gtin_identifier", finalStatus: rec.final_status });
         continue;
       }
       const dbRow = repair.get(rec.matched_barcode);
-      if (!dbRow) throw new Error(`Boss source ${pointer} has no repair source pointer ${rec.matched_barcode}`);
+      if (!dbRow) throw new Error("Boss source has no repair match");
       if (String(dbRow.canonical_product_uid ?? "") !== String(rec.matched_stable_product_id ?? "")) {
-        throw new Error(`Boss source ${pointer} disagrees with repair-issued canonical product identity`);
+        throw new Error("Boss source disagrees with repair-issued canonical product identity");
       }
       const bossUid = String(rec.matched_stable_product_id ?? "");
       nonGtinApprovedRows++;
       const prior = acceptedSpellingKeys.get(key);
-      if (prior && prior !== bossUid) throw new Error(`cross-product approved non-GTIN identifier at ${pointer}`);
+      if (prior && prior !== bossUid) throw new Error("cross-product approved non-GTIN identifier");
       addBossRow({ sourceLookupKey: key, dbRow: { ...dbRow, barcode_type: "approved_non_gtin" }, bossUid, pointer });
       acceptedSpellingKeys.set(key, bossUid);
       bossCanonicals.add(key);
       continue;
     }
-    if (!validCheckDigit(rec.raw_barcode)) throw new Error(`malformed accepted Boss input at ${rec.sheet}:${rec.row}`);
-    const key = canonicalGtin(rec.raw_barcode); if (!key) throw new Error(`non-GTIN Boss input at ${rec.sheet}:${rec.row}`);
+    if (!validCheckDigit(rec.raw_barcode)) throw new Error("malformed accepted Boss input");
+    const key = canonicalGtin(rec.raw_barcode); if (!key) throw new Error("non-GTIN Boss input");
     if (blockedPackages.has(key)) continue;
     const dbRow = repair.get(rec.matched_barcode);
-    if (!dbRow) throw new Error(`Boss source ${rec.sheet}:${rec.row} has no repair source pointer ${rec.matched_barcode}`);
+    if (!dbRow) throw new Error("Boss source has no repair match");
     if (String(dbRow.canonical_product_uid ?? "") !== String(rec.matched_stable_product_id ?? "")) {
-      throw new Error(`Boss source ${pointer} disagrees with repair-issued canonical product identity`);
+      throw new Error("Boss source disagrees with repair-issued canonical product identity");
     }
     const bossUid = String(rec.matched_stable_product_id ?? "");
     const row = minimal({ ...dbRow, barcode: rec.matched_barcode || rec.raw_barcode }, "authenticated_boss_corpus", true, bossCanonicalProductId(bossUid));
     const existing = all.get(key);
     if (existing) {
       const fields = differingFields(existing.row, row);
-      if (fields.length) existing.row = resolveReviewedMpnConflict({ key, globalPointer: existing.pointers[0], bossPointer: pointer, globalRow: existing.row, bossRow: row, fields, ledger });
+      if (fields.length) existing.row = resolveReviewedMpnConflict({ key, globalPointer: existing.pointers[0], bossPointer: pointer, globalRow: existing.row, bossRow: row, fields, ledger, bossHmacKey, reviewedCollisionKeys });
     }
     addBossRow({ sourceLookupKey: key, dbRow, bossUid, pointer });
     for (const spelling of String(rec.normalized_barcode_candidates || rec.raw_barcode).split("|").filter(Boolean)) {
-      if (!validCheckDigit(spelling) || canonicalGtin(spelling) !== key) throw new Error(`accepted spelling is not a valid canonical-equivalent public GTIN at ${pointer}`);
+      if (!validCheckDigit(spelling) || canonicalGtin(spelling) !== key) throw new Error("accepted spelling is not a valid canonical-equivalent public GTIN");
       const prior = acceptedSpellingKeys.get(spelling);
-      if (prior && prior !== bossUid) throw new Error(`accepted spelling collides across products: ${spelling}`);
+      if (prior && prior !== bossUid) throw new Error("accepted spelling collides across products");
       acceptedSpellingKeys.set(spelling, bossUid);
     }
     bossCanonicals.add(key);
   }
-  if (options.enforceLedgerCompleteness !== false && (ledger.size !== 42 || [...ledger.keys()].some((key) => !all.has(key)))) {
+  if (options.enforceLedgerCompleteness !== false && (ledger.size !== 42 || reviewedCollisionKeys.size !== 42)) {
     throw new Error("collision disposition ledger has an extra or unmatched entry");
   }
   const excludedCasePacks = blockedPackages.size;
@@ -288,8 +309,8 @@ export function buildExactIndex(options = {}) {
   const nonGtinBlankAliasConflicts = nonGtinConflictLedger.filter((entry) => entry.finalStatus === "alias").length;
   const redactedConflictLedger = { schemaVersion: "1.0.0", entries: [
     ...nonGtinConflictLedger,
-    ...[...ledger.values()].map((entry) => ({ sourcePointer: entry.bossSourcePointer, finalStatus: "accepted", reason: "reviewed_mpn_field_omitted", identifierHmacSha256: keyedDigest(bossHmacKey, "conflict-identifier:v1", entry.canonicalKey) })),
-  ].sort((a, b) => `${a.sourcePointer}:${a.reason}`.localeCompare(`${b.sourcePointer}:${b.reason}`)) };
+    ...[...ledger.values()].map((entry) => ({ sourcePointerHmacSha256: entry.bossSourcePointerHmacSha256, finalStatus: "accepted", reason: "reviewed_mpn_field_omitted", identifierHmacSha256: entry.canonicalKeyHmacSha256 })),
+  ].sort((a, b) => `${a.sourcePointerHmacSha256}:${a.reason}`.localeCompare(`${b.sourcePointerHmacSha256}:${b.reason}`)) };
   if (expectedCounts && (bossCanonicals.size !== expectedCounts.admittedBossCodes || acceptedSpellings !== expectedCounts.acceptedSpellings || bossProductIdentities.size !== expectedCounts.bossCanonicalProductIds || nonGtinApprovedRows !== expectedCounts.nonGtinApprovedRows ||
     nonGtinApprovedIdentifiers !== expectedCounts.nonGtinApprovedIdentifiers || nonGtinBlankAliasConflicts !== expectedCounts.nonGtinBlankAliasConflicts)) {
     throw new Error(`Boss cardinality mismatch: codes=${bossCanonicals.size}, spellings=${acceptedSpellings}, nonGtin=${nonGtinApprovedIdentifiers}, blankAliases=${nonGtinBlankAliasConflicts}`);
