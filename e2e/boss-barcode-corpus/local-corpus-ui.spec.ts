@@ -1,11 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { adminDb, clearLocalCorpusTenant, LOCAL_CORPUS_BUSINESS_ID, LOCAL_CORPUS_EMAIL, LOCAL_CORPUS_PASSWORD } from "./admin";
+import { adminDb, clearLocalCorpusTenant, LOCAL_CORPUS_BUSINESS_ID, LOCAL_CORPUS_EMAIL, LOCAL_CORPUS_PASSWORD, LOCAL_CORPUS_UID } from "./admin";
 
 const ALLOWED_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const SCANNER_INTERVAL_MS = 100; // declared local keyboard-wedge arrival rate: 10 scans/s
 const SETTLEMENT_TIMEOUT_MS = 2_000;
+const LOCAL_CORPUS_PERSIST_KEY = `sis-scan-${LOCAL_CORPUS_UID}`;
+const PREVIOUS_SCANNER_MODE_KEY = "local-corpus-previous-scanner-mode-v1";
+const ABSENT_PERSISTED_VALUE = "__absent__";
 
 function manifest() { return JSON.parse(readFileSync(join(process.cwd(), "src", "server", "tire-knowledge", "exact-index", "manifest.json"), "utf8")); }
 
@@ -20,6 +23,7 @@ async function blockExternalEgress(page: Page) {
 }
 
 async function login(page: Page) {
+  await installPersistedScannerMode(page);
   await page.goto("/login");
   await page.getByTestId("login-email").fill(LOCAL_CORPUS_EMAIL);
   await page.getByTestId("login-password").fill(LOCAL_CORPUS_PASSWORD);
@@ -28,27 +32,33 @@ async function login(page: Page) {
   await expect(page.getByTestId("scanner-input")).toBeFocused({ timeout: 30_000 });
 }
 
-async function pinScannerSubmitMode(page: Page) {
-  return page.evaluate(async () => {
-    type Store = { getState: () => { settings: { scannerSubmitMode: "enter" | "debounce" | "both" }; updateSettings: (settings: { scannerSubmitMode: "both" | "enter" | "debounce" }) => void } };
-    const store = (window as Window & { __scanStore?: Store }).__scanStore;
-    if (!store) throw new Error("Local corpus proof requires the test-only scan-store observer to pin scanner submission mode.");
-    const previous = store.getState().settings.scannerSubmitMode;
-    store.getState().updateSettings({ scannerSubmitMode: "both" });
-    if (store.getState().settings.scannerSubmitMode !== "both") throw new Error("Scanner submission mode was not pinned to both before the corpus burst.");
-    (window as Window & { __localCorpusPreviousSubmitMode?: typeof previous }).__localCorpusPreviousSubmitMode = previous;
-  });
+/**
+ * The production store reads this uid-namespaced Zustand blob when auth switches persistence from the
+ * anonymous key. The init script runs before `/scan` loads, so it uses the real persistence contract
+ * instead of the development-only `window.__scanStore` observer omitted from production builds.
+ */
+async function installPersistedScannerMode(page: Page) {
+  await page.addInitScript(({ persistKey, previousKey, absentValue }) => {
+    if (window.sessionStorage.getItem(previousKey) !== null) return;
+    const previous = window.localStorage.getItem(persistKey);
+    window.sessionStorage.setItem(previousKey, previous ?? absentValue);
+    window.localStorage.setItem(persistKey, JSON.stringify({
+      state: { settings: { scannerSubmitMode: "both" } },
+      // v13 intentionally invokes the production v14 migration. Zustand's persist merge is shallow,
+      // so this expands the settings-only fixture to the complete Settings object before hydration.
+      version: 13,
+    }));
+  }, { persistKey: LOCAL_CORPUS_PERSIST_KEY, previousKey: PREVIOUS_SCANNER_MODE_KEY, absentValue: ABSENT_PERSISTED_VALUE });
 }
 
 async function restoreScannerSubmitMode(page: Page) {
-  await page.evaluate(() => {
-    type Mode = "enter" | "debounce" | "both";
-    type Store = { getState: () => { updateSettings: (settings: { scannerSubmitMode: Mode }) => void } };
-    const windowWithState = window as Window & { __scanStore?: Store; __localCorpusPreviousSubmitMode?: Mode };
-    if (windowWithState.__scanStore && windowWithState.__localCorpusPreviousSubmitMode) {
-      windowWithState.__scanStore.getState().updateSettings({ scannerSubmitMode: windowWithState.__localCorpusPreviousSubmitMode });
-    }
-  }).catch(() => undefined);
+  await page.evaluate(({ persistKey, previousKey, absentValue }) => {
+    const previous = window.sessionStorage.getItem(previousKey);
+    if (previous === null) return;
+    if (previous === absentValue) window.localStorage.removeItem(persistKey);
+    else window.localStorage.setItem(persistKey, previous);
+    window.sessionStorage.removeItem(previousKey);
+  }, { persistKey: LOCAL_CORPUS_PERSIST_KEY, previousKey: PREVIOUS_SCANNER_MODE_KEY, absentValue: ABSENT_PERSISTED_VALUE }).catch(() => undefined);
 }
 
 async function assertVisibleUiSettlement(page: Page, expectedCodes: readonly string[], expectedEvents: number) {
@@ -122,12 +132,13 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
   page.on("dialog", async (dialog) => { unexpectedDialogs.push(dialog.type()); await dialog.dismiss(); });
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text().replace(/\d{5,}/g, "[redacted]").slice(0, 240)); });
   await login(page);
-  await pinScannerSubmitMode(page);
   const input = page.getByTestId("scanner-input");
   const feed = page.getByTestId("scan-feed-body");
   // This authenticated UI warm-up primes the exact index and route without being included in the
   // measured burst. Its persisted event/count is an explicit baseline, not silently discarded.
-  await page.keyboard.insertText(warmEntry.code); await page.keyboard.press("Enter");
+  // No Enter: this is the real scanner-mode assertion. The hydrated `both` setting must accept a
+  // keyboard-wedge burst through its debounce path before the measured corpus burst begins.
+  await page.keyboard.insertText(warmEntry.code);
   await expect(page.getByText("1 scans", { exact: true })).toBeVisible({ timeout: 2_000 });
   await expect.poll(async () => /Verified \(app-confirmed\)|Counted/.test(await feed.locator("tr").first().textContent() ?? ""), { timeout: SETTLEMENT_TIMEOUT_MS, intervals: [10, 20, 50] }).toBe(true);
   await expect(page.getByTestId("pending-count")).toHaveText(/^(?:Waiting to save|All saved): 0$/, { timeout: 30_000 });
