@@ -310,3 +310,28 @@ though free corpus rungs need no keys.
 decode ladder in every environment (local, preview, prod). The ladder's own gates decide rung availability
 (free rungs run keyless; paid rungs keep keys/cap/breaker gating) and every skipped rung surfaces an honest
 reason. Guard: `scanStore.ladderContinuation.test.ts`.
+
+## L17 (2026-08-05). A shared MCP browser profile stomped parallel-agent sessions
+
+**What happened.** Parallel QA agents shared one MCP browser profile/tab. Concurrent sessions overwrote
+each other's localStorage and tenant state, producing a false-alarm defect during the D4-W1 fleet run.
+
+**Rule.** Parallel browser QA always uses a per-worker isolated Chromium instance with its own Playwright
+script, or a chrome-devtools isolated context; never a shared MCP browser tab. Guard: the D4 task reports
+plus the isolated-rerun validation (W1b, D5a).
+
+## L18 (2026-08-05). A guard fixed at one call site regresses at the others
+
+**What happened.** The 2026-07-21 floor-guess brand guard fix was applied at one of three call sites; the
+other two regressed the same class of bug.
+
+**Rule.** Identity and precedence guards live in the shared layer (`enrichProductIdentity`), never patched
+per call site. Guard: `prefixFloorBrandClassFix.store.test.ts` plus the flag in `enrichProductIdentity`.
+
+## L19 (2026-08-05). PRAGMA integrity_check over Turso HTTP is transport-infeasible
+
+**What happened.** `PRAGMA integrity_check` over the Turso HTTP transport hangs or fails; it is not a
+usable pre-promote gate for a remote database.
+
+**Rule.** Replace an infeasible check with a feasible equivalent (a full readability scan) and label any
+skipped check explicitly rather than letting it silently pass. Guard: boss-override verify gate A.
