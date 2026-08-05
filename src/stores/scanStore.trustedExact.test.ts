@@ -411,7 +411,7 @@ describe("authenticated trusted-exact scan settlement", () => {
     expect(store.getState().finalCounts.reduce((sum, row) => sum + row.quantity, 0)).toBe(1);
   });
 
-  it("does not fall through to ordinary decode when a non-GTIN trusted-exact probe misses", async () => {
+  it("falls through to ordinary decode when a non-GTIN trusted-exact probe misses", async () => {
     const store = createTestScanStore({ db: new MockDb(), trustedExactProbeEnabled: true });
     store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
     store.getState().updateSettings({ aiLookupEnabled: true });

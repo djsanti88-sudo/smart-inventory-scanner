@@ -168,4 +168,39 @@ describe("trusted-exact ladder continuation", () => {
     expect(store.getState().scanFeed).toHaveLength(1);
     expect(store.getState().finalCounts.reduce((sum, row) => sum + row.quantity, 0)).toBe(1);
   });
+
+  it("resolves the row honestly instead of stalling when the daily AI cap is genuinely spent during continuation", async () => {
+    const store = configureTrustedExactStore();
+    // createTestScanStore pins now() to 2026-06-12T10:00:00.000Z (scanStore.ts createTestScanStore), so
+    // lastResetDate "2026-06-12" is "today" on that clock - this is the genuine cap-hit-after-usage
+    // branch, not the silently-reset default. The continuation gate forces dailyCount to 0 (cap math is
+    // server-side) so the handoff into the ordinary ladder is allowed, but the ordinary ladder's OWN
+    // pre-existing gate (evaluateAiGate, using the REAL dailyCount) must then genuinely block the
+    // follow-up call - the reviewer-proven silent stall.
+    store.setState((state) => ({
+      ...state,
+      online: true,
+      settings: { ...state.settings, dailyLookupCount: 1, dailyLookupLimit: 1, lastResetDate: "2026-06-12" },
+    }));
+    const fetchSpy = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { deterministicOnly?: boolean };
+      if (body.deterministicOnly) return missResponse();
+      throw new Error("follow-up decode must never fire once the daily cap gate blocks it");
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    store.getState().processScan(NON_GTIN_CODE);
+
+    // Exactly one fetch total: the free trusted-exact probe. The follow-up call is blocked at the
+    // ordinary gate before ever reaching fetch, so it must never add a second call.
+    await vi.waitFor(() => expect(store.getState().needsReviewQueue[0]?.decodeStatus).toBe("needs_review"));
+    await vi.waitFor(() => expect(store.getState().scanFeed[0]?.decodeStatus).toBe("needs_review"));
+    expect(decodeCalls(fetchSpy)).toHaveLength(1);
+
+    const reviewReason = store.getState().needsReviewQueue[0]?.reason ?? "";
+    const feedReason = store.getState().scanFeed[0]?.reason ?? "";
+    expect(reviewReason.toLowerCase()).toMatch(/daily ai lookup cap/);
+    expect(feedReason.toLowerCase()).toMatch(/daily ai lookup cap/);
+    expect(store.getState().finalCounts.reduce((sum, row) => sum + row.quantity, 0)).toBe(1);
+  });
 });

@@ -3557,10 +3557,46 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         });
         if (!gate.allowed && (!deterministicOnly || !state.online)) {
           const blockStatus: AiLookupLog["status"] = gate.reason === "offline" ? "blocked_offline" : "blocked_cap";
+          // OWNER RULE follow-up (2026-08-05): a non-deterministic call blocked at THIS gate (e.g. the
+          // trusted-exact continuation handing off into the ordinary ladder while the daily cap is
+          // genuinely spent) must resolve the row honestly instead of leaving it stuck at decodeStatus
+          // "decoding" forever - this gate returns before any fetch, so nothing downstream ever touches
+          // the row again otherwise. A deterministic probe never flips decodeStatus to "decoding" in the
+          // first place, so it stays exempt here (its own caller already routes the honest miss reason).
+          // The scanFeed row may already be "needs_review" rather than "decoding" at this point (the
+          // continuation's own flip-to-decoding write above is guarded to never touch an unrelated
+          // already-resolved row for a repeat scan of the same code - see that guard's comment), so this
+          // matches the same decoding/needs_review/suggested set as the decode-settle write below
+          // (~line 3900) rather than "decoding" alone, or the honest cap reason would silently lose to a
+          // stale pre-block reason already sitting on the row.
+          const gateReasonText: Record<AiGateReason, string> = {
+            ok: "",
+            disabled: "AI lookup is off. Turn it on in Settings to auto-decode.",
+            offline: "Offline. Saved locally; AI was not called.",
+            daily_cap: "Daily AI lookup cap reached. Routed to Needs Review.",
+            circuit_open: "AI circuit breaker is open after repeated failures. Routed to Needs Review.",
+          };
+          const blockedReason = gateReasonText[gate.reason];
           set((st) => ({
             aiLookupLogs: [mkLog(blockStatus, s.primaryProvider, 0, gate.breaker), ...st.aiLookupLogs],
             breaker: gate.breaker,
             settings: { ...st.settings, dailyLookupCount: dailyCount, lastResetDate: today },
+            needsReviewQueue: deterministicOnly
+              ? st.needsReviewQueue
+              : st.needsReviewQueue.map((item) =>
+                  item.id === reviewId
+                    ? { ...item, decodeStatus: "needs_review" as const, reason: blockedReason, decodeNote: undefined }
+                    : item,
+                ),
+            scanFeed: deterministicOnly
+              ? st.scanFeed
+              : st.scanFeed.map((event) =>
+                  event.sessionId === review.sessionId
+                    && event.cleanCode === review.cleanCode
+                    && (event.decodeStatus === "decoding" || event.decodeStatus === "needs_review" || event.decodeStatus === "suggested")
+                    ? { ...event, decodeStatus: "needs_review" as const, reason: blockedReason, decodeNote: undefined }
+                    : event,
+                ),
           }));
           return;
         }
@@ -3741,20 +3777,46 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                       ? { ...item, decodeStatus: "decoding" as const }
                       : item,
                   ),
+                  // Guard by decodeStatus === "decoding" (matches the sibling patterns at
+                  // materializeTrustedExactMiss above and the decode-settle write below): sessionId+
+                  // cleanCode alone can match a DIFFERENT, already-resolved scanFeed row for a repeat
+                  // scan of the same code in this session (e.g. an earlier occurrence already
+                  // "verified") - without the guard this would wrongly revert that unrelated row back
+                  // to "decoding".
                   scanFeed: state.scanFeed.map((event) =>
-                    event.sessionId === persisted.sessionId && event.cleanCode === persisted.cleanCode
+                    event.sessionId === persisted.sessionId
+                      && event.cleanCode === persisted.cleanCode
+                      && event.decodeStatus === "decoding"
                       ? { ...event, decodeStatus: "decoding" as const }
                       : event,
                   ),
                 }));
                 void get().liveDecode(persisted.id, { invalidationGeneration });
+              } else {
+                // Hardening: materializeTrustedExactMiss found neither the in-flight probe nor a
+                // needsReviewQueue entry for this id (e.g. the session/cache was cleared mid-flight).
+                // There is nothing left to continue into the ladder for - resolve honestly instead of
+                // silently doing nothing and leaving a stale row behind.
+                const fallbackReason = decision?.reason || "No trusted exact match was found.";
+                set((state) => ({
+                  needsReviewQueue: state.needsReviewQueue.map((item) =>
+                    item.id === reviewId
+                      ? { ...item, decodeStatus: "needs_review" as const, reason: fallbackReason, decodeNote: undefined }
+                      : item,
+                  ),
+                  scanFeed: state.scanFeed.map((event) =>
+                    event.sessionId === review.sessionId
+                      && event.cleanCode === review.cleanCode
+                      && event.decodeStatus === "decoding"
+                      ? { ...event, decodeStatus: "needs_review" as const, reason: fallbackReason, decodeNote: undefined }
+                      : event,
+                  ),
+                }));
               }
               return;
             }
             const missReasonBase = decision?.reason || "No trusted exact match was found.";
-            const missReason = continuationGate.reason
-              ? `${missReasonBase} Decode did not continue: ${continuationGate.reason}`
-              : `${missReasonBase} Decode did not continue: offline.`;
+            const missReason = `${missReasonBase} Decode did not continue: ${continuationGate.reason}`;
             if (trustedExactProbes.has(reviewId)) {
               materializeTrustedExactMiss(reviewId, missReason);
               return;
