@@ -15,6 +15,7 @@ import { KillSwitchBanner } from "@/components/KillSwitchBanner";
 import { requiresOwnerPin } from "@/services/security/destructiveGuard";
 import { getSession, onAuthChange } from "@/lib/auth";
 import { runSignOutFlow, wipeAndSignOut } from "@/services/auth/signOutFlow";
+import { BusinessContextGate } from "@/components/BusinessContextGate";
 
 export default function SettingsPage() {
   const settings = useScanStore((s) => s.settings);
@@ -174,6 +175,12 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4">
+      {/* BusinessContextGate (same convention as /scan, /review, /history, /sessions/[id]): a hard
+          page load directly on /settings must wait for the real signed-in business context to
+          hydrate before Business ID and the account-delete flow (/api/account/delete, which sends
+          businessId) can read/use it - otherwise they'd read the coded mock default (demo-business)
+          instead of the real tenant (same bug class as the /reconcile 403). */}
+      <BusinessContextGate>
       <h1 className="sr-only">Settings</h1>
       <OwnerPinSettings />
       {/* P3: the raw Business ID is an internal identifier - platformOwner only. Customers see only
@@ -565,6 +572,7 @@ export default function SettingsPage() {
           )}
         </div>
       </div>
+      </BusinessContextGate>
     </div>
   );
 }

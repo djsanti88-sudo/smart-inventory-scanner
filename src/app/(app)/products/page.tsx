@@ -7,8 +7,14 @@ import { customerDisplayName } from "@/services/displayName";
 import { ImageHoverPreview } from "@/components/ImageHoverPreview";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
 import { UniversalImportPanelContainer } from "@/components/UniversalImportPanelContainer";
+import { BusinessContextGate } from "@/components/BusinessContextGate";
 import type { Product } from "@/types";
 
+// BusinessContextGate wraps this page's content (same convention as /scan, /review, /history,
+// /sessions/[id]) so a hard page load directly on /products waits for the real signed-in business
+// context to hydrate before UniversalImportPanelContainer can fire /api/import-mapping or
+// /api/reconcile/match - otherwise those requests go out scoped to the coded mock default
+// (demo-business) instead of the real tenant (same bug class as the /reconcile 403).
 export default function ProductsPage() {
   const allProducts = useScanStore((s) => s.products);
   // Archived (deleted) products are hidden from the list but kept in state for Undo + audit.
@@ -19,6 +25,7 @@ export default function ProductsPage() {
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4">
+      <BusinessContextGate>
       {isPlatform && <UndoDeleteBanner />}
       <UniversalImportPanelContainer />
       <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -52,6 +59,7 @@ export default function ProductsPage() {
           </table>
         </div>
       </div>
+      </BusinessContextGate>
     </div>
   );
 }
