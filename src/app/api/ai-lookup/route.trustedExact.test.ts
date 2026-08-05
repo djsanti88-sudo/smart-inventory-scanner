@@ -287,14 +287,30 @@ describe("authenticated Boss trusted-exact route", () => {
     expect((await response.json()).decision.status).toBe("needs_review");
   });
 
-  it("stops a deterministic-only exact miss and an arbitrary malformed miss before all egress", async () => {
+  it("returns trusted_exact_miss for allowlisted deterministic-only misses before all egress", async () => {
     const { POST } = await import("./route");
 
     const shortMiss = await POST(request("SAFE-SHORT-MISS"));
     const malformedMiss = await POST(request("???"));
 
-    expect((await shortMiss.json()).decision.status).toBe("needs_review");
-    expect((await malformedMiss.json()).decision.status).toBe("needs_review");
+    expect((await shortMiss.json()).reasonCode).toBe("trusted_exact_miss");
+    expect((await malformedMiss.json()).reasonCode).toBe("trusted_exact_miss");
+    expect(runDecodePipeline).not.toHaveBeenCalled();
+    expect(ladderStorage).not.toHaveBeenCalled();
+    expect(legacyRateLimit).not.toHaveBeenCalled();
+  });
+
+  it("returns trusted_exact_not_available for a non-allowlisted bare numeric deterministic-only miss", async () => {
+    process.env.TRUSTED_EXACT_BOSS_BUSINESS_IDS = "business-z";
+    const { POST } = await import("./route");
+
+    const response = await POST(request("8848116004503"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.reasonCode).toBe("trusted_exact_not_available");
+    expect(body.reasonText).toBe("Trusted exact lookup is not enabled for this session, so the code was not checked against the trusted index.");
+    expect(body.decision.status).toBe("needs_review");
     expect(runDecodePipeline).not.toHaveBeenCalled();
     expect(ladderStorage).not.toHaveBeenCalled();
     expect(legacyRateLimit).not.toHaveBeenCalled();

@@ -44,6 +44,14 @@ function decodeRequest(cleanCode: string) {
   });
 }
 
+function lookupRequest(cleanCode: string) {
+  return new Request("http://localhost/api/ai-lookup", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cleanCode }),
+  });
+}
+
 describe("bare numeric scan codes reach the pipeline unmasked", () => {
   beforeEach(() => {
     process.env.NEXT_PUBLIC_AUTH_MODE = "mock";
@@ -76,5 +84,14 @@ describe("bare numeric scan codes reach the pipeline unmasked", () => {
     const flat = JSON.stringify(runDecodePipeline.mock.calls[0]);
     expect(flat).toContain("redacted-phone");
     expect(flat).not.toContain("305");
+  });
+
+  it("preserves a bare numeric lookup code in the legacy lookup response", async () => {
+    const res = await POST(lookupRequest("3220015959"));
+    expect(res.status).toBe(200);
+
+    const json = await res.json();
+    expect(json.sanitizedInput.cleanCodeSanitized).toBe("3220015959");
+    expect(json.sanitizedInput.cleanCodeSanitized).not.toBe("[redacted-phone]");
   });
 });

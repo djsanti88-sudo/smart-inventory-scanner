@@ -58,7 +58,7 @@ function trustedBossBusinessIds(): Set<string> {
   );
 }
 
-function deterministicMissBody(reasonCode = "no_result", reason = "No trusted exact match was found.") {
+function deterministicMissBody(reasonCode = "trusted_exact_miss", reason = "No trusted exact match was found.") {
   return {
     mode: "decode" as const,
     providerNames: [] as string[],
@@ -346,7 +346,8 @@ export async function POST(request: Request) {
 
   // Keep the exact scanned identifier local to the trusted index. The AI sanitizer intentionally masks
   // 10-digit phone-shaped strings, but approved shop identifiers can legitimately have that shape.
-  // Provider-facing paths below continue to receive only the existing sanitized value.
+  // A bare 8-14 digit scan code passes through unmasked to both the decode pipeline and the legacy
+  // lookup req; all other text stays sanitized.
   const exactCode = cleanScanCode(body.cleanCode ?? body.rawCode ?? "").cleanCode;
   // Defense in depth: sanitize again on the server before anything reaches a provider.
   const rawCodeSanitized = sanitizeForAiLookup(body.rawCode ?? "").clean;
@@ -467,7 +468,15 @@ export async function POST(request: Request) {
   // Deterministic-only is a work-reduction request. A non-allowlisted member, a mock caller, or an
   // allowlisted exact miss exits here without reaching storage, catalog, legacy, or provider code.
   if (isDecodeMode && body.deterministicOnly === true) {
-    return Response.json(deterministicMissBody());
+    if (!trustedBossAccess) {
+      return Response.json(
+        deterministicMissBody(
+          "trusted_exact_not_available",
+          "Trusted exact lookup is not enabled for this session, so the code was not checked against the trusted index.",
+        ),
+      );
+    }
+    return Response.json(deterministicMissBody("trusted_exact_miss"));
   }
 
   // Legacy abuse/spend controls intentionally begin only after the free authenticated exact path.
@@ -708,6 +717,6 @@ export async function POST(request: Request) {
     providerName: usedProvider,
     result,
     notes: errors.length ? errors : undefined,
-    sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
+    sanitizedInput: { rawCodeSanitized: req.rawCodeSanitized, cleanCodeSanitized: req.cleanCodeSanitized },
   });
 }
