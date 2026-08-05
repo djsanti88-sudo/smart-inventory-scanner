@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestScanStore, trustedExactProbeCandidate } from "@/stores/scanStore";
 import { MockDb } from "@/services/mockDb";
 import { validatePendingSyncItem } from "@/services/db/firebase/firebaseSyncSafety";
+import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
 import type { PendingSyncItem, ScanEvent } from "@/types";
 
 const SHORT_CODE = "3220017438";
@@ -81,6 +82,12 @@ function decodeCalls(fetchSpy: ReturnType<typeof vi.fn>) {
   return fetchSpy.mock.calls.filter(([url]) => String(url) === "/api/ai-lookup");
 }
 
+function rehydrateAsCustomer(store: ReturnType<typeof createTestScanStore>) {
+  const persisted = buildPersistedScanState(store.getState() as unknown as PersistableScanState, "business");
+  const rehydrated = JSON.parse(JSON.stringify(persisted));
+  store.setState((previous) => ({ ...previous, ...rehydrated }));
+}
+
 class StrictValidationDb extends MockDb {
   readonly rejected: Array<{ item: PendingSyncItem; errorCode: string }> = [];
 
@@ -129,7 +136,7 @@ describe("authenticated trusted-exact scan settlement", () => {
 
     store.getState().processScan(code);
 
-    await vi.waitFor(() => expect(store.getState().needsReviewQueue[0]?.status).toBe("resolved"));
+    await vi.waitFor(() => expect(store.getState().scanFeed[0]?.decodeStatus).toBe("verified"));
     expect(JSON.parse(String(decodeCalls(fetchSpy)[0]?.[1]?.body))).toMatchObject({
       deterministicOnly: true,
       rawCode: code,
@@ -152,12 +159,12 @@ describe("authenticated trusted-exact scan settlement", () => {
     expect(event?.rawCode).toBe(SHORT_CODE);
     expect(store.getState().finalCounts.reduce((sum, row) => sum + row.quantity, 0)).toBe(1);
     expect(store.getState().scanFeed).toHaveLength(1);
-    await vi.waitFor(() => expect(store.getState().needsReviewQueue[0]?.status).toBe("resolved"));
+    await vi.waitFor(() => expect(store.getState().scanFeed[0]?.decodeStatus).toBe("verified"));
 
     const body = JSON.parse(String(decodeCalls(fetchSpy)[0]?.[1]?.body));
     expect(body).toMatchObject({ mode: "decode", deterministicOnly: true, cleanCode: SHORT_CODE });
     const state = store.getState();
-    expect(state.needsReviewQueue[0]?.resolutionAction).toBe("trusted_exact");
+    expect(state.needsReviewQueue).toEqual([]);
     expect(state.scanFeed[0]).toMatchObject({
       rawCode: SHORT_CODE,
       cleanCode: SHORT_CODE,
@@ -171,10 +178,7 @@ describe("authenticated trusted-exact scan settlement", () => {
     expect(state.aliases).toEqual(aliasesBefore);
     expect(state.catalog).toEqual([]);
     expect(lookupGlobalCatalog).not.toHaveBeenCalled();
-    expect(db.snapshot().reviews[state.needsReviewQueue[0].id]).toMatchObject({
-      status: "resolved",
-      resolutionAction: "trusted_exact",
-    });
+    expect(db.snapshot().reviews).toEqual({});
     expect(db.snapshot().scanEvents[event!.id]?.decodeStatus).toBe("verified");
   });
 
@@ -186,7 +190,7 @@ describe("authenticated trusted-exact scan settlement", () => {
 
     store.getState().processScan(SHORT_CODE);
 
-    await vi.waitFor(() => expect(store.getState().needsReviewQueue[0]?.status).toBe("resolved"));
+    await vi.waitFor(() => expect(store.getState().scanFeed[0]?.decodeStatus).toBe("verified"));
     await vi.waitFor(() => expect(store.getState().pendingSyncQueue).toEqual([]));
     expect(db.rejected).toEqual([]);
   });
@@ -210,19 +214,22 @@ describe("authenticated trusted-exact scan settlement", () => {
       reviews: store.getState().needsReviewQueue.map((review) => ({ status: review.status, decodeStatus: review.decodeStatus })),
     };
     release(response());
-    await vi.waitFor(() => expect(store.getState().needsReviewQueue[0]?.status).toBe("resolved"));
+    await vi.waitFor(() => expect(store.getState().scanFeed.every((event) => event.decodeStatus === "verified")).toBe(true));
 
     expect(pendingSnapshot.totalCount).toBe(2);
     expect(pendingSnapshot.rawCodes).toEqual([SHORT_CODE, SHORT_CODE]);
-    expect(pendingSnapshot.decodeStatuses).toEqual(["decoding", "decoding"]);
+    expect(pendingSnapshot.decodeStatuses).toContain("decoding");
     expect(pendingSnapshot.reasons.every((reason) => !/suggested|needs review/i.test(reason))).toBe(true);
-    expect(pendingSnapshot.reviews).toEqual([{ status: "open", decodeStatus: "decoding" }]);
+    // A trusted-exact probe is neutral decoding work, not Needs Review work. This snapshot is taken
+    // before the response settles, so it catches even a one-render transient review row.
+    expect(pendingSnapshot.reviews).toEqual([]);
 
     const state = store.getState();
     expect(decodeCalls(fetchSpy)).toHaveLength(1);
     expect(state.products.filter((item) => item.trustedExactCanonicalId === CANONICAL_ID && item.status === "active")).toHaveLength(1);
     expect(state.finalCounts.reduce((sum, row) => sum + row.quantity, 0)).toBe(2);
     expect(state.scanFeed.every((event) => event.decodeStatus === "verified")).toBe(true);
+    expect(state.needsReviewQueue).toEqual([]);
   });
 
   it("keeps the existing Suggested repeat presentation for an ordinary decode in flight", async () => {
@@ -255,7 +262,7 @@ describe("authenticated trusted-exact scan settlement", () => {
 
     store.getState().processScan(SHORT_CODE);
     store.getState().processScan(OTHER_SHORT_CODE);
-    await vi.waitFor(() => expect(store.getState().needsReviewQueue.every((review) => review.status === "resolved")).toBe(true));
+    await vi.waitFor(() => expect(store.getState().products.some((item) => item.trustedExactCanonicalId === CANONICAL_ID)).toBe(true));
 
     const state = store.getState();
     const active = state.products.filter((item) => item.trustedExactCanonicalId === CANONICAL_ID && item.status === "active");
@@ -264,6 +271,29 @@ describe("authenticated trusted-exact scan settlement", () => {
     expect(state.aliases).toEqual(aliasesBefore);
     expect(state.catalog).toEqual([]);
     expect(state.scanFeed.every((event) => event.matchedProductId === active[0].id && event.decodeStatus === "verified")).toBe(true);
+  });
+
+  it("coalesces a second accepted spelling after a customer persistence round-trip", async () => {
+    const store = createTestScanStore({ db: new MockDb(), trustedExactProbeEnabled: true });
+    store.getState().updateSettings({ aiLookupEnabled: false });
+    const fetchSpy = vi.fn(async (_url: string, init?: RequestInit) => {
+      const code = JSON.parse(String(init?.body)).cleanCode as string;
+      return response(code, CANONICAL_ID);
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    store.getState().processScan(SHORT_CODE);
+    await vi.waitFor(() => expect(store.getState().scanFeed[0]?.decodeStatus).toBe("verified"));
+    rehydrateAsCustomer(store);
+
+    store.getState().processScan(OTHER_SHORT_CODE);
+    await vi.waitFor(() => expect(store.getState().scanFeed.every((event) => event.decodeStatus === "verified")).toBe(true));
+
+    const state = store.getState();
+    const active = state.products.filter((item) => item.status === "active" && item.trustedExactCanonicalId === CANONICAL_ID);
+    expect(active).toHaveLength(1);
+    expect(state.finalCounts).toEqual([expect.objectContaining({ productId: active[0].id, quantity: 2 })]);
+    expect(decodeCalls(fetchSpy)).toHaveLength(2);
   });
 
   it("never repoints an unrelated null event while settling the matching review", async () => {
@@ -295,7 +325,7 @@ describe("authenticated trusted-exact scan settlement", () => {
     globalThis.fetch = vi.fn(async () => response()) as unknown as typeof fetch;
 
     store.getState().processScan(SHORT_CODE);
-    await vi.waitFor(() => expect(store.getState().needsReviewQueue[0]?.status).toBe("resolved"));
+    await vi.waitFor(() => expect(store.getState().scanFeed.find((event) => event.cleanCode === SHORT_CODE)?.decodeStatus).toBe("verified"));
 
     expect(store.getState().scanFeed.find((event) => event.id === unrelated.id)).toMatchObject({
       id: unrelated.id,
@@ -322,7 +352,7 @@ describe("authenticated trusted-exact scan settlement", () => {
       globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => trusted }) as Response) as unknown as typeof fetch;
 
       store.getState().processScan(SHORT_CODE);
-      await vi.waitFor(() => expect(store.getState().needsReviewQueue[0]?.decodeStatus).not.toBe("decoding"));
+      await vi.waitFor(() => expect(store.getState().needsReviewQueue[0]?.decodeStatus).toBe("needs_review"));
 
       const state = store.getState();
       expect(state.needsReviewQueue[0]?.status).toBe("open");
@@ -357,7 +387,7 @@ describe("authenticated trusted-exact scan settlement", () => {
 
     store.getState().processScan(VALID_GTIN);
 
-    await vi.waitFor(() => expect(store.getState().needsReviewQueue[0]?.status).toBe("resolved"));
+    await vi.waitFor(() => expect(store.getState().scanFeed[0]?.decodeStatus).toBe("verified"));
     const bodies = decodeCalls(fetchSpy).map(([, init]) => JSON.parse(String(init?.body)));
     expect(bodies.map((body) => ({ mode: body.mode, code: body.cleanCode, deterministicOnly: body.deterministicOnly }))).toEqual([
       { mode: "decode", code: VALID_GTIN, deterministicOnly: true },
@@ -394,6 +424,25 @@ describe("authenticated trusted-exact scan settlement", () => {
     const bodies = decodeCalls(fetchSpy).map(([, init]) => JSON.parse(String(init?.body)));
     expect(bodies.map((body) => body.deterministicOnly)).toEqual([true]);
     expect(store.getState().finalCounts.reduce((sum, row) => sum + row.quantity, 0)).toBe(1);
+  });
+
+  it("drops an old-tenant trusted-exact response after a business switch", async () => {
+    let release!: (value: Response) => void;
+    const pending = new Promise<Response>((resolve) => { release = resolve; });
+    const store = createTestScanStore({ db: new MockDb(), trustedExactProbeEnabled: true });
+    store.getState().updateSettings({ aiLookupEnabled: false });
+    globalThis.fetch = vi.fn(() => pending) as unknown as typeof fetch;
+
+    store.getState().processScan(SHORT_CODE);
+    await vi.waitFor(() => expect(decodeCalls(globalThis.fetch as ReturnType<typeof vi.fn>)).toHaveLength(1));
+    store.getState().setBusinessContext("other-business", "other-user");
+    release(response());
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    const state = store.getState();
+    expect(state.businessId).toBe("other-business");
+    expect(state.products.some((item) => item.trustedExactCanonicalId === CANONICAL_ID)).toBe(false);
+    expect(state.needsReviewQueue).toEqual([]);
   });
 
   it("does not dispatch placeholders or arbitrary non-identifier labels", async () => {

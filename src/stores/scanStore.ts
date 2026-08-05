@@ -1296,6 +1296,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
     // then distinguish its own trusted-exact lookup from an ordinary AI decode that happens to share
     // the same provisional row/review shape.
     const trustedExactProbeReviewIds = new Set<string>();
+    // A trusted-exact probe is deliberately NOT a review until it misses. Keeping its minimal context
+    // outside Zustand means the navigation badge/table cannot observe a transient open review before an
+    // authenticated exact hit settles.
+    const trustedExactProbes = new Map<string, UnknownCodeReview>();
+    const trustedExactProbeIdsByCode = new Map<string, string>();
+    const clearTrustedExactProbes = () => {
+      trustedExactProbeReviewIds.clear();
+      trustedExactProbes.clear();
+      trustedExactProbeIdsByCode.clear();
+    };
 
     const enqueueAndSync = (items: PendingSyncItem[]) => {
       set((s) => ({ pendingSyncQueue: [...s.pendingSyncQueue, ...items] }));
@@ -1351,8 +1361,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       reason: string,
     ): boolean => {
       const state = get();
-      const review = state.needsReviewQueue.find((item) => item.id === reviewId);
+      const review = state.needsReviewQueue.find((item) => item.id === reviewId) ?? trustedExactProbes.get(reviewId);
       if (!review || (review.status !== "open" && review.status !== "suggested")) return false;
+      if (review.businessId !== state.businessId || review.sessionId !== state.sessionId) {
+        trustedExactProbes.delete(reviewId);
+        trustedExactProbeIdsByCode.delete(review.cleanCode);
+        trustedExactProbeReviewIds.delete(reviewId);
+        return false;
+      }
+      const transientProbe = trustedExactProbes.has(reviewId);
 
       const matchingEvent = state.scanFeed.find(
         (event) => event.sessionId === review.sessionId && event.cleanCode === review.cleanCode,
@@ -1478,8 +1495,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }),
         finalCounts,
         scanFeed: settledEvents,
-        needsReviewQueue: current.needsReviewQueue.map((item) => item.id === reviewId ? settledReview : item),
+        needsReviewQueue: transientProbe
+          ? current.needsReviewQueue
+          : current.needsReviewQueue.map((item) => item.id === reviewId ? settledReview : item),
       }));
+      if (transientProbe) {
+        trustedExactProbes.delete(reviewId);
+        trustedExactProbeIdsByCode.delete(review.cleanCode);
+      }
 
       const version = `${review.id}:${canonicalId}`;
       const settledEventOps = settledEvents
@@ -1509,14 +1532,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           idempotencyKey: archiveKey, scanEventId: null,
         }));
       }
-      persistOps.push(
-        makeQueueItem({
+      if (!transientProbe) {
+        persistOps.push(makeQueueItem({
           idFactory, now, businessId: state.businessId, sessionId: review.sessionId,
           entityType: "UnknownCodeReview", entityId: review.id, operation: "SAVE_UNKNOWN_SCAN", payload: settledReview,
           idempotencyKey: reviewKey, scanEventId: matchingEvent?.id ?? null,
-        }),
-        ...settledEventOps,
-      );
+        }));
+      }
+      persistOps.push(...settledEventOps);
       enqueueAndSync(persistOps);
       return true;
     };
@@ -1531,6 +1554,36 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       } catch {
         // An audit failure must never break the scanner or any action. Swallow it.
       }
+    };
+
+    const materializeTrustedExactMiss = (reviewId: string, reason: string): UnknownCodeReview | null => {
+      const probe = trustedExactProbes.get(reviewId);
+      if (!probe) return get().needsReviewQueue.find((item) => item.id === reviewId) ?? null;
+      const review: UnknownCodeReview = {
+        ...probe,
+        reason,
+        decodeNote: undefined,
+        decodeStatus: "needs_review",
+      };
+      trustedExactProbes.delete(reviewId);
+      trustedExactProbeIdsByCode.delete(review.cleanCode);
+      set((state) => ({
+        needsReviewQueue: state.needsReviewQueue.some((item) => item.id === review.id)
+          ? state.needsReviewQueue
+          : [...state.needsReviewQueue, review],
+        scanFeed: state.scanFeed.map((event) =>
+          event.sessionId === review.sessionId && event.cleanCode === review.cleanCode && event.decodeStatus === "decoding"
+            ? { ...event, decodeStatus: "needs_review" as const, reason, decodeNote: undefined }
+            : event,
+        ),
+      }));
+      enqueueAndSync([makeQueueItem({
+        idFactory, now, businessId: review.businessId, sessionId: review.sessionId,
+        entityType: "UnknownCodeReview", entityId: review.id, operation: "SAVE_UNKNOWN_SCAN", payload: review,
+        idempotencyKey: review.idempotencyKey, scanEventId: null,
+      })]);
+      emitAudit({ entityType: "UnknownCodeReview", entityId: review.id, action: "unknown_review_created", metadata: { code: review.cleanCode } });
+      return review;
     };
 
     // Owner feature (2026-07-22): automatically archive the CURRENT session's live scanFeed into
@@ -1730,6 +1783,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             lastSyncError: null,
           });
         } else {
+          clearTrustedExactProbes();
           // Isolation: settings/needsReviewQueue/scanFeed are NOT returned by loadBusinessData and
           // finalCounts linger when no session restores, so a context switch must REPLACE all four or
           // the previous tenant's rows bleed through (two users OR one user with two businesses).
@@ -1928,6 +1982,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       resetForSignOut: () => {
+        clearTrustedExactProbes();
         // Capture identity BEFORE the reset wipes it: the per-uid key must be removed and the persist
         // middleware re-pointed to the anon key, or the fail-soft coalesced storage would simply
         // rewrite sis-scan-<uid> on the next tick and the "cleared" state would leak right back.
@@ -2536,6 +2591,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 && review.cleanCode === cleaned.cleanCode
                 && review.status === "open"
                 && review.decodeStatus === "decoding",
+            ) ?? [...trustedExactProbes.values()].find(
+              (probe) =>
+                probe.provisionalProductId === provMatchId
+                && probe.sessionId === sessionId
+                && probe.cleanCode === cleaned.cleanCode,
             )
           : undefined;
         const effectiveProductId = resolution.productId ?? provMatchId;
@@ -2853,6 +2913,35 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // decode handlers (which filter on status !== "known") find nothing to re-count.
         get().ensureProvisionalCount(cleaned.cleanCode, resolution.reason);
 
+        if (deterministicLookupEligible) {
+          // Repeats share the in-flight probe, while each physical scan has already received its own
+          // synchronous feed/count event above.
+          if (trustedExactProbeIdsByCode.has(cleaned.cleanCode)) return event;
+          const mintedPlaceholder = get().products.find(
+            (p) => p.provisional === true && p.status !== "archived" && p.primaryBarcode === cleaned.cleanCode,
+          );
+          const probe: UnknownCodeReview = {
+            id: idFactory(), businessId, sessionId, rawCode: cleaned.rawCode, cleanCode: cleaned.cleanCode,
+            normalizedCandidates: cleaned.normalizedCandidates,
+            suggestedProductName: "", suggestedBrand: "", suggestedCategory: "", suggestedSpecsShort: "", suggestedSpecsFull: "",
+            suggestedPrimarySku: "", suggestedPrimaryBarcode: "", suggestedGtin: "", suggestedUpc: "", suggestedEan: "",
+            suggestedImageUrl: "", suggestedProductUrl: "", suggestedAliases: [], sourceUrls: [], verifiedFacts: [], guesses: [],
+            reason: resolution.reason, decodeNote: autoGate.reason, providerName: "", confidence: 0, hasSuggestion: false,
+            decodeStatus: "decoding", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheckDecision: "",
+            status: "open", createdAt, resolvedAt: null, resolvedBy: null, resolutionAction: null, syncStatus: "pending",
+            idempotencyKey: keyFor("SAVE_UNKNOWN_SCAN"), provisionalProductId: mintedPlaceholder?.id ?? null,
+            suggestedLinkProductId: resolution.nearMatchSuggestion?.productId,
+          };
+          trustedExactProbes.set(probe.id, probe);
+          trustedExactProbeIdsByCode.set(probe.cleanCode, probe.id);
+          trustedExactProbeReviewIds.add(probe.id);
+          void get().liveDecode(probe.id, { deterministicOnly: true }).then(
+            () => trustedExactProbeReviewIds.delete(probe.id),
+            () => trustedExactProbeReviewIds.delete(probe.id),
+          );
+          return event;
+        }
+
         if (!existingOpen) {
           // STABLE-ID FIX: ensureProvisionalCount just ran synchronously above, so this code's placeholder
           // product (if one was minted) already exists in state. Capture its id now so resolveUnknown can
@@ -2934,15 +3023,6 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // Every trusted-exact candidate gets the isolated deterministic-only request first. A valid
           // GTIN miss may later enter the unchanged ordinary queue; non-GTIN, misread, and gate-blocked
           // misses remain counted/reviewable without provider egress.
-          if (deterministicLookupEligible) {
-            trustedExactProbeReviewIds.add(review.id);
-            void get().liveDecode(review.id, { deterministicOnly: true }).then(
-              () => trustedExactProbeReviewIds.delete(review.id),
-              () => trustedExactProbeReviewIds.delete(review.id),
-            );
-            return event;
-          }
-
           // CATALOG-FIRST (offline-first, saves AI tokens): private shop override -> verified shared
           // catalog. A verified hit resolves + counts with NO AI, even with no key / offline. AI only
           // runs on a miss or a weak/conflicting catalog hit.
@@ -3422,9 +3502,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
       runLiveDecodeOnce: async (reviewId, options) => {
         const state = get();
-        const review = state.needsReviewQueue.find((r) => r.id === reviewId);
-        if (!review || review.status !== "open") return;
         const deterministicOnly = options?.deterministicOnly === true;
+        const review = state.needsReviewQueue.find((r) => r.id === reviewId)
+          ?? (deterministicOnly ? trustedExactProbes.get(reviewId) : undefined);
+        if (!review || review.status !== "open") return;
 
         const s = state.settings;
         const nowIso = now();
@@ -3638,10 +3719,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               && canonicalGtin(review.cleanCode) !== null
               && !isLikelyMisreadGtin(review.cleanCode);
             if (shouldFallbackToOrdinary) {
-              void get().liveDecode(reviewId);
+              const persisted = materializeTrustedExactMiss(reviewId, decision?.reason || "No trusted exact match was found.");
+              if (persisted) void get().liveDecode(persisted.id);
               return;
             }
             const missReason = decision?.reason || "No trusted exact match was found.";
+            if (trustedExactProbes.has(reviewId)) {
+              materializeTrustedExactMiss(reviewId, missReason);
+              return;
+            }
             set((current) => ({
               scanFeed: current.scanFeed.map((event) =>
                 event.sessionId === review.sessionId
@@ -4380,6 +4466,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             syncDecodedState(reviewId);
           }
         } catch (e) {
+          if (deterministicOnly && trustedExactProbes.has(reviewId)) {
+            materializeTrustedExactMiss(
+              reviewId,
+              "Trusted exact lookup was unavailable. Saved locally and counted as unverified; retry to identify when back online.",
+            );
+            return;
+          }
           const nextBreaker = recordFailure(gate.breaker, nowMs);
           // Emit only on the closed/half-open -> open transition. This best-effort request must not
           // participate in the scan/decode control flow or report a raw scan/provider error.
