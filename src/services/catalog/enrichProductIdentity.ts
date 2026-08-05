@@ -134,8 +134,23 @@ export function canonicalTireDisplayName(parts: {
 export function enrichProductIdentity(args: {
   payload: ProductIdentityPayload;
   existing?: ProductIdentityExisting;
+  /**
+   * CLASS FIX (2026-08-04, cocacola-bug-report.md): true when `existing.brand` is known to be nothing
+   * more than the prefix-floor NAMING AID's statistical GS1-prefix guess (see
+   * prefixFloorEnrich.ts's `brandIsOnlyFloorGuess`) rather than a genuine prior identity (a real decode,
+   * a human edit, an approved alias). A non-empty `existing.brand` normally wins outright under
+   * fill-if-empty - but a floor guess must never permanently outrank a real identity just because it
+   * happens to be non-empty. When true, `existing.brand` is treated as EMPTY for this merge: the
+   * payload's own brand wins when present, else a deterministic parse of the (cleaned) name, else "" -
+   * the floor guess itself is never re-used as a fallback value (matching the ALREADY-SHIPPED behavior
+   * at the one call site this was previously guarded at: once any real decode/human resolution touches
+   * the row, even a brandless one, the statistical guess is retired for good, never silently reinstated).
+   * Callers that omit this (the default, `false`) get the original, unguarded fill-if-empty behavior -
+   * safe for every caller whose `existing.brand` is never a floor guess.
+   */
+  existingBrandIsFloorGuess?: boolean;
 }): EnrichedProductIdentity {
-  const { payload } = args;
+  const { payload, existingBrandIsFloorGuess = false } = args;
   const existing = args.existing ?? {};
 
   const rawName = payload.name ?? existing.name ?? "";
@@ -149,8 +164,9 @@ export function enrichProductIdentity(args: {
   const parsed = parseTireIdentity(rawName);
   const parsedSize = canonicalTireSize(rawName) || parsed.size;
 
-  const brand = (existing.brand && existing.brand.trim())
-    ? existing.brand
+  const trustedExistingBrand = existingBrandIsFloorGuess ? "" : (existing.brand ?? "");
+  const brand = (trustedExistingBrand && trustedExistingBrand.trim())
+    ? trustedExistingBrand
     : firstNonEmpty(payload.brand, parsed.brand);
 
   // Confident tire parse: brand AND model AND size all present, and not a multi-variant listing

@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel } from "@/services/catalog/prefixFloorEnrich";
+import {
+  fetchPrefixFloorEnrichment,
+  isBareUnidentifiedLabel,
+  isFloorGuessOnlyLabel,
+  brandIsOnlyFloorGuess,
+} from "@/services/catalog/prefixFloorEnrich";
 
 // F5 bundle-surgery (wave 2, 2026-07-20): proves the client-side enrichment fetch never throws, never
 // upgrades a non-fallback name, and correctly shapes its one network call - it is the ONLY piece of the
@@ -20,6 +25,49 @@ describe("isBareUnidentifiedLabel", () => {
   });
   it("does NOT match another code's fallback label", () => {
     expect(isBareUnidentifiedLabel("Unidentified item (barcode 999999999999)", "051596000004")).toBe(false);
+  });
+});
+
+// CLASS FIX (2026-08-04, cocacola-bug-report.md): isFloorGuessOnlyLabel/brandIsOnlyFloorGuess are the
+// SINGLE shared signal every enrichProductIdentity call site in scanStore.ts now passes so a prefix-
+// floor statistical brand guess can never permanently outrank a real decode's brand.
+describe("isFloorGuessOnlyLabel", () => {
+  it("matches the plain floor naming-aid suffix", () => {
+    expect(isFloorGuessOnlyLabel("Coca-Cola / product unconfirmed")).toBe(true);
+  });
+  it("matches the family-annotated floor naming-aid suffix", () => {
+    expect(isFloorGuessOnlyLabel("General (Continental family) / product unconfirmed")).toBe(true);
+  });
+  it("does NOT match a real decoded product name", () => {
+    expect(isFloorGuessOnlyLabel("Michelin X-Ice North 4 225/60R18 104T")).toBe(false);
+  });
+  it("does NOT match the bare Unidentified-item fallback", () => {
+    expect(isFloorGuessOnlyLabel("Unidentified item (barcode 049000026603)")).toBe(false);
+  });
+  it("does NOT match a name that merely contains the phrase mid-string", () => {
+    expect(isFloorGuessOnlyLabel("product unconfirmed brand new tire")).toBe(false);
+  });
+  it("handles undefined/empty safely", () => {
+    expect(isFloorGuessOnlyLabel(undefined)).toBe(false);
+    expect(isFloorGuessOnlyLabel("")).toBe(false);
+  });
+});
+
+describe("brandIsOnlyFloorGuess", () => {
+  it("true for the bare Unidentified-item fallback", () => {
+    expect(brandIsOnlyFloorGuess("Unidentified item (barcode 049000026603)", "049000026603")).toBe(true);
+  });
+  it("true for the floor naming-aid text (SEED/LEARNED-tier synchronous mint shape)", () => {
+    expect(brandIsOnlyFloorGuess("Coca-Cola / product unconfirmed", "049000026603")).toBe(true);
+  });
+  it("true for the floor naming-aid text even when it arrived via the ASYNC DERIVED-tier enrichment race (no client-recomputable code relationship required)", () => {
+    // Provenance-tier-agnostic by design: the async enrichPrefixFloorLabel fetch can resolve a
+    // DERIVED-tier brand the client-safe SEED/LEARNED-only recompute could never reproduce - matching
+    // purely on the naming-aid TEXT itself (not re-deriving from the code) closes that gap too.
+    expect(brandIsOnlyFloorGuess("Coca-Cola / product unconfirmed", "999999999999")).toBe(true);
+  });
+  it("false for a real decoded product name", () => {
+    expect(brandIsOnlyFloorGuess("Michelin X-Ice North 4 225/60R18 104T", "049000026603")).toBe(false);
   });
 });
 

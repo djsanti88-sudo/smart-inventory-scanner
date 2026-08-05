@@ -63,7 +63,7 @@ import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/services/
 import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
 import { prefixFloorName, type PrefixFloorResult } from "@/services/catalog/prefixFloor";
-import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel } from "@/services/catalog/prefixFloorEnrich";
+import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel, brandIsOnlyFloorGuess } from "@/services/catalog/prefixFloorEnrich";
 import { detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable, toMasterAwareStoreEntry } from "@/services/catalog/sanitizeCatalog";
 import { findIdentityMerge } from "@/services/catalog/identityMerge";
@@ -4348,14 +4348,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     // name-parsed brand, or genuinely empty), never silently lock in the wrong brand next
                     // to a now-correct decoded name. A brand set by any OTHER means (a prior real decode,
                     // a human edit) still wins untouched, since p.name would no longer equal the floor text.
-                    const brandIsOnlyFloorGuess = isBareUnidentifiedLabel(p.name, code) || p.name === provisionalPlaceholderName(code);
+                    //
+                    // CLASS FIX (2026-08-04, cocacola-bug-report.md): this used to be the ONLY of three
+                    // vulnerable call sites carrying this guard - moved into enrichProductIdentity itself
+                    // (via existingBrandIsFloorGuess) so the other two call sites (resolveUnknown's
+                    // reuse/orphan-upgrade branches) can share the exact same protection.
                     const enrichIdentity = enrichProductIdentity({
                       payload: { name: provName, brand: best?.brand, category: best?.category, specsShort: best?.specsShort, specsFull: best?.specsFull },
-                      existing: {
-                        name: p.name,
-                        brand: brandIsOnlyFloorGuess ? "" : p.brand,
-                        category: p.category, specsShort: p.specsShort, specsFull: p.specsFull,
-                      },
+                      existing: { name: p.name, brand: p.brand, category: p.category, specsShort: p.specsShort, specsFull: p.specsFull },
+                      existingBrandIsFloorGuess: brandIsOnlyFloorGuess(p.name, code),
                     });
                     return {
                           ...p,
@@ -5681,9 +5682,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   // parse of the (cleaned) name - never a guess. `enriched.name` is the CLEANED name
                   // (tireListingNormalizer's cleanListingTitle) - use it wherever np.name would have
                   // been written raw before.
+                  // CLASS FIX (2026-08-04, cocacola-bug-report.md): `p.brand` at this point may be
+                  // NOTHING MORE than the statistical prefix-floor guess ensureProvisionalCount wrote
+                  // synchronously before any decode ever ran (this is the second EXACT unguarded sibling
+                  // of the 2026-07-21 "PREFIX-FLOOR BRAND LOCK FIX" - the dedup-reuse path). Compute it
+                  // once and pass it through so enrichProductIdentity treats that guess as empty rather
+                  // than a trustworthy prior brand.
+                  const pBrandIsFloorGuess = brandIsOnlyFloorGuess(p.name, p.primaryBarcode || review.cleanCode);
                   const enriched = enrichProductIdentity({
                     payload: { name: np.name ?? p.name, brand: np.brand, category: np.category, specsShort: np.specsShort, specsFull: np.specsFull },
                     existing: { name: p.name, brand: p.brand, category: p.category, specsShort: p.specsShort, specsFull: p.specsFull },
+                    existingBrandIsFloorGuess: pBrandIsFloorGuess,
                   });
                   // B1 FIX (owner-reported, 268-row review, 2026-07-20): this re-match/reuse path used to
                   // drop specsShort/specsFull/primarySku/category entirely - a decode payload's structured
@@ -5701,7 +5710,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   if (!p.specsShort) updates.specsShort = enriched.specsShort;
                   if (!p.specsFull) updates.specsFull = enriched.specsFull;
                   if (!p.primarySku && np.primarySku) updates.primarySku = np.primarySku;
-                  if (!p.brand) updates.brand = enriched.brand;
+                  // CLASS FIX: a floor-guess-only brand must yield to enrichProductIdentity's resolution
+                  // (payload brand, then a name-parsed brand) even though p.brand is technically
+                  // non-empty - it was never a trustworthy prior identity in the first place.
+                  if (!p.brand || pBrandIsFloorGuess) updates.brand = enriched.brand;
                   if (!p.structuredModel && enriched.structuredModel) updates.structuredModel = enriched.structuredModel;
                   // Task 4: (re)structure only when the name/brand actually changed above; the guard
                   // inside structuredFieldsFor never overwrites a row already stamped "human". Uses
@@ -5733,9 +5745,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // permanently blank even though the size/brand/model are cleanly parseable from the
             // name. Route through the shared helper: payload field wins when present; a still-empty
             // field falls back to a deterministic parse of the (cleaned) name - never a guess.
+            //
+            // CLASS FIX (2026-08-04, cocacola-bug-report.md): `orphan.brand` at this point may be
+            // NOTHING MORE than the statistical prefix-floor guess ensureProvisionalCount wrote
+            // synchronously before any decode ever ran (this is the EXACT unguarded sibling of the
+            // 2026-07-21 "PREFIX-FLOOR BRAND LOCK FIX" above - the fresh-single-scan path a brand-new
+            // 049000-prefixed tire scan actually takes). existingBrandIsFloorGuess tells
+            // enrichProductIdentity to treat that guess as empty rather than a trustworthy prior brand.
             const orphanEnriched = enrichProductIdentity({
               payload: { name: np.name, brand: np.brand, category: np.category, specsShort: np.specsShort, specsFull: np.specsFull },
               existing: { name: orphan.name, brand: orphan.brand, category: orphan.category, specsShort: orphan.specsShort, specsFull: orphan.specsFull },
+              existingBrandIsFloorGuess: brandIsOnlyFloorGuess(orphan.name, review.cleanCode),
             });
             const upgraded: Product = {
               ...orphan,
