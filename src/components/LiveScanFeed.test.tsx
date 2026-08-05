@@ -92,6 +92,14 @@ describe("LiveScanFeed - suggested identity over provisional placeholder (Task 3
     expect(screen.queryByText(/Unidentified item/)).not.toBeInTheDocument();
     expect(screen.getByText(/unconfirmed/i)).toBeInTheDocument();
     expect(screen.queryByText(/\(suggested\)/)).not.toBeInTheDocument();
+
+    // COSMETIC FIX (2026-08-04, cocacola-bug-report.md): the product name and the "unconfirmed" tag
+    // must be separated by an actual space character, not just a CSS margin - otherwise the two
+    // differently-styled adjacent text runs can read as one concatenated word (e.g. "Delinte
+    // D7unconfirmed") in a screenshot.
+    const nameCell = screen.getByTestId("feed-product-ev1");
+    expect(nameCell.textContent).toMatch(/\S\s+unconfirmed$/);
+    expect(nameCell.textContent).not.toMatch(/\Sunconfirmed$/);
   });
 
   it("low-confidence suggestion keeps the (suggested) tag", () => {

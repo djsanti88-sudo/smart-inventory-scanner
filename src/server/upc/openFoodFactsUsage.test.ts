@@ -85,7 +85,8 @@ describe("openFoodFactsUsage", () => {
     const paidUsageBefore = await storage.readUsage();
     const usage = openFoodFactsUsage(storage, { now: AT_12_34 });
     await usage.record();
-    expect(await storage.readUsage()).toEqual(paidUsageBefore); // paid Go-UPC untouched
+    expect(await storage.readUsage()).toEqual(paidUsageBefore);
+    expect(paidUsageBefore).toEqual({ month: "2026-07", used: 0 }); // absolute floor restored (final-review) // paid Go-UPC untouched
     expect(await storage.get("upcitemdb-usage:2026-07-12")).toBeNull();
     expect(await storage.get("ai-lookup-daily-cap")).toBeNull();
   });

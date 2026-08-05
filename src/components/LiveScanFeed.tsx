@@ -169,10 +169,20 @@ export function LiveScanFeed() {
                           </button>
                         </span>
                       ) : null}
+                      {/* COSMETIC FIX (2026-08-04, cocacola-bug-report.md): adjacent {text}{element} JSX
+                          renders with no whitespace text node between them - the ml-1 margin alone (4px)
+                          reads as a concatenated word ("Delinte D7unconfirmed") in a screenshot. Add a
+                          literal space, matching the codebase's own {" "} convention elsewhere. */}
                       {suggestionTag === "unconfirmed" ? (
-                        <span className="ml-1 rounded px-1 text-xs text-zinc-600">unconfirmed</span>
+                        <>
+                          {" "}
+                          <span className="ml-1 rounded px-1 text-xs text-zinc-600">unconfirmed</span>
+                        </>
                       ) : suggestionTag === "(suggested)" ? (
-                        <span className="ml-1 text-xs text-amber-700">(suggested)</span>
+                        <>
+                          {" "}
+                          <span className="ml-1 text-xs text-amber-700">(suggested)</span>
+                        </>
                       ) : null}
                       {/* Task 9: an app-verified decode that counted despite being off the business scan
                           context (e.g. hot sauce in a tire shop) shows this advisory tag - it counted, but

@@ -361,11 +361,11 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     // TRANSIENT-FAILURE GUARD (found live 2026-07-06): a failed rung call is NOT genuine ladder
     // exhaustion - it must NOT write a permanent no_result_receipt (that froze the code forever on
     // one OpenAI hiccup), and the failure must be visible as a surfaced skip, never silent.
-    expect(json.debug.gptLadderSkipReason).toBe("gpt_call_failed");
+    expect(json.debug.gptLadderSkipReason).toMatch(/^gpt_call_failed:/); // classified diagnostics (e8ef3737)
     expect(
       json.providerStatuses.some(
         (s: { provider: string; status: string; errorCode?: string }) =>
-          s.provider === "gpt-5.5-ladder" && s.status === "skipped" && s.errorCode === "gpt_call_failed",
+          s.provider === "gpt-5.5-ladder" && s.status === "skipped" && s.errorCode?.startsWith("gpt_call_failed"),
       ),
     ).toBe(true);
     const stored = fs.existsSync(tmpDecodeCacheFile) ? JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8")) : {};
@@ -1158,7 +1158,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
       const json = await res.json();
       expect(json.decision.status).not.toBe("verified");
       // debug.gptLadderSkipReason legitimately carries the raw code for platform diagnosis.
-      expect(json.debug.gptLadderSkipReason).toBe("gpt_call_failed");
+      expect(json.debug.gptLadderSkipReason).toMatch(/^gpt_call_failed:/); // classified diagnostics (e8ef3737)
       assertProseClean(json);
     }, 40000);
 

@@ -90,6 +90,7 @@ describe("upcItemDbUsage", () => {
     await usage.record();
     // The paid Go-UPC usage file is untouched.
     expect(await storage.readUsage()).toEqual(paidUsageBefore);
+    expect(paidUsageBefore).toEqual({ month: "2026-07", used: 0 }); // absolute floor restored (final-review)
     // No key resembling the AI-lookup daily cap's own namespace was ever written.
     expect(await storage.get("ai-lookup-daily-cap")).toBeNull();
   });

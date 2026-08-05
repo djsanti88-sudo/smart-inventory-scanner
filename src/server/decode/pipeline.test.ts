@@ -137,7 +137,7 @@ vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
   };
 });
 
-import { runDecodePipeline, DailyCapExceededError, classifySourceTier } from "@/server/decode/pipeline";
+import { runDecodePipeline, DailyCapExceededError, classifySourceTier, classifyGptFailureDetail } from "@/server/decode/pipeline";
 import { detectCodeType } from "@/services/codeTypeDetector";
 import { __resetForTest, readDailyUsed, recordGptLadderSpend, recordGptLadderCall } from "@/services/security/aiSpendGuard";
 import { ladderStorage } from "@/server/upc/storage";
@@ -2662,5 +2662,113 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       // ladder-side give-up that leaves the real HTTP call running unaborted server-side).
       expect(openAiSignal?.aborted).toBe(true);
     }, 30000);
+  });
+
+  // Diagnostic-observability fix (2026-08-05, gpt-failure-rootcause.md): before this fix, maybeGptLadder
+  // (pipeline.ts ~909-910) collapsed EVERY real GPT provider failure - 429 rate limit, 5xx server error,
+  // network exception, anything - into the single generic skipReason "gpt_call_failed", leaving ZERO
+  // diagnostic trace (no status code, no error class) in ladderReasons / providerStatuses / the Turso
+  // decode_outcomes ledger. classifyGptFailureDetail (exported, pure) derives a compact, SANITIZED
+  // suffix from gptFromScratch's r.error - a status code or coarse error-class name, NEVER the raw
+  // response body, prompt, key, or full message text (PII/key-safety rule) - so the failure CLASS now
+  // survives everywhere "gpt_call_failed" already flowed. The suffixed string still trips
+  // CUSTOMER_REASON_DENYLIST (decodeFallback.ts) exactly like the bare code did (it still contains the
+  // literal substring "gpt_call_failed"), so it never leaks to customer-facing reasonText/decision.reason
+  // - only the platform-only debug.ladderReasons / providerStatuses[].errorCode / Turso trail gain detail.
+  describe("gpt-5.5 rung failure diagnostics: gpt_call_failed carries a classified error detail (2026-08-05 fix)", () => {
+    const GOUPC_API = "go-upc.com/api";
+    const UPCITEMDB_HOST = "api.upcitemdb.com";
+    const OFF_HOST = "world.openfoodfacts.org";
+
+    // Every free/earlier rung genuinely misses so the code reaches the paid GPT-5.5 rung, and the
+    // OpenAI call itself is the one that fails - proving the classification happens at the real call
+    // site (maybeGptLadder), not a stand-in.
+    function stubAllMissThenOpenAi(openAiHandler: () => Response | Promise<Response>) {
+      fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
+        if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+        if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 });
+        if (url.includes("api.openai.com/v1/responses")) return openAiHandler();
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+    }
+
+    function gptReason(out: Awaited<ReturnType<typeof runDecodePipeline>>): string | undefined {
+      if (out.kind !== "computed") throw new Error("unreachable: expected a computed outcome");
+      const reasons = (out.payload.debug.ladderReasons as Array<{ rung: string; reason: string }> | undefined) ?? [];
+      return reasons.find((r) => r.rung === "gpt")?.reason;
+    }
+
+    function gptProviderErrorCode(out: Awaited<ReturnType<typeof runDecodePipeline>>): string | undefined {
+      if (out.kind !== "computed") throw new Error("unreachable: expected a computed outcome");
+      return out.payload.providerStatuses.find((p) => p.provider === "gpt-5.5-ladder")?.errorCode;
+    }
+
+    it("FAILING-FIRST for the fix: a genuine 429 rate-limit response is classified, not collapsed into a bare 'gpt_call_failed'", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.OPENAI_API_KEY = "test-key";
+      process.env.GO_UPC_API_KEY = "test-key";
+      stubAllMissThenOpenAi(() => new Response("rate limited", { status: 429 }));
+
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(out.kind).toBe("computed");
+      const reason = gptReason(out);
+      expect(reason).toContain("gpt_call_failed:429");
+      expect(gptProviderErrorCode(out)).toBe("gpt_call_failed:429");
+    }, 30000);
+
+    it("a genuine 5xx server error is classified as 'gpt_call_failed:5xx' (not lumped with 429 or left bare)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.OPENAI_API_KEY = "test-key";
+      process.env.GO_UPC_API_KEY = "test-key";
+      stubAllMissThenOpenAi(() => new Response("internal error", { status: 503 }));
+
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(out.kind).toBe("computed");
+      expect(gptReason(out)).toContain("gpt_call_failed:5xx");
+      expect(gptProviderErrorCode(out)).toBe("gpt_call_failed:5xx");
+    }, 30000);
+
+    it("a network-level exception (fetch itself throws - the request never reached OpenAI) is classified as 'gpt_call_failed:network'", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.OPENAI_API_KEY = "test-key";
+      process.env.GO_UPC_API_KEY = "test-key";
+      stubAllMissThenOpenAi(() => {
+        throw new TypeError("fetch failed");
+      });
+
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(out.kind).toBe("computed");
+      expect(gptReason(out)).toContain("gpt_call_failed:network");
+      expect(gptProviderErrorCode(out)).toBe("gpt_call_failed:network");
+    }, 30000);
+
+    it("customer-facing reasonText/decision.reason still never leak the classified detail (CUSTOMER_REASON_DENYLIST intact)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.OPENAI_API_KEY = "test-key";
+      process.env.GO_UPC_API_KEY = "test-key";
+      stubAllMissThenOpenAi(() => new Response("rate limited", { status: 429 }));
+
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(out.kind).toBe("computed");
+      if (out.kind !== "computed") throw new Error("unreachable");
+      expect(out.payload.reasonText).not.toMatch(/gpt_call_failed|\b429\b/);
+      expect(out.payload.decision.reason).not.toMatch(/gpt_call_failed|\b429\b/);
+    }, 30000);
+
+    // "no-detail fallback": gptFromScratch always sets r.error whenever tier is "none" and the call
+    // wasn't aborted (every real code path does), so this branch is structurally unreachable through a
+    // live ladder run - it exists purely as a defensive default. Proven directly on the exported pure
+    // classifier instead of through the full pipeline.
+    it("no-detail fallback: classifyGptFailureDetail defaults to 'other' when no error string is available", () => {
+      expect(classifyGptFailureDetail(undefined)).toBe("other");
+      expect(classifyGptFailureDetail("")).toBe("other");
+    });
   });
 });

@@ -103,6 +103,64 @@ describe("enrichProductIdentity - shared identity-apply enrichment", () => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// CLASS FIX (2026-08-04, cocacola-bug-report.md): `existingBrandIsFloorGuess` is the shared contract
+// every enrichProductIdentity call site now passes so a prefix-floor STATISTICAL brand guess (see
+// prefixFloor.ts / prefixFloorEnrich.ts's `brandIsOnlyFloorGuess`) can never permanently outrank a real
+// decode/human identity just because it happens to be non-empty. Table-driven across the three shapes
+// every real scanStore.ts call site produces (mint-enrich, dedup-reuse, orphan-upgrade all reduce to the
+// same enrichProductIdentity contract; only what they compute for existingBrandIsFloorGuess differs).
+// ---------------------------------------------------------------------------------------------
+describe("enrichProductIdentity - existingBrandIsFloorGuess (class fix, 2026-08-04)", () => {
+  it("a floor-guess-only existing brand yields to the payload's own real brand", () => {
+    const result = enrichProductIdentity({
+      payload: { name: "Michelin X-Ice North 4 225/60R18 104T", brand: "Michelin" },
+      existing: { name: "Coca-Cola / product unconfirmed", brand: "Coca-Cola", category: "", specsShort: "", specsFull: "" },
+      existingBrandIsFloorGuess: true,
+    });
+    expect(result.brand).toBe("Michelin");
+    // The assembled name must ALSO reflect the corrected brand, not the stale floor guess - name
+    // assembly reuses the same resolved `brand`, so the bug corrupted both fields simultaneously.
+    expect(result.name).toContain("Michelin");
+    expect(result.name).not.toContain("Coca-Cola");
+  });
+
+  it("a floor-guess-only existing brand yields to a brand parsed from the payload's name alone (no separate brand field - the original 2026-07-21 incident shape)", () => {
+    const result = enrichProductIdentity({
+      payload: { name: "Michelin X-Ice North 4 225/60R18 104T" }, // no `brand` key at all
+      existing: { name: "Coca-Cola / product unconfirmed", brand: "Coca-Cola", category: "", specsShort: "", specsFull: "" },
+      existingBrandIsFloorGuess: true,
+    });
+    expect(result.brand).toBe("Michelin");
+  });
+
+  it("a floor-guess-only existing brand does NOT survive even when the real decode is itself brandless (matches the already-shipped guarded-site behavior)", () => {
+    const result = enrichProductIdentity({
+      payload: { name: "Entry Level All Season Passenger Tire 205/55R16", brand: "" },
+      existing: { name: "United Solutions / product unconfirmed", brand: "United Solutions", category: "", specsShort: "", specsFull: "" },
+      existingBrandIsFloorGuess: true,
+    });
+    expect(result.brand).toBe("");
+  });
+
+  it("existingBrandIsFloorGuess defaults to false: a genuine (non-floor) existing brand is unaffected and still wins fill-if-empty", () => {
+    const result = enrichProductIdentity({
+      payload: { name: "Michelin X-Ice North 4 225/60R18 104T", brand: "Michelin" },
+      existing: { name: "Human Custom Name", brand: "HumanBrand", category: "", specsShort: "", specsFull: "" },
+    });
+    expect(result.brand).toBe("HumanBrand");
+  });
+
+  it("existingBrandIsFloorGuess: true has no effect when existing.brand is already empty (nothing to protect against)", () => {
+    const result = enrichProductIdentity({
+      payload: { name: "Michelin X-Ice North 4 225/60R18 104T", brand: "Michelin" },
+      existing: { name: "Unidentified item (barcode 049000026603)", brand: "", category: "", specsShort: "", specsFull: "" },
+      existingBrandIsFloorGuess: true,
+    });
+    expect(result.brand).toBe("Michelin");
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
 // Group B (owner mandate 2026-07-21): every tire row must present ONE canonical format the app
 // assembles itself, never raw junky listing text once a confident parse exists.
 // ---------------------------------------------------------------------------------------------

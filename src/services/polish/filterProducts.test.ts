@@ -41,3 +41,48 @@ describe("filterProducts", () => {
     expect(filterProducts(rows, "nonexistent")).toEqual([]);
   });
 });
+
+// W3 data-flows bot (taskD4) repro: a shop owner searching the EXACT size shown in the Size column
+// (which includes a "/", e.g. "275/55R20") got zero results, even though the digits-only form of the
+// same query ("2755520") worked. Root cause: any query with a non-digit character was routed only to
+// brand/model/description text search, and description never carries the size. These fixtures
+// deliberately do NOT repeat the size string inside description/brand/model, unlike the fixtures
+// above, so a fix that only "happens" to match via incidental description text is caught.
+const sizeRows: FilterableRow[] = [
+  { id: "s1", brand: "Goodyear", model: "Wrangler", description: "Goodyear Wrangler All-Terrain", sizeTag: "2755520" },
+  { id: "s2", brand: "Bridgestone", model: "Dueler", description: "Bridgestone Dueler H/T", sizeTag: "2657017" },
+  { id: "s3", brand: "Continental", model: "TerrainContact", description: "Continental TerrainContact A/T", sizeTag: "2255517" },
+];
+
+describe("filterProducts - size query containing a slash (taskD4 regression)", () => {
+  it("matches the exact size as displayed, including the slash (e.g. 275/55R20)", () => {
+    expect(filterProducts(sizeRows, "275/55R20").map((r) => r.id)).toEqual(["s1"]);
+  });
+
+  it("matches a partial size containing a slash (e.g. 275/55)", () => {
+    expect(filterProducts(sizeRows, "275/55").map((r) => r.id)).toEqual(["s1"]);
+  });
+
+  it("still matches the plain digits-only form of the same size", () => {
+    expect(filterProducts(sizeRows, "2755520").map((r) => r.id)).toEqual(["s1"]);
+  });
+
+  it("still matches brand text search unaffected by the size fix", () => {
+    expect(filterProducts(sizeRows, "Goodyear").map((r) => r.id)).toEqual(["s1"]);
+  });
+
+  it("still matches model text search case-insensitively unaffected by the size fix", () => {
+    expect(filterProducts(sizeRows, "dueler").map((r) => r.id)).toEqual(["s2"]);
+  });
+
+  it("a slash-bearing query that matches no size and no text returns no rows, and never throws", () => {
+    expect(() => filterProducts(sizeRows, "999/99R99")).not.toThrow();
+    expect(filterProducts(sizeRows, "999/99R99")).toEqual([]);
+  });
+
+  it("a query built entirely from regex metacharacters never throws and matches nothing spuriously", () => {
+    expect(() => filterProducts(sizeRows, "(.*)+")).not.toThrow();
+    expect(() => filterProducts(sizeRows, "[a-z")).not.toThrow();
+    expect(filterProducts(sizeRows, "(.*)+")).toEqual([]);
+  });
+});

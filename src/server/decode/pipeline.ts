@@ -411,6 +411,34 @@ export function classifySourceTier(reasonCode: string, providerNames: string[]):
   return null;
 }
 
+// Diagnostic observability fix (2026-08-05, gpt-failure-rootcause.md): maybeGptLadder used to collapse
+// EVERY real GPT provider failure (429 rate limit, 5xx server error, network exception, auth failure,
+// non-JSON parse, ...) into the single generic skipReason "gpt_call_failed", leaving zero diagnostic
+// trace in ladderReasons/providerStatuses/the Turso decode_outcomes ledger about what actually failed.
+// This derives a compact, SANITIZED suffix from gptFromScratch's r.error (a status code when present,
+// else a coarse error-class name) - NEVER the raw response body, prompt, key, or full message text
+// (key-safety / PII rule). The caller prefixes it onto "gpt_call_failed:" so the combined string still
+// contains the literal "gpt_call_failed" substring and therefore still trips
+// decodeFallback.ts's CUSTOMER_REASON_DENYLIST exactly like the bare code did - this never becomes more
+// visible to the customer, only to the platform-only debug/ladder/Turso trail.
+export function classifyGptFailureDetail(rawError: string | undefined): string {
+  if (!rawError) return "other"; // gptFromScratch always sets an error string on a real "none" outcome;
+  // this is a defensive default for an unexpected/missing detail, never hit by the real ladder today.
+  const httpMatch = /^HTTP (\d{3})$/.exec(rawError);
+  if (httpMatch) {
+    const status = Number(httpMatch[1]);
+    if (status === 429) return "429";
+    if (status >= 500 && status < 600) return "5xx";
+    return String(status); // other 4xx (400/403/404/422) - still just a status code, no body/message
+  }
+  if (rawError.startsWith("openai_auth_failed")) return "401";
+  if (rawError === "model returned non-JSON") return "bad_json";
+  // Anything else reaching here comes from gptFromScratch's fetch-level catch block - the request never
+  // got an HTTP response at all (DNS failure, connection refused, timeout, generic fetch exception).
+  // Never echo the raw exception text (may embed a URL or stack fragment); "network" says enough.
+  return "network";
+}
+
 /** Fill in the full GptFromScratchResult shape from a Playwright test-fixture body (E2E only). */
 function normalizeMockGptLadder(raw: Partial<GptFromScratchResult> | undefined): GptFromScratchResult | null {
   if (!raw || typeof raw !== "object") return null;
@@ -907,7 +935,12 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // empty productName ("empty productName") counts as genuinely probed-and-empty; every other
     // "none" is surfaced as a skip (visible in providerStatuses) and stays retryable.
     if (r.tier === "none" && (r.aborted || (r.error && r.error !== "empty productName"))) {
-      return { payload: null, skipReason: r.aborted ? "gpt_aborted_at_cap" : "gpt_call_failed", surfaceSkip: true };
+      // Observability fix (2026-08-05): thread a sanitized classification of r.error (status code /
+      // error class, never the raw message) into the skip reason so a real provider failure leaves a
+      // diagnostic trace in ladderReasons/providerStatuses/Turso instead of collapsing to a bare,
+      // undifferentiated "gpt_call_failed" - see classifyGptFailureDetail above.
+      const skipReason = r.aborted ? "gpt_aborted_at_cap" : `gpt_call_failed:${classifyGptFailureDetail(r.error)}`;
+      return { payload: null, skipReason, surfaceSkip: true };
     }
     return { payload: gptResultToDecodePayload(r, code), surfaceSkip: false };
   };

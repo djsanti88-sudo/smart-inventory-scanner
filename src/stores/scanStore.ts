@@ -63,7 +63,7 @@ import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/services/
 import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
 import { prefixFloorName, type PrefixFloorResult } from "@/services/catalog/prefixFloor";
-import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel } from "@/services/catalog/prefixFloorEnrich";
+import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel, brandIsOnlyFloorGuess } from "@/services/catalog/prefixFloorEnrich";
 import { detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable, toMasterAwareStoreEntry } from "@/services/catalog/sanitizeCatalog";
 import { findIdentityMerge } from "@/services/catalog/identityMerge";
@@ -1331,24 +1331,46 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       const state = get();
       const review = state.needsReviewQueue.find((item) => item.id === reviewId);
       if (!review || !state.businessContextReady || !state.sessionId) return;
-      const event = state.scanFeed.find(
+      // CLASS FIX (Codex final verdict finding 2, 2026-08-04): a repeat scan of the SAME unknown code
+      // while its first scan's decode is still in flight reuses the still-open review (scanStore.ts:
+      // 2902-2912) and mints its own SIBLING ScanEvent that shares this review's (sessionId, cleanCode).
+      // The local settle further below (the scanFeed.map matching e.cleanCode === review.cleanCode)
+      // updates EVERY such row, so persistence must sync ALL of them, not just the first `.find()` hit -
+      // otherwise a sibling's decoded status never reaches the backend, and a reload/rehydrate (e.g. the
+      // session timeline reading fresh ScanEvents via getScanEventsBySession) resurrects its stale
+      // "decoding" badge even though the local count was always correct.
+      const events = state.scanFeed.filter(
         (item) => item.sessionId === review.sessionId && item.cleanCode === review.cleanCode,
       );
-      const product = event ? state.products.find((item) => item.id === event.matchedProductId) : undefined;
-      if (!event || !product) return;
-      const version = JSON.stringify([event.status, event.decodeStatus, event.reason, product.name, product.brand, product.primaryBarcode]);
-      enqueueAndSync([
-        makeQueueItem({
-          idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
-          entityType: "Product", entityId: product.id, operation: "SAVE_PRODUCT", payload: product,
-          idempotencyKey: buildIdempotencyKey(state.businessId, event.sessionId, `${product.id}:decode:${version}`, "SAVE_PRODUCT"), scanEventId: null,
-        }),
-        makeQueueItem({
-          idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
-          entityType: "ScanEvent", entityId: event.id, operation: "SAVE_SCAN_EVENT", payload: event,
-          idempotencyKey: buildIdempotencyKey(state.businessId, event.sessionId, `${event.id}:decode:${version}`, "SAVE_SCAN_EVENT"), scanEventId: event.id,
-        }),
-      ]);
+      const items: PendingSyncItem[] = [];
+      const syncedProductIds = new Set<string>();
+      for (const event of events) {
+        const product = state.products.find((item) => item.id === event.matchedProductId);
+        if (!product) continue;
+        // One product save per distinct matched product (normally all sibling events share the same
+        // provisional/decoded product) - never one duplicate SAVE_PRODUCT per sibling event.
+        if (!syncedProductIds.has(product.id)) {
+          syncedProductIds.add(product.id);
+          const productVersion = JSON.stringify([product.name, product.brand, product.primaryBarcode]);
+          items.push(
+            makeQueueItem({
+              idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
+              entityType: "Product", entityId: product.id, operation: "SAVE_PRODUCT", payload: product,
+              idempotencyKey: buildIdempotencyKey(state.businessId, event.sessionId, `${product.id}:decode:${productVersion}`, "SAVE_PRODUCT"), scanEventId: null,
+            }),
+          );
+        }
+        const version = JSON.stringify([event.status, event.decodeStatus, event.reason, product.name, product.brand, product.primaryBarcode]);
+        items.push(
+          makeQueueItem({
+            idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
+            entityType: "ScanEvent", entityId: event.id, operation: "SAVE_SCAN_EVENT", payload: event,
+            idempotencyKey: buildIdempotencyKey(state.businessId, event.sessionId, `${event.id}:decode:${version}`, "SAVE_SCAN_EVENT"), scanEventId: event.id,
+          }),
+        );
+      }
+      if (items.length === 0) return;
+      enqueueAndSync(items);
     };
 
     /**
@@ -4348,14 +4370,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     // name-parsed brand, or genuinely empty), never silently lock in the wrong brand next
                     // to a now-correct decoded name. A brand set by any OTHER means (a prior real decode,
                     // a human edit) still wins untouched, since p.name would no longer equal the floor text.
-                    const brandIsOnlyFloorGuess = isBareUnidentifiedLabel(p.name, code) || p.name === provisionalPlaceholderName(code);
+                    //
+                    // CLASS FIX (2026-08-04, cocacola-bug-report.md): this used to be the ONLY of three
+                    // vulnerable call sites carrying this guard - moved into enrichProductIdentity itself
+                    // (via existingBrandIsFloorGuess) so the other two call sites (resolveUnknown's
+                    // reuse/orphan-upgrade branches) can share the exact same protection.
                     const enrichIdentity = enrichProductIdentity({
                       payload: { name: provName, brand: best?.brand, category: best?.category, specsShort: best?.specsShort, specsFull: best?.specsFull },
-                      existing: {
-                        name: p.name,
-                        brand: brandIsOnlyFloorGuess ? "" : p.brand,
-                        category: p.category, specsShort: p.specsShort, specsFull: p.specsFull,
-                      },
+                      existing: { name: p.name, brand: p.brand, category: p.category, specsShort: p.specsShort, specsFull: p.specsFull },
+                      existingBrandIsFloorGuess: brandIsOnlyFloorGuess(p.name, code),
                     });
                     return {
                           ...p,
@@ -5681,9 +5704,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   // parse of the (cleaned) name - never a guess. `enriched.name` is the CLEANED name
                   // (tireListingNormalizer's cleanListingTitle) - use it wherever np.name would have
                   // been written raw before.
+                  // CLASS FIX (2026-08-04, cocacola-bug-report.md): `p.brand` at this point may be
+                  // NOTHING MORE than the statistical prefix-floor guess ensureProvisionalCount wrote
+                  // synchronously before any decode ever ran (this is the second EXACT unguarded sibling
+                  // of the 2026-07-21 "PREFIX-FLOOR BRAND LOCK FIX" - the dedup-reuse path). Compute it
+                  // once and pass it through so enrichProductIdentity treats that guess as empty rather
+                  // than a trustworthy prior brand.
+                  const pBrandIsFloorGuess = brandIsOnlyFloorGuess(p.name, p.primaryBarcode || review.cleanCode);
                   const enriched = enrichProductIdentity({
                     payload: { name: np.name ?? p.name, brand: np.brand, category: np.category, specsShort: np.specsShort, specsFull: np.specsFull },
                     existing: { name: p.name, brand: p.brand, category: p.category, specsShort: p.specsShort, specsFull: p.specsFull },
+                    existingBrandIsFloorGuess: pBrandIsFloorGuess,
                   });
                   // B1 FIX (owner-reported, 268-row review, 2026-07-20): this re-match/reuse path used to
                   // drop specsShort/specsFull/primarySku/category entirely - a decode payload's structured
@@ -5701,7 +5732,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   if (!p.specsShort) updates.specsShort = enriched.specsShort;
                   if (!p.specsFull) updates.specsFull = enriched.specsFull;
                   if (!p.primarySku && np.primarySku) updates.primarySku = np.primarySku;
-                  if (!p.brand) updates.brand = enriched.brand;
+                  // CLASS FIX: a floor-guess-only brand must yield to enrichProductIdentity's resolution
+                  // (payload brand, then a name-parsed brand) even though p.brand is technically
+                  // non-empty - it was never a trustworthy prior identity in the first place.
+                  if (!p.brand || pBrandIsFloorGuess) updates.brand = enriched.brand;
                   if (!p.structuredModel && enriched.structuredModel) updates.structuredModel = enriched.structuredModel;
                   // Task 4: (re)structure only when the name/brand actually changed above; the guard
                   // inside structuredFieldsFor never overwrites a row already stamped "human". Uses
@@ -5733,9 +5767,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // permanently blank even though the size/brand/model are cleanly parseable from the
             // name. Route through the shared helper: payload field wins when present; a still-empty
             // field falls back to a deterministic parse of the (cleaned) name - never a guess.
+            //
+            // CLASS FIX (2026-08-04, cocacola-bug-report.md): `orphan.brand` at this point may be
+            // NOTHING MORE than the statistical prefix-floor guess ensureProvisionalCount wrote
+            // synchronously before any decode ever ran (this is the EXACT unguarded sibling of the
+            // 2026-07-21 "PREFIX-FLOOR BRAND LOCK FIX" above - the fresh-single-scan path a brand-new
+            // 049000-prefixed tire scan actually takes). existingBrandIsFloorGuess tells
+            // enrichProductIdentity to treat that guess as empty rather than a trustworthy prior brand.
             const orphanEnriched = enrichProductIdentity({
               payload: { name: np.name, brand: np.brand, category: np.category, specsShort: np.specsShort, specsFull: np.specsFull },
               existing: { name: orphan.name, brand: orphan.brand, category: orphan.category, specsShort: orphan.specsShort, specsFull: orphan.specsFull },
+              existingBrandIsFloorGuess: brandIsOnlyFloorGuess(orphan.name, review.cleanCode),
             });
             const upgraded: Product = {
               ...orphan,

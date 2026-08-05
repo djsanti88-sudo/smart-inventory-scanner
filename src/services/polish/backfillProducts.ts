@@ -6,6 +6,7 @@
 // imported directly, standalone, by scripts/polish-backfill.mts under plain `node`).
 import { safeStructuredFieldsFor } from "./structuredFields.ts";
 import { enrichProductIdentity } from "../catalog/enrichProductIdentity.ts";
+import { brandIsOnlyFloorGuess } from "../catalog/prefixFloorEnrich.ts";
 import type { Product } from "../../types.ts";
 
 export interface BackfillResult {
@@ -44,6 +45,15 @@ export function backfillProducts(products: Product[]): BackfillResult {
       skippedHumanIds.push(p.id);
       return p;
     }
+    // MEDIUM review finding (2026-08-05, follow-up to commit cd9e7c51 "floor-guess brands never beat
+    // verified decode identity (class fix)"): that commit propagated `existingBrandIsFloorGuess` to
+    // the three scanStore.ts apply sites but missed this 4th call site - which runs on EVERY
+    // localStorage rehydrate (scanStore's migrate v5->v6) and scripts/polish-backfill.mts. A row
+    // already poisoned by the floor-guess bug (a non-empty statistical GS1-prefix guess, e.g.
+    // "Coca-Cola" for a 049000-prefixed Michelin) has a non-empty `p.brand`, so the old unconditional
+    // `!p.brand` gate below never even considered healing it. Computed once here so both the
+    // enrichProductIdentity call and the widened brand-patch gate share the exact same signal.
+    const brandIsFloorGuess = brandIsOnlyFloorGuess(p.name, p.primaryBarcode);
     // Identity-field fill-if-empty backfill (brand/category/specsShort/specsFull) runs FIRST, parsed
     // from the name when the row itself carries nothing - so the structurer pass right below sees
     // the SAME (already brand-filled) input on every run, keeping the whole function idempotent from
@@ -51,9 +61,16 @@ export function backfillProducts(products: Product[]): BackfillResult {
     const enriched = enrichProductIdentity({
       payload: { name: p.name },
       existing: { name: p.name, brand: p.brand, category: p.category, specsShort: p.specsShort, specsFull: p.specsFull },
+      existingBrandIsFloorGuess: brandIsFloorGuess,
     });
     const identityPatch: Partial<Product> = {};
-    if (!p.brand && enriched.brand) identityPatch.brand = enriched.brand;
+    // Widened (not just `!p.brand`): a floor-guess-poisoned brand must also heal, but ONLY when
+    // enrichment actually derives a DIFFERENT real brand from the row's own name/decode fields - a
+    // floor guess with no better data available (`enriched.brand` still "" or unchanged) must stay
+    // exactly as-is (the naming aid is preserved, never blanked or churned into a no-op "change").
+    if ((!p.brand || brandIsFloorGuess) && enriched.brand && enriched.brand !== p.brand) {
+      identityPatch.brand = enriched.brand;
+    }
     if (!p.category && enriched.category) identityPatch.category = enriched.category;
     if (!p.specsShort && enriched.specsShort) identityPatch.specsShort = enriched.specsShort;
     if (!p.specsFull && enriched.specsFull) identityPatch.specsFull = enriched.specsFull;

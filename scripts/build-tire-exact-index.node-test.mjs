@@ -64,7 +64,10 @@ function fixture() {
   writeFileSync(globalPath, JSON.stringify(global));
   writeFileSync(repairPath, JSON.stringify(repair));
   writeFileSync(reconciliationPath, reconciliation);
-  const entries = Array.from({ length: 42 }, (_, index) => ({
+  // 2026-08-05 orchestrator ruling: the production ledger moved from 42 to 41 entries (one entry
+  // reclassified into the shared_barcode_variant_pair reviewed class); this synthetic fixture ledger
+  // mirrors the same exhaustive count so schema validation in loadDispositionLedger stays consistent.
+  const entries = Array.from({ length: 41 }, (_, index) => ({
     action: "omit_conflicting_field",
     canonicalKeyHmacSha256: hmac(TEST_BOSS_HMAC_KEY, COLLISION_HMAC_DOMAINS[0], `synthetic-${index}`),
     globalSourcePointerHmacSha256: hmac(TEST_BOSS_HMAC_KEY, COLLISION_HMAC_DOMAINS[1], `synthetic-${index}`),
@@ -331,16 +334,16 @@ test("overlap normalizers accept only the reviewed Toyo and tire-size spellings"
 
 test("production build contract pins all three supplied inputs and fixed cardinalities", { skip: !hasProductionInputs() }, () => {
   const reviewedLedger = JSON.parse(readFileSync(resolve("scripts/tire-exact-index-collision-dispositions.json"), "utf8"));
-  assert.equal(reviewedLedger.entries.length, 42, "the exhaustive reviewed MPN collision census is pinned exactly");
+  assert.equal(reviewedLedger.entries.length, 41, "the exhaustive reviewed MPN collision census is pinned exactly (42 -> 41, 2026-08-05 orchestrator ruling)");
   const result = buildExactIndex({ root: resolve("."), ...requiredProductionInputs(), outputDir: join(mkdtempSync(join(tmpdir(), "tire-exact-production-")), "exact-index"), dryRun: true, bossHmacKey: requiredProductionHmacKey() });
-  assert.equal(result.manifest.admittedBossCodes, 5626);
-  assert.equal(result.manifest.acceptedSpellings, 13656);
-  assert.equal(result.manifest.bossCanonicalProductIds, 5296);
-  assert.equal(result.manifest.nonGtinApprovedRows, 314);
-  assert.equal(result.manifest.nonGtinApprovedIdentifiers, 310);
-  assert.equal(result.manifest.nonGtinBlankAliasConflicts, 193);
+  assert.equal(result.manifest.admittedBossCodes, 6354);
+  assert.equal(result.manifest.acceptedSpellings, 10344);
+  assert.equal(result.manifest.bossCanonicalProductIds, 6024);
+  assert.equal(result.manifest.nonGtinApprovedRows, 303);
+  assert.equal(result.manifest.nonGtinApprovedIdentifiers, 299);
+  assert.equal(result.manifest.nonGtinBlankAliasConflicts, 3);
   assert.equal(result.manifest.excludedCasePacks, 1);
-  assert.equal(result.manifest.collisionDispositionCount, 42);
+  assert.equal(result.manifest.collisionDispositionCount, 41);
   assert.match(result.manifest.collisionDispositionLedgerSha256, /^[A-F0-9]{64}$/);
 });
 
@@ -386,7 +389,7 @@ test("restores the previous complete index when promotion fails after its move",
 test("the committed collision source and generated conflict ledger use only domain-separated HMAC fields", () => {
   const source = JSON.parse(readFileSync(resolve("scripts/tire-exact-index-collision-dispositions.json"), "utf8"));
   assert.equal(source.schemaVersion, "2.0.0");
-  assert.equal(source.entries.length, 42);
+  assert.equal(source.entries.length, 41, "42 -> 41, 2026-08-05 orchestrator ruling (shared_barcode_variant_pair reclassification)");
   assert.deepEqual(Object.keys(source).sort(), ["entries", "keyFingerprintHmacSha256", "schemaVersion"]);
   assert.match(source.keyFingerprintHmacSha256, /^[A-F0-9]{64}$/);
   const sourceKeys = [...new Set(source.entries.flatMap(Object.keys))].sort();

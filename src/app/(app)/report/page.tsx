@@ -5,7 +5,13 @@ import { getSession } from "@/lib/auth";
 import { isLiveAuth } from "@/services/auth/authMode";
 import { buildBossReport } from "@/services/reports/bossReport";
 import { useScanStore } from "@/stores/scanStore";
+import { BusinessContextGate } from "@/components/BusinessContextGate";
 
+// BusinessContextGate (same convention as /scan, /review, /history, /sessions/[id], /reconcile,
+// /products, /settings): a hard page load directly on /report must wait for the real signed-in
+// business context to hydrate before "Get shareable link" can send businessId to /api/share -
+// otherwise it would send the coded mock default (demo-business) instead of the real tenant (same
+// bug class as the /reconcile 403).
 export default function BossReportPage() {
   const products = useScanStore((state) => state.products);
   const finalCounts = useScanStore((state) => state.finalCounts);
@@ -81,6 +87,7 @@ export default function BossReportPage() {
 
   return (
     <div className="boss-report-page mx-auto flex max-w-3xl flex-col gap-4 p-4 print:p-0">
+      <BusinessContextGate>
       <style>{`
         @media print {
           @page {
@@ -205,6 +212,7 @@ export default function BossReportPage() {
           </div>
         )}
       </div>
+      </BusinessContextGate>
     </div>
   );
 }

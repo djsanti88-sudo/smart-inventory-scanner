@@ -341,6 +341,14 @@ describe("FinalCountTable Status column + suggested-identity display (owner orde
     expect(row.textContent).not.toMatch(/\(suggested\)/);
     expect(screen.getByTestId("brand-pProv2").textContent).toBe("Michelin");
     expect(row.querySelector('[data-testid="decode-row-status"]')?.textContent).toBe("Suggested");
+
+    // COSMETIC FIX (2026-08-04, cocacola-bug-report.md): the product name and the "unconfirmed" tag
+    // must be separated by an actual space character, not just a CSS margin - otherwise the two
+    // differently-styled adjacent text runs can read as one concatenated word (e.g. "Delinte
+    // D7unconfirmed") in a screenshot. Assert on the raw name cell's textContent directly.
+    const nameCell = row.querySelectorAll("td")[1]!;
+    expect(nameCell.textContent).toMatch(/\S\s+unconfirmed$/);
+    expect(nameCell.textContent).not.toMatch(/\Sunconfirmed$/);
   });
 
   it("provisional product with no suggestion anywhere shows the needs_review badge and keeps the placeholder name", () => {

@@ -7,9 +7,13 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 
 const HASHES = {
-  global: "CF61D12208E6E1AA0DCB5BBD2AAA98E775ED7A60110601628BB3EDE9DBFE13D6",
-  repair: "ECF1F14400489897A3882964E928DFC28F8056CAC262176E28808B7BA0E42E82",
-  reconciliation: "DAB216234D5346BAEEFBAE80E5C704F2F3C5D568CC3CA01FD5C4990B44183FFD",
+  // 2026-08-05 boss truth override (Task B4): global corpus pin corrected to the currently-committed
+  // tireKnowledge.generated.json (the prior CF61D122... pin was already stale before this task - it
+  // predated a harvester rebuild that never re-pinned the exact-index builder). repair/reconciliation
+  // point at the Sheet1-overlay outputs of scripts/tire-db-repair/12_boss_sheet1_overlay_2026-08-05.mjs.
+  global: "942F43EA62634626A6B6F73061DFE7F2FBA2AAB18227BFA63F46DE224B6F8F44",
+  repair: "5BBA95B391E54A8A8FBAC34C6C331C5E587205ABFB8D4D5F54D5C9E494439373",
+  reconciliation: "9ED7FE7BC1A6C540FD4636A6B649CB06932E76B7656F6AF0EDB88E85D3FB45E2",
 };
 const SHARDS = Array.from({ length: 64 }, (_, index) => index.toString(16).padStart(2, "0"));
 const MAX_TOTAL = 40 * 1024 * 1024;
@@ -113,8 +117,12 @@ function collisionHmac(key, domain, value) {
 function loadDispositionLedger(path, bossHmacKey) {
   const bytes = readFileSync(path);
   const parsed = JSON.parse(bytes.toString("utf8"));
-  if (parsed.schemaVersion !== "2.0.0" || !/^[A-F0-9]{64}$/.test(parsed.keyFingerprintHmacSha256) || !Array.isArray(parsed.entries) || parsed.entries.length !== 42) {
-    throw new Error("collision disposition ledger must contain exactly the exhaustive 42 reviewed entries");
+  if (parsed.schemaVersion !== "2.0.0" || !/^[A-F0-9]{64}$/.test(parsed.keyFingerprintHmacSha256) || !Array.isArray(parsed.entries) || parsed.entries.length !== 41) {
+    // 2026-08-05 orchestrator ruling: 42 -> 41. One entry (barcode 848983023278 / item F-62051267) was
+    // reclassified out of this ledger into the shared_barcode_variant_pair reviewed class (same
+    // owner-approved conflict class) because the boss truth override discovered it shares its barcode
+    // with sibling item F-62151267 - see backups/boss-export-2026-08-05/collision_disposition_reclassification_2026-08-05.json.
+    throw new Error("collision disposition ledger must contain exactly the exhaustive 41 reviewed entries");
   }
   if (parsed.keyFingerprintHmacSha256 !== collisionHmac(bossHmacKey, "key-fingerprint:v1", "scanbin-boss-exact-index")) {
     throw new Error("collision disposition ledger HMAC key mismatch");
@@ -195,8 +203,8 @@ export function buildExactIndex(options = {}) {
   const root = resolve(options.root ?? ".");
   const bossHmacKey = requireBossHmacKey(options.bossHmacKey);
   const globalPath = options.globalPath ?? process.env.BOSS_GLOBAL_CORPUS_PATH ?? join(root, "src/server/tire-knowledge/tireKnowledge.generated.json");
-  const repairPath = options.repairPath ?? process.env.BOSS_REPAIR_DB_PATH ?? join(root, "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/REPAIRED_TIRE_DATABASE.db");
-  const reconciliationPath = options.reconciliationPath ?? process.env.BOSS_RECONCILIATION_PATH ?? join(root, "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/BOSS_ROW_RECONCILIATION.csv");
+  const repairPath = options.repairPath ?? process.env.BOSS_REPAIR_DB_PATH ?? join(root, "backups/boss-export-2026-08-05/REPAIRED_TIRE_DATABASE_v2.db");
+  const reconciliationPath = options.reconciliationPath ?? process.env.BOSS_RECONCILIATION_PATH ?? join(root, "backups/boss-export-2026-08-05/BOSS_ROW_RECONCILIATION_v2.csv");
   const outputDir = options.outputDir ?? join(root, "src/server/tire-knowledge/exact-index");
   const dispositionPath = options.dispositionPath ?? join(root, "scripts/tire-exact-index-collision-dispositions.json");
   const expected = options.expectedHashes ?? HASHES;
@@ -296,13 +304,16 @@ export function buildExactIndex(options = {}) {
     }
     bossCanonicals.add(key);
   }
-  if (options.enforceLedgerCompleteness !== false && (ledger.size !== 42 || reviewedCollisionKeys.size !== 42)) {
+  if (options.enforceLedgerCompleteness !== false && (ledger.size !== 41 || reviewedCollisionKeys.size !== 41)) {
     throw new Error("collision disposition ledger has an extra or unmatched entry");
   }
   const excludedCasePacks = blockedPackages.size;
   if (excludedCasePacks !== 1) throw new Error(`expected exactly one excluded case pack, got ${excludedCasePacks}`);
   const expectedCounts = options.expectedCounts === undefined
-    ? { admittedBossCodes: 5626, acceptedSpellings: 13656, bossCanonicalProductIds: 5296, nonGtinApprovedRows: 314, nonGtinApprovedIdentifiers: 310, nonGtinBlankAliasConflicts: 193 }
+    // 2026-08-05 boss truth override (Task B4): recomputed from the Sheet1-overlay reconciliation +
+    // repair snapshot (backups/boss-export-2026-08-05/BOSS_ROW_RECONCILIATION_v2.csv /
+    // REPAIRED_TIRE_DATABASE_v2.db) against the unchanged 78,437-row global corpus.
+    ? { admittedBossCodes: 6354, acceptedSpellings: 10344, bossCanonicalProductIds: 6024, nonGtinApprovedRows: 303, nonGtinApprovedIdentifiers: 299, nonGtinBlankAliasConflicts: 3 }
     : options.expectedCounts;
   const acceptedSpellings = acceptedSpellingKeys.size;
   const nonGtinApprovedIdentifiers = [...acceptedSpellingKeys.keys()].filter((key) => key.startsWith("nongtin:")).length;
