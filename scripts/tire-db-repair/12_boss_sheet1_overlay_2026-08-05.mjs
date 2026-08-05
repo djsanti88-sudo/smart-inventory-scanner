@@ -84,20 +84,48 @@ function csvLine(fields) {
   return fields.map(csvEscape).join(",") + "\n";
 }
 
-// Mirrors build-tire-exact-index.mjs's csvRows() so parsing behaves identically to the consumer.
-function csvRows(text) {
-  const rows = []; let row = [], cell = "", quote = false;
+// Mirrors build-tire-exact-index.mjs's csvRows() so parsing behaves identically to the consumer, plus
+// the unclosed-quote rejection from scripts/boss-workbook-reconcile-dryrun.mjs's parseCsvRows() (Codex
+// final verdict finding 3, 2026-08-05): a stray or missing closing quote must fail loudly, naming the
+// record it started in, instead of silently absorbing the rest of the file as "one giant field".
+export function csvRows(text) {
+  const rows = []; let row = [], cell = "", quote = false; let recordNumber = 1;
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
     if (char === '"') { if (quote && text[i + 1] === '"') { cell += '"'; i++; } else quote = !quote; }
     else if (char === "," && !quote) { row.push(cell); cell = ""; }
-    else if ((char === "\n" || char === "\r") && !quote) { if (char === "\r" && text[i + 1] === "\n") i++; row.push(cell); if (row.some(Boolean)) rows.push(row); row = []; cell = ""; }
+    else if ((char === "\n" || char === "\r") && !quote) { if (char === "\r" && text[i + 1] === "\n") i++; row.push(cell); if (row.some(Boolean)) rows.push(row); row = []; cell = ""; recordNumber++; }
     else cell += char;
+  }
+  if (quote) {
+    throw new Error(
+      `Malformed CSV: unterminated quoted field starting in record ${recordNumber} (counting the header row as record 1). Check for a stray or missing closing quote.`,
+    );
   }
   if (cell || row.length) { row.push(cell); rows.push(row); }
   const [headers, ...values] = rows;
   return values.map((fields) => Object.fromEntries(headers.map((header, index) => [header, fields[index] ?? ""])));
 }
+
+// Builds an item_number -> row Map, throwing loudly on a duplicate key instead of silently letting the
+// LAST row win (Codex final verdict finding 3, part (c)): a duplicate boss item_number in the new sheet1
+// or review-remainder inputs must never be able to silently pick an identity-bearing row for a Sheet1
+// overlay.
+function mapByItemNumberOrThrow(rows, label) {
+  const map = new Map();
+  for (const row of rows) {
+    const key = row.item_number;
+    if (map.has(key)) throw new Error(`duplicate item_number in ${label}: ${key}`);
+    map.set(key, row);
+  }
+  return map;
+}
+
+// Overlay classes B allow exactly these action values (mirroring the script header's own class
+// documentation). Anything else - a typo like "defer_reveiw", or a genuinely new/unhandled future
+// action - must throw naming the offending row rather than silently falling through the `else` branch
+// as an accepted Case B overlay (Codex final verdict finding 3, part (a)).
+const ALLOWED_ACTIONS = new Set(["defer_review", "update_blank_fill", "insert_new_uid", "insert_preserve_uid"]);
 
 // --- Barcode / part-number normalization, mirroring 02_boss_reconciliation.mjs exactly. -----------
 function isGtinShaped(code) {
@@ -139,6 +167,11 @@ export function classifySheet1Row(oldRow, { actionsByItem, newSheet1ByItem, rema
   const itemNumber = oldRow.source_part_number;
   const action = actionsByItem.get(itemNumber);
   if (action) {
+    if (!ALLOWED_ACTIONS.has(action.action)) {
+      throw new Error(
+        `Unknown/unexpected action ${JSON.stringify(action.action)} for item_number ${itemNumber} - expected one of: ${[...ALLOWED_ACTIONS].join(", ")}. Refusing to guess which overlay class it belongs to.`,
+      );
+    }
     if (action.action === "defer_review") {
       return { newRow: oldRow, caseTag: "A", actionType: action.action }; // byte-for-byte unchanged
     }
@@ -281,7 +314,7 @@ export function main(options = {}) {
   console.log(`Loaded ${oldReconRows.length} old reconciliation rows (expect 6990).`);
 
   const newSheet1Rows = csvRows(readFileSync(paths.newSheet1Path, "utf8"));
-  const newSheet1ByItem = new Map(newSheet1Rows.map((r) => [r.item_number, r]));
+  const newSheet1ByItem = mapByItemNumberOrThrow(newSheet1Rows, "new sheet1");
   console.log(`Loaded ${newSheet1Rows.length} new sheet1 rows (expect 3543).`);
 
   const actionLines = readFileSync(paths.actionsPath, "utf8").split("\n").filter(Boolean);
@@ -294,7 +327,7 @@ export function main(options = {}) {
   console.log(`Loaded ${actionsByItem.size} override actions (expect 3429).`);
 
   const remainderRows = csvRows(readFileSync(paths.reviewRemainderPath, "utf8"));
-  const remainderByItem = new Map(remainderRows.map((r) => [r.item_number, r]));
+  const remainderByItem = mapByItemNumberOrThrow(remainderRows, "review remainder");
   console.log(`Loaded ${remainderRows.length} review-remainder rows (expect 114).`);
 
   const counts = {
@@ -307,6 +340,14 @@ export function main(options = {}) {
     sheet1Unmatched: 0,
   };
 
+  // Closure tracking (Codex final verdict finding 3, part (d)): every override action and every
+  // review-remainder row is supposed to be consumed by EXACTLY one Sheet1 row (that is the whole premise
+  // of the deterministic-join header comment). Previously the counts above were only logged, never
+  // asserted against the input sets themselves - an orphan action/remainder entry (an item_number naming
+  // no current Sheet1 row) would silently do nothing and never surface as an error.
+  const usedActionItems = new Set();
+  const usedRemainderItems = new Set();
+
   const newRows = [];
   for (const r of oldReconRows) {
     if (r.sheet !== "Sheet1") {
@@ -318,16 +359,45 @@ export function main(options = {}) {
 
     const { newRow, caseTag, actionType } = classifySheet1Row(r, { actionsByItem, newSheet1ByItem, remainderByItem });
     newRows.push(newRow);
-    if (caseTag === "A") counts.sheet1CaseA_deferred++;
+    if (caseTag === "A") { counts.sheet1CaseA_deferred++; usedActionItems.add(r.source_part_number); }
     else if (caseTag === "B") {
       counts.sheet1CaseB_overlaid++;
       counts.sheet1CaseB_byAction[actionType] = (counts.sheet1CaseB_byAction[actionType] ?? 0) + 1;
-    } else if (caseTag === "C") counts.sheet1CaseC_sharedBarcodeConflict++;
-    else if (caseTag === "D") counts.sheet1CaseD_frozenUnchanged[actionType] = (counts.sheet1CaseD_frozenUnchanged[actionType] ?? 0) + 1;
+      usedActionItems.add(r.source_part_number);
+    } else if (caseTag === "C") { counts.sheet1CaseC_sharedBarcodeConflict++; usedRemainderItems.add(r.source_part_number); }
+    else if (caseTag === "D") {
+      counts.sheet1CaseD_frozenUnchanged[actionType] = (counts.sheet1CaseD_frozenUnchanged[actionType] ?? 0) + 1;
+      usedRemainderItems.add(r.source_part_number);
+    }
     else if (caseTag === "unmatched") counts.sheet1Unmatched++;
   }
 
   if (counts.sheet1Unmatched > 0) throw new Error(`${counts.sheet1Unmatched} Sheet1 rows matched neither actions nor review remainder`);
+
+  // Exact set closure, asserted (never just logged): every loaded action/remainder item_number must have
+  // been consumed by exactly one Sheet1 row above. A leftover entry means the input ledger references an
+  // item_number that no longer exists in the current Sheet1 - a reproducibility hazard that must fail
+  // loudly, not silently produce an artifact short of its claimed inputs.
+  if (usedActionItems.size !== actionsByItem.size) {
+    const orphans = [...actionsByItem.keys()].filter((k) => !usedActionItems.has(k));
+    throw new Error(
+      `Override-actions closure failure: ${orphans.length} action item_number(s) matched no Sheet1 row: ${orphans.slice(0, 20).join(", ")}${orphans.length > 20 ? ", ..." : ""}`,
+    );
+  }
+  if (usedRemainderItems.size !== remainderByItem.size) {
+    const orphans = [...remainderByItem.keys()].filter((k) => !usedRemainderItems.has(k));
+    throw new Error(
+      `Review-remainder closure failure: ${orphans.length} remainder item_number(s) matched no Sheet1 row: ${orphans.slice(0, 20).join(", ")}${orphans.length > 20 ? ", ..." : ""}`,
+    );
+  }
+  // Exact count closure, asserted: every Sheet1 row lands in exactly one case bucket.
+  const sheet1CaseTotal =
+    counts.sheet1CaseA_deferred + counts.sheet1CaseB_overlaid + counts.sheet1CaseC_sharedBarcodeConflict +
+    Object.values(counts.sheet1CaseD_frozenUnchanged).reduce((a, b) => a + b, 0);
+  const sheet1RowCount = oldReconRows.filter((r) => r.sheet === "Sheet1").length;
+  if (sheet1CaseTotal !== sheet1RowCount) {
+    throw new Error(`Sheet1 case-count closure failure: buckets sum to ${sheet1CaseTotal}, expected ${sheet1RowCount}`);
+  }
 
   const header = [
     "sheet", "row", "raw_barcode", "normalized_barcode_candidates", "gtin_valid", "gtin_level",

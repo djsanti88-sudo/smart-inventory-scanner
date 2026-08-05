@@ -1331,24 +1331,46 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       const state = get();
       const review = state.needsReviewQueue.find((item) => item.id === reviewId);
       if (!review || !state.businessContextReady || !state.sessionId) return;
-      const event = state.scanFeed.find(
+      // CLASS FIX (Codex final verdict finding 2, 2026-08-04): a repeat scan of the SAME unknown code
+      // while its first scan's decode is still in flight reuses the still-open review (scanStore.ts:
+      // 2902-2912) and mints its own SIBLING ScanEvent that shares this review's (sessionId, cleanCode).
+      // The local settle further below (the scanFeed.map matching e.cleanCode === review.cleanCode)
+      // updates EVERY such row, so persistence must sync ALL of them, not just the first `.find()` hit -
+      // otherwise a sibling's decoded status never reaches the backend, and a reload/rehydrate (e.g. the
+      // session timeline reading fresh ScanEvents via getScanEventsBySession) resurrects its stale
+      // "decoding" badge even though the local count was always correct.
+      const events = state.scanFeed.filter(
         (item) => item.sessionId === review.sessionId && item.cleanCode === review.cleanCode,
       );
-      const product = event ? state.products.find((item) => item.id === event.matchedProductId) : undefined;
-      if (!event || !product) return;
-      const version = JSON.stringify([event.status, event.decodeStatus, event.reason, product.name, product.brand, product.primaryBarcode]);
-      enqueueAndSync([
-        makeQueueItem({
-          idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
-          entityType: "Product", entityId: product.id, operation: "SAVE_PRODUCT", payload: product,
-          idempotencyKey: buildIdempotencyKey(state.businessId, event.sessionId, `${product.id}:decode:${version}`, "SAVE_PRODUCT"), scanEventId: null,
-        }),
-        makeQueueItem({
-          idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
-          entityType: "ScanEvent", entityId: event.id, operation: "SAVE_SCAN_EVENT", payload: event,
-          idempotencyKey: buildIdempotencyKey(state.businessId, event.sessionId, `${event.id}:decode:${version}`, "SAVE_SCAN_EVENT"), scanEventId: event.id,
-        }),
-      ]);
+      const items: PendingSyncItem[] = [];
+      const syncedProductIds = new Set<string>();
+      for (const event of events) {
+        const product = state.products.find((item) => item.id === event.matchedProductId);
+        if (!product) continue;
+        // One product save per distinct matched product (normally all sibling events share the same
+        // provisional/decoded product) - never one duplicate SAVE_PRODUCT per sibling event.
+        if (!syncedProductIds.has(product.id)) {
+          syncedProductIds.add(product.id);
+          const productVersion = JSON.stringify([product.name, product.brand, product.primaryBarcode]);
+          items.push(
+            makeQueueItem({
+              idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
+              entityType: "Product", entityId: product.id, operation: "SAVE_PRODUCT", payload: product,
+              idempotencyKey: buildIdempotencyKey(state.businessId, event.sessionId, `${product.id}:decode:${productVersion}`, "SAVE_PRODUCT"), scanEventId: null,
+            }),
+          );
+        }
+        const version = JSON.stringify([event.status, event.decodeStatus, event.reason, product.name, product.brand, product.primaryBarcode]);
+        items.push(
+          makeQueueItem({
+            idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
+            entityType: "ScanEvent", entityId: event.id, operation: "SAVE_SCAN_EVENT", payload: event,
+            idempotencyKey: buildIdempotencyKey(state.businessId, event.sessionId, `${event.id}:decode:${version}`, "SAVE_SCAN_EVENT"), scanEventId: event.id,
+          }),
+        );
+      }
+      if (items.length === 0) return;
+      enqueueAndSync(items);
     };
 
     /**

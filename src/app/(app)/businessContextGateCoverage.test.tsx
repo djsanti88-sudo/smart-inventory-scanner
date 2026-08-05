@@ -65,12 +65,8 @@ describe.each([
   { name: "products", Page: ProductsPage, contentTestId: "products-body" },
   { name: "settings", Page: SettingsPage, contentTestId: "clear-cache" },
   { name: "report", Page: ReportPage, contentTestId: "boss-report-body" },
-  // CatalogReviewTable itself never reads/sends businessId (cross-tenant, platform-owner-only,
-  // authorized server-side via id token only - see CatalogReviewTable.tsx). Gated here for
-  // convention consistency, not because it can leak a stale demo-business id. With no matching
-  // platformOwner identity in this test's default state, its own un-gated content would be the
-  // "forbidden" branch, not the real table - either way, the gate must withhold it.
-  { name: "catalog-review", Page: CatalogReviewPage, contentTestId: "catalog-review-forbidden" },
+  // catalog-review is INTENTIONALLY excluded from this gated list - see the dedicated describe block
+  // below (Codex final verdict, 2026-08-05, finding 4 - final ruling).
 ])("$name route: business-context gate (same class as the reconcile 403)", ({ Page, contentTestId }) => {
   it("shows the business-context loading gate instead of page content, and fires no request scoped to the stale demo-business id", () => {
     render(<Page />);
@@ -118,5 +114,25 @@ describe("reconcile: hard-load reproduction with an already-imported session", (
     expect(screen.queryByTestId("reconcile-run")).not.toBeInTheDocument();
     expect(screen.queryByTestId("business-loading")).toBeInTheDocument();
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
+// catalog-review: DELIBERATELY the ODD ONE OUT among the routes above (Codex final verdict, 2026-08-05,
+// finding 4 - final ruling). It was briefly wrapped in BusinessContextGate "for consistency" with the
+// other protected routes, but CatalogReviewTable never reads/sends businessId - it is a cross-tenant,
+// platform-owner-only resource authorized server-side via the Firebase id token only (see
+// CatalogReviewTable.tsx). BusinessContextGate's "no-business" branch requires a SELECTED business
+// membership, so wrapping it there wrongly locked out a correctly authenticated platform owner who has
+// not selected a shop. The final ruling reverted the wrapper: this page must render its real (gated only
+// by useIsPlatformOwner) content immediately, under live auth, with no business context set up at all -
+// never the "business-loading" wait the other four routes above require.
+describe("catalog-review: intentionally UNGATED by BusinessContextGate (business-agnostic platform-owner admin page)", () => {
+  it("renders its own content immediately under live auth with no selected business, never the business-context loading gate", () => {
+    render(<CatalogReviewPage />);
+    // No BusinessContextGate wrapper: the page's real content (platform-owner-only CatalogReviewTable,
+    // which itself shows the "forbidden" branch for a non-platform-owner test identity) renders right
+    // away - the shared "business-loading" gate must never appear here.
+    expect(screen.queryByTestId("business-loading")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("catalog-review-forbidden")).toBeInTheDocument();
   });
 });

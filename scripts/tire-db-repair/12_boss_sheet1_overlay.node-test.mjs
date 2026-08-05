@@ -20,6 +20,7 @@ import {
   classifySheet1Row,
   checkExistingRepairAgreement,
   buildInsertRowRecord,
+  csvRows,
   main,
 } from "./12_boss_sheet1_overlay_2026-08-05.mjs";
 
@@ -356,5 +357,137 @@ test("main(): same inputs produce byte-identical BOSS_ROW_RECONCILIATION_v2.csv 
     const repairA = readFileSync(join(outDirA, "REPAIRED_TIRE_DATABASE_v2.db"));
     const repairB = readFileSync(join(outDirB, "REPAIRED_TIRE_DATABASE_v2.db"));
     assert.ok(repairA.equals(repairB), "repair snapshot DB must be byte-identical across independent runs of the same inputs");
+  } finally { cleanup(root); }
+});
+
+// --- Fail-closed hardening (Codex final verdict, 2026-08-05, finding 3). ------------------------------
+// (a) explicit action allowlist: an unknown/typo action (e.g. "defer_reveiw") must throw naming the row,
+//     never silently fall through to the Case B overlay path.
+// (b) unclosed-quote rejection in the CSV parser, mirroring scripts/boss-workbook-reconcile-dryrun.mjs.
+// (c) duplicate item_number detection in sheet1/remainder inputs (throw, no silent Map collapse).
+// (d) exact set/count closure ASSERTED (every override action and review-remainder row must be consumed
+//     by exactly one Sheet1 row), not just logged.
+
+test("classifySheet1Row rejects an unknown/typo action instead of silently treating it as Case B", () => {
+  const oldRow = { sheet: "Sheet1", row: "2", source_part_number: "ITEM-TYPO", part_number_base_key: "X", part_number_affix_core: "" };
+  const actionsByItem = new Map([["ITEM-TYPO", { action: "defer_reveiw", current_uid: null, desired_barcode: "191563020526" }]]);
+  assert.throws(
+    () => classifySheet1Row(oldRow, { actionsByItem, newSheet1ByItem: new Map(), remainderByItem: new Map() }),
+    (err) => {
+      assert.match(err.message, /defer_reveiw/, "must name the bad action value");
+      assert.match(err.message, /ITEM-TYPO/, "must name the offending item_number/row");
+      return true;
+    },
+  );
+});
+
+test("csvRows rejects an unterminated quoted field instead of silently absorbing the rest of the file", () => {
+  const badText = [
+    "a,b,c",
+    'v1,"unterminated,v3',
+    "next,row,here",
+    "",
+  ].join("\n");
+  assert.throws(() => csvRows(badText), /unterminated|Malformed CSV/i);
+});
+
+test("csvRows accepts a properly closed quoted field containing a comma (sanity: the hardening does not reject valid CSV)", () => {
+  const goodText = ["a,b,c", 'v1,"has, a comma",v3', ""].join("\n");
+  const rows = csvRows(goodText);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].b, "has, a comma");
+});
+
+test("main() throws on a duplicate item_number in the new sheet1 CSV instead of silently collapsing it via Map", () => {
+  const root = mkdtempSync(join(tmpdir(), "boss-sheet1-overlay-dupsheet1-"));
+  const outDir = join(root, "out");
+  try {
+    const fx = buildFixture(root);
+    // Append a duplicate ITEM-A row to the new sheet1 file.
+    const dup = readFileSync(fx.newSheet1Path, "utf8") + "ITEM-A,225/50R17,test item A duplicate,OldBrand,OLDPLACE-A\n";
+    writeFileSync(fx.newSheet1Path, dup);
+    assert.throws(
+      () => main({
+        oldReconPath: fx.oldReconPath, oldRepairDbPath: fx.oldRepairDbPath, newSheet1Path: fx.newSheet1Path,
+        actionsPath: fx.actionsPath, reviewRemainderPath: fx.remainderPath, outDir,
+      }),
+      (err) => {
+        assert.match(err.message, /duplicate/i);
+        assert.match(err.message, /ITEM-A/);
+        return true;
+      },
+    );
+  } finally { cleanup(root); }
+});
+
+test("main() throws on a duplicate item_number in the review-remainder CSV instead of silently collapsing it via Map", () => {
+  const root = mkdtempSync(join(tmpdir(), "boss-sheet1-overlay-dupremainder-"));
+  const outDir = join(root, "out");
+  try {
+    const fx = buildFixture(root);
+    const dup = readFileSync(fx.remainderPath, "utf8") + "ITEM-C,255/45R20,test item C duplicate,NewBrandC,191563007435,shared_barcode_variant_pair\n";
+    writeFileSync(fx.remainderPath, dup);
+    assert.throws(
+      () => main({
+        oldReconPath: fx.oldReconPath, oldRepairDbPath: fx.oldRepairDbPath, newSheet1Path: fx.newSheet1Path,
+        actionsPath: fx.actionsPath, reviewRemainderPath: fx.remainderPath, outDir,
+      }),
+      (err) => {
+        assert.match(err.message, /duplicate/i);
+        assert.match(err.message, /ITEM-C/);
+        return true;
+      },
+    );
+  } finally { cleanup(root); }
+});
+
+test("main() asserts exact closure of the override-actions set: an orphan action item_number matching no Sheet1 row throws instead of being silently ignored", () => {
+  const root = mkdtempSync(join(tmpdir(), "boss-sheet1-overlay-orphanaction-"));
+  const outDir = join(root, "out");
+  try {
+    const fx = buildFixture(root);
+    // An action for an item_number that does not exist anywhere in the old reconciliation's Sheet1 rows -
+    // previously this would just be loaded into actionsByItem and never consumed, with no error, only a
+    // count silently short of the input total.
+    const orphanAction = {
+      item_number: "ITEM-ORPHAN-ACTION", desired_barcode: "8848116004619", current_barcodes: [],
+      match_basis: "none", current_uid: "TIRE_ORPHANUID0000000000", action: "insert_new_uid",
+      old_keys_to_drop: [], part_number_alias_to_add: "ITEM-ORPHAN-ACTION", source_row: 99, decision_reason: "orphan test",
+    };
+    const actionsText = readFileSync(fx.actionsPath, "utf8") + JSON.stringify(orphanAction) + "\n";
+    writeFileSync(fx.actionsPath, actionsText);
+    assert.throws(
+      () => main({
+        oldReconPath: fx.oldReconPath, oldRepairDbPath: fx.oldRepairDbPath, newSheet1Path: fx.newSheet1Path,
+        actionsPath: fx.actionsPath, reviewRemainderPath: fx.remainderPath, outDir,
+      }),
+      (err) => {
+        assert.match(err.message, /closure/i);
+        assert.match(err.message, /ITEM-ORPHAN-ACTION/);
+        return true;
+      },
+    );
+  } finally { cleanup(root); }
+});
+
+test("main() asserts exact closure of the review-remainder set: an orphan remainder item_number matching no Sheet1 row throws instead of being silently ignored", () => {
+  const root = mkdtempSync(join(tmpdir(), "boss-sheet1-overlay-orphanremainder-"));
+  const outDir = join(root, "out");
+  try {
+    const fx = buildFixture(root);
+    const remainderText = readFileSync(fx.remainderPath, "utf8")
+      + "ITEM-ORPHAN-REMAINDER,235/40R18,orphan test item,OldBrand,,blank_barcode\n";
+    writeFileSync(fx.remainderPath, remainderText);
+    assert.throws(
+      () => main({
+        oldReconPath: fx.oldReconPath, oldRepairDbPath: fx.oldRepairDbPath, newSheet1Path: fx.newSheet1Path,
+        actionsPath: fx.actionsPath, reviewRemainderPath: fx.remainderPath, outDir,
+      }),
+      (err) => {
+        assert.match(err.message, /closure/i);
+        assert.match(err.message, /ITEM-ORPHAN-REMAINDER/);
+        return true;
+      },
+    );
   } finally { cleanup(root); }
 });
