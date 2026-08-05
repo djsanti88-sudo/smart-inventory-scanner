@@ -32,3 +32,12 @@ test("scanner-banner proof observes transient forbidden and counted feedback dur
   assert.match(spec, /\[data-testid="scan-status"\]/);
   assert.match(spec, /scannerCounted[^\n]*toBeGreaterThanOrEqual\(1\)/);
 });
+
+test("review proof watches the nav badge live and verifies the durable Review UI is empty", () => {
+  assert.match(spec, /reviewBadgeForbidden/);
+  assert.match(spec, /a\[href="\/review"\]/);
+  assert.match(spec, /page\.goto\("\/review"\)/);
+  assert.match(spec, /review-row-/);
+  assert.match(spec, /Nothing to review/);
+  assert.match(spec, /page\.goto\("\/scan"\)/);
+});

@@ -116,10 +116,12 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
   await expect(input).toBeFocused();
   const history = await page.evaluate((codes) => {
     const root = document.querySelector('[data-testid="scan-feed-body"]'); if (!root) throw new Error("scan feed missing");
-    const value = { forbidden: false, scannerForbidden: false, scannerCounted: 0, measuring: false, lastScannerMessage: "", observer: null as MutationObserver | null, marks: {} as Record<string, { immediate?: number; settled?: number }> };
+    const value = { forbidden: false, scannerForbidden: false, scannerCounted: 0, reviewBadgeForbidden: false, measuring: false, lastScannerMessage: "", observer: null as MutationObserver | null, marks: {} as Record<string, { immediate?: number; settled?: number }> };
     const inspect = () => {
       for (const cell of root.querySelectorAll<HTMLTableCellElement>("td[data-testid^='feed-barcode-']")) for (const code of codes) if (cell.textContent === code) { const row = cell.closest("tr"); if (!row) throw new Error("Exact barcode cell is not contained by a feed row."); const text = row.textContent ?? ""; const mark = value.marks[code] ?? (value.marks[code] = {}); mark.immediate ??= performance.now(); if (/Verified \(app-confirmed\)|Counted/.test(text)) mark.settled ??= performance.now(); if (/Suggested|Needs Review|Conflict|Vendor/i.test(text)) value.forbidden = true; }
       if (!value.measuring) return;
+      const reviewBadge = document.querySelector('a[href="/review"] span')?.textContent?.trim() ?? "";
+      if (reviewBadge !== "") value.reviewBadgeForbidden = true;
       const message = document.querySelector('[data-testid="scan-status"]')?.textContent ?? "";
       if (!message || message === value.lastScannerMessage) return;
       value.lastScannerMessage = message;
@@ -189,10 +191,11 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
     await testInfo.attach("local-corpus-settlement-diagnostic", { contentType: "application/json", body: Buffer.from(JSON.stringify(diagnostic.settlementDiagnostic ?? { unavailable: true })) });
     throw error;
   }
-  const visual = await page.evaluate(() => { const state = (window as Window & { __localCorpusHistory?: { forbidden: boolean; scannerForbidden: boolean; scannerCounted: number; observer: MutationObserver | null } }).__localCorpusHistory; state?.observer?.disconnect(); return { forbidden: state?.forbidden ?? true, scannerForbidden: state?.scannerForbidden ?? true, scannerCounted: state?.scannerCounted ?? 0 }; });
+  const visual = await page.evaluate(() => { const state = (window as Window & { __localCorpusHistory?: { forbidden: boolean; scannerForbidden: boolean; scannerCounted: number; reviewBadgeForbidden: boolean; observer: MutationObserver | null } }).__localCorpusHistory; state?.observer?.disconnect(); return { forbidden: state?.forbidden ?? true, scannerForbidden: state?.scannerForbidden ?? true, scannerCounted: state?.scannerCounted ?? 0, reviewBadgeForbidden: state?.reviewBadgeForbidden ?? true }; });
   expect(visual.forbidden, "trusted exact UI must not transiently show Suggested, Needs Review, Conflict, or Vendor").toBe(false);
   expect(visual.scannerForbidden, "scanner banner must not transiently claim review, conflict, vendor, or new-code status").toBe(false);
   expect(visual.scannerCounted, "scanner banner must show a terminal Counted confirmation during the measured burst").toBeGreaterThanOrEqual(1);
+  expect(visual.reviewBadgeForbidden, "Review navigation badge must never transiently show an open item during the trusted-exact burst").toBe(false);
   expect(unexpectedDialogs, "local corpus proof must not trigger confirmation or session-control dialogs").toEqual([]);
   expect(page.url()).toContain("/scan");
   const allExpectedCodes = [...allExpectedIdentities.keys()];
@@ -200,6 +203,15 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
   await page.reload(); await expect(input).toBeFocused({ timeout: 30_000 });
   await expect(page.getByText(`${selected.length + 1} scans`, { exact: true })).toBeVisible({ timeout: 30_000 });
   await assertVisibleUiSettlement(page, allExpectedCodes, selected.length + 1);
+  await page.goto("/review");
+  const reviewBody = page.getByTestId("review-body");
+  await expect(reviewBody.locator('[data-testid^="review-row-"]')).toHaveCount(0);
+  await expect(reviewBody).toContainText("Nothing to review");
+  await expect(page.locator('a[href="/review"] span')).toHaveCount(0);
+  await page.goto("/scan");
+  await expect(input).toBeFocused({ timeout: 30_000 });
+  await expect(page.getByText(`${selected.length + 1} scans`, { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('a[href="/review"] span')).toHaveCount(0);
   expect(blocked, "local proof must make no external browser requests").toEqual([]);
   const summary = { scope: "synthetic-normal-member-local-emulator", measured: { events: selected.length, counted: selected.length }, warmupBaseline: { events: 1, counted: 1 }, shortest: 20, boundary: selected.length - 20, persisted: { events: settled.events, counted: settled.counted, activeReviews: settled.activeReviews }, identities: [...expectedIdentities.entries()].map(([code, canonicalId]) => ({ code: fixtureModule.redactForReceipt(code), canonicalId: fixtureModule.redactForReceipt(canonicalId) })), scannerIntervalMs: SCANNER_INTERVAL_MS, latencyGate, latencyByFixtureClass, latencyMs: { immediate: { p50: fixtureModule.percentile(immediateMs, .5), p95: fixtureModule.percentile(immediateMs, .95) }, settlement: { p50: fixtureModule.percentile(settledMs, .5), p95: fixtureModule.percentile(settledMs, .95), max: Math.max(...settledMs) }, queue: { p50: fixtureModule.percentile(queueMs, .5), p95: fixtureModule.percentile(queueMs, .95) } } };
   await testInfo.attach("local-corpus-summary", { contentType: "application/json", body: Buffer.from(JSON.stringify(summary)) });
