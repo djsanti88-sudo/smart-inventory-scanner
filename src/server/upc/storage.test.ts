@@ -298,6 +298,19 @@ describe("fileLadderStorage", () => {
       await Promise.all(Array.from({ length: 50 }, () => store.increment("concurrent-key")));
       expect(await store.get("concurrent-key")).toBe("50");
     });
+
+    it("keeps the KV JSON valid across 601 concurrent writes from independent adapters in one process", async () => {
+      const first = fileLadderStorage(dir);
+      const second = fileLadderStorage(dir);
+      const key = "ratelimit:local:0";
+
+      await Promise.all(Array.from({ length: 601 }, (_, index) =>
+        (index % 2 === 0 ? first : second).increment(key),
+      ));
+
+      expect(await first.get(key)).toBe("601");
+      expect(JSON.parse(readFileSync(join(dir, ".ladder-kv.json"), "utf8"))).toMatchObject({ [key]: "601" });
+    });
   });
 });
 
@@ -541,6 +554,19 @@ describe("ladderStorage selector", () => {
     // Prove it's the file adapter: writing then reading round-trips through the filesystem.
     await store.writeUsage({ month: "2026-07", used: 7 });
     expect(existsSync(join(dir, ".go-upc-usage.json"))).toBe(true);
+  });
+
+  it("uses the Boss certification-owned file directory instead of the caller fallback", async () => {
+    delete process.env.TURSO_DATABASE_URL;
+    delete process.env.TURSO_AUTH_TOKEN;
+    const certificationDir = freshDir();
+    process.env.BOSS_CORPUS_LADDER_STORAGE_DIR = certificationDir;
+
+    const store = await ladderStorage(dir);
+    await store.writeUsage({ month: "2026-07", used: 7 });
+
+    expect(existsSync(join(certificationDir, ".go-upc-usage.json"))).toBe(true);
+    expect(existsSync(join(dir, ".go-upc-usage.json"))).toBe(false);
   });
 
   it("selects the Turso adapter when both env vars are set", async () => {

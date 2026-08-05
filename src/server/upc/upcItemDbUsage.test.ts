@@ -85,10 +85,11 @@ describe("upcItemDbUsage", () => {
 
   it("NEVER touches the paid Go-UPC usage key or the daily AI-lookup cap key (own namespace)", async () => {
     const storage = fileLadderStorage(dir);
+    const paidUsageBefore = await storage.readUsage();
     const usage = upcItemDbUsage(storage, { now: AT_JULY_12 });
     await usage.record();
-    // The paid Go-UPC usage file is untouched (still default month/used 0).
-    expect(await storage.readUsage()).toEqual({ month: "2026-07", used: 0 });
+    // The paid Go-UPC usage file is untouched.
+    expect(await storage.readUsage()).toEqual(paidUsageBefore);
     // No key resembling the AI-lookup daily cap's own namespace was ever written.
     expect(await storage.get("ai-lookup-daily-cap")).toBeNull();
   });
