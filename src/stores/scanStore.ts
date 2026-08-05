@@ -3719,28 +3719,42 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             const current = get();
             const currentSettings = current.settings;
             const currentNow = new Date(now()).getTime();
-            const currentToday = now().slice(0, 10);
-            const currentDailyCount = currentSettings.lastResetDate === currentToday
-              ? currentSettings.dailyLookupCount
-              : 0;
-            const ordinaryGate = evaluateAutoDecode({
+            // OWNER RULE (2026-08-05): a trusted-exact miss is never a dead end. The code continues into
+            // the ordinary ladder in every environment unless the ordinary ladder's own gate blocks it.
+            // dailyCount is intentionally forced to 0 so paid-rung cap math stays server-side while the
+            // free corpus/cache rungs still run. GTIN shape and misread-likelihood never suppress the handoff.
+            const continuationGate = evaluateAutoDecode({
               aiEnabled: currentSettings.aiLookupEnabled,
               status: current.aiStatus,
               online: current.online,
-              dailyCount: currentDailyCount,
+              dailyCount: 0,
               dailyLimit: currentSettings.dailyLookupLimit,
               breaker: current.breaker,
               now: currentNow,
             });
-            const shouldFallbackToOrdinary = ordinaryGate.allowed
-              && canonicalGtin(review.cleanCode) !== null
-              && !isLikelyMisreadGtin(review.cleanCode);
-            if (shouldFallbackToOrdinary) {
+            if (continuationGate.allowed) {
               const persisted = materializeTrustedExactMiss(reviewId, decision?.reason || "No trusted exact match was found.");
-              if (persisted) void get().liveDecode(persisted.id, { invalidationGeneration });
+              if (persisted) {
+                set((state) => ({
+                  needsReviewQueue: state.needsReviewQueue.map((item) =>
+                    item.id === persisted.id
+                      ? { ...item, decodeStatus: "decoding" as const }
+                      : item,
+                  ),
+                  scanFeed: state.scanFeed.map((event) =>
+                    event.sessionId === persisted.sessionId && event.cleanCode === persisted.cleanCode
+                      ? { ...event, decodeStatus: "decoding" as const }
+                      : event,
+                  ),
+                }));
+                void get().liveDecode(persisted.id, { invalidationGeneration });
+              }
               return;
             }
-            const missReason = decision?.reason || "No trusted exact match was found.";
+            const missReasonBase = decision?.reason || "No trusted exact match was found.";
+            const missReason = continuationGate.reason
+              ? `${missReasonBase} Decode did not continue: ${continuationGate.reason}`
+              : `${missReasonBase} Decode did not continue: offline.`;
             if (trustedExactProbes.has(reviewId)) {
               materializeTrustedExactMiss(reviewId, missReason);
               return;

@@ -422,7 +422,7 @@ describe("authenticated trusted-exact scan settlement", () => {
 
     await vi.waitFor(() => expect(store.getState().needsReviewQueue[0]?.decodeStatus).toBe("needs_review"));
     const bodies = decodeCalls(fetchSpy).map(([, init]) => JSON.parse(String(init?.body)));
-    expect(bodies.map((body) => body.deterministicOnly)).toEqual([true]);
+    expect(bodies.map((body) => body.deterministicOnly)).toEqual([true, false]);
     expect(store.getState().finalCounts.reduce((sum, row) => sum + row.quantity, 0)).toBe(1);
   });
 
