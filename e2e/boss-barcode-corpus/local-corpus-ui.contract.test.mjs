@@ -19,3 +19,9 @@ test("timing observer identifies each scan through an exact barcode cell, not a 
 test("production corpus proof models a keyboard wedge with an explicit Enter terminator", () => {
   assert.match(spec, /await page\.keyboard\.insertText\(warmEntry\.code\);\s*await page\.keyboard\.press\("Enter"\);/);
 });
+
+test("visible settlement accepts a mixed terminal Verified and Counted exact-barcode feed", () => {
+  assert.equal(spec.includes('feed.getByTestId("decode-row-status")'), false);
+  assert.match(spec, /candidate\.querySelector\("td\[data-testid\^='feed-barcode-'\]"\)\?\.textContent === code/);
+  assert.equal(spec.includes("Verified \\(app-confirmed\\)|Counted"), true);
+});

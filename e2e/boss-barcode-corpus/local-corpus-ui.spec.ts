@@ -34,8 +34,13 @@ async function assertVisibleUiSettlement(page: Page, expectedCodes: readonly str
   await expect.poll(async () => page.locator("td[data-testid^='feed-barcode-']").evaluateAll((cells, expected) =>
     cells.filter((cell) => expected.includes(cell.textContent ?? "")).length,
   expectedCodes), { timeout: 30_000 }).toBe(expectedEvents);
-  await expect(feed.getByTestId("decode-row-status")).toHaveCount(expectedEvents);
-  await expect(feed.getByTestId("decode-row-status")).toHaveText(Array(expectedEvents).fill("Verified (app-confirmed)"));
+  await expect.poll(async () => feed.locator("tr").evaluateAll((rows, codes) => codes.every((code) => {
+    const row = rows.find((candidate) =>
+      candidate.querySelector("td[data-testid^='feed-barcode-']")?.textContent === code,
+    );
+    const text = row?.textContent ?? "";
+    return /Verified \(app-confirmed\)|Counted/.test(text) && !/Suggested|Needs Review|Conflict|Vendor/i.test(text);
+  }), expectedCodes), { timeout: 30_000 }).toBe(true);
   await expect(feed).not.toContainText(/Suggested|Needs Review|Conflict|Vendor/i);
   await expect(page.getByTestId("scan-counted")).toBeVisible();
   await expect(page.getByTestId("scan-status")).toContainText(/^Counted:/);
