@@ -43,9 +43,9 @@ test("opaque trusted exact identity matches the provider contract", () => {
   assert.equal(opaqueTrustedExactCanonicalId("product-a"), "trusted-exact:v1:2898B41B903D0EBB491452B44A103968");
 });
 
-test("receipt redaction is an irreversible digest, not a reversible transport encoding", () => {
-  const raw = "123456789"; const redacted = redactForReceipt(raw);
-  assert.match(redacted, /^[A-F0-9]{16}$/); assert.notEqual(redacted, raw); assert.equal(redacted.includes("MTIzNDU2Nzg5"), false);
+test("receipt redaction is an irreversible keyed digest, not a reversible transport encoding", () => {
+  const raw = "123456789"; const redacted = redactForReceipt(raw, "fixtures-unit-test-receipt-key");
+  assert.match(redacted, /^[A-F0-9]{32}$/); assert.notEqual(redacted, raw); assert.equal(redacted.includes("MTIzNDU2Nzg5"), false);
 });
 
 test("trusted exact latency gate excludes only cold first scan and reports fixture-class aggregates", () => {

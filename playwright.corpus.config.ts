@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { resolve } from "node:path";
-const scrubbed = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:NEXT_PUBLIC_)?(?:OPENAI|GO_?UPC|FIRECRAWL|BRAVE|GEMINI|GOOGLE|TURSO)(?:_|$)/i.test(key)));
+const scrubbed = Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== "BOSS_CERT_RECEIPT_HMAC_KEY" && !/^(?:NEXT_PUBLIC_)?(?:OPENAI|GO_?UPC|FIRECRAWL|BRAVE|GEMINI|GOOGLE|TURSO)(?:_|$)/i.test(key)));
 const source = process.env.BOSS_RECONCILIATION_PATH;
 if (!source) throw new Error("BOSS_RECONCILIATION_PATH is required for local corpus UI proof.");
 export default defineConfig({

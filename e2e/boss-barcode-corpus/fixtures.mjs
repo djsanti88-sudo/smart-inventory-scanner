@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { redactedCode } from "./receipt.mjs";
 
 export const RECONCILIATION_SHA256 = "DAB216234D5346BAEEFBAE80E5C704F2F3C5D568CC3CA01FD5C4990B44183FFD";
 export const EXPECTED_COUNTS = Object.freeze({
@@ -197,9 +198,7 @@ export function opaqueTrustedExactCanonicalId(canonicalProductUid) {
 }
 
 /** One-way receipt identifier: never use reversible encodings for private code material. */
-export function redactForReceipt(value) {
-  return createHash("sha256").update(String(value)).digest("hex").slice(0, 16).toUpperCase();
-}
+export const redactForReceipt = redactedCode;
 
 export function percentile(values, fraction) {
   const sorted = [...values].filter(Number.isFinite).sort((left, right) => left - right);

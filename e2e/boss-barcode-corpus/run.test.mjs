@@ -21,6 +21,6 @@ test("Windows runner actually launches its JS CLI entrypoint with no shell", () 
     const source = join(dir, "source.csv"); const sentinel = join(dir, "firebase.js");
     writeFileSync(source, "private source stays in env");
     writeFileSync(sentinel, "process.exit(process.argv.includes('emulators:exec') && process.argv.includes('npx.cmd playwright test --config=playwright.corpus.config.ts') ? 0 : 7);");
-    assert.equal(main({ BOSS_RECONCILIATION_PATH: source, FIREBASE_CLI_JS: sentinel, FIREBASE_BIN: "firebase.cmd" }), 0);
+    assert.equal(main({ BOSS_RECONCILIATION_PATH: source, BOSS_CERT_RECEIPT_HMAC_KEY: "runner-unit-test-receipt-key", FIREBASE_CLI_JS: sentinel, FIREBASE_BIN: "firebase.cmd" }), 0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

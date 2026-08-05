@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { requireReceiptHmacKey } from "./receipt.mjs";
 
 const FIREBASE_ARGS = ["emulators:exec", "--project", "demo-smart-inventory", "--only", "auth,firestore", "npx.cmd playwright test --config=playwright.corpus.config.ts"];
 export function firebaseCliJs(firebaseBin = "", configuredCliJs = "") {
@@ -17,6 +18,7 @@ export function spawnSpec({ platform = process.platform, firebase = process.env.
 export function main(env = process.env) {
   const source = env.BOSS_RECONCILIATION_PATH;
   if (!source || !existsSync(source)) throw new Error("BOSS_RECONCILIATION_PATH must identify the private pinned reconciliation source.");
+  requireReceiptHmacKey(env.BOSS_CERT_RECEIPT_HMAC_KEY);
   const cliJs = process.platform === "win32" ? firebaseCliJs(env.FIREBASE_BIN, env.FIREBASE_CLI_JS) : "";
   if (cliJs && !existsSync(cliJs)) throw new Error("Firebase CLI JavaScript entrypoint was not found beside FIREBASE_BIN.");
   const spec = spawnSpec({ firebase: env.FIREBASE_BIN, firebaseCliJs: cliJs });

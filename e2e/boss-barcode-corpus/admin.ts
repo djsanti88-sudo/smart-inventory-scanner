@@ -21,6 +21,19 @@ async function clearCollection(db: Firestore, path: string) {
   await batch.commit();
 }
 
+/** Removes the emulator-only tenant after a proof so its state cannot contaminate another test. */
+export async function clearLocalCorpusTenant() {
+  const auth = getAuth(app()); const db = adminDb();
+  await Promise.all(["products", "aliases", "scanEvents", "inventoryCounts", "countSessions", "unknownCodeReviews", "auditLog", "_appliedKeys"].map((name) => clearCollection(db, `businesses/${LOCAL_CORPUS_BUSINESS_ID}/${name}`)));
+  await Promise.all([
+    db.doc(`businesses/${LOCAL_CORPUS_BUSINESS_ID}`).delete(),
+    db.doc(`businessMembers/${LOCAL_CORPUS_BUSINESS_ID}_${LOCAL_CORPUS_UID}`).delete(),
+    db.doc(`userProfiles/${LOCAL_CORPUS_UID}`).delete(),
+  ]);
+  try { await auth.deleteUser(LOCAL_CORPUS_UID); }
+  catch (error) { if (!String((error as { code?: string }).code ?? "").includes("user-not-found")) throw error; }
+}
+
 /** Synthetic, ordinary owner membership for the local emulator only. */
 export async function seedLocalCorpusTenant() {
   const auth = getAuth(app()); const db = adminDb();

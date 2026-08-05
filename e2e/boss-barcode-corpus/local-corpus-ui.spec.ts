@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { adminDb, LOCAL_CORPUS_BUSINESS_ID, LOCAL_CORPUS_EMAIL, LOCAL_CORPUS_PASSWORD } from "./admin";
+import { adminDb, clearLocalCorpusTenant, LOCAL_CORPUS_BUSINESS_ID, LOCAL_CORPUS_EMAIL, LOCAL_CORPUS_PASSWORD } from "./admin";
 
 const ALLOWED_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const SCANNER_INTERVAL_MS = 100; // declared local keyboard-wedge arrival rate: 10 scans/s
@@ -27,6 +27,55 @@ async function login(page: Page) {
   await page.waitForURL("**/scan");
   await expect(page.getByTestId("scanner-input")).toBeFocused({ timeout: 30_000 });
 }
+
+async function pinScannerSubmitMode(page: Page) {
+  return page.evaluate(async () => {
+    type Store = { getState: () => { settings: { scannerSubmitMode: "enter" | "debounce" | "both" }; updateSettings: (settings: { scannerSubmitMode: "both" | "enter" | "debounce" }) => void } };
+    const store = (window as Window & { __scanStore?: Store }).__scanStore;
+    if (!store) throw new Error("Local corpus proof requires the test-only scan-store observer to pin scanner submission mode.");
+    const previous = store.getState().settings.scannerSubmitMode;
+    store.getState().updateSettings({ scannerSubmitMode: "both" });
+    if (store.getState().settings.scannerSubmitMode !== "both") throw new Error("Scanner submission mode was not pinned to both before the corpus burst.");
+    (window as Window & { __localCorpusPreviousSubmitMode?: typeof previous }).__localCorpusPreviousSubmitMode = previous;
+  });
+}
+
+async function restoreScannerSubmitMode(page: Page) {
+  await page.evaluate(() => {
+    type Mode = "enter" | "debounce" | "both";
+    type Store = { getState: () => { updateSettings: (settings: { scannerSubmitMode: Mode }) => void } };
+    const windowWithState = window as Window & { __scanStore?: Store; __localCorpusPreviousSubmitMode?: Mode };
+    if (windowWithState.__scanStore && windowWithState.__localCorpusPreviousSubmitMode) {
+      windowWithState.__scanStore.getState().updateSettings({ scannerSubmitMode: windowWithState.__localCorpusPreviousSubmitMode });
+    }
+  }).catch(() => undefined);
+}
+
+async function assertVisibleUiSettlement(page: Page, expectedCodes: readonly string[], expectedEvents: number) {
+  const feed = page.getByTestId("scan-feed-body");
+  await expect(feed.locator("tr")).toHaveCount(expectedEvents, { timeout: 30_000 });
+  await expect.poll(async () => page.locator("td[data-testid^='feed-barcode-']").evaluateAll((cells, expected) =>
+    cells.filter((cell) => expected.includes(cell.textContent ?? "")).length,
+  expectedCodes), { timeout: 30_000 }).toBe(expectedEvents);
+  await expect(feed.getByTestId("decode-row-status")).toHaveCount(expectedEvents);
+  await expect(feed.getByTestId("decode-row-status")).toHaveText(Array(expectedEvents).fill("Verified (app-confirmed)"));
+  await expect(feed).not.toContainText(/Suggested|Needs Review|Conflict|Vendor/i);
+  await expect(page.getByTestId("scan-counted")).toBeVisible();
+  await expect(page.getByTestId("scan-status")).toContainText(/^Counted:/);
+  await expect(page.getByTestId("pending-count")).toHaveText(/^(?:Waiting to save|All saved): 0$/, { timeout: 30_000 });
+  await expect(page.getByTestId("final-count-body").locator("td[data-testid^='qty-']")).not.toHaveCount(0);
+  await expect.poll(async () => page.getByTestId("final-count-body").locator("td[data-testid^='qty-']").evaluateAll((cells) =>
+    cells.reduce((total, cell) => total + Number(cell.textContent?.trim() ?? 0), 0),
+  )).toBe(expectedEvents);
+  await expect(page.getByTestId("final-count-body")).not.toContainText(/Suggested|Needs Review|Conflict|Vendor/i);
+  await expect(page.locator('a[href="/review"] span')).toHaveCount(0);
+  await expect(page.getByTestId("scanner-input")).toBeFocused();
+}
+
+test.afterEach(async ({ page }) => {
+  await restoreScannerSubmitMode(page);
+  await clearLocalCorpusTenant();
+});
 
 async function settlementSnapshot(expectedEvents: number, expectedIdentities: Map<string, string>) {
   const db = adminDb();
@@ -69,8 +118,11 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
   const expectedIdentities = new Map(selected.map((entry) => [entry.code, fixtureModule.runtimeCanonicalIdFor(entry)]));
   const blocked = await blockExternalEgress(page);
   const consoleErrors: string[] = [];
+  const unexpectedDialogs: string[] = [];
+  page.on("dialog", async (dialog) => { unexpectedDialogs.push(dialog.type()); await dialog.dismiss(); });
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text().replace(/\d{5,}/g, "[redacted]").slice(0, 240)); });
   await login(page);
+  await pinScannerSubmitMode(page);
   const input = page.getByTestId("scanner-input");
   const feed = page.getByTestId("scan-feed-body");
   // This authenticated UI warm-up primes the exact index and route without being included in the
@@ -85,7 +137,7 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
   const history = await page.evaluate((codes) => {
     const root = document.querySelector('[data-testid="scan-feed-body"]'); if (!root) throw new Error("scan feed missing");
     const value = { forbidden: false, observer: null as MutationObserver | null, marks: {} as Record<string, { immediate?: number; settled?: number }> };
-    const inspect = () => { for (const row of root.querySelectorAll("tr")) for (const code of codes) { const text = row.textContent ?? ""; if (!text.includes(code)) continue; const mark = value.marks[code] ?? (value.marks[code] = {}); mark.immediate ??= performance.now(); if (/Verified \(app-confirmed\)|Counted/.test(text)) mark.settled ??= performance.now(); if (/Suggested|Needs Review|Conflict|Vendor/i.test(text)) value.forbidden = true; } };
+    const inspect = () => { for (const cell of root.querySelectorAll<HTMLTableCellElement>("td[data-testid^='feed-barcode-']")) for (const code of codes) { if (cell.textContent === code) { const row = cell.closest("tr"); if (!row) throw new Error("Exact barcode cell is not contained by a feed row."); const text = row.textContent ?? ""; const mark = value.marks[code] ?? (value.marks[code] = {}); mark.immediate ??= performance.now(); if (/Verified \(app-confirmed\)|Counted/.test(text)) mark.settled ??= performance.now(); if (/Suggested|Needs Review|Conflict|Vendor/i.test(text)) value.forbidden = true; } } };
     value.observer = new MutationObserver(inspect);
     value.observer.observe(root, { childList: true, subtree: true, characterData: true }); (window as Window & { __localCorpusHistory?: typeof value }).__localCorpusHistory = value;
     return true;
@@ -145,9 +197,13 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
   }
   const visual = await page.evaluate(() => { const state = (window as Window & { __localCorpusHistory?: { forbidden: boolean; observer: MutationObserver | null } }).__localCorpusHistory; state?.observer?.disconnect(); return state?.forbidden ?? true; });
   expect(visual, "trusted exact UI must not transiently show Suggested, Needs Review, Conflict, or Vendor").toBe(false);
+  expect(unexpectedDialogs, "local corpus proof must not trigger confirmation or session-control dialogs").toEqual([]);
   expect(page.url()).toContain("/scan");
+  const allExpectedCodes = [...allExpectedIdentities.keys()];
+  await assertVisibleUiSettlement(page, allExpectedCodes, selected.length + 1);
   await page.reload(); await expect(input).toBeFocused({ timeout: 30_000 });
   await expect(page.getByText(`${selected.length + 1} scans`, { exact: true })).toBeVisible({ timeout: 30_000 });
+  await assertVisibleUiSettlement(page, allExpectedCodes, selected.length + 1);
   expect(blocked, "local proof must make no external browser requests").toEqual([]);
   const summary = { scope: "synthetic-normal-member-local-emulator", measured: { events: selected.length, counted: selected.length }, warmupBaseline: { events: 1, counted: 1 }, shortest: 20, boundary: selected.length - 20, persisted: { events: settled.events, counted: settled.counted, activeReviews: settled.activeReviews }, identities: [...expectedIdentities.entries()].map(([code, canonicalId]) => ({ code: fixtureModule.redactForReceipt(code), canonicalId: fixtureModule.redactForReceipt(canonicalId) })), scannerIntervalMs: SCANNER_INTERVAL_MS, latencyGate, latencyByFixtureClass, latencyMs: { immediate: { p50: fixtureModule.percentile(immediateMs, .5), p95: fixtureModule.percentile(immediateMs, .95) }, settlement: { p50: fixtureModule.percentile(settledMs, .5), p95: fixtureModule.percentile(settledMs, .95), max: Math.max(...settledMs) }, queue: { p50: fixtureModule.percentile(queueMs, .5), p95: fixtureModule.percentile(queueMs, .95) } } };
   await testInfo.attach("local-corpus-summary", { contentType: "application/json", body: Buffer.from(JSON.stringify(summary)) });
