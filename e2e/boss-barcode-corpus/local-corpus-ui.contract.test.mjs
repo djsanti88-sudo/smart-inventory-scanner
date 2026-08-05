@@ -25,3 +25,10 @@ test("visible settlement accepts a mixed terminal Verified and Counted exact-bar
   assert.match(spec, /candidate\.querySelector\("td\[data-testid\^='feed-barcode-'\]"\)\?\.textContent === code/);
   assert.equal(spec.includes("Verified \\(app-confirmed\\)|Counted"), true);
 });
+
+test("scanner-banner proof observes transient forbidden and counted feedback during the burst", () => {
+  assert.match(spec, /scannerForbidden/);
+  assert.match(spec, /scannerCounted/);
+  assert.match(spec, /\[data-testid="scan-status"\]/);
+  assert.match(spec, /scannerCounted[^\n]*toBeGreaterThanOrEqual\(1\)/);
+});

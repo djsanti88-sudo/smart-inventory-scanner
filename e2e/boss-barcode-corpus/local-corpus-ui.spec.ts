@@ -42,8 +42,6 @@ async function assertVisibleUiSettlement(page: Page, expectedCodes: readonly str
     return /Verified \(app-confirmed\)|Counted/.test(text) && !/Suggested|Needs Review|Conflict|Vendor/i.test(text);
   }), expectedCodes), { timeout: 30_000 }).toBe(true);
   await expect(feed).not.toContainText(/Suggested|Needs Review|Conflict|Vendor/i);
-  await expect(page.getByTestId("scan-counted")).toBeVisible();
-  await expect(page.getByTestId("scan-status")).toContainText(/^Counted:/);
   await expect(page.getByTestId("pending-count")).toHaveText(/^(?:Waiting to save|All saved): 0$/, { timeout: 30_000 });
   await expect(page.getByTestId("final-count-body").locator("td[data-testid^='qty-']")).not.toHaveCount(0);
   await expect.poll(async () => page.getByTestId("final-count-body").locator("td[data-testid^='qty-']").evaluateAll((cells) =>
@@ -118,14 +116,28 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
   await expect(input).toBeFocused();
   const history = await page.evaluate((codes) => {
     const root = document.querySelector('[data-testid="scan-feed-body"]'); if (!root) throw new Error("scan feed missing");
-    const value = { forbidden: false, observer: null as MutationObserver | null, marks: {} as Record<string, { immediate?: number; settled?: number }> };
-    const inspect = () => { for (const cell of root.querySelectorAll<HTMLTableCellElement>("td[data-testid^='feed-barcode-']")) for (const code of codes) { if (cell.textContent === code) { const row = cell.closest("tr"); if (!row) throw new Error("Exact barcode cell is not contained by a feed row."); const text = row.textContent ?? ""; const mark = value.marks[code] ?? (value.marks[code] = {}); mark.immediate ??= performance.now(); if (/Verified \(app-confirmed\)|Counted/.test(text)) mark.settled ??= performance.now(); if (/Suggested|Needs Review|Conflict|Vendor/i.test(text)) value.forbidden = true; } } };
+    const value = { forbidden: false, scannerForbidden: false, scannerCounted: 0, measuring: false, lastScannerMessage: "", observer: null as MutationObserver | null, marks: {} as Record<string, { immediate?: number; settled?: number }> };
+    const inspect = () => {
+      for (const cell of root.querySelectorAll<HTMLTableCellElement>("td[data-testid^='feed-barcode-']")) for (const code of codes) if (cell.textContent === code) { const row = cell.closest("tr"); if (!row) throw new Error("Exact barcode cell is not contained by a feed row."); const text = row.textContent ?? ""; const mark = value.marks[code] ?? (value.marks[code] = {}); mark.immediate ??= performance.now(); if (/Verified \(app-confirmed\)|Counted/.test(text)) mark.settled ??= performance.now(); if (/Suggested|Needs Review|Conflict|Vendor/i.test(text)) value.forbidden = true; }
+      if (!value.measuring) return;
+      const message = document.querySelector('[data-testid="scan-status"]')?.textContent ?? "";
+      if (!message || message === value.lastScannerMessage) return;
+      value.lastScannerMessage = message;
+      if (/Suggested|Needs Review|Conflict|Vendor|New code|Check the review list/i.test(message)) value.scannerForbidden = true;
+      if (/^Counted:/.test(message)) value.scannerCounted += 1;
+    };
     value.observer = new MutationObserver(inspect);
-    value.observer.observe(root, { childList: true, subtree: true, characterData: true }); (window as Window & { __localCorpusHistory?: typeof value }).__localCorpusHistory = value;
+    value.observer.observe(document.body, { childList: true, subtree: true, characterData: true }); (window as Window & { __localCorpusHistory?: typeof value }).__localCorpusHistory = value;
     return true;
   }, selected.map((entry) => entry.code));
   expect(history).toBe(true);
   const starts = new Map<string, number>();
+  await page.evaluate(() => {
+    const state = (window as Window & { __localCorpusHistory?: { measuring: boolean; lastScannerMessage: string } }).__localCorpusHistory;
+    if (!state) throw new Error("local corpus history missing");
+    state.lastScannerMessage = document.querySelector('[data-testid="scan-status"]')?.textContent ?? "";
+    state.measuring = true;
+  });
   const burstStart = performance.now();
   for (let index = 0; index < selected.length; index += 1) {
     if (index % 20 === 0) await expect(input).toBeFocused();
@@ -177,8 +189,10 @@ test("synthetic normal-member UI proves short and boundary trusted exact barcode
     await testInfo.attach("local-corpus-settlement-diagnostic", { contentType: "application/json", body: Buffer.from(JSON.stringify(diagnostic.settlementDiagnostic ?? { unavailable: true })) });
     throw error;
   }
-  const visual = await page.evaluate(() => { const state = (window as Window & { __localCorpusHistory?: { forbidden: boolean; observer: MutationObserver | null } }).__localCorpusHistory; state?.observer?.disconnect(); return state?.forbidden ?? true; });
-  expect(visual, "trusted exact UI must not transiently show Suggested, Needs Review, Conflict, or Vendor").toBe(false);
+  const visual = await page.evaluate(() => { const state = (window as Window & { __localCorpusHistory?: { forbidden: boolean; scannerForbidden: boolean; scannerCounted: number; observer: MutationObserver | null } }).__localCorpusHistory; state?.observer?.disconnect(); return { forbidden: state?.forbidden ?? true, scannerForbidden: state?.scannerForbidden ?? true, scannerCounted: state?.scannerCounted ?? 0 }; });
+  expect(visual.forbidden, "trusted exact UI must not transiently show Suggested, Needs Review, Conflict, or Vendor").toBe(false);
+  expect(visual.scannerForbidden, "scanner banner must not transiently claim review, conflict, vendor, or new-code status").toBe(false);
+  expect(visual.scannerCounted, "scanner banner must show a terminal Counted confirmation during the measured burst").toBeGreaterThanOrEqual(1);
   expect(unexpectedDialogs, "local corpus proof must not trigger confirmation or session-control dialogs").toEqual([]);
   expect(page.url()).toContain("/scan");
   const allExpectedCodes = [...allExpectedIdentities.keys()];
