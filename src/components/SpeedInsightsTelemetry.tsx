@@ -26,7 +26,14 @@ export function minimizeSpeedInsightEvent(
   }
 }
 
+export function isSpeedInsightsDisabled(value = process.env.NEXT_PUBLIC_DISABLE_TELEMETRY): boolean {
+  return value === "1";
+}
+
 export function SpeedInsightsTelemetry() {
+  // Local corpus certification has a strict no-external-egress contract. This opt-out is deliberately
+  // explicit and preserves normal Preview/production telemetry by default.
+  if (isSpeedInsightsDisabled()) return null;
   return (
     <SpeedInsights
       sampleRate={0.1}

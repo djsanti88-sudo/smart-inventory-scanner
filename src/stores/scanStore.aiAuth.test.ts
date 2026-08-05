@@ -26,6 +26,8 @@ describe("scanStore live decode auth", () => {
       const applied: Array<{ operation: string; idempotencyKey: string }> = [];
       const store = createTestScanStore({
         cloudBackend: true,
+        // This unit isolates the ordinary decode-auth payload. Trusted-exact has its own attestation suite.
+        trustedExactProbeEnabled: false,
         db: {
           apply: async (item) => {
             applied.push(item);

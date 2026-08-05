@@ -20,7 +20,13 @@ describe("upcItemDbUsage", () => {
   let dir: string;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(AT_JULY_12());
     dir = freshDir();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("fresh store: allowed with used 0, limit 90 (buffer under UPCitemdb's 100/day)", async () => {

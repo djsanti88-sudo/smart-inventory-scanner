@@ -1,0 +1,1222 @@
+{
+  "schemaVersion": "1.0.0",
+  "entries": [
+    {
+      "sourcePointer": "Sheet1:1000",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1093",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1094",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1095",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1096",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1097",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1098",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1099",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1100",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1101",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1102",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1104",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1132",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1133",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1134",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1135",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1136",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1137",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1138",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1139",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1140",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1141",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1142",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1143",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1144",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1145",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1146",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1147",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1148",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1149",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1150",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1151",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1152",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1153",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1154",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1155",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1156",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1157",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1158",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1159",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1160",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1161",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1162",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1165",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1166",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1167",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1168",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1170",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1171",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1172",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1173",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1174",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1175",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1176",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1178",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1189",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:140",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:144",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1537",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1547",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1559",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1567",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1568",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1573",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:158",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1589",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1590",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1591",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1592",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1608",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "CB92DAAD1601CB177DA0D0A8B34BFC499B0770AE0A3DE2FEB9635813674D068D"
+    },
+    {
+      "sourcePointer": "Sheet1:170",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1757",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1761",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1763",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1778",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1798",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1828",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:1870",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "28303F6C106E1D210541B626A2C1B2E2AE6F8B75EB7418FF7C96B43E26603557"
+    },
+    {
+      "sourcePointer": "Sheet1:1871",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "0DDD6BADDDCC3A0C75C1B779E37C9820444481CD16165FBC3CC4984683B0BBDD"
+    },
+    {
+      "sourcePointer": "Sheet1:1877",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "004AB2259A16F95E118E959495869A5F61141EF0D1FC09ED1C40B4A402FC1A4A"
+    },
+    {
+      "sourcePointer": "Sheet1:1878",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "46D20BF65A11D0C249D4B60142070C09B8A3AA0E2F6FC0336E8C10C235CDD7FE"
+    },
+    {
+      "sourcePointer": "Sheet1:1879",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "EF53A866274983AED3D6C36BF53665BC7333284C53BC3E8FC747D914E9575E25"
+    },
+    {
+      "sourcePointer": "Sheet1:1914",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "1DB2E8169EF2A5B3FB9B9CC1B144F3F95A182E22BDCCB92673841F6A6071B4D3"
+    },
+    {
+      "sourcePointer": "Sheet1:1915",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "77C6ABAF4C4728DB36E3038D3B2B0F10CB0D9D961BAE777D2225FAF63D95BB2B"
+    },
+    {
+      "sourcePointer": "Sheet1:1926",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "15F44C4FCFE1407DD99EEB302C4F701C3F7526E655FAAFA5B2261F340360E5A7"
+    },
+    {
+      "sourcePointer": "Sheet1:1928",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "CD7650AD02F9BAD30E28EAC5B453C6BA1F13679B3D35640CBDF0EE39FFF7B1FC"
+    },
+    {
+      "sourcePointer": "Sheet1:1929",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "B2EB58F831D9A9F0F7A6C79E22305555BF1EABF17E57485EF983B04E7052A624"
+    },
+    {
+      "sourcePointer": "Sheet1:1933",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "0DB35A6C9DD621D43D2B891422E91074D9CDF7120E02C973534FDEE260CA743B"
+    },
+    {
+      "sourcePointer": "Sheet1:1938",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "3DA572051F493A1C82432581814D22A61E6A644F560F33699060BCABD8584625"
+    },
+    {
+      "sourcePointer": "Sheet1:1939",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "1BA4B818F100A6CD4181056DE72DAEAD1D23BFAC8B7396B8D41273505CD81BAE"
+    },
+    {
+      "sourcePointer": "Sheet1:1940",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "5A1E9F1D32218E520562F6D76129E630E9E90AB6A993D365EAE8D3B26085394C"
+    },
+    {
+      "sourcePointer": "Sheet1:1941",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "826DFAD57869AF0CE9716E02F7F9CE5D461242CF433EA45A479A863C500238CE"
+    },
+    {
+      "sourcePointer": "Sheet1:1943",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "6F925D4451012B08612F7654602AC89A0B47FBAA5E8965061455E73900B9F935"
+    },
+    {
+      "sourcePointer": "Sheet1:1944",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "9B06C37A62C1F8D90C9C4E774C74F60F5F18E1A227FA12585408F208B3E92A94"
+    },
+    {
+      "sourcePointer": "Sheet1:1954",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "D85800F9A0A63F3C0553AA2DB034DF620145DCE6C3B4BE6B68225B2A60C0E47D"
+    },
+    {
+      "sourcePointer": "Sheet1:1980",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "01FB998840F05A2C1F75C8699800E93F5CE00C1812620D6B3A06C05E12716252"
+    },
+    {
+      "sourcePointer": "Sheet1:1981",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "169C9692AF31C6A44198890D86CF6CA8A06D642DFE00A12FE8C032CF86004D66"
+    },
+    {
+      "sourcePointer": "Sheet1:1989",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "6556F7E8F7519DFCD64947811CA5F34F41DB066659CEF863F6EF15DA81567945"
+    },
+    {
+      "sourcePointer": "Sheet1:1990",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "E550213CC319A10BB4A2365638E5CDBBAE95230BDA0B6617479507DCC04901EC"
+    },
+    {
+      "sourcePointer": "Sheet1:200",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:2007",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "3B1ED573D84B9EB1380B3B1BB38028753054FBCA876706A25BF6026B61AFBB63"
+    },
+    {
+      "sourcePointer": "Sheet1:2023",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "B83C24BB37125064E864FEDEF0C803ED69161D659F84E1B51C2B88D9F8536A3B"
+    },
+    {
+      "sourcePointer": "Sheet1:2048",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "23CA9449511EC1754AEF7C4A5A36F4EB27ABBE3473E33936EB135BFCD86D5DD9"
+    },
+    {
+      "sourcePointer": "Sheet1:2052",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "63334C94E5FEA4BD1ADA4DA79F61D4C909E7EB252B18219E90AD517143AC672F"
+    },
+    {
+      "sourcePointer": "Sheet1:2153",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "4AEB7FF73FA405FFFDEABAEFBA349B348A65C0F4480E67A7A8456B3A5E887DE6"
+    },
+    {
+      "sourcePointer": "Sheet1:2157",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "257CA5BD763DE4AAA44DC06C3033A4DFED2981AC92C70590091E08F9B531220D"
+    },
+    {
+      "sourcePointer": "Sheet1:2158",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "6A161DC625FFA5238E1F9139E8593A6850514FFEC49EA35BD7D2B8FD7DDF84BF"
+    },
+    {
+      "sourcePointer": "Sheet1:236",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:2420",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:2490",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:2494",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:2500",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:2580",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:2586",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:2589",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:2591",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:2593",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:2626",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:2629",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:2739",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:563",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:564",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:566",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:568",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:569",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:570",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:571",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:576",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:579",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:580",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:582",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:583",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:585",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:586",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:587",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:594",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:595",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:598",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:599",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:600",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:601",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:602",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:603",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:604",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:607",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:608",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:613",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:615",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:616",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:617",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:621",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:622",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:624",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:626",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:629",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:636",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:644",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:652",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:687",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "660B67499CD94117070D075E13787BA05B523F4A935D22C57C7FA691433A4A87"
+    },
+    {
+      "sourcePointer": "Sheet1:689",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "B51BB57FA6A4AC7770778D32E7693EA6DD28D95F78C866E718FEC317002507D2"
+    },
+    {
+      "sourcePointer": "Sheet1:690",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "3264F1DD18FFA6B4EA874ABBCF0BCB569ABFBB8C80C2D5755FF7BE47176F5952"
+    },
+    {
+      "sourcePointer": "Sheet1:691",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "2918BA039D56B9DAA4A1D82E34E2F31E66541D717D6B710FDCB376139716443A"
+    },
+    {
+      "sourcePointer": "Sheet1:692",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "0A034A840F52DB9EE6A1E928A6869CD53710DAD3A56D6AB167AC141F8406FAC7"
+    },
+    {
+      "sourcePointer": "Sheet1:694",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "0772A7366C4E27FCE575B3CE18FDA1A957435A56F319A63859B2C8C7D0C1FBE4"
+    },
+    {
+      "sourcePointer": "Sheet1:695",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "358145B21AABF718575F6C541F322E71BF69BB668732B560BDA28F70F27A7B4F"
+    },
+    {
+      "sourcePointer": "Sheet1:697",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "5E4D18F2E58DEF1C1DE90FC5CE42319C46D3E7E02E7C087305042FC47E7A035E"
+    },
+    {
+      "sourcePointer": "Sheet1:699",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "6A648A67176318313B57E01B681FC47728EEC88F4BE72C3AA81CB7E0B7E9F874"
+    },
+    {
+      "sourcePointer": "Sheet1:700",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "C947011E342C6D04411AECAD5FE6A0864CCBB2048ADA8768A5DCC0E068171406"
+    },
+    {
+      "sourcePointer": "Sheet1:776",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:864",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:865",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:866",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:867",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:868",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:869",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:870",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:871",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:872",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:873",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:874",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:875",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:876",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:877",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:878",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:941",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:942",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:943",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:944",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:945",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:946",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:947",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:948",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:949",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:950",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:951",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:952",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:953",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:954",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:955",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:956",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:957",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:958",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:960",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:961",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:962",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:963",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:964",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:965",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:966",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:967",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:968",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:969",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:970",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:973",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:975",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:977",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:978",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:979",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:980",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:981",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:982",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:983",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:985",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:986",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:989",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:990",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:991",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:993",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:994",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:995",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:996",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:997",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet1:998",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointer": "Sheet2:1912",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "BE0FD736A82A056FC6159D898B0B27D77150354FB2C036D5021450D125710EE3"
+    },
+    {
+      "sourcePointer": "Sheet2:769",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "3CF0EEEF94C5B676B66203853AE368DD08C1264ADF70C0E70D29E13EB72C0CD9"
+    }
+  ]
+}

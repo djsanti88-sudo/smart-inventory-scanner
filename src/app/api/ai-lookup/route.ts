@@ -23,6 +23,10 @@ import { clampConfidenceThreshold } from "@/services/security/decodePolicy";
 import { readDailyUsedForAccount, chargeDailySlotForAccount } from "@/services/security/aiSpendGuard";
 import { buildMasterCatalogEntry, appendMasterCatalogEntry } from "@/server/catalog/masterAppend";
 import { logServerEvent } from "@/server/log";
+import { cleanScanCode } from "@/services/scanCleaner";
+import { resolveTrustedExactBarcodeDecision } from "@/server/tire-knowledge/TireKnowledgeProvider";
+import { getTireExactIndexFingerprint } from "@/server/tire-knowledge/tireExactIndex";
+import { trustedExactRateLimiter } from "@/services/security/trustedExactRateLimit";
 
 // FAST-FIRST: cheap/fast models do the first pass (+ page-fetch). The slow PRO models are only used
 // to escalate when the fast pass found no product. All overridable via env. (Reported by GET only;
@@ -44,6 +48,42 @@ const OPENAI_DECODE_MODEL = process.env.OPENAI_DECODE_MODEL || "gpt-5"; // pro e
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs"; // Admin SDK requires the Node runtime (same as resolve-scan/route.ts:25)
+
+function trustedBossBusinessIds(): Set<string> {
+  return new Set(
+    (process.env.TRUSTED_EXACT_BOSS_BUSINESS_IDS ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
+}
+
+function deterministicMissBody(reasonCode = "no_result", reason = "No trusted exact match was found.") {
+  return {
+    mode: "decode" as const,
+    providerNames: [] as string[],
+    results: [] as AiLookupResult[],
+    decision: {
+      status: "needs_review" as const,
+      confidence: 0,
+      reason,
+      evidenceStrength: "none" as const,
+      exactCodeEvidenceVerifiedByApp: false,
+      crossCheck: {
+        decision: "not_checked" as const,
+        confidence: 0,
+        reason,
+        brandSimilarity: 0,
+        nameSimilarity: 0,
+        contradictions: [] as string[],
+      },
+    },
+    reasonCode,
+    reasonText: reason,
+    timedOut: false,
+    trustedExact: { path: "trusted_exact_miss" as const },
+  };
+}
 
 function selectProvider(name: string): AiProvider {
   switch (name) {
@@ -232,42 +272,6 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  // Server-side abuse + spend guard (auth DEFERRED by owner). Bounds bill-drain without login:
-  // kill switch (503) and per-IP rate limit (429) here; the hard daily cap is checked at the decode
-  // path below. Each control makes ZERO provider calls when it blocks. Local-first state; a deployed
-  // multi-instance setup needs a shared store (see services/security/aiSpendGuard.ts). Inert under E2E
-  // mock mode (no real provider spend to bound), so deterministic test runs are unaffected.
-  if (!e2eMode()) {
-    if (killSwitchOn()) {
-      logServerEvent({ route: "/api/ai-lookup", event: "kill_switch", reasonCode: "kill_switch", status: 503 });
-      return Response.json({ error: "AI lookup is temporarily disabled.", reasonCode: "kill_switch" }, { status: 503 });
-    }
-    const clientIp =
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      request.headers.get("x-real-ip") ||
-      "local";
-    // B1: durable, storage-backed rate limiting - see the GET handler's comment above.
-    //
-    // FINDING C (P6 fix wave): the whole rate-limit block is wrapped so a storage INIT throw (e.g.
-    // Turso/libsql unreachable) never crashes the request into a raw 500 - it logs rate_limit_unavailable
-    // and falls through WITHOUT rate limiting instead, mirroring the export route's now-standard fail-open
-    // pattern (src/app/api/account/export/route.ts). checkRateLimit already fails open on a storage error
-    // once storage is in hand; this closes the remaining hole where `await ladderStorage()` ITSELF throws
-    // before checkRateLimit is even called. A storage hiccup must never take the whole app down.
-    try {
-      const rl = await checkRateLimit(clientIp, { storage: await ladderStorage() });
-      if (!rl.allowed) {
-        logServerEvent({ route: "/api/ai-lookup", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
-        return Response.json(
-          { error: "Too many requests. Slow down and try again.", reasonCode: "rate_limited" },
-          { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } }
-        );
-      }
-    } catch {
-      logServerEvent({ route: "/api/ai-lookup", event: "rate_limit_unavailable", reasonCode: "storage_error", status: 200 });
-    }
-  }
-
   let body: {
     rawCode?: string;
     cleanCode?: string;
@@ -293,6 +297,8 @@ export async function POST(request: Request) {
     // Ignored entirely in mock mode (today's open-demo behavior is unchanged).
     idToken?: string;
     businessId?: string;
+    /** Work-reduction only. The server still derives trusted-corpus access from auth + membership + allowlist. */
+    deterministicOnly?: boolean;
   };
   try {
     body = await request.json();
@@ -306,6 +312,7 @@ export async function POST(request: Request) {
   // (locked by route.d4.test.ts): this gate completes BEFORE any quota read or charge, global or
   // per-account - a 401/403 request must never touch a counter key.
   let authedBusinessId: string | null = null;
+  let authedUid: string | null = null;
   if (isLiveAuth() && !e2eMode()) {
     const idToken = (body as { idToken?: string }).idToken ?? "";
     const bizId = (body as { businessId?: string }).businessId ?? "";
@@ -326,13 +333,21 @@ export async function POST(request: Request) {
       }
       return Response.json({ error: "Invalid or expired sign-in.", reasonCode: "bad_token" }, { status: 401 });
     }
+    // Private trusted-exact corpus access must reflect revocation immediately. There is no
+    // authoritative revocation signal for this process-local cache, so every request reads the
+    // membership document after verifying its token.
     const member = await getAdminDb().doc(`${COLLECTIONS.businessMembers}/${memberDocId(bizId, uid)}`).get();
     if (!member.exists) {
       return Response.json({ error: "Not a member of this business.", reasonCode: "not_member" }, { status: 403 });
     }
     authedBusinessId = bizId;
+    authedUid = uid;
   }
 
+  // Keep the exact scanned identifier local to the trusted index. The AI sanitizer intentionally masks
+  // 10-digit phone-shaped strings, but approved shop identifiers can legitimately have that shape.
+  // Provider-facing paths below continue to receive only the existing sanitized value.
+  const exactCode = cleanScanCode(body.cleanCode ?? body.rawCode ?? "").cleanCode;
   // Defense in depth: sanitize again on the server before anything reaches a provider.
   const rawCodeSanitized = sanitizeForAiLookup(body.rawCode ?? "").clean;
   const cleanCodeSanitized = sanitizeForAiLookup(body.cleanCode ?? "").clean;
@@ -372,6 +387,105 @@ export async function POST(request: Request) {
     brandPrefixHint: body.brandPrefixHint,
   };
 
+  const isDecodeMode = body.mode === "decode" || body.mode === "decode-deep";
+  const forceRetry = body.forceRetry === true;
+
+  // Authenticated Boss exact path. The request boolean can only reduce work; it never grants access.
+  // Access is derived exclusively from a freshly verified token, current membership, and a server-only
+  // business allowlist. The uid+business scanner limiter runs before both hits and misses.
+  const trustedBossAccess = Boolean(
+    isDecodeMode && authedUid && authedBusinessId && trustedBossBusinessIds().has(authedBusinessId),
+  );
+  if (trustedBossAccess && authedUid && authedBusinessId) {
+    const exactRate = trustedExactRateLimiter.check(authedUid, authedBusinessId);
+    if (!exactRate.allowed) {
+      return Response.json(
+        { error: "Too many trusted exact lookups. Slow down and try again.", reasonCode: "trusted_exact_rate_limited" },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(exactRate.retryAfterMs / 1000)) } },
+      );
+    }
+    const exact = await resolveTrustedExactBarcodeDecision(exactCode, { authenticatedBossCorpus: true });
+    if (exact.kind === "hit") {
+      const index = await getTireExactIndexFingerprint();
+      const canonicalId = exact.result.decision.trustedExactCanonicalProductId;
+      if (!index || (exact.sourceScope === "authenticated_boss_corpus" && !canonicalId)) {
+        return Response.json(deterministicMissBody("exact_index_unavailable", "Trusted exact index verification is unavailable."));
+      }
+      const result = exact.result.results[0];
+      return Response.json({
+        mode: "decode",
+        providerNames: ["tire-corpus"],
+        results: [{
+          productName: result.productName,
+          brand: result.brand,
+          category: result.category,
+          specsShort: result.specsShort,
+          primarySku: result.primarySku,
+          primaryBarcode: result.primaryBarcode,
+          gtin: result.gtin,
+          upc: result.upc,
+          ean: result.ean,
+          confidence: result.confidence,
+        }],
+        decision: {
+          status: "verified",
+          confidence: exact.result.decision.confidence,
+          reason: exact.result.decision.reason,
+          evidenceStrength: "fetched_source",
+          exactCodeEvidenceVerifiedByApp: true,
+          corroborationPath: exact.result.decision.corroborationPath,
+          ...(canonicalId ? { trustedExactCanonicalProductId: canonicalId } : {}),
+          crossCheck: {
+            decision: "single_provider",
+            confidence: exact.result.decision.confidence,
+            reason: exact.result.decision.reason,
+            brandSimilarity: 1,
+            nameSimilarity: 1,
+            contradictions: [],
+          },
+        },
+        reasonCode: "trusted_exact_hit",
+        reasonText: exact.result.decision.reason,
+        timedOut: false,
+        trustedExact: {
+          path: exact.sourceScope === "authenticated_boss_corpus" ? "boss_trusted_exact_barcode" : "trusted_exact_barcode",
+          index,
+        },
+      });
+    }
+    if (exact.kind === "blocked_package" || exact.kind === "unavailable") {
+      const reasonCode = exact.kind === "blocked_package" ? "blocked_package" : "exact_index_unavailable";
+      return Response.json(deterministicMissBody(reasonCode, "Trusted exact lookup requires review."));
+    }
+  }
+
+  // Deterministic-only is a work-reduction request. A non-allowlisted member, a mock caller, or an
+  // allowlisted exact miss exits here without reaching storage, catalog, legacy, or provider code.
+  if (isDecodeMode && body.deterministicOnly === true) {
+    return Response.json(deterministicMissBody());
+  }
+
+  // Legacy abuse/spend controls intentionally begin only after the free authenticated exact path.
+  if (!e2eMode()) {
+    if (killSwitchOn()) {
+      logServerEvent({ route: "/api/ai-lookup", event: "kill_switch", reasonCode: "kill_switch", status: 503 });
+      return Response.json({ error: "AI lookup is temporarily disabled.", reasonCode: "kill_switch" }, { status: 503 });
+    }
+    const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "local";
+    try {
+      const rl = await checkRateLimit(clientIp, { storage: await ladderStorage() });
+      if (!rl.allowed) {
+        logServerEvent({ route: "/api/ai-lookup", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
+        return Response.json(
+          { error: "Too many requests. Slow down and try again.", reasonCode: "rate_limited" },
+          { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } },
+        );
+      }
+    } catch {
+      logServerEvent({ route: "/api/ai-lookup", event: "rate_limit_unavailable", reasonCode: "storage_error", status: 200 });
+    }
+  }
+
   // Hard server-side daily spend cap (auth DEFERRED) for the LEGACY lookup path. The decode modes run
   // their own cap check below (after the decode-cache peek) so a zero-spend cached repeat scan never
   // consumes a cap slot - checking here for decode too would double-count every decode POST (each scan
@@ -390,8 +504,6 @@ export async function POST(request: Request) {
   // (no authedBusinessId) has no per-account bucket at all, so it keeps today's behavior unchanged:
   // gated by the plain AI_LOOKUP_DAILY_LIMIT global cap. L12 unchanged: exactly one global charge +
   // one account charge per genuine paid compute, only after every applicable check passes.
-  const isDecodeMode = body.mode === "decode" || body.mode === "decode-deep";
-  const forceRetry = body.forceRetry === true;
   if (!e2eMode() && !isDecodeMode) {
     const ladderStore = await ladderStorage();
     const limit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 2000);
