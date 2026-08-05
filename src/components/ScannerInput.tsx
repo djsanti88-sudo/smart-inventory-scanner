@@ -69,7 +69,7 @@ export function ScannerInput({
   // The store owns the authoritative, settled identity and quantity. Keep lastResult only as an
   // immediate fallback until its feed row exists, so a completed verification cannot flash stale
   // unknown/review copy after the lookup panel disappears.
-  const displayResult = liveFeedEntry ?? lastResult;
+  const displayedResult = liveFeedEntry ?? lastResult;
 
   useEffect(() => {
     if (autoFocus) inputRef.current?.focus();
@@ -214,7 +214,7 @@ export function ScannerInput({
         </p>
       ) : (
         (() => {
-          const result = displayResult!;
+          const result = displayedResult!;
           const style = PANEL_STYLES[result.status];
           return (
             <div
@@ -239,7 +239,7 @@ export function ScannerInput({
           );
         })()
       )}
-      {displayResult?.status === "known" && (
+      {displayedResult?.status === "known" && (
         // Kept as a SEPARATE, always-additional marker (not the panel's own testid) so existing
         // tests/E2E asserting scan-success for known scans keep passing unmodified while every
         // other status shares the same scan-counted panel testid above. Purely a stable test

@@ -152,6 +152,26 @@ describe("ScannerInput status line reset to Ready", () => {
       vi.useRealTimers();
     }
   });
+
+  it("replaces provisional review feedback when trusted exact identity settles", () => {
+    const provisional: ScanEvent = { ...fakeEvent("BOSS-EXACT"), status: "needs_review", decodeStatus: "decoding" };
+    useScanStore.setState({ scanFeed: [provisional] });
+    render(<ScannerInput onScan={() => provisional} submitMode="enter" />);
+    const input = screen.getByTestId("scanner-input");
+    fireEvent.change(input, { target: { value: "BOSS-EXACT" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    act(() => {
+      useScanStore.setState({
+        scanFeed: [{ ...provisional, status: "known", resolverStatus: "known", decodeStatus: "verified" }],
+      });
+    });
+
+    expect(screen.getByText("Added.")).toBeTruthy();
+    expect(screen.queryByText("Counted. Sent to review.")).toBeNull();
+    expect(screen.queryByText("New code. Check the review list to identify it.")).toBeNull();
+    expect(screen.getByTestId("scan-success")).toBeTruthy();
+  });
 });
 
 describe("ScannerInput settled live-feed feedback", () => {
