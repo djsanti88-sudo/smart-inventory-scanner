@@ -505,3 +505,52 @@ production).
   once cutover actually lands.
 - Next: owner reviews Gate 1-5 batches per the plan; nothing in this effort pushed master, merged a
   PR, deleted a branch, or touched Vercel/GitHub config without that approval.
+
+## Checkpoint 2026-08-03: Retail corpus v2 evidence-preserving rebuild
+
+- Scanned 4,532,767 raw Open Food Facts rows offline and retained 4,373,077 unique checksum-valid
+  GTINs with immutable source evidence; 2 malformed and 159,638 invalid-GTIN rows were rejected.
+- Classified every retained GTIN: 4,046,693 serving-safe known products, 325,846 review rows, and
+  538 quarantined rows. Forty-five conflicting duplicate GTINs fail closed into review.
+- Rebuilt the combined SQLite knowledge database with 4,046,693 retail and 78,838 tire rows;
+  fixed-path and decompressed-gzip hashes match and both integrity checks return `ok`.
+- Added deterministic, bounded-memory builders, compressed evidence/review artifacts, atomic
+  promotion/rollback, poison and zero-padding gates, baseline diffs, and machine-readable receipts.
+- Green proof: 39 new Node and 6 new Python corpus tests, 3,724 full local tests, ledger/golden/drift suites,
+  focused lint, Next.js production build, and the mock full inventory scan Playwright test.
+- No paid/live provider, production Firebase/Turso, deployment, customer import, commit, or push was
+  performed. Upstream license/provenance approval remains required before publication or live use.
+- Detailed receipt: `docs/analysis/retail-corpus-v2-2026-08-03/README.md`.
+
+## Checkpoint 2026-08-05: diagnostic verdict, owner rule, fix branch executed
+
+- Diagnostic (5-agent + Codex): localhost:3400 was the boss certification harness (branch
+  codex/boss-barcode-fastpath-safe, synthetic allowlist local-corpus-certification) - every real session
+  got the canned trusted-exact miss. Owner codes 3220015959/3220016695/3220017458/3220017198 (10-digit,
+  gtin_valid=false) were never promoted (BOSS_UNRESOLVED_REVIEW.csv, 697 rows); 8848116004503 IS in
+  corpus+Turso and missed only via the allowlist.
+- Two live defects found and fixed on branch fix/decode-diagnostic-2026-08-04 (base 5038de82, worktree
+  C:\tmp\scanbin-fix-diagnostic): sanitizer masked bare 10-digit codes into [redacted-phone] pre-pipeline
+  (fix 4e0bfe9b + 4e43e786); non-GTIN codes dead-ended at the trusted-exact fallback (owner-rule fix
+  22f2c1c3 + panel fix round pending commit). Also: honest deterministicOnly reasons (4e43e786), tire JSON
+  index status on /api/health (f7c27069), trustedExact.allowlistConfigured on status GET + port-3400 docs
+  (214f9b2a), boss workbook dry-run gate (d192736b + c52ab59c).
+- OWNER RULE 2026-08-05 recorded (CLAUDE.md decode section, GUARDRAILS.md, LESSONS L16): codes not in the
+  DB always continue through the ladder, every environment; probes never dead-end.
+- Boss Turso data verified clean: all 5,561 boss-touched tires carry valid GTINs; NOTHING deleted; full
+  backup + dry-run-verified PROPOSED_DELETES.sql at backups/turso-boss-export-2026-08-04. Workbook truth:
+  6,990 rows (6,097 accepted / 697 needs_review). Corrected-workbook upsert path prepped (reconcile
+  dry-run script); live import stays owner-gated.
+- retailtursodatabase uncommitted tree ADJUDICATED: Gemini said keep-all; Codex deep review found 5
+  Criticals (incl. LiveScanFeed 100-row render limit proven to hide row 101 = TOP-LAW violation,
+  Firestore-rules-forbidden counter merges, Math.min shortage commit). Verdict = cherry-pick donors
+  (ScannerInput+test, retail-quality+test, upc/storage+tests), rebuild trusted-exact integration clean,
+  discard generated payloads + testing/app-knowledge placeholder overwrites. Tree left UNTOUCHED as donor;
+  extract-vs-delete is an owner decision. SDD ledger:
+  .superpowers/sdd/2026-08-04-diagnostic-fixes-and-pr-salvage/progress.md.
+- 2026-08-05 close: fix branch final state = 10 commits, tip 9345522a (adds final fix wave: client-side
+  bare-code passthrough end to end, health privacy, honest trustedExact.path + gate labels, RFC-4180
+  workbook parser). Final review + scoped re-review CLEAN; proof:local 3786+ tests green; ledger gate
+  green. Merge/push awaits owner. Follow-ups ledgered: same-class masking in legacy lookupUnknown +
+  backgroundVerifyDeep; lookupUnknown label collapse; pipeline free-settled-suggestion paid escalation
+  (owner ruling needed); Argus engine env defect (tools/fable5 doctor).

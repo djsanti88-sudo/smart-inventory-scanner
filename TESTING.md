@@ -369,3 +369,11 @@ never become indistinguishable from it). The fix is a faithful dump/restore of t
   gaps are filled).
 - Gate run (2026-07-15, Task 20 only): `npx vitest run src/server/decodeCacheBackup.test.ts` 7/7 passed;
   `npx tsc --noEmit` clean; CLI smoke exit 0.
+
+## 2026-08-05 diagnostic-fix branch (fix/decode-diagnostic-2026-08-04)
+- `src/app/api/ai-lookup/route.bareCode.test.ts` - bare numeric scan codes reach the pipeline unmasked; free-text phones still masked; lookup-mode response truthfully echoes what providers received
+- `src/app/api/ai-lookup/route.trustedExact.test.ts` (extended) - deterministicOnly miss reasons are honest per session authorization (trusted_exact_not_available vs trusted_exact_miss)
+- `src/app/api/ai-lookup/route.statusTrustedExact.test.ts` - status GET exposes trustedExact.allowlistConfigured without leaking business ids
+- `src/server/tire-knowledge/tireKnowledgeIndex.jsonStatus.test.ts` - tire JSON corpus load state surfaced on /api/health, never throws
+- `src/stores/scanStore.ladderContinuation.test.ts` - owner rule: trusted-exact misses always continue into the full ladder; offline blocks with honest combined reason; counting untouched
+- `scripts/boss-workbook-reconcile-dryrun.test.mjs` (node:test, vitest-excluded) - offline GS1 check-digit + RFC-4180 CSV gate for the corrected boss workbook

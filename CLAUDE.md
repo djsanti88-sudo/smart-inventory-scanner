@@ -97,6 +97,10 @@ is a plain local `node:test` suite (runs today, not gated); only live-app-drivin
   rungs miss -> Needs Review with honest reasons.
 - GEMINI IS PERMANENTLY OUT OF DECODE (grounding bills every executed search, no cap control; L11):
   `GEMINI_DECODE_DISABLED = true` in pipeline.ts; survives only in legacy lookup / correction re-check.
+- OWNER RULE (2026-08-05, L16): a code not found in the trusted index/corpus MUST continue through the
+  decode ladder in EVERY environment (local, preview, prod). Trusted-exact/deterministic probes never
+  dead-end; the ladder's own gates decide rung availability (free rungs run keyless; paid rungs keep
+  keys/cap/breaker gating) and skipped rungs surface honest reasons. Guard: scanStore.ladderContinuation.test.ts.
 - Daily AI cap (default 2000, `AI_LOOKUP_DAILY_LIMIT`) charges ONLY paid rungs, exactly once per genuine
   compute, via `chargeDailySlot` (L12: never charge two paths of one request). Free/corpus/cache hits
   never burn a slot. `checkAndIncrementDaily` is the LEGACY lookup-mode gate - do not add callers.
