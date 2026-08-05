@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { redactedCode } from "./receipt.mjs";
@@ -7,13 +7,22 @@ export const RECONCILIATION_SHA256 = "DAB216234D5346BAEEFBAE80E5C704F2F3C5D568CC
 export const EXPECTED_COUNTS = Object.freeze({
   acceptedSpellings: 13_656,
   bossTrustedLookupKeys: 5_626,
-  canonicalProductIds: 5_528,
+  canonicalProductIds: 5_296,
   nonGtinApprovedRows: 314,
   nonGtinApprovedIdentifiers: 310,
   excludedCasePacks: 1,
 });
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex").toUpperCase();
+function requiredBossHmacKey(explicit) {
+  const value = String(explicit ?? process.env.BOSS_EXACT_INDEX_HMAC_KEY ?? "");
+  if (Buffer.byteLength(value, "utf8") < 32) throw new Error("BOSS_EXACT_INDEX_HMAC_KEY must be configured with at least 32 bytes.");
+  return value;
+}
+const keyedDigest = (key, domain, value) => createHmac("sha256", key).update(`${domain}\0${value}`).digest("hex").toUpperCase();
+export function bossArtifactLookupKey(sourceLookupKey, hmacKey) {
+  return `boss:v1:${keyedDigest(requiredBossHmacKey(hmacKey), "lookup:v1", sourceLookupKey)}`;
+}
 const gtinShape = (value) => /^\d{8}$|^\d{12,14}$/.test(String(value ?? "").trim());
 
 export function canonicalGtin(value) {
@@ -63,7 +72,8 @@ function lookupKey(value) {
  * Derives scanner spellings only from the hash-pinned reconciliation source.  No barcode material is
  * stored in the repo or emitted by callers; callers report only aggregate counts and hashes.
  */
-export function deriveCorpusFixtures(rows, manifest) {
+export function deriveCorpusFixtures(rows, manifest, { hmacKey } = {}) {
+  const key = requiredBossHmacKey(hmacKey);
   const spellings = new Map();
   const lookupKeys = new Map();
   const canonicalProductIds = new Set();
@@ -74,7 +84,7 @@ export function deriveCorpusFixtures(rows, manifest) {
     const raw = String(row.raw_barcode ?? "").trim();
     const rawKey = lookupKey(raw);
     const candidates = String(row.normalized_barcode_candidates || raw).split("|").map((candidate) => candidate.trim()).filter(Boolean);
-    if (row.final_status === "packaging_code" && rawKey && manifest.blockedPackageCanonicalKeys.includes(rawKey)) {
+    if (row.final_status === "packaging_code" && rawKey && manifest.blockedBossPackageKeys.includes(bossArtifactLookupKey(rawKey, key))) {
       for (const candidate of candidates) {
         if (!validCheckDigit(candidate) || canonicalGtin(candidate) !== rawKey) throw new Error("Blocked package source contains a non-equivalent spelling.");
         packageSpellings.add(candidate);
@@ -117,30 +127,32 @@ export function loadCorpusFixtures(reconciliationPath, manifest) {
   if (!reconciliationPath) throw new Error("BOSS_RECONCILIATION_PATH is required; the private source is never committed.");
   const bytes = readFileSync(reconciliationPath);
   if (sha256(bytes) !== RECONCILIATION_SHA256) throw new Error("BOSS_RECONCILIATION_PATH SHA-256 does not match the pinned reconciliation source.");
-  const fixtures = deriveCorpusFixtures(csvRows(bytes.toString("utf8")), manifest);
-  // Source rows name the repair-issued identity, while the runtime index may preserve a global
-  // canonical identity for a public overlap.  Count the same identities the resolver will return.
+  const hmacKey = requiredBossHmacKey();
+  const fixtures = deriveCorpusFixtures(csvRows(bytes.toString("utf8")), manifest, { hmacKey });
+  // Reconciliation identity remains authoritative. Verify the keyed runtime projection against it;
+  // never replace source expectations with index-derived identities.
   const indexDir = join(process.cwd(), "src", "server", "tire-knowledge", "exact-index");
-  const indexedCanonicalProductIds = new Set();
   const unresolvedLookupKeys = new Set(fixtures.lookupKeys.keys());
   for (let shard = 0; shard < 64 && unresolvedLookupKeys.size; shard += 1) {
     const name = shard.toString(16).padStart(2, "0");
     const entries = JSON.parse(readFileSync(join(indexDir, `${name}.json`), "utf8"));
-    for (const key of unresolvedLookupKeys) {
-      const row = entries[key];
+    for (const sourceKey of unresolvedLookupKeys) {
+      const row = entries[bossArtifactLookupKey(sourceKey, hmacKey)];
       if (!row) continue;
-      if (row.bossTrusted !== true || typeof row.canonical_product_uid !== "string" || !row.canonical_product_uid) {
+      const sourceUid = fixtures.lookupKeys.get(sourceKey);
+      if (row.bossTrusted !== true || row.sourceScope !== "authenticated_boss_corpus"
+        || row.barcode !== "" || row.canonical_product_uid !== ""
+        || row.boss_canonical_product_id !== opaqueTrustedExactCanonicalId(sourceUid)) {
         throw new Error("Trusted exact index does not attest a reconciliation lookup key.");
       }
-      indexedCanonicalProductIds.add(row.canonical_product_uid);
-      unresolvedLookupKeys.delete(key);
+      unresolvedLookupKeys.delete(sourceKey);
     }
   }
   if (unresolvedLookupKeys.size) throw new Error("Trusted exact index is missing a reconciliation lookup key.");
-  fixtures.canonicalProductIds = indexedCanonicalProductIds;
   const expected = EXPECTED_COUNTS;
   if (manifest.acceptedSpellings !== expected.acceptedSpellings
     || manifest.admittedBossCodes !== expected.bossTrustedLookupKeys
+    || manifest.bossCanonicalProductIds !== expected.canonicalProductIds
     || manifest.nonGtinApprovedRows !== expected.nonGtinApprovedRows
     || manifest.nonGtinApprovedIdentifiers !== expected.nonGtinApprovedIdentifiers
     || manifest.excludedCasePacks !== expected.excludedCasePacks
@@ -185,11 +197,13 @@ export function selectUiCorpusSample(fixtures, { shortest = 20, boundary = 12 } 
 }
 
 export function runtimeCanonicalIdFor(entry) {
-  const shard = (createHash("sha256").update(entry.lookupKey).digest()[0] % 64).toString(16).padStart(2, "0");
+  const artifactKey = bossArtifactLookupKey(entry.lookupKey);
+  const shard = (createHash("sha256").update(artifactKey).digest()[0] % 64).toString(16).padStart(2, "0");
   const rows = JSON.parse(readFileSync(join(process.cwd(), "src", "server", "tire-knowledge", "exact-index", `${shard}.json`), "utf8"));
-  const row = rows[entry.lookupKey];
-  if (!row || row.bossTrusted !== true || typeof row.canonical_product_uid !== "string" || !row.canonical_product_uid) throw new Error("Selected UI spelling lacks a trusted exact runtime identity.");
-  return opaqueTrustedExactCanonicalId(row.canonical_product_uid);
+  const row = rows[artifactKey];
+  const expected = opaqueTrustedExactCanonicalId(entry.canonicalProductId);
+  if (!row || row.bossTrusted !== true || row.boss_canonical_product_id !== expected) throw new Error("Selected UI spelling lacks its source-derived trusted exact runtime identity.");
+  return expected;
 }
 
 /** Must exactly mirror the server's opaque canonical identity; raw source UIDs never leave the harness. */

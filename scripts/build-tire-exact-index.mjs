@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // Read-only, fail-closed projection of the approved global corpus and authenticated Boss reconciliation.
-import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash, createHmac } from "node:crypto";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 
@@ -12,11 +11,19 @@ const HASHES = {
   repair: "ECF1F14400489897A3882964E928DFC28F8056CAC262176E28808B7BA0E42E82",
   reconciliation: "DAB216234D5346BAEEFBAE80E5C704F2F3C5D568CC3CA01FD5C4990B44183FFD",
 };
-const BLOCKED_PACKAGES = new Set(["30029885620210"]);
 const SHARDS = Array.from({ length: 64 }, (_, index) => index.toString(16).padStart(2, "0"));
 const MAX_TOTAL = 40 * 1024 * 1024;
 const MAX_SHARD = 1024 * 1024;
 const sha256 = (value) => createHash("sha256").update(value).digest("hex").toUpperCase();
+const OPAQUE_ID_PREFIX = "trusted-exact:v1:";
+function requireBossHmacKey(value = process.env.BOSS_EXACT_INDEX_HMAC_KEY) {
+  const key = String(value ?? "");
+  if (Buffer.byteLength(key, "utf8") < 32) throw new Error("BOSS_EXACT_INDEX_HMAC_KEY must be a server-only secret of at least 32 bytes");
+  return key;
+}
+const keyedDigest = (key, domain, value) => createHmac("sha256", key).update(`${domain}\0${value}`).digest("hex").toUpperCase();
+const bossLookupKey = (key, sourceKey) => `boss:v1:${keyedDigest(key, "lookup:v1", sourceKey)}`;
+const bossCanonicalProductId = (sourceUid) => `${OPAQUE_ID_PREFIX}${sha256(String(sourceUid)).slice(0, 32)}`;
 const norm = (value) => String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 const normMpn = (value) => String(value ?? "").trim().replace(/[ -]/g, "").toUpperCase();
 const normBrand = (value) => norm(value) === "toyo tire" ? "toyo" : norm(value);
@@ -64,14 +71,19 @@ function csvRows(text) {
   const [headers, ...values] = rows;
   return values.map((fields) => Object.fromEntries(headers.map((header, index) => [header, fields[index] ?? ""])));
 }
-function minimal(row, scope, bossTrusted = false) {
+function minimal(row, scope, bossTrusted = false, bossCanonicalId = "") {
   return {
     canonical_product_uid: String(row.canonical_product_uid ?? ""), brand: String(row.brand ?? ""), model: String(row.model ?? ""),
     size: String(row.size ?? ""), raw_size_text: String(row.raw_size_text ?? row.size ?? ""), load_index: String(row.load_index ?? ""),
     speed_rating: String(row.speed_rating ?? ""), load_range: String(row.load_range ?? ""), type: String(row.type ?? ""), season: String(row.season ?? ""),
     manufacturer_part_number: String(row.manufacturer_part_number ?? ""), barcode: String(row.barcode ?? ""), barcode_type: String(row.barcode_type ?? ""),
     confidence: String(row.confidence ?? "verified_1src_strong"), current_status: String(row.current_status ?? "verified"), sourceScope: scope, bossTrusted,
+    ...(bossTrusted ? { boss_canonical_product_id: bossCanonicalId } : {}),
   };
+}
+
+function privateBossRow(row, bossCanonicalId) {
+  return minimal({ ...row, canonical_product_uid: "", barcode: "" }, "authenticated_boss_corpus", true, bossCanonicalId);
 }
 function differingFields(a, b) {
   for (const field of ["brand", "model", "size", "manufacturer_part_number"]) {
@@ -105,12 +117,12 @@ function loadDispositionLedger(path) {
 }
 function resolveReviewedMpnConflict({ key, globalPointer, bossPointer, globalRow, bossRow, fields, ledger }) {
   if (fields.length !== 1 || fields[0] !== "manufacturer_part_number") {
-    throw new Error(`Boss/global incompatibility for ${key}: ${globalPointer} vs ${bossPointer}; fields=${fields.join("|")}`);
+    throw new Error(`Boss/global incompatibility: ${globalPointer} vs ${bossPointer}; fields=${fields.join("|")}`);
   }
   const entry = ledger.get(key);
   if (!entry || entry.globalSourcePointer !== globalPointer || entry.bossSourcePointer !== bossPointer ||
     entry.globalValue !== String(globalRow.manufacturer_part_number ?? "") || entry.bossValue !== String(bossRow.manufacturer_part_number ?? "")) {
-    throw new Error(`unreviewed or changed MPN collision disposition for ${key}`);
+    throw new Error(`unreviewed or changed MPN collision disposition at ${bossPointer}`);
   }
   return { ...globalRow, manufacturer_part_number: "" };
 }
@@ -160,9 +172,10 @@ function validateOnDiskArtifact(outputDir, freshDir) {
 
 export function buildExactIndex(options = {}) {
   const root = resolve(options.root ?? ".");
-  const globalPath = options.globalPath ?? join(root, "src/server/tire-knowledge/tireKnowledge.generated.json");
-  const repairPath = options.repairPath ?? join(root, "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/REPAIRED_TIRE_DATABASE.db");
-  const reconciliationPath = options.reconciliationPath ?? join(root, "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/BOSS_ROW_RECONCILIATION.csv");
+  const bossHmacKey = requireBossHmacKey(options.bossHmacKey);
+  const globalPath = options.globalPath ?? process.env.BOSS_GLOBAL_CORPUS_PATH ?? join(root, "src/server/tire-knowledge/tireKnowledge.generated.json");
+  const repairPath = options.repairPath ?? process.env.BOSS_REPAIR_DB_PATH ?? join(root, "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/REPAIRED_TIRE_DATABASE.db");
+  const reconciliationPath = options.reconciliationPath ?? process.env.BOSS_RECONCILIATION_PATH ?? join(root, "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/BOSS_ROW_RECONCILIATION.csv");
   const outputDir = options.outputDir ?? join(root, "src/server/tire-knowledge/exact-index");
   const dispositionPath = options.dispositionPath ?? join(root, "scripts/tire-exact-index-collision-dispositions.json");
   const expected = options.expectedHashes ?? HASHES;
@@ -176,22 +189,46 @@ export function buildExactIndex(options = {}) {
   options.afterInputVerification?.();
   const repair = new Map(loadRepair(verifiedRepairPath).map((row) => [String(row.barcode), row]));
   rmSync(verifiedRepairPath, { force: true });
+  const reconciliationRows = csvRows(reconciliationInput.bytes.toString("utf8"));
   const dispositionLedger = loadDispositionLedger(dispositionPath);
   const ledger = dispositionLedger.entries;
-  const all = new Map(); const bossCanonicals = new Set(); const acceptedSpellingKeys = new Map(); const blockedPackages = new Set();
+  const all = new Map(); const bossCanonicals = new Set(); const bossProductIdentities = new Set(); const bossIdentityByLookupKey = new Map();
+  const acceptedSpellingKeys = new Map(); const blockedPackages = new Set();
   let nonGtinApprovedRows = 0;
-  const sourceDerivedNonGtinCandidates = [];
   const nonGtinConflictLedger = [];
+  for (const rec of reconciliationRows) {
+    if (rec.final_status !== "packaging_code") continue;
+    const packageKey = canonicalGtin(rec.raw_barcode);
+    if (!packageKey || !validCheckDigit(rec.raw_barcode)) throw new Error(`malformed packaging source at ${rec.sheet}:${rec.row}`);
+    blockedPackages.add(packageKey);
+  }
   for (const value of Object.values(global.barcodeIndex ?? {})) {
     const row = minimal(value, "global_corpus"); const key = canonicalGtin(row.barcode);
     if (!key || !validCheckDigit(row.barcode)) continue;
-    if (BLOCKED_PACKAGES.has(row.barcode) || BLOCKED_PACKAGES.has(key.replace(/^0+/, ""))) { blockedPackages.add(key); continue; }
+    if (blockedPackages.has(key)) continue;
     const existing = all.get(key);
     if (existing && differingFields(existing.row, row).length) throw new Error(`canonical collision for ${key}: global corpus rows disagree`);
     all.set(key, { row, pointers: [`tireKnowledge.generated.json:barcodeIndex.${row.barcode}`] });
   }
-  for (const rec of csvRows(reconciliationInput.bytes.toString("utf8"))) {
-    if (rec.final_status === "packaging_code") { if (canonicalGtin(rec.raw_barcode) === canonicalGtin("30029885620210")) blockedPackages.add(canonicalGtin(rec.raw_barcode)); continue; }
+  const addBossRow = ({ sourceLookupKey, dbRow, bossUid, pointer }) => {
+    const priorIdentity = bossIdentityByLookupKey.get(sourceLookupKey);
+    if (priorIdentity && priorIdentity !== bossUid) throw new Error(`conflicting Boss identities for one lookup key at ${pointer}`);
+    bossIdentityByLookupKey.set(sourceLookupKey, bossUid);
+    bossProductIdentities.add(bossUid);
+    const privateKey = bossLookupKey(bossHmacKey, sourceLookupKey);
+    const bossCanonicalId = bossCanonicalProductId(bossUid);
+    const row = privateBossRow(dbRow, bossCanonicalId);
+    const existing = all.get(privateKey);
+    if (existing) {
+      if (existing.row.boss_canonical_product_id !== bossCanonicalId) throw new Error(`conflicting Boss identities for one lookup key at ${pointer}`);
+      if (differingFields(existing.row, row).length) throw new Error(`Boss source rows disagree for one lookup key at ${pointer}`);
+      existing.pointers.push(pointer);
+      return;
+    }
+    all.set(privateKey, { row, pointers: [pointer] });
+  };
+  for (const rec of reconciliationRows) {
+    if (rec.final_status === "packaging_code") continue;
     if (rec.final_status !== "accepted" && rec.final_status !== "alias") continue;
     const pointer = `${rec.sheet}:${rec.row}`;
     if (rec.gtin_valid !== "true") {
@@ -205,41 +242,36 @@ export function buildExactIndex(options = {}) {
       if (String(dbRow.canonical_product_uid ?? "") !== String(rec.matched_stable_product_id ?? "")) {
         throw new Error(`Boss source ${pointer} disagrees with repair-issued canonical product identity`);
       }
-      const row = minimal({ ...dbRow, barcode: String(rec.raw_barcode).trim(), barcode_type: "approved_non_gtin" }, "authenticated_boss_corpus", true);
+      const bossUid = String(rec.matched_stable_product_id ?? "");
       nonGtinApprovedRows++;
-      sourceDerivedNonGtinCandidates.push(String(rec.raw_barcode).trim());
-      const existing = all.get(key);
-      if (existing && existing.row.canonical_product_uid !== row.canonical_product_uid) {
-        throw new Error(`cross-product approved non-GTIN identifier at ${pointer}`);
-      }
-      if (!existing) all.set(key, { row, pointers: [pointer] }); else existing.pointers.push(pointer);
-      acceptedSpellingKeys.set(key, row.canonical_product_uid);
+      const prior = acceptedSpellingKeys.get(key);
+      if (prior && prior !== bossUid) throw new Error(`cross-product approved non-GTIN identifier at ${pointer}`);
+      addBossRow({ sourceLookupKey: key, dbRow: { ...dbRow, barcode_type: "approved_non_gtin" }, bossUid, pointer });
+      acceptedSpellingKeys.set(key, bossUid);
       bossCanonicals.add(key);
       continue;
     }
     if (!validCheckDigit(rec.raw_barcode)) throw new Error(`malformed accepted Boss input at ${rec.sheet}:${rec.row}`);
     const key = canonicalGtin(rec.raw_barcode); if (!key) throw new Error(`non-GTIN Boss input at ${rec.sheet}:${rec.row}`);
-    if (canonicalGtin(rec.raw_barcode) === canonicalGtin("30029885620210")) { blockedPackages.add(key); continue; }
+    if (blockedPackages.has(key)) continue;
     const dbRow = repair.get(rec.matched_barcode);
     if (!dbRow) throw new Error(`Boss source ${rec.sheet}:${rec.row} has no repair source pointer ${rec.matched_barcode}`);
     if (String(dbRow.canonical_product_uid ?? "") !== String(rec.matched_stable_product_id ?? "")) {
       throw new Error(`Boss source ${pointer} disagrees with repair-issued canonical product identity`);
     }
-    const row = minimal({ ...dbRow, barcode: rec.matched_barcode || rec.raw_barcode }, "authenticated_boss_corpus", true);
+    const bossUid = String(rec.matched_stable_product_id ?? "");
+    const row = minimal({ ...dbRow, barcode: rec.matched_barcode || rec.raw_barcode }, "authenticated_boss_corpus", true, bossCanonicalProductId(bossUid));
     const existing = all.get(key);
     if (existing) {
       const fields = differingFields(existing.row, row);
       if (fields.length) existing.row = resolveReviewedMpnConflict({ key, globalPointer: existing.pointers[0], bossPointer: pointer, globalRow: existing.row, bossRow: row, fields, ledger });
-      // Preserve public availability for overlaps, but record that an authorized Boss tenant may
-      // elevate this same exact row onto the durable Boss-trusted settlement path.
-      existing.row.bossTrusted = true;
     }
-    if (!existing) all.set(key, { row, pointers: [pointer] }); else existing.pointers.push(pointer);
+    addBossRow({ sourceLookupKey: key, dbRow, bossUid, pointer });
     for (const spelling of String(rec.normalized_barcode_candidates || rec.raw_barcode).split("|").filter(Boolean)) {
-      if (!validCheckDigit(spelling) || canonicalGtin(spelling) !== key) throw new Error(`accepted spelling is not a valid canonical-equivalent public GTIN at ${pointer}: ${spelling}`);
+      if (!validCheckDigit(spelling) || canonicalGtin(spelling) !== key) throw new Error(`accepted spelling is not a valid canonical-equivalent public GTIN at ${pointer}`);
       const prior = acceptedSpellingKeys.get(spelling);
-      if (prior && prior !== key) throw new Error(`accepted spelling collides across products: ${spelling}`);
-      acceptedSpellingKeys.set(spelling, key);
+      if (prior && prior !== bossUid) throw new Error(`accepted spelling collides across products: ${spelling}`);
+      acceptedSpellingKeys.set(spelling, bossUid);
     }
     bossCanonicals.add(key);
   }
@@ -249,17 +281,16 @@ export function buildExactIndex(options = {}) {
   const excludedCasePacks = blockedPackages.size;
   if (excludedCasePacks !== 1) throw new Error(`expected exactly one excluded case pack, got ${excludedCasePacks}`);
   const expectedCounts = options.expectedCounts === undefined
-    ? { admittedBossCodes: 5626, acceptedSpellings: 13656, nonGtinApprovedRows: 314, nonGtinApprovedIdentifiers: 310, nonGtinBlankAliasConflicts: 193 }
+    ? { admittedBossCodes: 5626, acceptedSpellings: 13656, bossCanonicalProductIds: 5296, nonGtinApprovedRows: 314, nonGtinApprovedIdentifiers: 310, nonGtinBlankAliasConflicts: 193 }
     : options.expectedCounts;
   const acceptedSpellings = acceptedSpellingKeys.size;
   const nonGtinApprovedIdentifiers = [...acceptedSpellingKeys.keys()].filter((key) => key.startsWith("nongtin:")).length;
   const nonGtinBlankAliasConflicts = nonGtinConflictLedger.filter((entry) => entry.finalStatus === "alias").length;
-  const sourceDerivedNonGtinSample = sourceDerivedNonGtinCandidates.sort((a, b) => a.length - b.length || a.localeCompare(b)).slice(0, 20);
   const redactedConflictLedger = { schemaVersion: "1.0.0", entries: [
     ...nonGtinConflictLedger,
-    ...[...ledger.values()].map((entry) => ({ sourcePointer: entry.bossSourcePointer, finalStatus: "accepted", reason: "reviewed_mpn_field_omitted", identifierSha256: sha256(entry.canonicalKey) })),
+    ...[...ledger.values()].map((entry) => ({ sourcePointer: entry.bossSourcePointer, finalStatus: "accepted", reason: "reviewed_mpn_field_omitted", identifierHmacSha256: keyedDigest(bossHmacKey, "conflict-identifier:v1", entry.canonicalKey) })),
   ].sort((a, b) => `${a.sourcePointer}:${a.reason}`.localeCompare(`${b.sourcePointer}:${b.reason}`)) };
-  if (expectedCounts && (bossCanonicals.size !== expectedCounts.admittedBossCodes || acceptedSpellings !== expectedCounts.acceptedSpellings || nonGtinApprovedRows !== expectedCounts.nonGtinApprovedRows ||
+  if (expectedCounts && (bossCanonicals.size !== expectedCounts.admittedBossCodes || acceptedSpellings !== expectedCounts.acceptedSpellings || bossProductIdentities.size !== expectedCounts.bossCanonicalProductIds || nonGtinApprovedRows !== expectedCounts.nonGtinApprovedRows ||
     nonGtinApprovedIdentifiers !== expectedCounts.nonGtinApprovedIdentifiers || nonGtinBlankAliasConflicts !== expectedCounts.nonGtinBlankAliasConflicts)) {
     throw new Error(`Boss cardinality mismatch: codes=${bossCanonicals.size}, spellings=${acceptedSpellings}, nonGtin=${nonGtinApprovedIdentifiers}, blankAliases=${nonGtinBlankAliasConflicts}`);
   }
@@ -270,7 +301,7 @@ export function buildExactIndex(options = {}) {
     for (const shard of SHARDS) { const bytes = Buffer.from(JSON.stringify(shards[shard]) + "\n"); shardHashes[shard] = sha256(bytes); shardCounts[shard] = Object.keys(shards[shard]).length; shardBytes[shard] = bytes.length; writeFileSync(join(staged, `${shard}.json`), bytes); }
     const conflictLedgerBytes = Buffer.from(JSON.stringify(redactedConflictLedger, null, 2) + "\n");
     writeFileSync(join(staged, "conflict-ledger.json"), conflictLedgerBytes);
-    const manifest = { schemaVersion: "1.0.0", generatorVersion: "1.0.0", shardAlgorithm: "sha256-first-byte-mod-64-v1", approvedCorpusSha256: expected.global, repairSha256: expected.repair, reconciliationSha256: expected.reconciliation, collisionDispositionCount: ledger.size, collisionDispositionLedgerSha256: dispositionLedger.digest, conflictLedgerCount: redactedConflictLedger.entries.length, conflictLedgerSha256: sha256(conflictLedgerBytes), admittedBossCodes: bossCanonicals.size, acceptedSpellings, nonGtinApprovedRows, nonGtinApprovedIdentifiers, nonGtinBlankAliasConflicts, nonGtinConflictLedgerSha256: sha256(JSON.stringify(nonGtinConflictLedger)), sourceDerivedNonGtinSampleCount: sourceDerivedNonGtinSample.length, sourceDerivedNonGtinSampleSha256: sha256(JSON.stringify(sourceDerivedNonGtinSample)), excludedCasePacks, blockedPackageCanonicalKeys: [...blockedPackages].sort(), shardHashes, shardCounts, shardBytes, totalShardBytes: Object.values(shardBytes).reduce((sum, value) => sum + value, 0), totalKeys: all.size };
+    const manifest = { schemaVersion: "2.0.0", generatorVersion: "2.0.0", shardAlgorithm: "sha256-first-byte-mod-64-v1", bossHmacAlgorithm: "hmac-sha256-domain-separated-v1", bossKeyFingerprint: keyedDigest(bossHmacKey, "key-fingerprint:v1", "scanbin-boss-exact-index"), approvedCorpusSha256: expected.global, repairSha256: expected.repair, reconciliationSha256: expected.reconciliation, collisionDispositionCount: ledger.size, collisionDispositionLedgerSha256: dispositionLedger.digest, conflictLedgerCount: redactedConflictLedger.entries.length, conflictLedgerSha256: sha256(conflictLedgerBytes), admittedBossCodes: bossCanonicals.size, acceptedSpellings, bossCanonicalProductIds: bossProductIdentities.size, nonGtinApprovedRows, nonGtinApprovedIdentifiers, nonGtinBlankAliasConflicts, nonGtinConflictLedgerSha256: sha256(JSON.stringify(nonGtinConflictLedger)), excludedCasePacks, blockedBossPackageKeys: [...blockedPackages].map((key) => bossLookupKey(bossHmacKey, key)).sort(), shardHashes, shardCounts, shardBytes, totalShardBytes: Object.values(shardBytes).reduce((sum, value) => sum + value, 0), totalKeys: all.size };
     manifest.contentDigest = sha256(JSON.stringify(manifest)); writeFileSync(join(staged, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
     const totalBytes = requireOutputLimits(staged, manifest);
     if (options.check) validateOnDiskArtifact(outputDir, staged);

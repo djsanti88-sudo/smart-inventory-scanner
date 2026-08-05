@@ -119,6 +119,7 @@ export type TrustedExactBarcodeProviderDecision =
   | { kind: "miss" };
 
 function opaqueCanonicalProductId(row: TireKnowledgeRow): string {
+  if (/^trusted-exact:v1:[A-F0-9]{32}$/.test(row.canonical_product_uid)) return row.canonical_product_uid;
   const digest = createHash("sha256").update(row.canonical_product_uid).digest("hex").slice(0, 32).toUpperCase();
   return `trusted-exact:v1:${digest}`;
 }

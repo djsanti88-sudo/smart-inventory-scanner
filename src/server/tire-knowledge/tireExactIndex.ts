@@ -1,5 +1,5 @@
 import "server-only";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalGtin } from "@/services/upc/gtin";
@@ -12,12 +12,15 @@ interface ExactIndexRow extends Omit<Partial<TireKnowledgeRow>, "source_count"> 
   barcode: string;
   sourceScope: SourceScope;
   bossTrusted: boolean;
+  boss_canonical_product_id?: string;
 }
 
 interface ExactIndexManifest {
   schemaVersion: string;
   generatorVersion: string;
   shardAlgorithm: string;
+  bossHmacAlgorithm: string;
+  bossKeyFingerprint: string;
   contentDigest: string;
   conflictLedgerCount: number;
   conflictLedgerSha256: string;
@@ -25,9 +28,8 @@ interface ExactIndexManifest {
   nonGtinApprovedIdentifiers: number;
   nonGtinBlankAliasConflicts: number;
   nonGtinConflictLedgerSha256: string;
-  sourceDerivedNonGtinSampleCount: number;
-  sourceDerivedNonGtinSampleSha256: string;
-  blockedPackageCanonicalKeys: string[];
+  bossCanonicalProductIds: number;
+  blockedBossPackageKeys: string[];
   shardHashes: Record<string, string>;
   shardCounts: Record<string, number>;
   shardBytes: Record<string, number>;
@@ -58,12 +60,12 @@ function maxCachedShards(): number {
   return CERTIFICATION_CACHE_CAPS.has(requested) ? requested : SHARDS.length;
 }
 const EXPECTED_MANIFEST_KEYS = [
-  "schemaVersion", "generatorVersion", "shardAlgorithm", "approvedCorpusSha256", "repairSha256", "reconciliationSha256",
+  "schemaVersion", "generatorVersion", "shardAlgorithm", "bossHmacAlgorithm", "bossKeyFingerprint", "approvedCorpusSha256", "repairSha256", "reconciliationSha256",
   "collisionDispositionCount", "collisionDispositionLedgerSha256", "conflictLedgerCount", "conflictLedgerSha256", "admittedBossCodes", "acceptedSpellings",
+  "bossCanonicalProductIds",
   "nonGtinApprovedRows", "nonGtinApprovedIdentifiers", "nonGtinBlankAliasConflicts", "nonGtinConflictLedgerSha256",
-  "sourceDerivedNonGtinSampleCount", "sourceDerivedNonGtinSampleSha256",
   "excludedCasePacks",
-  "blockedPackageCanonicalKeys", "shardHashes", "shardCounts", "shardBytes", "totalShardBytes", "totalKeys", "contentDigest",
+  "blockedBossPackageKeys", "shardHashes", "shardCounts", "shardBytes", "totalShardBytes", "totalKeys", "contentDigest",
 ];
 const SHA256 = /^[A-F0-9]{64}$/;
 const MAX_SHARD_BYTES = 1024 * 1024;
@@ -91,26 +93,41 @@ function hasExactShardKeys(value: unknown): value is Record<string, unknown> {
     && JSON.stringify(Object.keys(value).sort()) === JSON.stringify(SHARDS);
 }
 
-function isCanonicalBlockList(value: unknown): value is string[] {
+function isBossKeyList(value: unknown): value is string[] {
   return Array.isArray(value)
-    && value.every((key) => typeof key === "string" && canonicalGtin(key) === key)
+    && value.every((key) => typeof key === "string" && /^boss:v1:[A-F0-9]{64}$/.test(key))
     && new Set(value).size === value.length
     && value.every((key, index) => index === 0 || value[index - 1] < key);
 }
 
-function validateManifest(value: unknown): ExactIndexManifest | null {
+function keyedDigest(key: string, domain: string, value: string): string {
+  return createHmac("sha256", key).update(`${domain}\0${value}`).digest("hex").toUpperCase();
+}
+
+function bossHmacKey(): string | null {
+  const key = String(process.env.BOSS_EXACT_INDEX_HMAC_KEY ?? "");
+  return Buffer.byteLength(key, "utf8") >= 32 ? key : null;
+}
+
+function bossLookupKey(key: string, sourceKey: string): string {
+  return `boss:v1:${keyedDigest(key, "lookup:v1", sourceKey)}`;
+}
+
+function validateManifest(value: unknown, key: string): ExactIndexManifest | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const manifest = value as Record<string, unknown>;
   if (JSON.stringify(Object.keys(manifest)) !== JSON.stringify(EXPECTED_MANIFEST_KEYS)) return null;
-  if (manifest.schemaVersion !== "1.0.0" || typeof manifest.generatorVersion !== "string"
+  if (manifest.schemaVersion !== "2.0.0" || manifest.generatorVersion !== "2.0.0"
     || manifest.shardAlgorithm !== "sha256-first-byte-mod-64-v1" || typeof manifest.contentDigest !== "string"
-    || !SHA256.test(manifest.contentDigest) || !isCanonicalBlockList(manifest.blockedPackageCanonicalKeys)
+    || manifest.bossHmacAlgorithm !== "hmac-sha256-domain-separated-v1"
+    || manifest.bossKeyFingerprint !== keyedDigest(key, "key-fingerprint:v1", "scanbin-boss-exact-index")
+    || !SHA256.test(manifest.contentDigest) || !isBossKeyList(manifest.blockedBossPackageKeys)
     || !hasExactShardKeys(manifest.shardHashes) || !hasExactShardKeys(manifest.shardCounts) || !hasExactShardKeys(manifest.shardBytes)
     || !Number.isSafeInteger(manifest.totalKeys) || !Number.isSafeInteger(manifest.totalShardBytes)
     || !Number.isSafeInteger(manifest.conflictLedgerCount) || !SHA256.test(String(manifest.conflictLedgerSha256 ?? ""))
     || !Number.isSafeInteger(manifest.nonGtinApprovedRows) || !Number.isSafeInteger(manifest.nonGtinApprovedIdentifiers)
     || !Number.isSafeInteger(manifest.nonGtinBlankAliasConflicts) || !SHA256.test(String(manifest.nonGtinConflictLedgerSha256 ?? ""))
-    || !Number.isSafeInteger(manifest.sourceDerivedNonGtinSampleCount) || !SHA256.test(String(manifest.sourceDerivedNonGtinSampleSha256 ?? ""))) return null;
+    || !Number.isSafeInteger(manifest.bossCanonicalProductIds)) return null;
   const digestInput = Object.fromEntries(Object.entries(manifest).filter(([key]) => key !== "contentDigest"));
   if (sha256(JSON.stringify(digestInput)) !== manifest.contentDigest) return null;
   const shardHashes = manifest.shardHashes as Record<string, unknown>;
@@ -133,10 +150,12 @@ function validateManifest(value: unknown): ExactIndexManifest | null {
 
 async function getManifest(): Promise<ManifestResult> {
   if (!manifestPromise) {
+    const key = bossHmacKey();
+    if (!key) return { kind: "unavailable" };
     manifestPromise = readFile(join(INDEX_DIR, "manifest.json"), "utf8")
       .then((raw): ManifestResult => {
         try {
-          const value = validateManifest(JSON.parse(raw));
+          const value = validateManifest(JSON.parse(raw), key);
           return value ? { kind: "manifest", value } : { kind: "unavailable" };
         } catch {
           return { kind: "unavailable" };
@@ -149,14 +168,18 @@ async function getManifest(): Promise<ManifestResult> {
 
 function isValidShardRow(key: string, value: unknown, shard: string): value is ExactIndexRow {
   const isGtin = canonicalGtin(key) === key;
-  const nonGtin = key.startsWith("nongtin:") && key.length > "nongtin:".length;
-  if (!value || typeof value !== "object" || Array.isArray(value) || (!isGtin && !nonGtin) || shardFor(key) !== shard) return false;
+  const privateBossKey = /^boss:v1:[A-F0-9]{64}$/.test(key);
+  if (!value || typeof value !== "object" || Array.isArray(value) || (!isGtin && !privateBossKey) || shardFor(key) !== shard) return false;
   const row = value as Partial<ExactIndexRow>;
-  return typeof row.canonical_product_uid === "string" && typeof row.barcode === "string"
-    && (isGtin ? canonicalGtin(row.barcode) === key : key === `nongtin:${row.barcode}`)
-    && typeof row.bossTrusted === "boolean"
-    && (row.sourceScope === "global_corpus" || row.sourceScope === "authenticated_boss_corpus")
-    && (row.sourceScope !== "authenticated_boss_corpus" || row.bossTrusted === true);
+  if (typeof row.canonical_product_uid !== "string" || typeof row.barcode !== "string" || typeof row.bossTrusted !== "boolean") return false;
+  if (isGtin) {
+    return canonicalGtin(row.barcode) === key && row.sourceScope === "global_corpus" && row.bossTrusted === false
+      && row.canonical_product_uid.length > 0 && row.boss_canonical_product_id === undefined;
+  }
+  return row.sourceScope === "authenticated_boss_corpus" && row.bossTrusted === true
+    && row.barcode === "" && row.canonical_product_uid === ""
+    && typeof row.boss_canonical_product_id === "string"
+    && /^trusted-exact:v1:[A-F0-9]{32}$/.test(row.boss_canonical_product_id);
 }
 
 async function getShard(shard: string, manifest: ExactIndexManifest): Promise<ShardResult> {
@@ -194,15 +217,16 @@ async function getShard(shard: string, manifest: ExactIndexManifest): Promise<Sh
   }
 }
 
-function toTireKnowledgeRow(row: ExactIndexRow): TireKnowledgeRow {
+function toTireKnowledgeRow(row: ExactIndexRow, scannedCode?: string): TireKnowledgeRow {
   return {
-    canonical_product_uid: row.canonical_product_uid,
+    canonical_product_uid: row.sourceScope === "authenticated_boss_corpus" ? row.boss_canonical_product_id! : row.canonical_product_uid,
     brand: row.brand ?? "", brand_normalized: row.brand_normalized ?? row.brand ?? "",
     model: row.model ?? "", model_normalized: row.model_normalized ?? row.model ?? "",
     size: row.size ?? "", raw_size_text: row.raw_size_text ?? "",
     load_index: row.load_index ?? "", speed_rating: row.speed_rating ?? "", load_range: row.load_range ?? "",
     type: row.type ?? "", season: row.season ?? "", manufacturer_part_number: row.manufacturer_part_number ?? "",
-    barcode: row.barcode, barcode_type: row.barcode_type ?? "", confidence: row.confidence ?? "",
+    barcode: row.sourceScope === "authenticated_boss_corpus" ? String(scannedCode ?? "") : row.barcode,
+    barcode_type: row.barcode_type ?? "", confidence: row.confidence ?? "",
     current_status: row.current_status ?? "", usable_for: row.usable_for ?? "",
     field_completeness_score: row.field_completeness_score ?? "", missing_fields: row.missing_fields ?? "", source_count: 0,
   };
@@ -220,31 +244,25 @@ export async function lookupTrustedExactBarcode(
   const manifestResult = await getManifest();
   if (manifestResult.kind === "unavailable") return manifestResult;
   const manifest = manifestResult.value;
-  if (canonicalKey && manifest.blockedPackageCanonicalKeys.includes(canonicalKey)) {
-    return { kind: "blocked_package", canonicalKey };
+  const key = bossHmacKey();
+  if (!key) return { kind: "unavailable" };
+  const bossSourceKeys = [...new Set([canonicalKey, rawExactKey].filter((value): value is string => !!value))];
+  const bossKeys = bossSourceKeys.map((sourceKey) => bossLookupKey(key, sourceKey));
+  const blockedKey = bossKeys.find((candidate) => manifest.blockedBossPackageKeys.includes(candidate));
+  if (blockedKey) {
+    return { kind: "blocked_package", canonicalKey: canonicalKey ?? rawExactKey };
   }
-
-  const lookupKeys = canonicalKey ? [canonicalKey, rawExactKey] : [rawExactKey];
-  for (const [index, lookupKey] of lookupKeys.entries()) {
+  const lookupKeys = access.authenticatedBossCorpus
+    ? [...bossKeys, ...(canonicalKey ? [canonicalKey] : [])]
+    : canonicalKey ? [canonicalKey] : [];
+  for (const lookupKey of lookupKeys) {
     const shardResult = await getShard(shardFor(lookupKey), manifest);
     if (shardResult.kind === "unavailable") return shardResult;
     const row = shardResult.value[lookupKey];
     if (!row) continue;
 
-    // A raw fallback for a digit string that also canonicalizes is deliberately narrower than an
-    // ordinary exact lookup: only the authenticated, source-approved Boss row can opt that literal
-    // spelling out of GTIN canonicalization. The canonical key always wins when it exists.
-    const rawFallback = canonicalKey !== null && index === 1;
-    if (rawFallback && (
-      !access.authenticatedBossCorpus
-      || !row.bossTrusted
-      || row.sourceScope !== "authenticated_boss_corpus"
-    )) return null;
     if (row.sourceScope === "authenticated_boss_corpus" && !access.authenticatedBossCorpus) return null;
-    const sourceScope = access.authenticatedBossCorpus && row.bossTrusted
-      ? "authenticated_boss_corpus"
-      : row.sourceScope;
-    return { kind: "hit", row: toTireKnowledgeRow(row), sourceScope };
+    return { kind: "hit", row: toTireKnowledgeRow(row, exactCode), sourceScope: row.sourceScope };
   }
   return null;
 }

@@ -87,6 +87,19 @@ describe("resolveTrustedExactBarcodeDecision", () => {
     expect(canonicalId).not.toContain("3220017438");
   });
 
+  it("hashes the scope-selected Boss identity rather than a public overlap identity", async () => {
+    mockLookupTrustedExactBarcode.mockResolvedValueOnce({
+      kind: "hit",
+      sourceScope: "authenticated_boss_corpus",
+      row: { ...CORPUS_ROW, canonical_product_uid: "boss-reconciliation-identity" },
+    });
+
+    const decision = await resolveTrustedExactBarcodeDecision("036000291452", { authenticatedBossCorpus: true });
+    if (decision.kind !== "hit") throw new Error("expected hit");
+    expect(decision.result.decision.trustedExactCanonicalProductId)
+      .toBe("trusted-exact:v1:D3E057CD62FACE30CFE55EE0FB71EAE1");
+  });
+
   it("preserves an index integrity failure as unavailable instead of a miss", async () => {
     mockLookupTrustedExactBarcode.mockResolvedValueOnce({ kind: "unavailable" });
 

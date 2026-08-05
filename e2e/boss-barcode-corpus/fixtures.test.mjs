@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deriveCorpusFixtures, opaqueTrustedExactCanonicalId, redactForReceipt, summarizeMeasuredLatency, trustedExactLatencyGate } from "./fixtures.mjs";
+import { bossArtifactLookupKey, deriveCorpusFixtures, opaqueTrustedExactCanonicalId, redactForReceipt, summarizeMeasuredLatency, trustedExactLatencyGate } from "./fixtures.mjs";
+
+const TEST_INDEX_KEY = "synthetic-index-key-only-never-used-for-artifacts-0001";
 
 const manifest = {
   admittedBossCodes: 2,
@@ -9,7 +11,7 @@ const manifest = {
   nonGtinApprovedRows: 1,
   nonGtinApprovedIdentifiers: 1,
   excludedCasePacks: 1,
-  blockedPackageCanonicalKeys: ["30029885620210"],
+  blockedBossPackageKeys: [bossArtifactLookupKey("30029885620210", TEST_INDEX_KEY)],
 };
 
 test("deriveCorpusFixtures preserves approved short identifiers and GTIN aliases", () => {
@@ -23,7 +25,7 @@ test("deriveCorpusFixtures preserves approved short identifiers and GTIN aliases
       normalized_barcode_candidates: "", matched_stable_product_id: "product-b",
     },
     { final_status: "packaging_code", gtin_valid: "true", raw_barcode: "30029885620210", normalized_barcode_candidates: "30029885620210" },
-  ], manifest);
+  ], manifest, { hmacKey: TEST_INDEX_KEY });
 
   assert.equal(fixtures.spellings.size, 3);
   assert.equal(fixtures.lookupKeys.size, 2);
@@ -36,7 +38,7 @@ test("deriveCorpusFixtures rejects an accepted spelling that is not canonical-eq
   assert.throws(() => deriveCorpusFixtures([{
     final_status: "accepted", gtin_valid: "true", raw_barcode: "00012345600012",
     normalized_barcode_candidates: "00012345600013", matched_stable_product_id: "product-a",
-  }], { ...manifest, admittedBossCodes: 1, acceptedSpellings: 1, nonGtinApprovedRows: 0, nonGtinApprovedIdentifiers: 0, excludedCasePacks: 0, blockedPackageCanonicalKeys: [] }), /canonical-equivalent/);
+  }], { ...manifest, admittedBossCodes: 1, acceptedSpellings: 1, nonGtinApprovedRows: 0, nonGtinApprovedIdentifiers: 0, excludedCasePacks: 0, blockedBossPackageKeys: [] }, { hmacKey: TEST_INDEX_KEY }), /canonical-equivalent/);
 });
 
 test("opaque trusted exact identity matches the provider contract", () => {
