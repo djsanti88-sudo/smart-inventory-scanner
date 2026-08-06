@@ -79,4 +79,35 @@ describe("businessDataLoader retry propagates into the store (unblocks the etern
     expect(store.getState().lastSyncError).toBeNull();
     expect(store.getState().businessDataLoaded).toBe(true);
   });
+
+  it("REGRESSION (round 2, coordinator-reported): an isolated hang on JUST the scanEvents read (largest, most hang-prone - up to 4,500 docs) still bounds and surfaces, even when products/aliases/sessions/counts all resolve fine", async () => {
+    vi.useFakeTimers();
+    mocks.getDocs.mockImplementation((reference: { path?: string; ref?: { path?: string } }) => {
+      const path = reference?.path ?? reference?.ref?.path ?? "";
+      if (path.includes("scanEvents")) {
+        return new Promise(() => {}); // ONLY the scan-events read hangs, like a stuck transport on the big read
+      }
+      if (path.includes("countSessions")) {
+        return Promise.resolve({
+          docs: [{ id: "s1", data: () => ({ businessId: "biz-1", status: "active", startedAt: "2026-08-06T00:00:00.000Z" }) }],
+        });
+      }
+      return Promise.resolve({ docs: [] });
+    });
+
+    const store = createTestScanStore({
+      cloudBackend: true,
+      loadBusinessData: (businessId) => loadBusinessData(fakeDb, businessId),
+    });
+
+    store.getState().setBusinessContext("biz-1", "user-1");
+    expect(store.getState().businessDataLoaded).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(LOAD_ATTEMPT_TIMEOUT_MS * LOAD_MAX_ATTEMPTS + 15_000);
+
+    // The other four reads resolved immediately; only the scan-events read was stuck. It must still be
+    // bounded on its own, not left to hang the whole bootstrap forever.
+    expect(store.getState().businessDataLoaded).toBe(true);
+    expect(store.getState().lastSyncError).toMatch(/Timed out/i);
+  });
 });
