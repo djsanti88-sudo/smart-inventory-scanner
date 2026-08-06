@@ -3244,7 +3244,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         });
       },
 
-      retrySync: () => get().syncPending(true),
+      // Explicit user-facing retry: re-arm any items quarantined by a terminal failure (e.g. Firestore
+      // permission-denied) so this drain can re-attempt them. Automatic drains (timer/online/enqueue)
+      // intentionally keep skipping "quarantined" status - only this explicit action re-attempts a
+      // terminal failure, so a fix to the underlying cause (e.g. a rules bug) is not stranded forever.
+      // syncError is preserved until a successful apply clears it (see the ok-branch in drainCloudOnce).
+      retrySync: () => {
+        set((cur) => ({
+          pendingSyncQueue: cur.pendingSyncQueue.map((item) =>
+            item.status === "quarantined" ? { ...item, status: "error" } : item,
+          ),
+        }));
+        get().syncPending(true);
+      },
 
       setOnline: (online) => {
         set({ online });
