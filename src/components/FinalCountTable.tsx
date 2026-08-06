@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { customerDisplayName } from "@/services/displayName";
@@ -115,11 +115,6 @@ export function FinalCountTable() {
     return rows.filter((r) => kept.has(r.count.id));
   }, [rows, filterQuery]);
 
-  // Display-only window over the already-sorted/filtered set. Reset to the default window whenever the
-  // filter changes so a narrowed search never inherits a stale, oversized window from a prior filter.
-  useEffect(() => {
-    setRenderWindow(COUNTS_RENDER_WINDOW);
-  }, [filterQuery]);
   const windowedRows = useMemo(() => visibleRows.slice(0, renderWindow), [visibleRows, renderWindow]);
   const hiddenCount = Math.max(0, visibleRows.length - windowedRows.length);
 
@@ -139,7 +134,12 @@ export function FinalCountTable() {
           type="text"
           data-testid="polish-filter"
           value={filterQuery}
-          onChange={(e) => setFilterQuery(e.target.value)}
+          onChange={(e) => {
+            setFilterQuery(e.target.value);
+            // Display-only window resets with the filter so a narrowed search never inherits a
+            // stale, oversized window from a prior filter.
+            setRenderWindow(COUNTS_RENDER_WINDOW);
+          }}
           placeholder="Filter by brand, model, description, or size (e.g. 205)"
           aria-label="Filter counts"
           className="min-h-[44px] w-full max-w-md rounded-lg border border-zinc-300 px-3 text-base"
