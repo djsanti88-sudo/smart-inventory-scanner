@@ -18,6 +18,21 @@ import {
 // the same item therefore can never double-increment, while a key collision cannot suppress another write.
 
 const APPLIED_KEYS = "_appliedKeys";
+const FIREBASE_TRANSACTION_TIMEOUT_MS = 55_000;
+
+async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
 
 export type FirebaseSyncResult = SyncResult & { errorCode?: FirebaseSyncErrorCode };
 
@@ -121,7 +136,7 @@ export class FirebaseSyncTarget implements SyncTarget {
         payloadHash,
       };
       const keyRef = doc(this.db, COLLECTIONS.businesses, bid, APPLIED_KEYS, keyId);
-      const result = await runTransaction(this.db, async (tx) => {
+      const result = await withTimeout(runTransaction(this.db, async (tx) => {
         // ----- ALL READS FIRST (Firestore transaction rule) -----
         const keySnap = await tx.get(keyRef);
         if (keySnap.exists()) {
@@ -221,15 +236,24 @@ export class FirebaseSyncTarget implements SyncTarget {
         }
 
         return { ok: true, alreadyApplied: false } as FirebaseSyncResult;
-      });
+      }), FIREBASE_TRANSACTION_TIMEOUT_MS, "Firestore sync transaction");
       return result;
     } catch (e) {
+      // A rules denial cannot become successful by replaying the identical queue item. In particular,
+      // counters can create their own active-session rows but may not update them after settlement with
+      // a fresh idempotency key. Surface that authorization boundary to the queue instead of retrying it
+      // forever. Same-key retries never reach here: their applied marker returns alreadyApplied above.
+      const firebaseCode =
+        e && typeof e === "object" && "code" in e && typeof e.code === "string"
+          ? e.code
+          : undefined;
+      const permissionDenied = firebaseCode === "permission-denied";
       return {
         ok: false,
         alreadyApplied: false,
-        errorCode: "firestore_transaction_failed",
+        errorCode: permissionDenied ? "permission_denied" : "firestore_transaction_failed",
         error: e instanceof Error ? e.message : String(e),
-        retryable: true,
+        retryable: !permissionDenied,
       };
     }
   }

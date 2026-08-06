@@ -185,4 +185,72 @@ describe("decodeOnce 429 handling (daily cap vs real rate limit)", () => {
     // Genuine rate-limit retry succeeded (200 on retry) - this must NOT surface the daily-cap copy.
     expect(r?.reason ?? "").not.toContain("Daily AI lookup cap reached");
   });
+
+  // P4 (#28): bug #28 tests - the shared fetchWithBackoff helper. Regression guards that the OLD
+  // "capped at 30s + exactly one retry, no jitter" logic never comes back, and that no 429 path can
+  // ever violate the TOP-LEVEL LAW (every scan appears and counts).
+
+  it("real rate limit that 429s on EVERY attempt: retries stop at the bounded max-attempt limit (never an infinite loop), and the honest reason surfaces", async () => {
+    const store = aiOnStore();
+    const code = "086699998543";
+    const review = openReview(store, code);
+
+    const calls: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string) => {
+      calls.push(String(url));
+      // Retry-After: 1 keeps the test fast (well within the abort-timeout ceiling) while still
+      // proving the wait/retry cycle runs and then stops - it never loops forever.
+      return new Response(JSON.stringify({ error: "rate limited" }), { status: 429, headers: { "Retry-After": "1" } });
+    }) as unknown as typeof fetch;
+
+    try {
+      await store.getState().liveDecode(review.id);
+    } finally {
+      globalThis.fetch = original;
+    }
+
+    // Bounded: exactly maxAttempts (2) fetch calls, never a third/unbounded attempt.
+    expect(calls.filter((u) => u.includes("/api/ai-lookup")).length).toBe(2);
+
+    const r = store.getState().needsReviewQueue.find((q) => q.id === review.id);
+    // Honest reason - not the daily-cap copy (this was never a cap block), not a raw provider string.
+    expect(r?.reason).toContain("Live decode failed (network / rate-limit / provider error)");
+    expect(r?.reason).not.toContain("Daily AI lookup cap reached");
+  });
+
+  it("TOP-LEVEL LAW: a 429 that exhausts every retry NEVER suppresses the scanned row or its count", async () => {
+    const store = aiOnStore();
+    const code = "086699998544";
+    const review = openReview(store, code);
+
+    // Prove the row/count already existed BEFORE decode even runs (ensureProvisionalCount at scan
+    // time, synchronous, before any network call) - decode enrichment failing must never remove it.
+    const feedBefore = store.getState().scanFeed.find((ev) => ev.cleanCode === code);
+    expect(feedBefore).toBeTruthy();
+    const productIdBefore = feedBefore?.matchedProductId;
+    const countBefore = store.getState().finalCounts.find((c) => c.productId === productIdBefore);
+    expect(countBefore?.quantity).toBeGreaterThanOrEqual(1);
+
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ error: "rate limited" }), { status: 429, headers: { "Retry-After": "1" } }),
+    ) as unknown as typeof fetch;
+
+    try {
+      await store.getState().liveDecode(review.id);
+    } finally {
+      globalThis.fetch = original;
+    }
+
+    // Row still on the feed, still counted, after every retry attempt was exhausted with a 429.
+    const feedAfter = store.getState().scanFeed.find((ev) => ev.cleanCode === code);
+    expect(feedAfter).toBeTruthy();
+    const productIdAfter = feedAfter?.matchedProductId;
+    const countAfter = store.getState().finalCounts.find((c) => c.productId === productIdAfter);
+    expect(countAfter?.quantity).toBeGreaterThanOrEqual(1);
+    // The review stays open/reviewable (a failed decode never fabricates or auto-verifies identity).
+    const r = store.getState().needsReviewQueue.find((q) => q.id === review.id);
+    expect(r?.status).toBe("open");
+  });
 });

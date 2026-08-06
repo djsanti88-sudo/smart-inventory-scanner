@@ -390,6 +390,8 @@ export interface PendingSyncItem {
   status: PendingItemStatus;
   retryCount: number;
   lastError: string | null;
+  /** Terminal/retry classification from the last cloud attempt. Optional for persisted legacy queue items. */
+  syncError?: { code: string; message: string } | null;
   createdAt: string;
   updatedAt: string;
   idempotencyKey: string;

@@ -26,6 +26,7 @@ import { isLikelyMisreadGtin } from "@/services/upc/misread";
 import { gradeBarcode } from "@/services/upc/barcodeTrust";
 import { canonicalGtin } from "@/services/upc/gtin";
 import { clampDecodeBudgetMs, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
+import { fetchWithBackoff } from "@/services/net/fetchWithBackoff";
 import { hashPin, verifyPin, isValidPinFormat } from "@/services/security/pinLock";
 import { resolveScanToProductTiered } from "@/services/aliasMatcher";
 import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/services/productDedup";
@@ -1034,6 +1035,21 @@ export function transferOrphanCount(
 // still visible), immediately followed by transferOrphanCount itself for the local state update. The
 // affected ScanEvents are also durably re-pointed with fresh SAVE_SCAN_EVENT keys: a cloud reload must
 // not retain their former identity even though the count pair itself has already balanced quantity.
+// Rotation-side finalCounts prune (bug #34 residual, read-side counterpart to the pendingSyncQueue
+// data-loss fix - see sessionRotationSyncSafety.store.test.ts). Rotation must drop ONLY the
+// just-abandoned session's own finalCounts rows (superseded by the sessionHistory archive captured
+// synchronously by archiveCurrentSessionIfAny just before this runs), never OTHER past sessions'
+// rows a prior refreshFromCloud already merged into this array. A blanket `finalCounts: []` wipes
+// those unrelated rows too, disabling/emptying the History page's CSV download for sessions that
+// had nothing to do with this rotation until the next refreshFromCloud re-fetches them.
+function pruneFinalCountsForRotation(
+  finalCounts: InventoryCount[],
+  abandonedSessionId: string | null | undefined,
+): InventoryCount[] {
+  if (!abandonedSessionId) return finalCounts;
+  return finalCounts.filter((c) => c.sessionId !== abandonedSessionId);
+}
+
 function buildOrphanTransferSyncOps(params: {
   finalCountsBeforeTransfer: InventoryCount[];
   scanFeedBeforeTransfer: ScanEvent[];
@@ -1640,18 +1656,41 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
     // contend on the same _appliedKeys doc (self-inflicted "already-exists"). A promise-chain mutex runs
     // each drain after the previous completes; every enqueue still triggers a drain that picks up the
     // latest queue. Per-item idempotency (transaction + ledger) remains the guarantee against true retries.
+    const CLOUD_APPLY_TIMEOUT_MS = 60_000;
+    const STALE_DRAIN_MS = 75_000;
     let drainChain: Promise<void> = Promise.resolve();
+    let drainStartedAt: number | null = null;
+    let activeDrainToken = 0;
     let businessLoadGeneration = 0;
     const queueItemIdentity = (item: PendingSyncItem) =>
       `${item.businessId}\u0000${item.id}\u0000${item.idempotencyKey}`;
     const syncPendingCloud = (force: boolean): Promise<void> => {
-      drainChain = drainChain.then(() => drainCloudOnce(force)).catch(() => {});
+      const state = get();
+      if (
+        drainStartedAt !== null &&
+        Date.now() - drainStartedAt > STALE_DRAIN_MS &&
+        state.pendingSyncQueue.length > 0
+      ) {
+        console.warn(`[sync] drain watchdog: force-reset after ${Date.now() - drainStartedAt}ms, ${state.pendingSyncQueue.length} items pending`);
+        activeDrainToken += 1;
+        drainStartedAt = null;
+        drainChain = Promise.resolve();
+      }
+      drainChain = drainChain.then(async () => {
+        const token = ++activeDrainToken;
+        drainStartedAt = Date.now();
+        try {
+          await drainCloudOnce(force, token);
+        } finally {
+          if (activeDrainToken === token) drainStartedAt = null;
+        }
+      }).catch(() => {});
       return drainChain;
     };
 
     // Cloud drain (one pass): async, awaits db.apply, and REQUIRES a real business context first (no
     // fake/default business writes). The mock/local path keeps the original SYNCHRONOUS syncPending below.
-    const drainCloudOnce = async (force: boolean) => {
+    const drainCloudOnce = async (force: boolean, token: number) => {
       const state = get();
       if (!state.online && !force) return;
       if (state.pendingSyncQueue.length === 0) return;
@@ -1673,6 +1712,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       const erroredItems = new Map<string, PendingSyncItem>();
       let lastErr: string | null = null;
       for (const item of batch) {
+        if (activeDrainToken !== token) return;
         const live = get();
         if (
           !live.businessContextReady ||
@@ -1684,7 +1724,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const itemIdentity = queueItemIdentity(item);
         let res;
         try {
-          res = await db.apply(item);
+          let timeoutId: ReturnType<typeof setTimeout> | undefined;
+          try {
+            res = await Promise.race([
+              db.apply(item),
+              new Promise<never>((_, reject) => {
+                timeoutId = setTimeout(() => reject(new Error(`cloud sync apply timed out after ${CLOUD_APPLY_TIMEOUT_MS}ms`)), CLOUD_APPLY_TIMEOUT_MS);
+              }),
+            ]);
+          } finally {
+            if (timeoutId !== undefined) clearTimeout(timeoutId);
+          }
         } catch (e) {
           res = {
             ok: false,
@@ -1702,11 +1752,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             status: res.retryable === false ? "quarantined" : "error",
             retryCount: item.retryCount + 1,
             lastError: res.error ?? "sync failed",
+            syncError: {
+              code: res.errorCode ?? "sync_failed",
+              message: res.error ?? "sync failed",
+            },
             updatedAt: now(),
           });
           lastErr = res.error ?? "sync failed";
         }
       }
+      if (activeDrainToken !== token) return;
       set((cur) => {
         // Reconcile against the CURRENT queue: drop applied items, replace errored with their updated
         // version, and KEEP any items enqueued while this pass was awaiting (the mutex's next pass drains
@@ -2133,6 +2188,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // Owner feature (2026-07-22): archive the session being abandoned/rotated away from BEFORE
         // its scanFeed is wiped below - a session with at least one scan is never silently lost.
         archiveCurrentSessionIfAny();
+        const previousSessionId = get().currentSession?.id;
         const id = `session-${idFactory()}`;
         const businessId = get().businessId;
         const session: InventorySession = {
@@ -2153,7 +2209,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           sessionId: id,
           currentSession: session,
           scanFeed: [],
-          finalCounts: [],
+          finalCounts: pruneFinalCountsForRotation(get().finalCounts, previousSessionId),
           needsReviewQueue: [],
           // DATA-LOSS FIX (owner 4k campaign, 2026-08-05): pendingSyncQueue is deliberately NOT
           // wiped here. Rotating while the previous session's backlog is still draining was
@@ -2406,7 +2462,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           sessionId: id,
           currentSession: session,
           scanFeed: [],
-          finalCounts: [],
+          finalCounts: pruneFinalCountsForRotation(get().finalCounts, cur?.id),
           needsReviewQueue: [],
           lastSyncError: null,
         });
@@ -3335,7 +3391,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         try {
           // D4-follow-up: live-auth mode requires idToken + businessId on every POST (route.ts:294-324)
           // or this 401s "unauthenticated" - mock mode resolves {} and is unaffected.
-          const res = await fetch("/api/ai-lookup", {
+          // P4 (#28): shared backoff helper - a human-initiated single action, not part of the bulk-
+          // paste storm, but gets the same honest-Retry-After/jitter resilience for consistency.
+          const res = await fetchWithBackoff("/api/ai-lookup", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -3701,26 +3759,44 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const decodeOnce = async () => {
             let res: Response;
             try {
-              res = await fetch("/api/ai-lookup", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                signal: abortController.signal,
-                body: JSON.stringify({
-                  ...(await aiRequestAuth(state.businessId)),
-                  mode: "decode",
-                  deterministicOnly,
-                  proRecheck: review.reopenedFromWrong === true, // auto-escalate a marked-wrong code to the stronger model
-                  rawCode: rawCodeSanitized,
-                  cleanCode: cleanCodeSanitized,
-                  codeType,
-                  confidenceThreshold: 0.8,
-                  allowImageSuggestions: s.allowImageSuggestions,
-                  budgetMs: clampedBudgetMs,
-                  scanContext,
-                  brandPrefixHint,
-                  autoCountNonPublicWithEvidence: s.autoCountNonPublicWithEvidence ?? true,
-                }),
-              });
+              // P4 (#28): fetchWithBackoff replaces the old inline capped-at-30s/single-retry-no-
+              // jitter block. It honors Retry-After IN FULL (up to its own safety ceiling, not the
+              // old 30s cap) and applies full jitter on the exponential fallback so a burst of 429s
+              // does not retry in a synchronized wave. onRetryDecision reads the (cloned) 429 body to
+              // veto a retry outright on daily_cap/account_daily_cap - those never clear by waiting,
+              // exactly as before. maxAttempts: 2 preserves the existing single-retry cost/latency
+              // budget; the ORIGINAL (unread) response is returned when exhausted/vetoed so the
+              // reasonCode handling below is unchanged.
+              res = await fetchWithBackoff(
+                "/api/ai-lookup",
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  signal: abortController.signal,
+                  body: JSON.stringify({
+                    ...(await aiRequestAuth(state.businessId)),
+                    mode: "decode",
+                    deterministicOnly,
+                    proRecheck: review.reopenedFromWrong === true, // auto-escalate a marked-wrong code to the stronger model
+                    rawCode: rawCodeSanitized,
+                    cleanCode: cleanCodeSanitized,
+                    codeType,
+                    confidenceThreshold: 0.8,
+                    allowImageSuggestions: s.allowImageSuggestions,
+                    budgetMs: clampedBudgetMs,
+                    scanContext,
+                    brandPrefixHint,
+                    autoCountNonPublicWithEvidence: s.autoCountNonPublicWithEvidence ?? true,
+                  }),
+                },
+                {
+                  maxAttempts: 2,
+                  onRetryDecision: async (cloned) => {
+                    const body = await cloned.json().catch(() => ({}) as { reasonCode?: string });
+                    return { retry: body?.reasonCode !== "account_daily_cap" && body?.reasonCode !== "daily_cap" };
+                  },
+                },
+              );
             } catch (fetchErr) {
               // An abort is NEVER a retry case (there is nowhere to retry TO - the decode keeps
               // running server-side and the client just gave up waiting). Every other fetch-level
@@ -3734,8 +3810,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             //  - daily_cap: the server-side daily AI spend cap is reached. There is no automatic
             //    decode-on-cap-reset queue anywhere in the app, so retrying now is pointless (it will
             //    just 429 again) - fail fast with an honest reason instead of burning a wait.
-            //  - anything else: a self-inflicted rate limit (costs $0). Keep the single retry with
-            //    backoff, respecting Retry-After, exactly as before.
+            //  - anything else: a self-inflicted rate limit (costs $0) that fetchWithBackoff already
+            //    retried (with full Retry-After honor + jitter) before returning this final response.
             if (res.status === 429) {
               const body = await res.json().catch(() => ({}) as { reasonCode?: string; floor?: PrefixFloorResult });
               // P2: thread the server's $0 prefix floor into the error so the cap-blocked row is named
@@ -3745,24 +3821,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               // its own honest account-scoped copy (accountScoped=true drives the message below).
               if (body?.reasonCode === "account_daily_cap") throw new DailyCapReachedError(undefined, body?.floor, true);
               if (body?.reasonCode === "daily_cap") throw new DailyCapReachedError(undefined, body?.floor);
-              const retryAfterSec = Math.min(Number(res.headers.get("Retry-After") || "5"), 30);
-              await new Promise((r) => setTimeout(r, retryAfterSec * 1000));
-              const retry = await fetch("/api/ai-lookup", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                // Review hardening 2026-07-15: the retry leg carries the same abort signal as the
-                // initial call so a hung retry can never block the scanner past the abort window.
-                signal: abortController.signal,
-                body: JSON.stringify({
-                  ...(await aiRequestAuth(state.businessId)),
-                  mode: "decode", deterministicOnly, proRecheck: review.reopenedFromWrong === true,
-                  rawCode: rawCodeSanitized, cleanCode: cleanCodeSanitized, codeType,
-                  confidenceThreshold: 0.8, allowImageSuggestions: s.allowImageSuggestions,
-                  budgetMs: clampedBudgetMs, scanContext, brandPrefixHint,
-                }),
-              });
-              if (!retry.ok) throw new Error(`decode failed ${retry.status} after 429 retry`);
-              return retry.json();
+              throw new Error(`decode failed 429 after retries`);
             }
             if (!res.ok) throw new Error(`decode failed ${res.status}`);
             return res.json();
@@ -5030,7 +5089,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         try {
           // D4-follow-up: live-auth mode requires idToken + businessId on every POST (route.ts:294-324)
           // or this 401s "unauthenticated" - mock mode resolves {} and is unaffected.
-          const res = await fetch("/api/ai-lookup", {
+          // P4 (#28): shared backoff helper - background enrichment only, still silently gives up
+          // (`if (!res.ok) return;` below) on a final 429, unchanged; this only adds honest-Retry-
+          // After/jittered resilience before that give-up point.
+          const res = await fetchWithBackoff("/api/ai-lookup", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -7129,7 +7191,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         try {
           // D4-follow-up: live-auth mode requires idToken + businessId on every POST (route.ts:294-324)
           // or this 401s "unauthenticated" - mock mode resolves {} and is unaffected.
-          const res = await fetch("/api/ai-lookup", {
+          // P4 (#28): shared backoff helper - a human-triggered single action, not a storm contributor,
+          // but gets the same honest-Retry-After/jitter resilience for consistency.
+          const res = await fetchWithBackoff("/api/ai-lookup", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             // proRecheck selects the strongest configured Gemini model server-side. Correction-only:

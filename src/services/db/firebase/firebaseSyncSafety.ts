@@ -24,6 +24,7 @@ export type FirebaseSyncErrorCode =
   | "invalid_entity_type"
   | "unsupported_operation"
   | "idempotency_conflict"
+  | "permission_denied"
   | "firestore_transaction_failed";
 
 export interface FirebaseSyncValidationFailure {
