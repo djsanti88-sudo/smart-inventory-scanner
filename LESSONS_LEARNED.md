@@ -277,3 +277,61 @@ caught.
 **Rule.** Budget for multiple adversarial review rounds as a standing part of any non-trivial fix, not a
 one-and-done step. The marginal defect-catch rate of round 2-3 has repeatedly justified the cost; declaring
 done after round 1 has repeatedly missed critical bugs.
+
+## L14 (2026-08-05). The PII sanitizer ate the lookup key
+
+**What happened.** `sanitizeForAiLookup` masked bare 10-digit scan codes into `[redacted-phone]` before
+`runDecodePipeline`, so every rung (corpus, cache, providers) searched for the literal masked string.
+Bare 10-digit codes were structurally undecodable while 11-14 digit codes sailed through a carve-out.
+
+**Rule.** The scanned code field is a technical identifier, never a free-text PII candidate. Sanitize
+names, emails, phones, and cost patterns in free text; never sanitize the lookup key itself. Guard:
+`route.bareCode.test.ts` (bare 8-14 digit codes reach the pipeline unmasked; formatted phones stay masked).
+
+## L15 (2026-08-05). A harness instance impersonated the product
+
+**What happened.** localhost:3400 was the boss-corpus certification harness (synthetic allowlist
+`local-corpus-certification`, live-auth emulators, all provider keys blanked). Every real session got the
+canned "No trusted exact match was found." regardless of data, and the owner lost a session concluding the
+database was broken.
+
+**Rule.** Trust-gated flows are never manually tested on a harness or synthetic instance. Status endpoints
+must expose which trust mode is active (`trustedExact.allowlistConfigured` on the status GET) and the port
+table documents 3400 as the harness. Guards: `route.statusTrustedExact.test.ts`, honest miss reasons in
+`route.trustedExact.test.ts`.
+
+## L16 (2026-08-05). Owner rule: probes never dead-end
+
+**What happened.** The trusted-exact fallback required `canonicalGtin(...) !== null`, so non-GTIN codes
+dead-ended at the probe with a canned miss; the client cap gate could also suppress the whole ladder even
+though free corpus rungs need no keys.
+
+**Rule (owner order 2026-08-05).** A code not found in the trusted index/corpus MUST continue through the
+decode ladder in every environment (local, preview, prod). The ladder's own gates decide rung availability
+(free rungs run keyless; paid rungs keep keys/cap/breaker gating) and every skipped rung surfaces an honest
+reason. Guard: `scanStore.ladderContinuation.test.ts`.
+
+## L17 (2026-08-05). A shared MCP browser profile stomped parallel-agent sessions
+
+**What happened.** Parallel QA agents shared one MCP browser profile/tab. Concurrent sessions overwrote
+each other's localStorage and tenant state, producing a false-alarm defect during the D4-W1 fleet run.
+
+**Rule.** Parallel browser QA always uses a per-worker isolated Chromium instance with its own Playwright
+script, or a chrome-devtools isolated context; never a shared MCP browser tab. Guard: the D4 task reports
+plus the isolated-rerun validation (W1b, D5a).
+
+## L18 (2026-08-05). A guard fixed at one call site regresses at the others
+
+**What happened.** The 2026-07-21 floor-guess brand guard fix was applied at one of three call sites; the
+other two regressed the same class of bug.
+
+**Rule.** Identity and precedence guards live in the shared layer (`enrichProductIdentity`), never patched
+per call site. Guard: `prefixFloorBrandClassFix.store.test.ts` plus the flag in `enrichProductIdentity`.
+
+## L19 (2026-08-05). PRAGMA integrity_check over Turso HTTP is transport-infeasible
+
+**What happened.** `PRAGMA integrity_check` over the Turso HTTP transport hangs or fails; it is not a
+usable pre-promote gate for a remote database.
+
+**Rule.** Replace an infeasible check with a feasible equivalent (a full readability scan) and label any
+skipped check explicitly rather than letting it silently pass. Guard: boss-override verify gate A.

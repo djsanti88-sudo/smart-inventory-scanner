@@ -41,6 +41,7 @@ export default defineConfig({
             "scripts/kkm-catalog/**/*.test.mjs",
             "scripts/refresh-tire-meta.test.mjs",
             "scripts/boss-workbook-reconcile-dryrun.test.mjs",
+            "scripts/boss-override-2026-08-05.test.mjs",
             "scripts/tire-db-repair/03_part_number_aliases.test.mjs",
             "scripts/tire-db-repair/09_promote_preflight.test.mjs",
             "scripts/tire-db-repair/10_promote_execute.test.mjs",

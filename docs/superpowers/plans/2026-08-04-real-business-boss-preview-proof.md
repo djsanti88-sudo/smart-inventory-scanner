@@ -13,7 +13,7 @@
   - **Conflict ledger:** blank, unsupported, or cross-product identifiers that must fail closed and are excluded from the zero-review claim until corrected.
 - [ ] Decide the implementation baseline in an isolated worktree because the current tree is dirty. No deployment until the owner approves the baseline/branch.
 
-Task 1 uses a deterministic source-derived shortest-20 sample and makes no owner-observed claim. The literal owner-observed 20 codes and selected business are mandatory Task 3 Preview inputs; if unavailable then, stop and report the missing evidence.
+If the 20 codes, selected business, approved export, or conflict dispositions are unavailable, stop and report the missing evidence.
 
 ### Build the truthful exact manifest
 

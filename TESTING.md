@@ -369,3 +369,18 @@ never become indistinguishable from it). The fix is a faithful dump/restore of t
   gaps are filled).
 - Gate run (2026-07-15, Task 20 only): `npx vitest run src/server/decodeCacheBackup.test.ts` 7/7 passed;
   `npx tsc --noEmit` clean; CLI smoke exit 0.
+
+## 2026-08-05 diagnostic-fix branch (fix/decode-diagnostic-2026-08-04)
+- `src/app/api/ai-lookup/route.bareCode.test.ts` - bare numeric scan codes reach the pipeline unmasked; free-text phones still masked; lookup-mode response truthfully echoes what providers received
+- `src/app/api/ai-lookup/route.trustedExact.test.ts` (extended) - deterministicOnly miss reasons are honest per session authorization (trusted_exact_not_available vs trusted_exact_miss)
+- `src/app/api/ai-lookup/route.statusTrustedExact.test.ts` - status GET exposes trustedExact.allowlistConfigured without leaking business ids
+- `src/server/tire-knowledge/tireKnowledgeIndex.jsonStatus.test.ts` - tire JSON corpus load state surfaced on /api/health, never throws
+- `src/stores/scanStore.ladderContinuation.test.ts` - owner rule: trusted-exact misses always continue into the full ladder; offline blocks with honest combined reason; counting untouched
+- `src/stores/prefixFloorBrandClassFix.store.test.ts` - guards all three brand-sanity call sites in enrichProductIdentity; auto-count gate + suggestion flow + conflict floor + edge cases
+- `src/services/filterProducts.test.ts` - slash/URL/encoded-case handling for identity merge; no silent normalization; exact match precedence
+- `scripts/teach/12_boss_sheet1_overlay.node-test.mjs` - boss-override CSV overlay idempotency; dupe key + order + upsert semantics; never loses counted scans
+- `src/app/(app)/businessContextGateCoverage.test.tsx` - table-driven coverage across reconcile/products/settings/report/catalog-review routes; BusinessContextGate applied consistently on every direct-load route; sessions index verified pure redirect
+- `src/services/polish/backfillProducts.test.ts` (extended, self-heal) - poisoned floor-guess brands heal on rehydrate once real identity data derives a brand; floor labels stay when nothing better exists
+- `src/server/decode/pipeline.test.ts` (extended, GPT diagnostics) - classifyGptFailureDetail classifies 429/5xx/network gpt_call_failed detail into ladderReasons, providerStatuses, and the decode_outcomes ledger; customer-facing reasonText/decision.reason never leak the classified detail (denylist intact)
+- `scripts/boss-override-2026-08-05.test.mjs` (node:test, 50 tests) - actions-ledger classifier: match_basis buckets, forbidden-code exclusion, stale-sibling drop proposals (fail-closed on mixed siblings), live 2026-08-05 dataset closure (3,429 rows), item-name/uid/barcode-shape parsers
+- `scripts/boss-workbook-reconcile-dryrun.test.mjs` (node:test, vitest-excluded) - offline GS1 check-digit + RFC-4180 CSV gate for the corrected boss workbook
