@@ -1,12 +1,13 @@
 "use client";
 
+import { useMemo } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { DecodeStatusBadge, MatchBadge, StatusBadge, SyncBadge } from "@/components/badges";
 import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
 import { matchTireSize } from "@/services/tire/tireSizeNormalizer";
 import { canonicalTireSize } from "@/services/catalog/tireListingNormalizer";
-import type { Product } from "@/types";
+import type { Product, UnknownCodeReview } from "@/types";
 
 // Size column: same structured-size source FinalCountTable already uses (product.specsShort via
 // matchTireSize), falling back to a deterministic parse of the row's own display name when the
@@ -23,11 +24,32 @@ function resolvedFeedSize(product: Product | undefined, displayName: string): st
 // and the scan status of each scan, never the code strings or how the code matched internally.
 export function LiveScanFeed() {
   const scanFeed = useScanStore((s) => s.scanFeed);
-  const getProduct = useScanStore((s) => s.getProduct);
+  const products = useScanStore((s) => s.products);
   const needsReviewQueue = useScanStore((s) => s.needsReviewQueue);
   const approveSuggestion = useScanStore((s) => s.approveSuggestion);
   const declineSuggestion = useScanStore((s) => s.declineSuggestion);
   const isPlatform = useIsPlatformOwner();
+
+  // PERF FIX (defect #37, live-reproduced 2026-08-05/06): the store's getProduct(id) does a linear
+  // `products.find()`. Calling it once per rendered scanFeed row made this O(scanFeed.length *
+  // products.length) - with thousands of scans and thousands of products, that quadratic blowup froze
+  // the renderer for 30+ seconds on a fresh device's first load. Build the id -> product index ONCE per
+  // `products` change (single pass, O(M)) and do O(1) Map lookups per row instead (O(N) total).
+  const productsById = useMemo(() => {
+    const m = new Map<string, Product>();
+    for (const p of products) m.set(p.id, p);
+    return m;
+  }, [products]);
+  // Same fix for the per-row `needsReviewQueue.find(...)` lookup: index by cleanCode ONCE (first
+  // matching review per code wins, same semantics as the original .find()), instead of re-scanning the
+  // whole review queue for every feed row.
+  const reviewByCleanCode = useMemo(() => {
+    const m = new Map<string, UnknownCodeReview>();
+    for (const r of needsReviewQueue) {
+      if (r.suggestedProductName && !m.has(r.cleanCode)) m.set(r.cleanCode, r);
+    }
+    return m;
+  }, [needsReviewQueue]);
   // The "Barcode" column shows the code the user JUST scanned (their own in-memory scan, never persisted
   // for customers and never the catalog/alias database) - visible to ALL roles. Raw code + Match remain
   // platformOwner-only. Customer columns: Time, Barcode, Brand, Product, Size, SKU, Qty, Status, Reason,
@@ -72,7 +94,7 @@ export function LiveScanFeed() {
               </tr>
             ) : (
               scanFeed.map((e) => {
-                const product = getProduct(e.matchedProductId);
+                const product = e.matchedProductId ? productsById.get(e.matchedProductId) : undefined;
                 // TASK 3 FIX (feed stuck on "Unidentified item"): ensureProvisionalCount ALWAYS mints a
                 // provisional placeholder Product synchronously at scan time, before decode finishes, so
                 // `product` is truthy even when there is no real identity yet. A naive `product ? undefined
@@ -80,7 +102,7 @@ export function LiveScanFeed() {
                 // lookup also runs when the matched product is still `provisional` (not yet a real,
                 // human-confirmed identity), so the feed shows the best-known name as soon as decode has one.
                 const suggestion = (!product || product.provisional)
-                  ? needsReviewQueue.find((r) => r.cleanCode === e.cleanCode && r.suggestedProductName)
+                  ? reviewByCleanCode.get(e.cleanCode)
                   : undefined;
                 // Display priority: a real (non-provisional) product name wins outright. Otherwise prefer the
                 // decoded suggestion's name over the safe-but-uninformative provisional placeholder name, and

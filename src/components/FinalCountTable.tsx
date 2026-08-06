@@ -54,7 +54,7 @@ function resolvedSizeDisplay(product: Product): string {
 export function FinalCountTable() {
   const finalCounts = useScanStore((s) => s.finalCounts);
   const currentSession = useScanStore((s) => s.currentSession);
-  const getProduct = useScanStore((s) => s.getProduct);
+  const products = useScanStore((s) => s.products);
   const needsReviewQueue = useScanStore((s) => s.needsReviewQueue);
   const isPlatform = useIsPlatformOwner();
   const [filterQuery, setFilterQuery] = useState("");
@@ -62,14 +62,31 @@ export function FinalCountTable() {
   // F2 fix (Phase 3 review): refreshFromCloud intentionally does an ADDITIVE cross-session merge into
   // finalCounts (a tested cross-device sync path - see refreshFromCloud.store.test.ts). This table
   // must show only the CURRENT session's counts, not every session's counts merged into the store.
-  const sessionCounts = currentSession
-    ? finalCounts.filter((c) => c.sessionId === currentSession.id)
-    : finalCounts;
+  const sessionCounts = useMemo(
+    () => (currentSession ? finalCounts.filter((c) => c.sessionId === currentSession.id) : finalCounts),
+    [finalCounts, currentSession],
+  );
 
-  const rows = sessionCounts
-    .map((c) => ({ count: c, product: getProduct(c.productId) }))
-    .filter((r): r is { count: InventoryCount; product: Product } => !!r.product)
-    .sort((a, b) => b.count.quantity - a.count.quantity);
+  // PERF FIX (defect #37, live-reproduced 2026-08-05/06): `getProduct(id)` does a linear
+  // `products.find()`. Mapping every session count through it - AND recomputing that map on every
+  // render since `rows` was not memoized - made this O(finalCounts.length * products.length) on every
+  // render, freezing the renderer for 30+ seconds on a fresh device with thousands of scans/products.
+  // Build the id -> product index ONCE per `products` change (O(M)) and memoize `rows` itself so the
+  // O(N) mapping over sessionCounts only re-runs when the underlying data actually changes.
+  const productsById = useMemo(() => {
+    const m = new Map<string, Product>();
+    for (const p of products) m.set(p.id, p);
+    return m;
+  }, [products]);
+
+  const rows = useMemo(
+    () =>
+      sessionCounts
+        .map((c) => ({ count: c, product: productsById.get(c.productId) }))
+        .filter((r): r is { count: InventoryCount; product: Product } => !!r.product)
+        .sort((a, b) => b.count.quantity - a.count.quantity),
+    [sessionCounts, productsById],
+  );
 
   // Task 4: digits-only query filters by sizeTag prefix; any other text filters brand/model/description.
   const visibleRows = useMemo(() => {
