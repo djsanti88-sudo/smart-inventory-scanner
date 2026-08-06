@@ -21,8 +21,27 @@
 // NOTE: this is the contained mitigation only. The unbounded-growth root cause (serializing the entire
 // scan state to a single localStorage key on every write) still argues for the IndexedDB migration - that
 // remains the recommended architectural follow-up and is intentionally OUT OF SCOPE here.
+//
+// Defect #37 layer 3 (fresh-device restore freeze, 2026-08-06): the wrapper above only coalesces the
+// BACKING localStorage.setItem call. When it is composed under zustand's `createJSONStorage`, that
+// helper's own `setItem(name, value)` still calls `JSON.stringify(value)` SYNCHRONOUSLY on every single
+// `set()` - BEFORE handing the string to this wrapper - because zustand's persist middleware calls
+// `storage.setItem` unconditionally from its overridden `api.setState` on every state change
+// (node_modules/zustand/esm/middleware.mjs: `setItem = () => storage.setItem(name, {state, version})`,
+// invoked from every `set(...)`/`api.setState(...)` call, not just ones the app intends to persist).
+// So the coalescing above only reduces REAL DISK WRITES, not JSON.stringify CALLS - and at restore-time
+// state size (~1,800 products + ~4,500 scanFeed rows + ~4,499 finalCounts, ~5MB), a handful of back-to-
+// back set() calls in the restore chain (persist.rehydrate -> setHasHydrated -> setBusinessContext's
+// synchronous branch -> its async loader's merge) each re-stringify the FULL state, blocking the main
+// thread long enough (repeatedly) to starve the Firestore SDK's webchannel keepalive - which reconnects,
+// re-delivers, and re-triggers a merge + another stringify, observed live as ~30s freeze "waves".
+// `createCoalescedFailSoftPersistStorage` fixes this at the actual expensive step: it implements
+// zustand's `PersistStorage<S>` directly (bypassing `createJSONStorage`) so `setItem` receives the RAW
+// state object and defers `JSON.stringify` itself into the SAME coalesced flush as the backing write -
+// collapsing N back-to-back set() calls in one tick to at most ONE stringify + ONE backing write, exactly
+// like the byte-write coalescing above already does for the string case.
 
-import type { StateStorage } from "zustand/middleware";
+import type { PersistStorage, StateStorage, StorageValue } from "zustand/middleware";
 
 /** The wrapper adds a synchronous force-flush so tests are deterministic and hide-events can drain. */
 export interface CoalescedFailSoftStorage extends StateStorage {
@@ -113,6 +132,125 @@ export function createCoalescedFailSoftStorage(
     },
     setItem: (name: string, value: string) => {
       // Coalesce: remember only the latest value; a single scheduled flush writes it once.
+      pendingName = name;
+      pendingValue = value;
+      hasPending = true;
+      schedule();
+    },
+    flush,
+  };
+}
+
+/** Same coalesce/fail-soft/flush-on-hide contract as `CoalescedFailSoftStorage`, but for a zustand
+ *  `PersistStorage<S>` used directly (no `createJSONStorage` wrapper) so `JSON.stringify` itself is
+ *  deferred into the coalesced flush - see the defect #37 layer-3 note above. */
+export interface CoalescedFailSoftPersistStorage<S> extends PersistStorage<S> {
+  flush: () => void;
+}
+
+/**
+ * Wrap a backing storage (default: window.localStorage) as a zustand `PersistStorage<S>` whose
+ * `setItem` defers BOTH serialization and the disk write to a single coalesced flush per tick, instead
+ * of stringifying the full state synchronously on every `set()` call (zustand's persist middleware calls
+ * `storage.setItem` from every state change, not only ones the app intends to persist - see file header).
+ */
+export function createCoalescedFailSoftPersistStorage<S>(
+  getBackingStorage: () => Backing,
+): CoalescedFailSoftPersistStorage<S> {
+  let pendingName: string | null = null;
+  let pendingValue: StorageValue<S> | null = null;
+  let hasPending = false;
+  let scheduled = false;
+
+  const doWrite = (name: string, value: StorageValue<S>) => {
+    let serialized: string;
+    try {
+      // The expensive step this wrapper exists to bound: one stringify per coalesced flush, not one
+      // per set() call.
+      serialized = JSON.stringify(value);
+    } catch (err) {
+      console.warn(
+        `[scanStore] Could not serialize '${name}' for persistence; this write was dropped. ` +
+          `Scanning continues in memory. (finding #16 / defect #37 fail-soft)`,
+        err,
+      );
+      return;
+    }
+    try {
+      getBackingStorage().setItem(name, serialized);
+    } catch (err) {
+      // Fail soft: quota exceeded, storage disabled, or private-mode restriction. Never throw - a persist
+      // failure must not brick scanning; the in-memory session keeps working. (Mirrors reconcileStore.ts.)
+      console.warn(
+        `[scanStore] Could not persist '${name}' (storage quota or unavailable); this write was dropped. ` +
+          `Scanning continues in memory; consider clearing local cache. (finding #16 fail-soft)`,
+        err,
+      );
+    }
+  };
+
+  const flush = () => {
+    scheduled = false;
+    if (!hasPending || pendingName === null || pendingValue === null) return;
+    const name = pendingName;
+    const value = pendingValue;
+    hasPending = false;
+    pendingName = null;
+    pendingValue = null;
+    doWrite(name, value);
+  };
+
+  const schedule = () => {
+    if (scheduled) return;
+    scheduled = true;
+    if (typeof setTimeout === "function") {
+      setTimeout(flush, 0);
+    } else {
+      flush();
+    }
+  };
+
+  if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+    const flushNow = () => flush();
+    window.addEventListener("pagehide", flushNow);
+    if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") flush();
+      });
+    }
+  }
+
+  return {
+    getItem: (name: string) => {
+      let raw: string | null;
+      try {
+        raw = getBackingStorage().getItem(name);
+      } catch (err) {
+        console.warn(`[scanStore] Could not read '${name}' from storage (unavailable).`, err);
+        return null;
+      }
+      if (raw === null || raw === undefined) return null;
+      try {
+        return JSON.parse(raw) as StorageValue<S>;
+      } catch (err) {
+        console.warn(`[scanStore] Could not parse persisted '${name}'; treating as absent.`, err);
+        return null;
+      }
+    },
+    removeItem: (name: string) => {
+      if (pendingName === name) {
+        hasPending = false;
+        pendingName = null;
+        pendingValue = null;
+      }
+      try {
+        getBackingStorage().removeItem(name);
+      } catch (err) {
+        console.warn(`[scanStore] Could not remove '${name}' from storage (unavailable).`, err);
+      }
+    },
+    setItem: (name: string, value: StorageValue<S>) => {
+      // Coalesce: remember only the latest RAW value; stringify happens once, at flush time.
       pendingName = name;
       pendingValue = value;
       hasPending = true;

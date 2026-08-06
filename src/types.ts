@@ -128,6 +128,8 @@ export interface Product {
   // ORPHANED verified product (verified lost on persist reset) which must still re-alias via resolveUnknown.
   provisional?: boolean;
   provenanceTier?: ProvenanceTier;
+  /** Opaque server-issued identity used only to coalesce authenticated trusted-exact scan spellings. */
+  trustedExactCanonicalId?: string;
   // Build 2 (product-name polish): fields split out of `name` by the deterministic structurer
   // (src/services/polish/structurer.ts) or, as a fallback, the LLM polish path. All optional so
   // older persisted products (no structuring run yet) fall back to `brand` / `name` at display time.
@@ -353,6 +355,7 @@ export interface UnknownCodeReview {
 export type ResolutionAction =
   | "link_existing"
   | "create_new"
+  | "trusted_exact"
   | "ignore"
   | "add_alias"
   | "reject_suggestion";
@@ -363,7 +366,10 @@ export interface AiLookupLog {
   rawCode: string;
   cleanCode: string;
   providerName: string;
-  status: "success" | "error" | "blocked_offline" | "blocked_cap" | "cache_hit";
+  // Fix-wave 2026-08-04: "blocked_cap" used to also stand in for a disabled AI toggle and an open
+  // circuit breaker, which hid the real block reason from anyone reading the log. "blocked_disabled"
+  // and "blocked_circuit" split those out; "blocked_cap" now means the daily AI lookup cap only.
+  status: "success" | "error" | "blocked_offline" | "blocked_cap" | "blocked_disabled" | "blocked_circuit" | "cache_hit";
   confidence: number;
   estimatedInputTokens: number;
   estimatedOutputTokens: number;
@@ -384,6 +390,8 @@ export interface PendingSyncItem {
   status: PendingItemStatus;
   retryCount: number;
   lastError: string | null;
+  /** Terminal/retry classification from the last cloud attempt. Optional for persisted legacy queue items. */
+  syncError?: { code: string; message: string } | null;
   createdAt: string;
   updatedAt: string;
   idempotencyKey: string;
@@ -619,6 +627,7 @@ export type CorroborationPath =
   | "corpus_exact_part_number"
   | "internet_two_source_size"
   | "non_public_trusted_source"
+  | "boss_trusted_exact_barcode"
   | "gpt_self_report";
 
 export interface DecodeDecision {
@@ -629,4 +638,6 @@ export interface DecodeDecision {
   exactCodeEvidenceVerifiedByApp: boolean; // set ONLY from EvidenceVerifier output, never the model
   crossCheck: CrossCheckResult;
   corroborationPath?: CorroborationPath; // set only when status === "verified"
+  /** Opaque stable identity emitted only by the authenticated server-side trusted-exact path. */
+  trustedExactCanonicalProductId?: string;
 }

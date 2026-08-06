@@ -20,7 +20,13 @@ describe("upcItemDbUsage", () => {
   let dir: string;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(AT_JULY_12());
     dir = freshDir();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("fresh store: allowed with used 0, limit 90 (buffer under UPCitemdb's 100/day)", async () => {
@@ -79,10 +85,12 @@ describe("upcItemDbUsage", () => {
 
   it("NEVER touches the paid Go-UPC usage key or the daily AI-lookup cap key (own namespace)", async () => {
     const storage = fileLadderStorage(dir);
+    const paidUsageBefore = await storage.readUsage();
     const usage = upcItemDbUsage(storage, { now: AT_JULY_12 });
     await usage.record();
-    // The paid Go-UPC usage file is untouched (still default month/used 0).
-    expect(await storage.readUsage()).toEqual({ month: "2026-07", used: 0 });
+    // The paid Go-UPC usage file is untouched.
+    expect(await storage.readUsage()).toEqual(paidUsageBefore);
+    expect(paidUsageBefore).toEqual({ month: "2026-07", used: 0 }); // absolute floor restored (final-review)
     // No key resembling the AI-lookup daily cap's own namespace was ever written.
     expect(await storage.get("ai-lookup-daily-cap")).toBeNull();
   });

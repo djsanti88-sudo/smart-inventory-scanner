@@ -3,6 +3,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
 import { logServerEvent } from "@/server/log";
+import { tireJsonIndexStatus } from "@/server/tire-knowledge/tireKnowledgeIndex";
 
 // Public, unauthenticated uptime-monitor endpoint (spec: docs/superpowers/specs/2026-07-29-m1-
 // engineering-specs.md section 4). Booleans-only JSON, no secrets, no keys, no URLs, no internal
@@ -133,12 +134,19 @@ export async function GET(request: Request): Promise<Response> {
   // advisory config never flip ok to false - the app is designed to degrade gracefully there.
   const ok = firestore && turso;
 
+  // Fix-wave 2026-08-04: this is a public, unauthenticated endpoint - tireJsonIndexStatus().message
+  // carries raw exception text (a config problem or a bad file) that must never reach an external
+  // caller. state/barcodeRows are safe presence/count signals; the full message stays server-side
+  // only (tireJsonIndexStatus() itself is still available for server-side logging elsewhere).
+  const tireStatus = tireJsonIndexStatus();
+
   return json(
     {
       ok,
       firestore,
       turso,
       aiKeys,
+      tireJsonIndex: { state: tireStatus.state, barcodeRows: tireStatus.barcodeRows },
       // Short build identifier only, never a secret. Vercel sets VERCEL_GIT_COMMIT_SHA
       // automatically; GIT_COMMIT_SHA is an optional manual override for non-Vercel hosts.
       version: (process.env.VERCEL_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || "dev").slice(0, 40),

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   storeState: {} as Record<string, unknown>,
   push: vi.fn(),
   accessLevel: "platform" as "platform" | "business",
+  liveAuth: false,
   downloadCsv: vi.fn(),
   getSessionCounts: vi.fn(() => [] as Array<{ businessId: string; sessionId: string; productId: string; quantity: number; scanEventIds: string[]; appliedIdempotencyKeys: string[] }>),
 }));
@@ -17,6 +18,10 @@ vi.mock("@/stores/scanStore", () => ({
 
 vi.mock("@/services/security/useAccessLevel", () => ({
   useAccessLevel: () => mocks.accessLevel,
+}));
+
+vi.mock("@/services/auth/authMode", () => ({
+  isLiveAuth: () => mocks.liveAuth,
 }));
 
 vi.mock("@/services/mockDb", () => ({
@@ -49,6 +54,7 @@ function session(over: Record<string, unknown>) {
 
 beforeEach(() => {
   mocks.accessLevel = "platform";
+  mocks.liveAuth = false;
   mocks.push.mockClear();
   mocks.downloadCsv.mockClear();
   mocks.getSessionCounts.mockReset();
@@ -264,6 +270,155 @@ describe("HistoryPage", () => {
     expect(screen.getByTestId("history-units-s2")).toHaveTextContent("3");
     expect(screen.getByTestId("history-products-s2")).toHaveTextContent("2");
     expect(mocks.getSessionCounts).not.toHaveBeenCalledWith("s2");
+  });
+
+  // Owner requirement (2026-08-05 10k campaign): a past session's counts must stay downloadable on the
+  // cloud backend. finalCounts only contains a past session's rows after a refreshFromCloud merge
+  // (additive cross-session - see refreshFromCloud.store.test.ts); a tab that finished the session and
+  // rotated to a new one has no local rows for it, so History must trigger the merge itself instead of
+  // leaving the download button permanently disabled while the cloud holds every row.
+  it("cloud backend: triggers refreshFromCloud when a past session has no local finalCounts rows", () => {
+    process.env.NEXT_PUBLIC_FIREBASE_BACKEND = "1";
+    const refreshFromCloud = vi.fn(() => Promise.resolve());
+    const s1 = session({ id: "s1", status: "active", startedAt: "2026-07-20T10:00:00.000Z" });
+    const s2 = session({ id: "s2", status: "completed", startedAt: "2026-07-19T10:00:00.000Z" });
+    mocks.storeState = {
+      businessId: "b1",
+      currentSession: s1,
+      sessions: [],
+      listSessions: () => [s1, s2],
+      finalCounts: [{ sessionId: "s1", productId: "p1", quantity: 1 }], // s2 has NO local rows
+      products: [],
+      refreshFromCloud,
+    };
+    render(<HistoryPage />);
+    expect(refreshFromCloud).toHaveBeenCalledTimes(1);
+  });
+
+  // Superseded by the fresh-device fix below: refreshFromCloud is now fired unconditionally once per
+  // ready mount (idempotent + generation-guarded, so a redundant call when everything is already
+  // synced is harmless) rather than only when a locally-known past session looks incomplete. Kept as
+  // a "still fires" case rather than deleted, so a future regression that removes the call entirely
+  // is still caught here.
+  it("cloud backend: still fires refreshFromCloud once even when every locally-known past session already has local rows", () => {
+    process.env.NEXT_PUBLIC_FIREBASE_BACKEND = "1";
+    const refreshFromCloud = vi.fn(() => Promise.resolve());
+    const s1 = session({ id: "s1", status: "active", startedAt: "2026-07-20T10:00:00.000Z" });
+    const s2 = session({ id: "s2", status: "completed", startedAt: "2026-07-19T10:00:00.000Z" });
+    mocks.storeState = {
+      businessId: "b1",
+      currentSession: s1,
+      sessions: [],
+      listSessions: () => [s1, s2],
+      finalCounts: [
+        { sessionId: "s1", productId: "p1", quantity: 1 },
+        { sessionId: "s2", productId: "p2", quantity: 3 },
+      ],
+      products: [],
+      refreshFromCloud,
+    };
+    render(<HistoryPage />);
+    expect(refreshFromCloud).toHaveBeenCalledTimes(1);
+  });
+
+  // LIVE-REPRODUCED DEFECT (2026-08-06): a Firestore emulator held SIX completed sessions, but after
+  // clearing local browser state and reloading, History showed only the freshly auto-created current
+  // session. Root cause: the old trigger only fired when a session it ALREADY knew about (via
+  // listSessions()/sessionHistory) looked like it was missing local rows. On a truly fresh device,
+  // both are empty (or only contain the brand-new current session) BEFORE the very refresh that would
+  // populate them - so pastIds was always empty and refreshFromCloud never ran. The full session list
+  // never made it into `sessions`, and History was permanently stuck at one row.
+  it("cloud backend: fires refreshFromCloud on a totally fresh device with zero known past sessions (restores full cloud history)", () => {
+    process.env.NEXT_PUBLIC_FIREBASE_BACKEND = "1";
+    const refreshFromCloud = vi.fn(() => Promise.resolve());
+    const s1 = session({ id: "s1", status: "active", startedAt: "2026-08-06T10:00:00.000Z" });
+    mocks.storeState = {
+      businessId: "b1",
+      currentSession: s1,
+      sessions: [], // fresh device: refreshFromCloud has never populated this yet
+      listSessions: () => [s1], // fresh device: only the brand-new auto-created session is known locally
+      finalCounts: [],
+      products: [],
+      refreshFromCloud,
+      sessionHistory: [], // fresh device: no local archive of any past session either
+    };
+    render(<HistoryPage />);
+    expect(refreshFromCloud).toHaveBeenCalledTimes(1);
+  });
+
+  // Archive-only variant (the live-caught residual): a finished-and-rotated session may exist ONLY in
+  // sessionHistory (listSessions no longer returns it) - exactly the session whose counts live only in
+  // the cloud. The trigger must consider archive entries too, or those rows stay download-disabled.
+  it("cloud backend: triggers refreshFromCloud for an archive-only past session missing local rows", () => {
+    process.env.NEXT_PUBLIC_FIREBASE_BACKEND = "1";
+    const refreshFromCloud = vi.fn(() => Promise.resolve());
+    const s1 = session({ id: "s1", status: "active", startedAt: "2026-07-20T10:00:00.000Z" });
+    mocks.storeState = {
+      businessId: "b1",
+      currentSession: s1,
+      sessions: [],
+      listSessions: () => [s1], // the archived session is NOT in the data-source list
+      finalCounts: [{ sessionId: "s1", productId: "p1", quantity: 1 }],
+      products: [],
+      refreshFromCloud,
+      sessionHistory: [
+        {
+          sessionId: "gone-2",
+          startedAt: "2026-07-18T09:00:00.000Z",
+          endedAt: "2026-07-18T09:30:00.000Z",
+          scanRows: [{ time: "2026-07-18T09:05:00.000Z", code: "444", productName: "Tire", quantityDelta: 1 }],
+          totalScans: 1,
+          totalUnits: 1,
+        },
+      ],
+    };
+    render(<HistoryPage />);
+    expect(refreshFromCloud).toHaveBeenCalledTimes(1);
+  });
+
+  // The live-auth regression the first version of this fix shipped with: on a fresh page load the
+  // effect fired on mount, BEFORE BusinessContextGate resolved businessContextReady, and
+  // refreshFromCloud silently no-opped - the download stayed disabled. The trigger must wait for
+  // readiness and fire when it lands.
+  it("cloud backend + live auth: waits for businessContextReady, then fires refreshFromCloud on the re-render where it turns true", () => {
+    process.env.NEXT_PUBLIC_FIREBASE_BACKEND = "1";
+    mocks.liveAuth = true;
+    const refreshFromCloud = vi.fn(() => Promise.resolve());
+    const s1 = session({ id: "s1", status: "active", startedAt: "2026-07-20T10:00:00.000Z" });
+    const s2 = session({ id: "s2", status: "completed", startedAt: "2026-07-19T10:00:00.000Z" });
+    mocks.storeState = {
+      businessId: "b1",
+      businessContextReady: false,
+      currentSession: s1,
+      sessions: [],
+      listSessions: () => [s1, s2],
+      finalCounts: [],
+      products: [],
+      refreshFromCloud,
+    };
+    const view = render(<HistoryPage />);
+    expect(refreshFromCloud).not.toHaveBeenCalled(); // context not ready yet - firing now would no-op
+
+    mocks.storeState = { ...mocks.storeState, businessContextReady: true };
+    view.rerender(<HistoryPage />);
+    expect(refreshFromCloud).toHaveBeenCalledTimes(1);
+  });
+
+  it("mock backend: never triggers refreshFromCloud (mock is already the source of truth)", () => {
+    const refreshFromCloud = vi.fn(() => Promise.resolve());
+    const s1 = session({ id: "s1", status: "active", startedAt: "2026-07-20T10:00:00.000Z" });
+    const s2 = session({ id: "s2", status: "completed", startedAt: "2026-07-19T10:00:00.000Z" });
+    mocks.storeState = {
+      businessId: "b1",
+      currentSession: s1,
+      sessions: [],
+      listSessions: () => [s1, s2],
+      finalCounts: [],
+      products: [],
+      refreshFromCloud,
+    };
+    render(<HistoryPage />);
+    expect(refreshFromCloud).not.toHaveBeenCalled();
   });
 
   it("an archived session the data source no longer knows about still gets a row (auto-saved trace) and navigates on click", () => {

@@ -90,13 +90,19 @@ is a plain local `node:test` suite (runs today, not gated); only live-app-drivin
   miss. AI is NEVER called for a known match.
 
 ## Decode Ladder + Evidence Rules (rung order, strengths, firewall detail: `docs/DECODER_ARCHITECTURE.md`; wiring §3)
-- COST-ORDERED LADDER (baseline v2, owner-approved 2026-07-08): the FIRST settled rung (verified OR
-  suggestion) STOPS it - never pay for a rung when an earlier one answered. True order in `pipeline.ts`:
+- COST-ORDERED LADDER (baseline v2, owner-approved 2026-07-08; escalation ruling 2026-08-05): a
+  VERIFIED result stops the ladder immediately. A free rung's SUGGESTION is kept as the stash but MAY
+  escalate into paid rungs seeking verification - the owner ruled this escalation INTENTIONAL
+  (2026-08-05, all environments). Never re-pay a rung that already answered. True order in `pipeline.ts`:
   free stages (L1 cache -> tire corpus -> retail corpus -> learned tier -> L2 Turso cache -> upcitemdb
   -> openfoodfacts) -> lazy daily-cap gate -> paid rungs (goupc, GTIN-gated -> fetchv2 -> gpt); all
   rungs miss -> Needs Review with honest reasons.
 - GEMINI IS PERMANENTLY OUT OF DECODE (grounding bills every executed search, no cap control; L11):
   `GEMINI_DECODE_DISABLED = true` in pipeline.ts; survives only in legacy lookup / correction re-check.
+- OWNER RULE (2026-08-05, L16): a code not found in the trusted index/corpus MUST continue through the
+  decode ladder in EVERY environment (local, preview, prod). Trusted-exact/deterministic probes never
+  dead-end; the ladder's own gates decide rung availability (free rungs run keyless; paid rungs keep
+  keys/cap/breaker gating) and skipped rungs surface honest reasons. Guard: scanStore.ladderContinuation.test.ts.
 - Daily AI cap (default 2000, `AI_LOOKUP_DAILY_LIMIT`) charges ONLY paid rungs, exactly once per genuine
   compute, via `chargeDailySlot` (L12: never charge two paths of one request). Free/corpus/cache hits
   never burn a slot. `checkAndIncrementDaily` is the LEGACY lookup-mode gate - do not add callers.

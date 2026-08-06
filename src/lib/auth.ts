@@ -21,6 +21,7 @@ import type {
   ProvisionResponse,
 } from "@/services/auth/provisioningTypes";
 import { COLLECTIONS, type BusinessMember } from "@/services/db/types";
+import { retryingRead } from "@/services/db/firebase/boundedRead";
 
 // Firebase Auth for the launch MVP (email/password; structured so Google can be added later). The
 // Admin SDK / service account is NEVER imported here. The guarded E2E/test bypass keeps Playwright specs
@@ -405,20 +406,28 @@ export async function createBusinessMember(input: {
   return { uid: null, createdAuthUser: false, passwordSet: false, error: "We could not add that user. Please try again." };
 }
 
-/** The signed-in user's memberships (rules scope reads to their own). */
+/**
+ * The signed-in user's memberships (rules scope reads to their own). Called from the fresh-device
+ * bootstrap chain (BusinessContextGate, with its own outer timeout) AND directly by other pages
+ * (e.g. the business switcher) with no outer timeout of their own - so every getDocs/getDoc here is
+ * bounded via ./boundedRead's retryingRead, matching businessDataLoader.ts, instead of relying on a
+ * caller-supplied timeout that may not exist.
+ */
 export async function listMemberships(): Promise<Membership[]> {
   if (isAuthBypassEnabled()) return [];
   const auth = getFirebaseAuth();
   const user = auth.currentUser;
   if (!user) return [];
   const db = getDb();
-  const snap = await getDocs(query(collection(db, COLLECTIONS.businessMembers), where("userId", "==", user.uid)));
+  const snap = await retryingRead("your memberships", () =>
+    getDocs(query(collection(db, COLLECTIONS.businessMembers), where("userId", "==", user.uid))),
+  );
   const memberships = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as BusinessMember);
   const validated = await Promise.all(memberships.map(async (membership) => {
     if (!/^[A-Za-z0-9_-]{1,200}$/.test(membership.businessId)) return null;
     let business: Awaited<ReturnType<typeof getDoc>>;
     try {
-      business = await getDoc(doc(db, COLLECTIONS.businesses, membership.businessId));
+      business = await retryingRead("a business record", () => getDoc(doc(db, COLLECTIONS.businesses, membership.businessId)));
     } catch (error) {
       const code =
         typeof error === "object" && error !== null && "code" in error

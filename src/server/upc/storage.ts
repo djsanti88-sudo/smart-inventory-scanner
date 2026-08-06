@@ -506,11 +506,14 @@ async function getTursoLadderStorage(): Promise<LadderStorage | null> {
 /**
  * Select the LadderStorage backend: Turso when TURSO_DATABASE_URL + TURSO_AUTH_TOKEN are set
  * (production), else the file adapter rooted at `dir` (default `process.cwd()`; local dev + preview).
+ * Boss corpus certification supplies its own marker-named directory so its four local next-start
+ * processes never concurrently rewrite one shared `.ladder-kv.json`; ordinary callers and user
+ * files keep the existing `dir` behavior.
  */
 export async function ladderStorage(dir: string = process.cwd()): Promise<LadderStorage> {
   const turso = await getTursoLadderStorage();
   if (turso) return turso;
-  return fileLadderStorage(dir);
+  return fileLadderStorage(process.env.BOSS_CORPUS_LADDER_STORAGE_DIR || dir);
 }
 
 /** For tests: reset the memoized Turso client/selector state so each test re-detects env vars. */

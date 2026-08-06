@@ -31,6 +31,8 @@ whether it belongs.
   → `docs/DECODER_ARCHITECTURE.md`
 - Decode only attaches identity — never blocks or hides a counted row.
   → CLAUDE.md TOP-LEVEL LAW
+- A code not in the DB always continues through the ladder, in every environment;
+  probes never dead-end (owner rule 2026-08-05). → L16, `scanStore.ladderContinuation.test.ts`
 
 ## How we plan
 - Brainstorm before building anything non-trivial. → `superpowers:brainstorming`

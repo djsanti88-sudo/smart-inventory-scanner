@@ -9,7 +9,10 @@ const { sendResetEmail, signInWithGoogle, signUp, signInWithPassword, ensureWork
   ensureWorkspace: vi.fn(),
   replace: vi.fn(),
 }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ replace }) }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace }),
+  useSearchParams: () => ({ get: () => null }),
+}));
 vi.mock("@/lib/auth", () => ({
   signInWithPassword: (...a: unknown[]) => signInWithPassword(...a),
   signUp: (...a: unknown[]) => signUp(...a),

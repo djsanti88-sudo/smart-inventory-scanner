@@ -1,12 +1,13 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { DecodeStatusBadge, MatchBadge, StatusBadge, SyncBadge } from "@/components/badges";
 import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
 import { matchTireSize } from "@/services/tire/tireSizeNormalizer";
 import { canonicalTireSize } from "@/services/catalog/tireListingNormalizer";
-import type { Product } from "@/types";
+import type { Product, UnknownCodeReview } from "@/types";
 
 // Size column: same structured-size source FinalCountTable already uses (product.specsShort via
 // matchTireSize), falling back to a deterministic parse of the row's own display name when the
@@ -18,21 +19,58 @@ function resolvedFeedSize(product: Product | undefined, displayName: string): st
   return canonicalTireSize(displayName) || "-";
 }
 
+// DEFECT #29/#37 residual (live-reproduced 2026-08-05/06, canelo round 2): after the Map-lookup fix
+// above, a fresh-device restore of a 4,500-event business STILL froze the renderer ~30s because this
+// table synchronously mounted EVERY scanFeed row into the DOM. WINDOWING (display-only, sanctioned
+// contingency - no new dependency): render only the most recent FEED_RENDER_WINDOW rows, plus a
+// summary row stating exactly how many earlier scans are hidden, with a "Show more" control that grows
+// the window by FEED_RENDER_CHUNK per click. TOP-LEVEL LAW is untouched - every scan still COUNTS; the
+// header's "N scans" total and all store totals are computed over the FULL scanFeed, never the window.
+export const FEED_RENDER_WINDOW = 150;
+export const FEED_RENDER_CHUNK = 300;
+
 // Raw live scan feed: every scan event in order, newest first. Keeps the full audit trail. Raw/clean
 // codes AND the internal match type are platformOwner-only; customers see the product name + part number
 // and the scan status of each scan, never the code strings or how the code matched internally.
 export function LiveScanFeed() {
   const scanFeed = useScanStore((s) => s.scanFeed);
-  const getProduct = useScanStore((s) => s.getProduct);
+  const products = useScanStore((s) => s.products);
   const needsReviewQueue = useScanStore((s) => s.needsReviewQueue);
   const approveSuggestion = useScanStore((s) => s.approveSuggestion);
   const declineSuggestion = useScanStore((s) => s.declineSuggestion);
   const isPlatform = useIsPlatformOwner();
+  const [renderWindow, setRenderWindow] = useState(FEED_RENDER_WINDOW);
+
+  // PERF FIX (defect #37, live-reproduced 2026-08-05/06): the store's getProduct(id) does a linear
+  // `products.find()`. Calling it once per rendered scanFeed row made this O(scanFeed.length *
+  // products.length) - with thousands of scans and thousands of products, that quadratic blowup froze
+  // the renderer for 30+ seconds on a fresh device's first load. Build the id -> product index ONCE per
+  // `products` change (single pass, O(M)) and do O(1) Map lookups per row instead (O(N) total).
+  const productsById = useMemo(() => {
+    const m = new Map<string, Product>();
+    for (const p of products) m.set(p.id, p);
+    return m;
+  }, [products]);
+  // Same fix for the per-row `needsReviewQueue.find(...)` lookup: index by cleanCode ONCE (first
+  // matching review per code wins, same semantics as the original .find()), instead of re-scanning the
+  // whole review queue for every feed row.
+  const reviewByCleanCode = useMemo(() => {
+    const m = new Map<string, UnknownCodeReview>();
+    for (const r of needsReviewQueue) {
+      if (r.suggestedProductName && !m.has(r.cleanCode)) m.set(r.cleanCode, r);
+    }
+    return m;
+  }, [needsReviewQueue]);
   // The "Barcode" column shows the code the user JUST scanned (their own in-memory scan, never persisted
   // for customers and never the catalog/alias database) - visible to ALL roles. Raw code + Match remain
   // platformOwner-only. Customer columns: Time, Barcode, Brand, Product, Size, SKU, Qty, Status, Reason,
   // Sync = 10.
   const colSpan = isPlatform ? 12 : 10;
+  // Display-only window: scanFeed is already newest-first, so slicing from the front keeps the newest
+  // rows visible exactly as before. Clamp against the current feed length so a shrunken feed (e.g.
+  // "Clear session") never leaves a stale negative hidden count.
+  const visibleFeed = useMemo(() => scanFeed.slice(0, renderWindow), [scanFeed, renderWindow]);
+  const hiddenCount = Math.max(0, scanFeed.length - visibleFeed.length);
 
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -71,8 +109,9 @@ export function LiveScanFeed() {
                 </td>
               </tr>
             ) : (
-              scanFeed.map((e) => {
-                const product = getProduct(e.matchedProductId);
+              <>
+              {visibleFeed.map((e) => {
+                const product = e.matchedProductId ? productsById.get(e.matchedProductId) : undefined;
                 // TASK 3 FIX (feed stuck on "Unidentified item"): ensureProvisionalCount ALWAYS mints a
                 // provisional placeholder Product synchronously at scan time, before decode finishes, so
                 // `product` is truthy even when there is no real identity yet. A naive `product ? undefined
@@ -80,7 +119,7 @@ export function LiveScanFeed() {
                 // lookup also runs when the matched product is still `provisional` (not yet a real,
                 // human-confirmed identity), so the feed shows the best-known name as soon as decode has one.
                 const suggestion = (!product || product.provisional)
-                  ? needsReviewQueue.find((r) => r.cleanCode === e.cleanCode && r.suggestedProductName)
+                  ? reviewByCleanCode.get(e.cleanCode)
                   : undefined;
                 // Display priority: a real (non-provisional) product name wins outright. Otherwise prefer the
                 // decoded suggestion's name over the safe-but-uninformative provisional placeholder name, and
@@ -169,10 +208,20 @@ export function LiveScanFeed() {
                           </button>
                         </span>
                       ) : null}
+                      {/* COSMETIC FIX (2026-08-04, cocacola-bug-report.md): adjacent {text}{element} JSX
+                          renders with no whitespace text node between them - the ml-1 margin alone (4px)
+                          reads as a concatenated word ("Delinte D7unconfirmed") in a screenshot. Add a
+                          literal space, matching the codebase's own {" "} convention elsewhere. */}
                       {suggestionTag === "unconfirmed" ? (
-                        <span className="ml-1 rounded px-1 text-xs text-zinc-600">unconfirmed</span>
+                        <>
+                          {" "}
+                          <span className="ml-1 rounded px-1 text-xs text-zinc-600">unconfirmed</span>
+                        </>
                       ) : suggestionTag === "(suggested)" ? (
-                        <span className="ml-1 text-xs text-amber-700">(suggested)</span>
+                        <>
+                          {" "}
+                          <span className="ml-1 text-xs text-amber-700">(suggested)</span>
+                        </>
                       ) : null}
                       {/* Task 9: an app-verified decode that counted despite being off the business scan
                           context (e.g. hot sauce in a tire shop) shows this advisory tag - it counted, but
@@ -220,7 +269,25 @@ export function LiveScanFeed() {
                     </td>
                   </tr>
                 );
-              })
+              })}
+              {hiddenCount > 0 && (
+                <tr className="border-t border-zinc-100 bg-zinc-50">
+                  <td colSpan={colSpan} className="px-4 py-3 text-center text-sm text-zinc-600" data-testid="feed-hidden-summary">
+                    + {hiddenCount} earlier {hiddenCount === 1 ? "scan" : "scans"} counted
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onMouseDown={(me) => me.preventDefault()}
+                      onClick={() => setRenderWindow((w) => w + FEED_RENDER_CHUNK)}
+                      data-testid="feed-show-more"
+                      className="ml-2 rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
+                    >
+                      Show more
+                    </button>
+                  </td>
+                </tr>
+              )}
+              </>
             )}
           </tbody>
         </table>

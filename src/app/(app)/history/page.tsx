@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getMockDb } from "@/services/mockDb";
 import { exportSessionCounts } from "@/services/csvExport";
 import { downloadCsv } from "@/services/exportFormats";
 import { useAccessLevel } from "@/services/security/useAccessLevel";
+import { isLiveAuth } from "@/services/auth/authMode";
 import { aggregateSessionCounts, aggregateHistoryRows, type SessionCountRow, type SessionAggregate } from "@/services/sessions/history";
 import type { SessionHistoryEntry } from "@/services/sessions/sessionHistory";
 import { BusinessContextGate } from "@/components/BusinessContextGate";
@@ -41,8 +42,35 @@ export default function HistoryPage() {
   const accessLevel = useAccessLevel();
   const cloudBackend = process.env.NEXT_PUBLIC_FIREBASE_BACKEND === "1";
 
+  const refreshFromCloud = useScanStore((s) => s.refreshFromCloud);
+
   const sessions = listSessions();
   const historyBySessionId = new Map(sessionHistory.map((e) => [e.sessionId, e]));
+
+  // Cloud backend: a past session's rows land in finalCounts (and its full session list lands in
+  // `sessions`) only after a refreshFromCloud merge (additive cross-session - see
+  // refreshFromCloud.store.test.ts). Fire that merge once per ready mount, UNCONDITIONALLY -
+  // regardless of what this device already appears to know locally.
+  //
+  // LIVE-REPRODUCED DEFECT (2026-08-06): the previous version only fired when a past session it
+  // ALREADY knew about (via listSessions()/sessionHistory) looked like it was missing local rows. On
+  // a genuinely fresh device (local state cleared, or a brand-new device signing in for the first
+  // time) both of those are empty - or contain only the just-auto-created current session - BEFORE
+  // the very refresh that would populate them. That made the "missing past session" candidate set
+  // always empty, so refreshFromCloud never ran, and a business with six completed cloud sessions
+  // showed only its most recent (or just the freshly created) one. Firing unconditionally instead
+  // (still only after businessContextReady, since refreshFromCloud no-ops before the context
+  // resolves) closes that gap. refreshFromCloud is idempotent and generation-guarded, so a redundant
+  // call when the device already had everything locally is harmless.
+  const cloudRefreshFired = useRef(false);
+  const businessContextReady = useScanStore((s) => s.businessContextReady);
+  useEffect(() => {
+    if (!cloudBackend || cloudRefreshFired.current) return;
+    if (isLiveAuth() && !businessContextReady) return; // wait for the gate; effect re-fires when ready
+    cloudRefreshFired.current = true;
+    void refreshFromCloud?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudBackend, businessContextReady]);
 
   // Past-session mock counts, fetched once per session id (not reactive - matches the detail page's
   // non-reactive timeline fetch). Keyed by sessionId -> rows, or null while unavailable/unfetched.

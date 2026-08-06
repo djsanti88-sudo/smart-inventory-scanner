@@ -190,7 +190,7 @@ describe("cloud pending queue tenant isolation", () => {
     expect(store.getState().pendingSyncQueue).toEqual([]);
   });
 
-  it("quarantines non-retryable validation failures instead of retrying forever", async () => {
+  it("quarantines non-retryable validation failures; automatic drains skip them forever, but an explicit retrySync re-attempts and re-quarantines", async () => {
     const target = new TerminalFailureTarget();
     const store = createTestScanStore({ db: target, cloudBackend: true });
     store.getState().setBusinessContext("business-1", "user-1");
@@ -199,15 +199,42 @@ describe("cloud pending queue tenant isolation", () => {
     store.setState({ pendingSyncQueue: [pendingItem("invalid", "business-1")] });
     store.getState().syncPending(true);
     await flush();
-    store.getState().retrySync();
-    await flush();
 
+    // Automatic drain: one attempt, item lands in quarantined.
     expect(target.attempts).toBe(1);
     expect(store.getState().pendingSyncQueue).toHaveLength(1);
     expect(store.getState().pendingSyncQueue[0]).toMatchObject({
       id: "invalid",
       status: "quarantined",
       retryCount: 1,
+      lastError: "invalid_entity_id: entityId is malformed",
+    });
+
+    // Explicit user-facing retry: re-arms the quarantined item and re-attempts it. The target still
+    // fails the same terminal way, so it re-quarantines with the same lastError, one more attempt/retry.
+    store.getState().retrySync();
+    await flush();
+
+    expect(target.attempts).toBe(2);
+    expect(store.getState().pendingSyncQueue).toHaveLength(1);
+    expect(store.getState().pendingSyncQueue[0]).toMatchObject({
+      id: "invalid",
+      status: "quarantined",
+      retryCount: 2,
+      lastError: "invalid_entity_id: entityId is malformed",
+    });
+
+    // Flip-flop guard: after re-quarantining, an AUTOMATIC drain must still skip it (no infinite
+    // auto-retry of a terminal failure) - attempts stays at 2.
+    store.getState().syncPending(true);
+    await flush();
+
+    expect(target.attempts).toBe(2);
+    expect(store.getState().pendingSyncQueue).toHaveLength(1);
+    expect(store.getState().pendingSyncQueue[0]).toMatchObject({
+      id: "invalid",
+      status: "quarantined",
+      retryCount: 2,
       lastError: "invalid_entity_id: entityId is malformed",
     });
   });

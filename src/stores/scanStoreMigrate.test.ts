@@ -175,6 +175,26 @@ describe("scanStoreMigrate - v5 -> v6 persist migration (Task 4 review fix)", ()
     expect("needsReviewQueue" in migrated).toBe(false);
     expect(migrated.countSnapshots).toEqual([]);
   });
+
+  // Review follow-up to cd9e7c51 (2026-08-05): the migrate v5->v6 branch's backfillProducts call is
+  // the REAL live-user self-heal path for a browser-local row poisoned by the floor-guess bug (a
+  // non-empty statistical brand guess like "Coca-Cola" stuck on a row whose name was later overwritten
+  // by a corrected floor-guess pass) - proving it end-to-end through scanStoreMigrate, not just the
+  // backfillProducts unit, so a regression at the migrate call site itself would also be caught here.
+  it("self-heals a floor-guess-poisoned product brand on rehydrate (cocacola-bug-report.md class fix, backfillProducts call site)", () => {
+    const poisoned = product({
+      id: "p-poisoned",
+      name: "Michelin X-Ice North 4 225/60R18 104T / product unconfirmed",
+      brand: "Coca-Cola",
+      primaryBarcode: "049000026603",
+    });
+    const persistedV5 = { products: [poisoned] };
+
+    const migrated = scanStoreMigrate(persistedV5, 5) as unknown as { products: Product[] };
+
+    const healed = migrated.products.find((p) => p.id === "p-poisoned");
+    expect(healed?.brand).toBe("Michelin");
+  });
 });
 
 // v13 self-heal: "if it is resolved, it does not go to review." An install that hit the old bug

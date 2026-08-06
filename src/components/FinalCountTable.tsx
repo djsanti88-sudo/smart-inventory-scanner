@@ -47,6 +47,16 @@ function resolvedSizeDisplay(product: Product): string {
   return matchTireSize(product.specsShort)?.canonical.split(" ")[0] ?? product.sizeTag ?? "-";
 }
 
+// DEFECT #29/#37 residual (live-reproduced 2026-08-05/06, canelo round 2): same freeze class as
+// LiveScanFeed - a fresh-device restore with ~1,800 count rows synchronously mounted ALL of them into
+// the DOM. WINDOWING (display-only, sanctioned contingency - no new dependency): render only the first
+// COUNTS_RENDER_WINDOW rows of the already-sorted list, plus a summary row stating exactly how many
+// more products are hidden, with a "Show more" control that grows the window by COUNTS_RENDER_CHUNK
+// per click. The header total ("N of M products") and all store totals are computed over the FULL
+// filtered set, never the rendered window.
+export const COUNTS_RENDER_WINDOW = 200;
+export const COUNTS_RENDER_CHUNK = 300;
+
 // Final count database: spreadsheet-style, grouped by PRODUCT (not by code). Raw codes (barcode +
 // aliases) are platformOwner-only. Row actions let the owner fix a wrong saved decode safely:
 // Correct (edit product fields), Remove from count (session-only), Mark wrong (platformOwner: deactivate
@@ -54,22 +64,40 @@ function resolvedSizeDisplay(product: Product): string {
 export function FinalCountTable() {
   const finalCounts = useScanStore((s) => s.finalCounts);
   const currentSession = useScanStore((s) => s.currentSession);
-  const getProduct = useScanStore((s) => s.getProduct);
+  const products = useScanStore((s) => s.products);
   const needsReviewQueue = useScanStore((s) => s.needsReviewQueue);
   const isPlatform = useIsPlatformOwner();
   const [filterQuery, setFilterQuery] = useState("");
+  const [renderWindow, setRenderWindow] = useState(COUNTS_RENDER_WINDOW);
 
   // F2 fix (Phase 3 review): refreshFromCloud intentionally does an ADDITIVE cross-session merge into
   // finalCounts (a tested cross-device sync path - see refreshFromCloud.store.test.ts). This table
   // must show only the CURRENT session's counts, not every session's counts merged into the store.
-  const sessionCounts = currentSession
-    ? finalCounts.filter((c) => c.sessionId === currentSession.id)
-    : finalCounts;
+  const sessionCounts = useMemo(
+    () => (currentSession ? finalCounts.filter((c) => c.sessionId === currentSession.id) : finalCounts),
+    [finalCounts, currentSession],
+  );
 
-  const rows = sessionCounts
-    .map((c) => ({ count: c, product: getProduct(c.productId) }))
-    .filter((r): r is { count: InventoryCount; product: Product } => !!r.product)
-    .sort((a, b) => b.count.quantity - a.count.quantity);
+  // PERF FIX (defect #37, live-reproduced 2026-08-05/06): `getProduct(id)` does a linear
+  // `products.find()`. Mapping every session count through it - AND recomputing that map on every
+  // render since `rows` was not memoized - made this O(finalCounts.length * products.length) on every
+  // render, freezing the renderer for 30+ seconds on a fresh device with thousands of scans/products.
+  // Build the id -> product index ONCE per `products` change (O(M)) and memoize `rows` itself so the
+  // O(N) mapping over sessionCounts only re-runs when the underlying data actually changes.
+  const productsById = useMemo(() => {
+    const m = new Map<string, Product>();
+    for (const p of products) m.set(p.id, p);
+    return m;
+  }, [products]);
+
+  const rows = useMemo(
+    () =>
+      sessionCounts
+        .map((c) => ({ count: c, product: productsById.get(c.productId) }))
+        .filter((r): r is { count: InventoryCount; product: Product } => !!r.product)
+        .sort((a, b) => b.count.quantity - a.count.quantity),
+    [sessionCounts, productsById],
+  );
 
   // Task 4: digits-only query filters by sizeTag prefix; any other text filters brand/model/description.
   const visibleRows = useMemo(() => {
@@ -87,6 +115,9 @@ export function FinalCountTable() {
     return rows.filter((r) => kept.has(r.count.id));
   }, [rows, filterQuery]);
 
+  const windowedRows = useMemo(() => visibleRows.slice(0, renderWindow), [visibleRows, renderWindow]);
+  const hiddenCount = Math.max(0, visibleRows.length - windowedRows.length);
+
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
       <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
@@ -103,7 +134,12 @@ export function FinalCountTable() {
           type="text"
           data-testid="polish-filter"
           value={filterQuery}
-          onChange={(e) => setFilterQuery(e.target.value)}
+          onChange={(e) => {
+            setFilterQuery(e.target.value);
+            // Display-only window resets with the filter so a narrowed search never inherits a
+            // stale, oversized window from a prior filter.
+            setRenderWindow(COUNTS_RENDER_WINDOW);
+          }}
           placeholder="Filter by brand, model, description, or size (e.g. 205)"
           aria-label="Filter counts"
           className="min-h-[44px] w-full max-w-md rounded-lg border border-zinc-300 px-3 text-base"
@@ -148,9 +184,26 @@ export function FinalCountTable() {
                 </td>
               </tr>
             ) : (
-              visibleRows.map(({ count, product }) => (
+              <>
+              {windowedRows.map(({ count, product }) => (
                 <CountRow key={count.id} count={count} product={product} isPlatform={isPlatform} needsReviewQueue={needsReviewQueue} />
-              ))
+              ))}
+              {hiddenCount > 0 && (
+                <tr className="border-t border-zinc-100 bg-zinc-50">
+                  <td colSpan={isPlatform ? 15 : 14} className="px-4 py-3 text-center text-sm text-zinc-600" data-testid="counts-hidden-summary">
+                    + {hiddenCount} more {hiddenCount === 1 ? "product" : "products"}
+                    <button
+                      type="button"
+                      onClick={() => setRenderWindow((w) => w + COUNTS_RENDER_CHUNK)}
+                      data-testid="counts-show-more"
+                      className="ml-2 rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
+                    >
+                      Show more
+                    </button>
+                  </td>
+                </tr>
+              )}
+              </>
             )}
           </tbody>
         </table>
@@ -275,10 +328,20 @@ function CountRow({
       </td>
       <td className="px-4 py-3 font-medium text-zinc-800">
         {isPlatform ? displayName : prettifyProductName(customerDisplayName(displayName))}
+        {/* COSMETIC FIX (2026-08-04, cocacola-bug-report.md): adjacent {text}{element} JSX renders with
+            no whitespace text node between them - the ml-1 margin alone (4px) reads as a concatenated
+            word ("Delinte D7unconfirmed") in a screenshot. Add a literal space, matching the codebase's
+            own {" "} convention elsewhere (e.g. CleanupRecommendations.tsx). */}
         {suggestionTag === "unconfirmed" ? (
-          <span className="ml-1 rounded px-1 text-xs text-zinc-600">unconfirmed</span>
+          <>
+            {" "}
+            <span className="ml-1 rounded px-1 text-xs text-zinc-600">unconfirmed</span>
+          </>
         ) : suggestionTag === "(suggested)" ? (
-          <span className="ml-1 text-xs text-amber-700">(suggested)</span>
+          <>
+            {" "}
+            <span className="ml-1 text-xs text-amber-700">(suggested)</span>
+          </>
         ) : null}
       </td>
       <td className="px-4 py-3" data-testid={`brand-${product.id}`}>{displayBrand}</td>

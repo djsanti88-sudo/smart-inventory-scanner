@@ -43,6 +43,7 @@ describe("identifier fields survive customer ('business') persistence (2026-07-2
           specsShort: "265/70R17", primarySku: "2881-6861", primaryBarcode: "0123456789012",
           gtin: "00123456789012", upc: "123456789012", ean: "0123456789012", vendorCodes: ["X001ABCD"],
           aliases: ["2881-6861", "28816861"], imageUrl: "", location: "Bay 3", notes: "", status: "active",
+          trustedExactCanonicalId: "trusted-exact:v1:tenant-scoped-opaque-id",
         },
       ],
       aliases: [], scanFeed: [], finalCounts: [], needsReviewQueue: [], lastCleanupBackup: null,
@@ -59,6 +60,7 @@ describe("identifier fields survive customer ('business') persistence (2026-07-2
     expect(product1.gtin).toBe("00123456789012");
     expect(product1.upc).toBe("123456789012");
     expect(product1.ean).toBe("0123456789012");
+    expect(product1.trustedExactCanonicalId).toBe("trusted-exact:v1:tenant-scoped-opaque-id");
     // The reusable alias/vendor data on the product is still gone.
     expect(product1.aliases).toBeUndefined();
     expect(product1.vendorCodes).toBeUndefined();
@@ -82,6 +84,7 @@ describe("identifier fields survive customer ('business') persistence (2026-07-2
     const businessId = "biz-1";
     const state = makeState();
     state.products[0].verified = true;
+    delete state.products[0].trustedExactCanonicalId;
 
     const persisted = buildPersistedScanState(state, "business");
     const rehydrated = JSON.parse(JSON.stringify(persisted)) as { products: Product[] };

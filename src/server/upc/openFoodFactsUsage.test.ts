@@ -18,7 +18,13 @@ describe("openFoodFactsUsage", () => {
   let dir: string;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(AT_12_34());
     dir = freshDir();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("fresh store: allowed with used 0, limit 10 (buffer under OFF's ~15/min read limit)", async () => {
@@ -76,9 +82,11 @@ describe("openFoodFactsUsage", () => {
 
   it("NEVER touches the paid Go-UPC usage key, the UPCitemdb daily key, or the AI-lookup daily cap key", async () => {
     const storage = fileLadderStorage(dir);
+    const paidUsageBefore = await storage.readUsage();
     const usage = openFoodFactsUsage(storage, { now: AT_12_34 });
     await usage.record();
-    expect(await storage.readUsage()).toEqual({ month: "2026-07", used: 0 }); // paid Go-UPC untouched
+    expect(await storage.readUsage()).toEqual(paidUsageBefore);
+    expect(paidUsageBefore).toEqual({ month: "2026-07", used: 0 }); // absolute floor restored (final-review) // paid Go-UPC untouched
     expect(await storage.get("upcitemdb-usage:2026-07-12")).toBeNull();
     expect(await storage.get("ai-lookup-daily-cap")).toBeNull();
   });

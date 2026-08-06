@@ -1,0 +1,266 @@
+{
+  "schemaVersion": "1.0.0",
+  "entries": [
+    {
+      "sourcePointerHmacSha256": "11590E87A3F09ED3D6EADCAC7499E53733B104E3BC3099BD47B0DF9646AF20F2",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "9239837ADE0E8DB546B98F04A77AC39E66FA7D2D7BEE8888426A79E855D0C3DF"
+    },
+    {
+      "sourcePointerHmacSha256": "17E393BFA452C697A2EB5CB1A5B573E63AF67FFB089EC5EC71C9DF7586651182",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "D0926C27A88A701ADEFB9CB6ADE03121A4EE11EFA03A38F1A33A620C816D7577"
+    },
+    {
+      "sourcePointerHmacSha256": "1997A5FD05177E17CBCBB14960AFB7DBDE605DF1E11F3DCE2AFE98AF1C630309",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "4B58E89783D3492947F86E12FD38753DCC4CEC4336A326D6CFE3DA392957E5C3"
+    },
+    {
+      "sourcePointerHmacSha256": "1F97945C56A83017A54BF8106FBE990A3042515A377408F4B27BB62E1466D2F7",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "0F170BA78C3322589D29247B57FDF6A379496D55BA5C4B7909208DCD6BFE7D44"
+    },
+    {
+      "sourcePointerHmacSha256": "2092A1A6924C5F9A9A4E8B0BEE77123579BC52319B2B89AD6A7468C3197D81CA",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "469335B5EBF88BE4AB636C50F2153146EF08D76994345443E9228884B4EBCB5D"
+    },
+    {
+      "sourcePointerHmacSha256": "20C1C161D52FB42B383C5155CCEB541CD9D328CA464B8954E90D60E034B802A5",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "C2B97411CA9580F77C10310E2E82FE854EFD7557AF2ABC9725847A7826A9E74D"
+    },
+    {
+      "sourcePointerHmacSha256": "2136D9A2194B6623C45A336CC0438C7B66ED51E330974A04B8079D23AC2674B6",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "F836770D6CA0C99F5083F858161DF9A97D010423C089E1095F8CC9A2D5487B57"
+    },
+    {
+      "sourcePointerHmacSha256": "27FF78C0DFE81D3008D7FBEA717C8AB493E8AD9D1854C8CB569BA633B4D805FD",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "132FB6CDBAA65FB2EE5D167894CD0153E1FC1BFD525F98CAE956D2BE3DC32B3C"
+    },
+    {
+      "sourcePointerHmacSha256": "3672139C810342B4E5AFCD2A2FFD52A89A061066C508B649B8BA5692E0D636D0",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "B701875C1D75CC41178FE1B8C438CE16BD19294044FB3FFC93118B613B4D40EA"
+    },
+    {
+      "sourcePointerHmacSha256": "3CE3E402E34F871F3F07C8B3054AC254987347717374B1E750FA14126F8B5C3B",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "9DBE38F0EFB127A54209A8B4C04BD55B4BB140AC6605BA4D92A4621E07931EBE"
+    },
+    {
+      "sourcePointerHmacSha256": "3DAF8ED4466728B9EA875F98500F2CDB95C750991C504B46097E0F82F2E428FF",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "D7EC926BAF8E69A59050B0D2D03BC05E008564C84758DE6A0495850D53726C87"
+    },
+    {
+      "sourcePointerHmacSha256": "4013ECCCE866587CC93E4440EA9319D095B9585E2C8D055331D8E3BAFCA05449",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "F0199D00963C890A2837687F90140FDE1A9DD0C8054923A8170E4C860A8D71FC"
+    },
+    {
+      "sourcePointerHmacSha256": "4651D236F4D91D5BECFBF8CBB96621E716E0A7DEBA2E94E6B4380B029C717D10",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "07C7CAF88E7474734E9BD432325BEBC393E21488E97C31FD46218E263C0C56B7"
+    },
+    {
+      "sourcePointerHmacSha256": "5C557FDE20FB62FCD655F851AF5B186B9E9145FA7A211DDCB39DA0FA003B9569",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "65C144307721A32A6FBAD3E67B6817FC6F911B8A9953AF5782BAC07A8ED8CBC2",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "0A87AE8650B21B495AD6BA27142BC3D243FE411D1F110EBA5950256A30EEA03A"
+    },
+    {
+      "sourcePointerHmacSha256": "67125EDA60949D6B17BD4F7286493AE96C12379E995AC7CF389A67F0C1E1DF19",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "CD846974CD461EBEFC7EE73DA9E94E9C448D0270715468A4F9F624776306D794"
+    },
+    {
+      "sourcePointerHmacSha256": "6B7879E212B65AAA5C704C2B54982CD7B29330CCB8731A4E446A6E78A17FC092",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "39D8B2D5BECE168296881E3C3F2BCD5AF45075CB710D39ACC09314E2E88C8A11"
+    },
+    {
+      "sourcePointerHmacSha256": "73CA81AFC7048889B988E98E8528E445B610301BA432FFDAB8C942C600D3C1B8",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "47E99B7ED83CA3335154205A471CF0E8405F33B68656FA31B4413468758C5D5D"
+    },
+    {
+      "sourcePointerHmacSha256": "8193C06414E476292E5631AA0626A50C371DA7D9556C3C5FA4DC91403A79CB0A",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "8C5FF58C29FE13F195366B47694CB9314D07BA2B3CFE3C059033C846A5AC96EC"
+    },
+    {
+      "sourcePointerHmacSha256": "837C086022A2893B2BAFC8F34C25BE21A4458FD5D69A3AA74AA4C29F992E91FA",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "34D6089F9EAB7407D0B324879AAE537D69E63B998531336D15B5C14AD9204734"
+    },
+    {
+      "sourcePointerHmacSha256": "88A5C1BB63C3F713719024B388B8AABA456758EC6DCDFCF1D1999C4A63EFB4C4",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "3F4C9421DC4F5EC26D5937B006C8BBBABDED58CB4DAECE2DF7BF5344364F798C"
+    },
+    {
+      "sourcePointerHmacSha256": "8F540ED2F7A3C13EDE86F156A56ACAC4BA4D98D2C07E9F021FD329AEC7D921C4",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "C5F2BFA75400A5ED435056B88F168FFFD744B7E278B482F16E0B3EBB3009A425"
+    },
+    {
+      "sourcePointerHmacSha256": "90DC15868284DE6CA21DE1110BC2B87E890D20BE705A37BD692BE15B6B67FA4E",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "827028D36FB99ACCEF62FADCADBA5AFD7BFDD497E6EB871CDD6B2C353E26D358"
+    },
+    {
+      "sourcePointerHmacSha256": "96369EA67011A972A380947D7EEBF4EF64CAACE404C7C990B2FCE4500E2ADF22",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "E811FF0EFCFB4401089D4B345E354F09C404AE99DCBC4667B7BB2F2188EC4903"
+    },
+    {
+      "sourcePointerHmacSha256": "9A298C42E31CDC4E3B50CB44518340D7301CB84A8F91141FCD061D83AF17B4C9",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "1C77A4E78938512A7884A60B2C65546EBF211B451ED8575950B1912EB062682D"
+    },
+    {
+      "sourcePointerHmacSha256": "9D13E782E910A9FAEE956ABF4020393E8F6F3B821BD9CAEFA8C53E3EDD3673D1",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "9E97575E2D44FEA040E9276841202EEE608684A33546AD574C4A56DC90715FDF",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "D9099EFCA599D0E499C85C893E173E271C065A440A75A56537496A4122165EA0"
+    },
+    {
+      "sourcePointerHmacSha256": "9F428910F0902A2B10DE37A669D45A3326D3734A0868C5BBF6EC472B80A4C790",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "C19F346272DC634923CFEE98F0E3A8AB4C83846F648271DE2A69EC707868F694"
+    },
+    {
+      "sourcePointerHmacSha256": "9F56A439F719B9965961FA2AB27AE4F5470E88C41360167C5ADF18381F595F8F",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "EFE8AFE6D9600D0024814ED87C258B8759B829901381EC4ABC046195FDF1128E"
+    },
+    {
+      "sourcePointerHmacSha256": "A1EC207AD745A5EC9CB5A7D8634661AAEDFBA485C67D598FCB10F476897E376D",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "F2D7EB1122DAFC5DF97746DCD30A3A129389D534745A1F8E0226C3DC2B9436D1"
+    },
+    {
+      "sourcePointerHmacSha256": "A6652B8E1B030290E713FF9CEE71E4F7D415EF3B70146B4460D0B2D1E4759D64",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "E78E574453C996E779D64C5FDE444042C056E0A05F0D654E227EE4351F1790E4"
+    },
+    {
+      "sourcePointerHmacSha256": "A7B1AA2D82A7192180DAA60F7F6E5768F948562D74E016B7956CE61F6AADFDD2",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "DCF52880F034AB076868EC05FA33B08120A39AFE6E51A2F7744DAFB2D182D198"
+    },
+    {
+      "sourcePointerHmacSha256": "AA3CC2654F35D55A2A87A8B383A169C92E8AC80DACCB0395C8B830E50EF2CFC8",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "C09ACBCA7440A872CC7A18EFFD256252619165B8F01A85C64AB2547881E8EC1C"
+    },
+    {
+      "sourcePointerHmacSha256": "B2AC6E98F6B6C2CABDE1423AEB7EE6FD98F995617C7FD95B4AC6E975E9CBD20A",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "DE707EA3CEF3B83BE3D02A356DFF5CA30A26129992FAB16CCE10EAE81BD85372"
+    },
+    {
+      "sourcePointerHmacSha256": "B346575FBCD8DEA73AF54F3774C033E0D1CDC422971A1C0FA6DCE3FFB85DA093",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "5D5491151FE6C7AAB66BD43802B8DDD5BDFB414D432D9F046BEB5F8D88A6CB9C"
+    },
+    {
+      "sourcePointerHmacSha256": "B505BE5C42D67CB41E3F0E502F206093E39D9C4F54FFBE140B7A9370ED614864",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "E895301FD4DB7167BBFB6B8CB3698CEEF4DA79052417C84674B69672FEA19685"
+    },
+    {
+      "sourcePointerHmacSha256": "B83C14487EB0FCC2112BCAEA8A2A9D578F0596601D549CB47D3FD26169387873",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "621C9AEC6CB4C46A24D7A8D6FB5F72FE2EA35297F6D4AE159DCDE9E8C9908056"
+    },
+    {
+      "sourcePointerHmacSha256": "C1931765D443C7C9D3C6E160A407570FA50EEC274605DAFAEBE3DA6144DC9D37",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "A58D050535C5C541CC1626B17CF47A76199C79EAB53F3126A17838A12D74091A"
+    },
+    {
+      "sourcePointerHmacSha256": "D614CB114DFE5B627E1F143ABD4960BBA172BFD4C3B3F4F0A8CA9D0FFF61EB75",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "DB35CD6F56C275B414C3510774D5331662EE6384981723C8301B2C3D6A18DE3B"
+    },
+    {
+      "sourcePointerHmacSha256": "D94A8E702AFC4C4AA575029312B2B9AB79C6908CA6CAD58B5807F859FC52FBFD",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "4D447321313523D625BBAABC89A09BECD14B67A60E994B75D793956008A203E5"
+    },
+    {
+      "sourcePointerHmacSha256": "E6EABB73D096F7BA362BAA0BACA504C8082AA342BE26B0EF803460186D8548A2",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "1F9A450D8E3A476A4459987E959B284D4DA94B1E2FA1AA840C0749AE878B7718"
+    },
+    {
+      "sourcePointerHmacSha256": "F0CCDE7CF8419D16B90D693AD1E710A429C4D70ACC2ABEEB4E29F790BE3EBA52",
+      "reason": "blank_non_gtin_identifier",
+      "finalStatus": "alias"
+    },
+    {
+      "sourcePointerHmacSha256": "F5DB99F1A0F193C139DD276501157154C26FEA29EA86BC57C02A26BC8C6D1DA5",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "A8D6E59B33D67A68BC071CE73F08A037B1812FA25B69E1ED0E9FD9E91CCBCB41"
+    },
+    {
+      "sourcePointerHmacSha256": "F9385D8560F7060521A3C7ED26462A8CC8D9C72B8A05412AAAF6A059E37F352C",
+      "finalStatus": "accepted",
+      "reason": "reviewed_mpn_field_omitted",
+      "identifierHmacSha256": "386090D9E7C9BCBB9E95284B9A16F15327E08062C4C7E0CD452FF3ECAF5E1B80"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
+import { persist } from "zustand/middleware";
 import type {
   Alias,
   AiLookupLog,
@@ -26,6 +26,7 @@ import { isLikelyMisreadGtin } from "@/services/upc/misread";
 import { gradeBarcode } from "@/services/upc/barcodeTrust";
 import { canonicalGtin } from "@/services/upc/gtin";
 import { clampDecodeBudgetMs, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
+import { fetchWithBackoff } from "@/services/net/fetchWithBackoff";
 import { hashPin, verifyPin, isValidPinFormat } from "@/services/security/pinLock";
 import { resolveScanToProductTiered } from "@/services/aliasMatcher";
 import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/services/productDedup";
@@ -63,7 +64,7 @@ import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/services/
 import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
 import { prefixFloorName, type PrefixFloorResult } from "@/services/catalog/prefixFloor";
-import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel } from "@/services/catalog/prefixFloorEnrich";
+import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel, brandIsOnlyFloorGuess } from "@/services/catalog/prefixFloorEnrich";
 import { detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable, toMasterAwareStoreEntry } from "@/services/catalog/sanitizeCatalog";
 import { findIdentityMerge } from "@/services/catalog/identityMerge";
@@ -86,7 +87,7 @@ import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
-import { createCoalescedFailSoftStorage } from "@/stores/scanPersistStorage";
+import { createCoalescedFailSoftPersistStorage } from "@/stores/scanPersistStorage";
 import { emptyTenantState } from "@/stores/scanReset";
 import { clearSelectedBusinessId } from "@/lib/selectedBusiness";
 import { persistKeyForUid, migrateLegacyBlobOnce } from "@/stores/scanPersistNamespace";
@@ -355,54 +356,65 @@ function autoSuggestApplyOk(params: {
 }
 
 /**
- * Bounded decode queue (Task 5): a rapid multi-scan burst must not fire unlimited concurrent
- * `/api/ai-lookup` network calls. The public `liveDecode` action is a thin wrapper that ENQUEUES the
- * real decode work (`runLiveDecodeOnce`) here; `drainDecodeQueue` runs at most MAX_CONCURRENT_DECODES
- * tasks at a time, FIFO. Module-level (not per-store-instance) is intentional and harmless: review ids
- * are globally unique per scan, and the queue always fully drains, so nothing leaks across store
- * instances or tests. Counting/persistence NEVER waits on this queue - `ensureProvisionalCount` already
- * ran SYNCHRONOUSLY at scan time, before `liveDecode` is ever invoked (see `processScan`), so a
- * queued/delayed decode only delays the AI enrichment, never the count or the "Decoding..." badge.
+ * Bounded decode queues (Task 5): ordinary decode retains its two-wide FIFO lane. Authenticated
+ * deterministic-only trusted-exact probes use a separate four-wide FIFO lane so a corpus burst cannot
+ * sit behind general enrichment. Counting/persistence NEVER waits on either queue -
+ * `ensureProvisionalCount` already ran SYNCHRONOUSLY at scan time, before `liveDecode` is ever invoked.
  */
 const MAX_CONCURRENT_DECODES = 2;
+const MAX_CONCURRENT_TRUSTED_EXACT_DECODES = 4;
 // Task 3.5: cap the count-snapshot ring buffer (same pattern as FEEDBACK_EVENT_CAP) so the variance/
 // shrinkage report's history stays useful without growing localStorage unbounded.
 const COUNT_SNAPSHOT_CAP = 12;
-const pendingDecodeIds: string[] = [];
-let activeDecodes = 0;
-const decodeTasks = new Map<string, { run: () => Promise<void>; resolve: () => void; reject: (e: unknown) => void }>();
-// Dedupe: a reviewId already queued OR in flight resolves to the SAME promise instead of being queued
-// twice - a duplicate liveDecode call for a review already being decoded is a no-op, not a second fetch.
+type DecodeTask = { run: () => Promise<void>; resolve: () => void; reject: (e: unknown) => void };
+type DecodeQueue = { pendingIds: string[]; tasks: Map<string, DecodeTask>; active: number; limit: number };
+const generalDecodeQueue: DecodeQueue = {
+  pendingIds: [],
+  tasks: new Map(),
+  active: 0,
+  limit: MAX_CONCURRENT_DECODES,
+};
+const trustedExactDecodeQueue: DecodeQueue = {
+  pendingIds: [],
+  tasks: new Map(),
+  active: 0,
+  limit: MAX_CONCURRENT_TRUSTED_EXACT_DECODES,
+};
+// Dedupe within each stage: a review already queued OR in flight resolves to the SAME promise instead
+// of being queued twice. The stage is part of the key because an exact miss must be allowed to enqueue
+// exactly one ordinary decode for the same review without either stage duplicating itself.
 const decodeTaskPromises = new Map<string, Promise<void>>();
 
-function drainDecodeQueue(): void {
-  while (activeDecodes < MAX_CONCURRENT_DECODES && pendingDecodeIds.length > 0) {
-    const reviewId = pendingDecodeIds.shift()!;
-    const task = decodeTasks.get(reviewId);
-    decodeTasks.delete(reviewId);
+function drainDecodeQueue(queue: DecodeQueue): void {
+  while (queue.active < queue.limit && queue.pendingIds.length > 0) {
+    const reviewId = queue.pendingIds.shift()!;
+    const task = queue.tasks.get(reviewId);
+    queue.tasks.delete(reviewId);
     if (!task) continue;
-    activeDecodes++;
+    queue.active++;
     task
       .run()
       .then(task.resolve, task.reject)
       .finally(() => {
-        activeDecodes--;
-        drainDecodeQueue();
+        queue.active--;
+        drainDecodeQueue(queue);
       });
   }
 }
 
-function enqueueDecode(reviewId: string, run: () => Promise<void>): Promise<void> {
-  const existing = decodeTaskPromises.get(reviewId);
+function enqueueDecode(reviewId: string, run: () => Promise<void>, deterministicOnly = false): Promise<void> {
+  const taskKey = `${deterministicOnly ? "trusted-exact" : "general"}:${reviewId}`;
+  const existing = decodeTaskPromises.get(taskKey);
   if (existing) return existing;
+  const queue = deterministicOnly ? trustedExactDecodeQueue : generalDecodeQueue;
   const promise = new Promise<void>((resolve, reject) => {
-    pendingDecodeIds.push(reviewId);
-    decodeTasks.set(reviewId, { run, resolve, reject });
+    queue.pendingIds.push(reviewId);
+    queue.tasks.set(reviewId, { run, resolve, reject });
   });
-  decodeTaskPromises.set(reviewId, promise);
-  const cleanup = () => decodeTaskPromises.delete(reviewId);
+  decodeTaskPromises.set(taskKey, promise);
+  const cleanup = () => decodeTaskPromises.delete(taskKey);
   promise.then(cleanup, cleanup);
-  drainDecodeQueue();
+  drainDecodeQueue(queue);
   return promise;
 }
 
@@ -451,6 +463,38 @@ function scrubSuggestedBarcode(value: string | undefined, partNumber?: string): 
   const v = (value ?? "").trim();
   if (!v) return "";
   return gradeBarcode({ barcode: v, partNumber }).verdict === "rejected" ? "" : v;
+}
+
+export function trustedExactProbeCandidate(code: string): boolean {
+  const value = code.trim();
+  const grade = gradeBarcode({ barcode: value });
+  if (grade.placeholder) return false;
+  // The exact corpus admits short numeric shop identifiers, invalid-check-digit spellings certified
+  // from source evidence, and bounded scanner-safe mixed labels. Merely probing these shapes grants no
+  // trust: settlement still requires the server attestation, opaque canonical id, and index digest.
+  return /^\d{3,14}$/.test(value)
+    || (/^(?=.{5,64}$)(?=.*\d)[A-Za-z0-9 ._%+'():/-]+$/.test(value));
+}
+
+function trustedExactCanonicalId(data: {
+  decision?: DecodeDecision;
+  trustedExact?: { path?: unknown; index?: { schemaVersion?: unknown; contentDigest?: unknown } };
+}): string | null {
+  const decision = data.decision;
+  const index = data.trustedExact?.index;
+  const id = decision?.trustedExactCanonicalProductId;
+  return decision?.status === "verified"
+    && decision.exactCodeEvidenceVerifiedByApp === true
+    && decision.corroborationPath === "boss_trusted_exact_barcode"
+    && data.trustedExact?.path === "boss_trusted_exact_barcode"
+    && typeof index?.schemaVersion === "string"
+    && /^\d+\.\d+\.\d+$/.test(index.schemaVersion)
+    && typeof index.contentDigest === "string"
+    && /^[A-F0-9]{64}$/i.test(index.contentDigest)
+    && typeof id === "string"
+    && /^trusted-exact:v1:[A-F0-9]{32}$/.test(id)
+    ? id
+    : null;
 }
 
 /** PN-BARCODE-CARRY (owner-reported: a PN-resolved suggestion's corpus barcode never carried through
@@ -509,6 +553,9 @@ export interface ScanStoreDeps {
   // When true (Firebase backend), syncPending uses the async drain and REQUIRES a real business context
   // (businessId + userId) before any write. Default/mock path is unchanged (sync, no context required).
   cloudBackend?: boolean;
+  // Authenticated cloud stores probe the server-only trusted-exact corpus even when paid AI is off.
+  // Injectable so focused tests can exercise the authenticated response contract without Firebase.
+  trustedExactProbeEnabled?: boolean;
   // Cloud backend only: loads a business's products/aliases/sessions/counts from Firestore when its
   // context is set, so the deterministic resolver works and the active session + finalCounts are
   // reconstructed after a refresh / on a fresh device. Injectable for tests.
@@ -713,10 +760,10 @@ export interface ScanState {
   /** Public entry point: ENQUEUES the decode (see the module-level bounded decode queue) and resolves
    *  once it actually runs. Never call `runLiveDecodeOnce` directly outside this queue - that would
    *  bypass the MAX_CONCURRENT_DECODES bound a rapid scan burst relies on. */
-  liveDecode: (reviewId: string) => Promise<void>;
+  liveDecode: (reviewId: string, options?: { deterministicOnly?: boolean; invalidationGeneration?: number }) => Promise<void>;
   /** The real decode work (network call + evidence gate + count/needs-review routing). Only ever
    *  invoked FROM the `liveDecode` queue wrapper - see the module-level `enqueueDecode`/`drainDecodeQueue`. */
-  runLiveDecodeOnce: (reviewId: string) => Promise<void>;
+  runLiveDecodeOnce: (reviewId: string, options?: { deterministicOnly?: boolean; invalidationGeneration?: number }) => Promise<void>;
   /** DECODE-EVERYTHING fallback: when the AI decode is SKIPPED (circuit breaker open / rate-limited / AI
    *  unavailable / offline / cap), still COUNT the scan as an UNVERIFIED, reviewable provisional row with a
    *  SAFE label (never fabricated manufacturer anatomy for non-GS1 codes; never an approved alias / verified
@@ -988,6 +1035,21 @@ export function transferOrphanCount(
 // still visible), immediately followed by transferOrphanCount itself for the local state update. The
 // affected ScanEvents are also durably re-pointed with fresh SAVE_SCAN_EVENT keys: a cloud reload must
 // not retain their former identity even though the count pair itself has already balanced quantity.
+// Rotation-side finalCounts prune (bug #34 residual, read-side counterpart to the pendingSyncQueue
+// data-loss fix - see sessionRotationSyncSafety.store.test.ts). Rotation must drop ONLY the
+// just-abandoned session's own finalCounts rows (superseded by the sessionHistory archive captured
+// synchronously by archiveCurrentSessionIfAny just before this runs), never OTHER past sessions'
+// rows a prior refreshFromCloud already merged into this array. A blanket `finalCounts: []` wipes
+// those unrelated rows too, disabling/emptying the History page's CSV download for sessions that
+// had nothing to do with this rotation until the next refreshFromCloud re-fetches them.
+function pruneFinalCountsForRotation(
+  finalCounts: InventoryCount[],
+  abandonedSessionId: string | null | undefined,
+): InventoryCount[] {
+  if (!abandonedSessionId) return finalCounts;
+  return finalCounts.filter((c) => c.sessionId !== abandonedSessionId);
+}
+
 function buildOrphanTransferSyncOps(params: {
   finalCountsBeforeTransfer: InventoryCount[];
   scanFeedBeforeTransfer: ScanEvent[];
@@ -1239,12 +1301,29 @@ function idForReview(r: UnknownCodeReview): string {
 export function buildScanInitializer(deps: ScanStoreDeps) {
   const { db, idFactory, now } = deps;
   const cloudBackend = deps.cloudBackend ?? false;
+  const trustedExactProbeEnabled = deps.trustedExactProbeEnabled ?? cloudBackend;
 
   return (
     set: (partial: Partial<ScanState> | ((s: ScanState) => Partial<ScanState>)) => void,
     get: () => ScanState,
   ): ScanState => {
     const seed = getSeed();
+    // Per-store, non-persisted marker for the narrow deterministic-only request. A rapid repeat can
+    // then distinguish its own trusted-exact lookup from an ordinary AI decode that happens to share
+    // the same provisional row/review shape.
+    const trustedExactProbeReviewIds = new Set<string>();
+    // A trusted-exact probe is deliberately NOT a review until it misses. Keeping its minimal context
+    // outside Zustand means the navigation badge/table cannot observe a transient open review before an
+    // authenticated exact hit settles.
+    const trustedExactProbes = new Map<string, UnknownCodeReview>();
+    const trustedExactProbeIdsByCode = new Map<string, string>();
+    let trustedExactProbeGeneration = 0;
+    const clearTrustedExactProbes = () => {
+      trustedExactProbeGeneration++;
+      trustedExactProbeReviewIds.clear();
+      trustedExactProbes.clear();
+      trustedExactProbeIdsByCode.clear();
+    };
 
     const enqueueAndSync = (items: PendingSyncItem[]) => {
       set((s) => ({ pendingSyncQueue: [...s.pendingSyncQueue, ...items] }));
@@ -1268,24 +1347,241 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       const state = get();
       const review = state.needsReviewQueue.find((item) => item.id === reviewId);
       if (!review || !state.businessContextReady || !state.sessionId) return;
-      const event = state.scanFeed.find(
+      // CLASS FIX (Codex final verdict finding 2, 2026-08-04): a repeat scan of the SAME unknown code
+      // while its first scan's decode is still in flight reuses the still-open review (scanStore.ts:
+      // 2902-2912) and mints its own SIBLING ScanEvent that shares this review's (sessionId, cleanCode).
+      // The local settle further below (the scanFeed.map matching e.cleanCode === review.cleanCode)
+      // updates EVERY such row, so persistence must sync ALL of them, not just the first `.find()` hit -
+      // otherwise a sibling's decoded status never reaches the backend, and a reload/rehydrate (e.g. the
+      // session timeline reading fresh ScanEvents via getScanEventsBySession) resurrects its stale
+      // "decoding" badge even though the local count was always correct.
+      const events = state.scanFeed.filter(
         (item) => item.sessionId === review.sessionId && item.cleanCode === review.cleanCode,
       );
-      const product = event ? state.products.find((item) => item.id === event.matchedProductId) : undefined;
-      if (!event || !product) return;
-      const version = JSON.stringify([event.status, event.decodeStatus, event.reason, product.name, product.brand, product.primaryBarcode]);
-      enqueueAndSync([
-        makeQueueItem({
-          idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
-          entityType: "Product", entityId: product.id, operation: "SAVE_PRODUCT", payload: product,
-          idempotencyKey: buildIdempotencyKey(state.businessId, event.sessionId, `${product.id}:decode:${version}`, "SAVE_PRODUCT"), scanEventId: null,
+      const items: PendingSyncItem[] = [];
+      const syncedProductIds = new Set<string>();
+      for (const event of events) {
+        const product = state.products.find((item) => item.id === event.matchedProductId);
+        if (!product) continue;
+        // One product save per distinct matched product (normally all sibling events share the same
+        // provisional/decoded product) - never one duplicate SAVE_PRODUCT per sibling event.
+        if (!syncedProductIds.has(product.id)) {
+          syncedProductIds.add(product.id);
+          const productVersion = JSON.stringify([product.name, product.brand, product.primaryBarcode]);
+          items.push(
+            makeQueueItem({
+              idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
+              entityType: "Product", entityId: product.id, operation: "SAVE_PRODUCT", payload: product,
+              idempotencyKey: buildIdempotencyKey(state.businessId, event.sessionId, `${product.id}:decode:${productVersion}`, "SAVE_PRODUCT"), scanEventId: null,
+            }),
+          );
+        }
+        const version = JSON.stringify([event.status, event.decodeStatus, event.reason, product.name, product.brand, product.primaryBarcode]);
+        items.push(
+          makeQueueItem({
+            idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
+            entityType: "ScanEvent", entityId: event.id, operation: "SAVE_SCAN_EVENT", payload: event,
+            idempotencyKey: buildIdempotencyKey(state.businessId, event.sessionId, `${event.id}:decode:${version}`, "SAVE_SCAN_EVENT"), scanEventId: event.id,
+          }),
+        );
+      }
+      if (items.length === 0) return;
+      enqueueAndSync(items);
+    };
+
+    /**
+     * Commit the authenticated trusted-exact result as one local state transition. This path deliberately
+     * does not create aliases or write the shared catalog: the opaque server identity is only a coalescing
+     * key for exact corpus rows, while every physical scan remains represented by its original event.
+     */
+    const settleTrustedExactIdentity = (
+      reviewId: string,
+      canonicalId: string,
+      result: Partial<AiLookupResult>,
+      reason: string,
+    ): boolean => {
+      const state = get();
+      const review = state.needsReviewQueue.find((item) => item.id === reviewId) ?? trustedExactProbes.get(reviewId);
+      if (!review || (review.status !== "open" && review.status !== "suggested")) return false;
+      if (review.businessId !== state.businessId || review.sessionId !== state.sessionId) {
+        trustedExactProbes.delete(reviewId);
+        trustedExactProbeIdsByCode.delete(review.cleanCode);
+        trustedExactProbeReviewIds.delete(reviewId);
+        return false;
+      }
+      const transientProbe = trustedExactProbes.has(reviewId);
+
+      const matchingEvent = state.scanFeed.find(
+        (event) => event.sessionId === review.sessionId && event.cleanCode === review.cleanCode,
+      );
+      const provisionalId = review.provisionalProductId ?? matchingEvent?.matchedProductId ?? null;
+      if (!provisionalId) return false;
+      const provisional = state.products.find((product) => product.id === provisionalId);
+      if (!provisional) return false;
+
+      const existingCanonical = state.products.find(
+        (product) => product.status !== "archived" && product.trustedExactCanonicalId === canonicalId,
+      );
+      const target = existingCanonical ?? provisional;
+      const targetId = target.id;
+      const settledAt = now();
+      const reviewKey = buildIdempotencyKey(
+        state.businessId,
+        review.sessionId,
+        `${review.id}:trusted-exact:${canonicalId}`,
+        "SAVE_UNKNOWN_SCAN",
+      );
+      const settledProduct: Product = {
+        ...target,
+        name: result.productName?.trim() || target.name,
+        brand: result.brand?.trim() || target.brand,
+        category: result.category?.trim() || target.category,
+        specsShort: result.specsShort?.trim() || target.specsShort,
+        specsFull: result.specsFull?.trim() || target.specsFull,
+        primarySku: result.primarySku?.trim() || target.primarySku,
+        primaryBarcode: target.primaryBarcode || result.primaryBarcode?.trim() || review.cleanCode,
+        gtin: result.gtin?.trim() || target.gtin,
+        upc: result.upc?.trim() || target.upc,
+        ean: result.ean?.trim() || target.ean,
+        aliases: target.aliases ?? [],
+        source: "catalog",
+        confidence: 1,
+        verified: true,
+        provisional: false,
+        provenanceTier: "corpus_verified",
+        trustedExactCanonicalId: canonicalId,
+        updatedAt: settledAt,
+        updatedBy: "system:trusted_exact",
+      };
+      const archivedProvisional: Product | null = provisionalId !== targetId
+        ? { ...provisional, status: "archived", updatedAt: settledAt, updatedBy: "system:trusted_exact" }
+        : null;
+
+      const isOwnEvent = (event: ScanEvent) =>
+        event.sessionId === review.sessionId
+        && (event.cleanCode === review.cleanCode || event.matchedProductId === provisionalId);
+      const settledEvents = state.scanFeed.map((event): ScanEvent =>
+        isOwnEvent(event)
+          ? {
+              ...event,
+              matchedProductId: targetId,
+              matchType: "primary_barcode",
+              status: "known",
+              resolverStatus: "known",
+              reason,
+              decodeNote: undefined,
+              decodeStatus: "verified",
+              provenance: "app_verified",
+              suggestion: undefined,
+              syncStatus: "pending",
+            }
+          : event,
+      );
+      const settledReview: UnknownCodeReview = {
+        ...review,
+        suggestedProductName: settledProduct.name,
+        suggestedBrand: settledProduct.brand,
+        suggestedCategory: settledProduct.category,
+        suggestedSpecsShort: settledProduct.specsShort,
+        suggestedSpecsFull: settledProduct.specsFull,
+        suggestedPrimarySku: settledProduct.primarySku,
+        suggestedPrimaryBarcode: settledProduct.primaryBarcode,
+        suggestedGtin: settledProduct.gtin,
+        suggestedUpc: settledProduct.upc,
+        suggestedEan: settledProduct.ean,
+        suggestedAliases: [],
+        sourceUrls: [],
+        verifiedFacts: [],
+        guesses: [],
+        reason,
+        decodeNote: undefined,
+        providerName: "trusted-exact-corpus",
+        confidence: 1,
+        hasSuggestion: false,
+        decodeStatus: "verified",
+        evidenceStrength: "fetched_source",
+        exactCodeEvidenceVerifiedByApp: true,
+        crossCheckDecision: "single_provider",
+        suggestedLinkProductId: undefined,
+        status: "resolved",
+        resolvedAt: settledAt,
+        resolvedBy: "system:trusted_exact",
+        resolutionAction: "trusted_exact",
+        syncStatus: "pending",
+        idempotencyKey: reviewKey,
+      };
+
+      let finalCounts = state.finalCounts;
+      const transferOps = provisionalId !== targetId
+        ? buildOrphanTransferSyncOps({
+            finalCountsBeforeTransfer: state.finalCounts,
+            scanFeedBeforeTransfer: state.scanFeed.filter(isOwnEvent),
+            oid: provisionalId,
+            targetId,
+            businessId: state.businessId,
+            idFactory,
+            now,
+          })
+        : [];
+      if (provisionalId !== targetId) {
+        finalCounts = transferOrphanCount(finalCounts, provisionalId, targetId, settledAt);
+      }
+
+      set((current) => ({
+        products: current.products.map((product) => {
+          if (product.id === targetId) return settledProduct;
+          if (archivedProvisional && product.id === archivedProvisional.id) return archivedProvisional;
+          return product;
         }),
+        finalCounts,
+        scanFeed: settledEvents,
+        needsReviewQueue: transientProbe
+          ? current.needsReviewQueue
+          : current.needsReviewQueue.map((item) => item.id === reviewId ? settledReview : item),
+      }));
+      if (transientProbe) {
+        trustedExactProbes.delete(reviewId);
+        trustedExactProbeIdsByCode.delete(review.cleanCode);
+      }
+
+      const version = `${review.id}:${canonicalId}`;
+      const settledEventOps = settledEvents
+        .filter(isOwnEvent)
+        .map((event) => {
+          const key = buildIdempotencyKey(state.businessId, event.sessionId, `${event.id}:trusted-exact:${canonicalId}`, "SAVE_SCAN_EVENT");
+          return makeQueueItem({
+            idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
+            entityType: "ScanEvent", entityId: event.id, operation: "SAVE_SCAN_EVENT", payload: event,
+            idempotencyKey: key, scanEventId: event.id,
+          });
+        });
+      const productKey = buildIdempotencyKey(state.businessId, review.sessionId, `${targetId}:trusted-exact:${version}`, "SAVE_PRODUCT");
+      const persistOps: PendingSyncItem[] = [
+        ...transferOps,
         makeQueueItem({
-          idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
-          entityType: "ScanEvent", entityId: event.id, operation: "SAVE_SCAN_EVENT", payload: event,
-          idempotencyKey: buildIdempotencyKey(state.businessId, event.sessionId, `${event.id}:decode:${version}`, "SAVE_SCAN_EVENT"), scanEventId: event.id,
+          idFactory, now, businessId: state.businessId, sessionId: review.sessionId,
+          entityType: "Product", entityId: targetId, operation: "SAVE_PRODUCT", payload: settledProduct,
+          idempotencyKey: productKey, scanEventId: null,
         }),
-      ]);
+      ];
+      if (archivedProvisional) {
+        const archiveKey = buildIdempotencyKey(state.businessId, review.sessionId, `${archivedProvisional.id}:trusted-exact-archive:${canonicalId}`, "SAVE_PRODUCT");
+        persistOps.push(makeQueueItem({
+          idFactory, now, businessId: state.businessId, sessionId: review.sessionId,
+          entityType: "Product", entityId: archivedProvisional.id, operation: "SAVE_PRODUCT", payload: archivedProvisional,
+          idempotencyKey: archiveKey, scanEventId: null,
+        }));
+      }
+      if (!transientProbe) {
+        persistOps.push(makeQueueItem({
+          idFactory, now, businessId: state.businessId, sessionId: review.sessionId,
+          entityType: "UnknownCodeReview", entityId: review.id, operation: "SAVE_UNKNOWN_SCAN", payload: settledReview,
+          idempotencyKey: reviewKey, scanEventId: matchingEvent?.id ?? null,
+        }));
+      }
+      persistOps.push(...settledEventOps);
+      enqueueAndSync(persistOps);
+      return true;
     };
 
     // Fire-and-forget audit. NEVER blocks or throws into the scanner/UI. Only emits with a REAL business
@@ -1298,6 +1594,36 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       } catch {
         // An audit failure must never break the scanner or any action. Swallow it.
       }
+    };
+
+    const materializeTrustedExactMiss = (reviewId: string, reason: string): UnknownCodeReview | null => {
+      const probe = trustedExactProbes.get(reviewId);
+      if (!probe) return get().needsReviewQueue.find((item) => item.id === reviewId) ?? null;
+      const review: UnknownCodeReview = {
+        ...probe,
+        reason,
+        decodeNote: undefined,
+        decodeStatus: "needs_review",
+      };
+      trustedExactProbes.delete(reviewId);
+      trustedExactProbeIdsByCode.delete(review.cleanCode);
+      set((state) => ({
+        needsReviewQueue: state.needsReviewQueue.some((item) => item.id === review.id)
+          ? state.needsReviewQueue
+          : [...state.needsReviewQueue, review],
+        scanFeed: state.scanFeed.map((event) =>
+          event.sessionId === review.sessionId && event.cleanCode === review.cleanCode && event.decodeStatus === "decoding"
+            ? { ...event, decodeStatus: "needs_review" as const, reason, decodeNote: undefined }
+            : event,
+        ),
+      }));
+      enqueueAndSync([makeQueueItem({
+        idFactory, now, businessId: review.businessId, sessionId: review.sessionId,
+        entityType: "UnknownCodeReview", entityId: review.id, operation: "SAVE_UNKNOWN_SCAN", payload: review,
+        idempotencyKey: review.idempotencyKey, scanEventId: null,
+      })]);
+      emitAudit({ entityType: "UnknownCodeReview", entityId: review.id, action: "unknown_review_created", metadata: { code: review.cleanCode } });
+      return review;
     };
 
     // Owner feature (2026-07-22): automatically archive the CURRENT session's live scanFeed into
@@ -1330,18 +1656,41 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
     // contend on the same _appliedKeys doc (self-inflicted "already-exists"). A promise-chain mutex runs
     // each drain after the previous completes; every enqueue still triggers a drain that picks up the
     // latest queue. Per-item idempotency (transaction + ledger) remains the guarantee against true retries.
+    const CLOUD_APPLY_TIMEOUT_MS = 60_000;
+    const STALE_DRAIN_MS = 75_000;
     let drainChain: Promise<void> = Promise.resolve();
+    let drainStartedAt: number | null = null;
+    let activeDrainToken = 0;
     let businessLoadGeneration = 0;
     const queueItemIdentity = (item: PendingSyncItem) =>
       `${item.businessId}\u0000${item.id}\u0000${item.idempotencyKey}`;
     const syncPendingCloud = (force: boolean): Promise<void> => {
-      drainChain = drainChain.then(() => drainCloudOnce(force)).catch(() => {});
+      const state = get();
+      if (
+        drainStartedAt !== null &&
+        Date.now() - drainStartedAt > STALE_DRAIN_MS &&
+        state.pendingSyncQueue.length > 0
+      ) {
+        console.warn(`[sync] drain watchdog: force-reset after ${Date.now() - drainStartedAt}ms, ${state.pendingSyncQueue.length} items pending`);
+        activeDrainToken += 1;
+        drainStartedAt = null;
+        drainChain = Promise.resolve();
+      }
+      drainChain = drainChain.then(async () => {
+        const token = ++activeDrainToken;
+        drainStartedAt = Date.now();
+        try {
+          await drainCloudOnce(force, token);
+        } finally {
+          if (activeDrainToken === token) drainStartedAt = null;
+        }
+      }).catch(() => {});
       return drainChain;
     };
 
     // Cloud drain (one pass): async, awaits db.apply, and REQUIRES a real business context first (no
     // fake/default business writes). The mock/local path keeps the original SYNCHRONOUS syncPending below.
-    const drainCloudOnce = async (force: boolean) => {
+    const drainCloudOnce = async (force: boolean, token: number) => {
       const state = get();
       if (!state.online && !force) return;
       if (state.pendingSyncQueue.length === 0) return;
@@ -1363,6 +1712,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       const erroredItems = new Map<string, PendingSyncItem>();
       let lastErr: string | null = null;
       for (const item of batch) {
+        if (activeDrainToken !== token) return;
         const live = get();
         if (
           !live.businessContextReady ||
@@ -1374,7 +1724,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const itemIdentity = queueItemIdentity(item);
         let res;
         try {
-          res = await db.apply(item);
+          let timeoutId: ReturnType<typeof setTimeout> | undefined;
+          try {
+            res = await Promise.race([
+              db.apply(item),
+              new Promise<never>((_, reject) => {
+                timeoutId = setTimeout(() => reject(new Error(`cloud sync apply timed out after ${CLOUD_APPLY_TIMEOUT_MS}ms`)), CLOUD_APPLY_TIMEOUT_MS);
+              }),
+            ]);
+          } finally {
+            if (timeoutId !== undefined) clearTimeout(timeoutId);
+          }
         } catch (e) {
           res = {
             ok: false,
@@ -1392,11 +1752,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             status: res.retryable === false ? "quarantined" : "error",
             retryCount: item.retryCount + 1,
             lastError: res.error ?? "sync failed",
+            syncError: {
+              code: res.errorCode ?? "sync_failed",
+              message: res.error ?? "sync failed",
+            },
             updatedAt: now(),
           });
           lastErr = res.error ?? "sync failed";
         }
       }
+      if (activeDrainToken !== token) return;
       set((cur) => {
         // Reconcile against the CURRENT queue: drop applied items, replace errored with their updated
         // version, and KEEP any items enqueued while this pass was awaiting (the mutex's next pass drains
@@ -1497,6 +1862,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             lastSyncError: null,
           });
         } else {
+          clearTrustedExactProbes();
           // Isolation: settings/needsReviewQueue/scanFeed are NOT returned by loadBusinessData and
           // finalCounts linger when no session restores, so a context switch must REPLACE all four or
           // the previous tenant's rows bleed through (two users OR one user with two businesses).
@@ -1695,6 +2061,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       resetForSignOut: () => {
+        clearTrustedExactProbes();
         // Capture identity BEFORE the reset wipes it: the per-uid key must be removed and the persist
         // middleware re-pointed to the anon key, or the fail-soft coalesced storage would simply
         // rewrite sis-scan-<uid> on the next tick and the "cleared" state would leak right back.
@@ -1817,9 +2184,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       startSession: (name, location) => {
+        clearTrustedExactProbes();
         // Owner feature (2026-07-22): archive the session being abandoned/rotated away from BEFORE
         // its scanFeed is wiped below - a session with at least one scan is never silently lost.
         archiveCurrentSessionIfAny();
+        const previousSessionId = get().currentSession?.id;
         const id = `session-${idFactory()}`;
         const businessId = get().businessId;
         const session: InventorySession = {
@@ -1840,9 +2209,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           sessionId: id,
           currentSession: session,
           scanFeed: [],
-          finalCounts: [],
+          finalCounts: pruneFinalCountsForRotation(get().finalCounts, previousSessionId),
           needsReviewQueue: [],
-          pendingSyncQueue: [],
+          // DATA-LOSS FIX (owner 4k campaign, 2026-08-05): pendingSyncQueue is deliberately NOT
+          // wiped here. Rotating while the previous session's backlog is still draining was
+          // silently discarding its unsynced cloud writes (measured live: 1,000 of 4,000 scan
+          // events never reached Firestore). Queue items carry their own sessionId/businessId and
+          // the drain is session-agnostic, so the backlog keeps draining under the new session -
+          // same principle as setBusinessContext's "deliberately NOT filtered" tenant rule.
+          // Guard: sessionRotationSyncSafety.store.test.ts.
           syncedScanEventIds: [],
           lastSyncError: null,
         });
@@ -1974,6 +2349,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             state.sessions.find((candidate) => candidate.id === sessionId) ??
             (state.currentSession?.id === sessionId ? state.currentSession : null);
           if (!session) return false;
+          clearTrustedExactProbes();
           set({
             currentSession: session,
             sessionId: session.id,
@@ -1987,6 +2363,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const db = getMockDb();
         const session = db.getSession(sessionId);
         if (!session || session.businessId !== get().businessId) return false;
+        clearTrustedExactProbes();
         const finalCounts: InventoryCount[] = db.getSessionCounts(sessionId).map((c) => ({
           id: `count-${c.sessionId}-${c.productId}`,
           businessId: c.businessId,
@@ -2063,6 +2440,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // A genuine rotation away from the prior session (fresh session below wipes scanFeed/
         // finalCounts) - archive it first, same as startSession.
         archiveCurrentSessionIfAny();
+        clearTrustedExactProbes();
         const id = `session-${idFactory()}`;
         const businessId = get().businessId;
         const session: InventorySession = {
@@ -2084,7 +2462,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           sessionId: id,
           currentSession: session,
           scanFeed: [],
-          finalCounts: [],
+          finalCounts: pruneFinalCountsForRotation(get().finalCounts, cur?.id),
           needsReviewQueue: [],
           lastSyncError: null,
         });
@@ -2294,6 +2672,22 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).some((c) => !!c && ids.includes(c)),
             )?.id ?? null;
         }
+        const pendingTrustedExactReview = provMatchId
+          ? get().needsReviewQueue.find(
+              (review) =>
+                trustedExactProbeReviewIds.has(review.id)
+                && review.provisionalProductId === provMatchId
+                && review.sessionId === sessionId
+                && review.cleanCode === cleaned.cleanCode
+                && review.status === "open"
+                && review.decodeStatus === "decoding",
+            ) ?? [...trustedExactProbes.values()].find(
+              (probe) =>
+                probe.provisionalProductId === provMatchId
+                && probe.sessionId === sessionId
+                && probe.cleanCode === cleaned.cleanCode,
+            )
+          : undefined;
         const effectiveProductId = resolution.productId ?? provMatchId;
         const effectiveCountable = countable || !!provMatchId;
         if (knownConflict === "category_context_conflict") {
@@ -2314,8 +2708,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             status: effectiveCountable ? "known" : resolution.resolverStatus === "conflict" ? "conflict" : "needs_review",
             resolverStatus: resolution.resolverStatus,
             codeType: resolution.codeType,
-            reason: provMatchId ? "Counted (suggested - awaiting your confirmation)." : resolution.reason,
-            decodeStatus: provMatchId ? "suggested" : undefined,
+            reason: pendingTrustedExactReview?.reason
+              ?? (provMatchId ? "Counted (suggested - awaiting your confirmation)." : resolution.reason),
+            decodeStatus: pendingTrustedExactReview ? "decoding" : provMatchId ? "suggested" : undefined,
             quantityDelta: effectiveCountable ? 1 : 0,
             quantityAfterScan: 0,
             createdAt,
@@ -2582,6 +2977,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (misread) {
           autoGate = { allowed: false, reason: "Scan misread - decode was not attempted." };
         }
+        const deterministicCandidate = trustedExactProbeCandidate(cleaned.cleanCode);
+        const deterministicLookupEligible = trustedExactProbeEnabled
+          && get().online
+          && deterministicCandidate;
+        const lookupPending = autoGate.allowed || deterministicLookupEligible;
 
         const existingOpen = get().needsReviewQueue.find(
           (r) => r.cleanCode === cleaned.cleanCode && r.status === "open",
@@ -2591,7 +2991,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // facing, no AI/provider/Settings mechanics). The auto-decode "why" (e.g. lookup not configured)
         // goes to decodeNote, which LiveScanFeed shows ONLY to platformOwner. The internal gate reason
         // text is unchanged (still used for aiLookupLogs/diagnostics).
-        event.decodeStatus = existingOpen?.decodeStatus ?? (autoGate.allowed ? "decoding" : "needs_review");
+        event.decodeStatus = existingOpen?.decodeStatus ?? (lookupPending ? "decoding" : "needs_review");
         event.reason = existingOpen?.reason ?? resolution.reason;
         event.decodeNote = existingOpen?.decodeNote ?? autoGate.reason;
 
@@ -2602,6 +3002,38 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // can never again decide whether the scan counts. ensureProvisionalCount is idempotent, so the later
         // decode handlers (which filter on status !== "known") find nothing to re-count.
         get().ensureProvisionalCount(cleaned.cleanCode, resolution.reason);
+
+        if (deterministicLookupEligible) {
+          // Repeats share the in-flight probe, while each physical scan has already received its own
+          // synchronous feed/count event above.
+          if (trustedExactProbeIdsByCode.has(cleaned.cleanCode)) return event;
+          const mintedPlaceholder = get().products.find(
+            (p) => p.provisional === true && p.status !== "archived" && p.primaryBarcode === cleaned.cleanCode,
+          );
+          const probe: UnknownCodeReview = {
+            id: idFactory(), businessId, sessionId, rawCode: cleaned.rawCode, cleanCode: cleaned.cleanCode,
+            normalizedCandidates: cleaned.normalizedCandidates,
+            suggestedProductName: "", suggestedBrand: "", suggestedCategory: "", suggestedSpecsShort: "", suggestedSpecsFull: "",
+            suggestedPrimarySku: "", suggestedPrimaryBarcode: "", suggestedGtin: "", suggestedUpc: "", suggestedEan: "",
+            suggestedImageUrl: "", suggestedProductUrl: "", suggestedAliases: [], sourceUrls: [], verifiedFacts: [], guesses: [],
+            reason: resolution.reason, decodeNote: autoGate.reason, providerName: "", confidence: 0, hasSuggestion: false,
+            decodeStatus: "decoding", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheckDecision: "",
+            status: "open", createdAt, resolvedAt: null, resolvedBy: null, resolutionAction: null, syncStatus: "pending",
+            idempotencyKey: keyFor("SAVE_UNKNOWN_SCAN"), provisionalProductId: mintedPlaceholder?.id ?? null,
+            suggestedLinkProductId: resolution.nearMatchSuggestion?.productId,
+          };
+          trustedExactProbes.set(probe.id, probe);
+          trustedExactProbeIdsByCode.set(probe.cleanCode, probe.id);
+          trustedExactProbeReviewIds.add(probe.id);
+          void get().liveDecode(probe.id, {
+            deterministicOnly: true,
+            invalidationGeneration: trustedExactProbeGeneration,
+          }).then(
+            () => trustedExactProbeReviewIds.delete(probe.id),
+            () => trustedExactProbeReviewIds.delete(probe.id),
+          );
+          return event;
+        }
 
         if (!existingOpen) {
           // STABLE-ID FIX: ensureProvisionalCount just ran synchronously above, so this code's placeholder
@@ -2639,7 +3071,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             providerName: resolution.resolverStatus === "conflict" ? "conflict" : "",
             confidence: 0,
             hasSuggestion: false,
-            decodeStatus: autoGate.allowed ? "decoding" : "needs_review",
+            decodeStatus: lookupPending ? "decoding" : "needs_review",
             evidenceStrength: "none",
             exactCodeEvidenceVerifiedByApp: false,
             crossCheckDecision: "",
@@ -2681,6 +3113,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             get().recordFeedback("conflict_detected", { code: cleaned.cleanCode });
           }
 
+          // Every trusted-exact candidate gets the isolated deterministic-only request first. A valid
+          // GTIN miss may later enter the unchanged ordinary queue; non-GTIN, misread, and gate-blocked
+          // misses remain counted/reviewable without provider egress.
           // CATALOG-FIRST (offline-first, saves AI tokens): private shop override -> verified shared
           // catalog. A verified hit resolves + counts with NO AI, even with no key / offline. AI only
           // runs on a miss or a weak/conflicting catalog hit.
@@ -2809,7 +3244,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         });
       },
 
-      retrySync: () => get().syncPending(true),
+      // Explicit user-facing retry: re-arm any items quarantined by a terminal failure (e.g. Firestore
+      // permission-denied) so this drain can re-attempt them. Automatic drains (timer/online/enqueue)
+      // intentionally keep skipping "quarantined" status - only this explicit action re-attempts a
+      // terminal failure, so a fix to the underlying cause (e.g. a rules bug) is not stranded forever.
+      // syncError is preserved until a successful apply clears it (see the ok-branch in drainCloudOnce).
+      retrySync: () => {
+        set((cur) => ({
+          pendingSyncQueue: cur.pendingSyncQueue.map((item) =>
+            item.status === "quarantined" ? { ...item, status: "error" } : item,
+          ),
+        }));
+        get().syncPending(true);
+      },
 
       setOnline: (online) => {
         set({ online });
@@ -2956,7 +3403,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         try {
           // D4-follow-up: live-auth mode requires idToken + businessId on every POST (route.ts:294-324)
           // or this 401s "unauthenticated" - mock mode resolves {} and is unaffected.
-          const res = await fetch("/api/ai-lookup", {
+          // P4 (#28): shared backoff helper - a human-initiated single action, not part of the bulk-
+          // paste storm, but gets the same honest-Retry-After/jitter resilience for consistency.
+          const res = await fetchWithBackoff("/api/ai-lookup", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -3152,11 +3601,21 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       // = 2) so a burst of unknown scans never fires unlimited concurrent /api/ai-lookup calls. Resolves once
       // the queued task actually runs and completes. Counting/persistence never waits on this - see the
       // queue doc comment above `decodeCorroborated`.
-      liveDecode: (reviewId) => enqueueDecode(reviewId, () => get().runLiveDecodeOnce(reviewId)),
+      liveDecode: (reviewId, options) => enqueueDecode(
+        reviewId,
+        () => get().runLiveDecodeOnce(reviewId, options),
+        options?.deterministicOnly === true,
+      ),
 
-      runLiveDecodeOnce: async (reviewId) => {
+      runLiveDecodeOnce: async (reviewId, options) => {
         const state = get();
-        const review = state.needsReviewQueue.find((r) => r.id === reviewId);
+        const deterministicOnly = options?.deterministicOnly === true;
+        const invalidationGeneration = options?.invalidationGeneration;
+        const wasInvalidated = () =>
+          invalidationGeneration !== undefined && invalidationGeneration !== trustedExactProbeGeneration;
+        if (wasInvalidated()) return;
+        const review = state.needsReviewQueue.find((r) => r.id === reviewId)
+          ?? (deterministicOnly ? trustedExactProbes.get(reviewId) : undefined);
         if (!review || review.status !== "open") return;
 
         const s = state.settings;
@@ -3194,18 +3653,82 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           breaker: state.breaker,
           now: nowMs,
         });
-        if (!gate.allowed) {
-          const blockStatus: AiLookupLog["status"] = gate.reason === "offline" ? "blocked_offline" : "blocked_cap";
+        if (!gate.allowed && (!deterministicOnly || !state.online)) {
+          // Fix-wave 2026-08-04: distinguish WHY this gate blocked instead of collapsing "disabled"
+          // and "circuit_open" into the same "blocked_cap" label as a real daily-cap block - an
+          // engineer reading aiLookupLogs needs to tell "the owner turned AI off" apart from "the
+          // circuit breaker tripped" apart from "the daily spend cap is spent".
+          const blockStatusByReason: Record<AiGateReason, AiLookupLog["status"]> = {
+            ok: "success",
+            disabled: "blocked_disabled",
+            offline: "blocked_offline",
+            daily_cap: "blocked_cap",
+            circuit_open: "blocked_circuit",
+          };
+          const blockStatus: AiLookupLog["status"] = blockStatusByReason[gate.reason];
+          // OWNER RULE follow-up (2026-08-05): a non-deterministic call blocked at THIS gate (e.g. the
+          // trusted-exact continuation handing off into the ordinary ladder while the daily cap is
+          // genuinely spent) must resolve the row honestly instead of leaving it stuck at decodeStatus
+          // "decoding" forever - this gate returns before any fetch, so nothing downstream ever touches
+          // the row again otherwise. A deterministic probe never flips decodeStatus to "decoding" in the
+          // first place, so it stays exempt here (its own caller already routes the honest miss reason).
+          // The scanFeed row may already be "needs_review" rather than "decoding" at this point (the
+          // continuation's own flip-to-decoding write above is guarded to never touch an unrelated
+          // already-resolved row for a repeat scan of the same code - see that guard's comment), so this
+          // matches the same decoding/needs_review/suggested set as the decode-settle write below
+          // (~line 3900) rather than "decoding" alone, or the honest cap reason would silently lose to a
+          // stale pre-block reason already sitting on the row.
+          const gateReasonText: Record<AiGateReason, string> = {
+            ok: "",
+            disabled: "AI lookup is off. Turn it on in Settings to auto-decode.",
+            offline: "Offline. Saved locally; AI was not called.",
+            daily_cap: "Daily AI lookup cap reached. Routed to Needs Review.",
+            circuit_open: "AI circuit breaker is open after repeated failures. Routed to Needs Review.",
+          };
+          const blockedReason = gateReasonText[gate.reason];
           set((st) => ({
             aiLookupLogs: [mkLog(blockStatus, s.primaryProvider, 0, gate.breaker), ...st.aiLookupLogs],
             breaker: gate.breaker,
             settings: { ...st.settings, dailyLookupCount: dailyCount, lastResetDate: today },
+            needsReviewQueue: deterministicOnly
+              ? st.needsReviewQueue
+              : st.needsReviewQueue.map((item) =>
+                  item.id === reviewId
+                    ? { ...item, decodeStatus: "needs_review" as const, reason: blockedReason, decodeNote: undefined }
+                    : item,
+                ),
+            scanFeed: deterministicOnly
+              ? st.scanFeed
+              : st.scanFeed.map((event) =>
+                  event.sessionId === review.sessionId
+                    && event.cleanCode === review.cleanCode
+                    && (event.decodeStatus === "decoding" || event.decodeStatus === "needs_review" || event.decodeStatus === "suggested")
+                    ? { ...event, decodeStatus: "needs_review" as const, reason: blockedReason, decodeNote: undefined }
+                    : event,
+                ),
           }));
           return;
         }
 
-        const rawCodeSanitized = sanitizeForAiLookup(review.rawCode).clean;
-        const cleanCodeSanitized = sanitizeForAiLookup(review.cleanCode).clean;
+        // Fix-wave 2026-08-04 (BLOCKER): mirror route.ts's bareNumericCode carve-out here, client-side.
+        // The phone sanitizer masks bare 10-digit runs (sanitizer.ts's PHONE pattern), so a scanned
+        // UPC/EAN-shaped bare code was being sent to the server as the literal string
+        // "[redacted-phone]" instead of real digits. The server has its own carve-out (route.ts's
+        // bareNumericCode), but it only recovers real digits from body.cleanCode/body.rawCode - once
+        // the client had already masked them, the server never saw anything to recover. A bare
+        // separator-free 8-14 digit run is a lookup code, not free text; everything else (formatted
+        // phone numbers, letters, extra words) still gets sanitized exactly as before. The
+        // deterministicOnly branch already sends the untouched review.rawCode/review.cleanCode (the
+        // trusted-exact corpus probe never reaches a third-party AI provider - see route.ts's
+        // deterministicOnly early return before any provider code), so it is unaffected here.
+        const exactCodeForBareCheck = cleanScanCode(review.cleanCode || review.rawCode || "").cleanCode;
+        const bareNumericCode = /^\d{8,14}$/.test(exactCodeForBareCheck) ? exactCodeForBareCheck : null;
+        const rawCodeSanitized = deterministicOnly
+          ? review.rawCode
+          : (bareNumericCode ?? sanitizeForAiLookup(review.rawCode).clean);
+        const cleanCodeSanitized = deterministicOnly
+          ? review.cleanCode
+          : (bareNumericCode ?? sanitizeForAiLookup(review.cleanCode).clean);
         const codeType = detectCodeType(review.cleanCode);
         // Phase 8B: app-derived prompt hints (advisory only - the Phase 8 firewall stays the hard gate).
         const scanContext = s.scanContext ?? "any";
@@ -3248,25 +3771,44 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const decodeOnce = async () => {
             let res: Response;
             try {
-              res = await fetch("/api/ai-lookup", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                signal: abortController.signal,
-                body: JSON.stringify({
-                  ...(await aiRequestAuth(state.businessId)),
-                  mode: "decode",
-                  proRecheck: review.reopenedFromWrong === true, // auto-escalate a marked-wrong code to the stronger model
-                  rawCode: rawCodeSanitized,
-                  cleanCode: cleanCodeSanitized,
-                  codeType,
-                  confidenceThreshold: 0.8,
-                  allowImageSuggestions: s.allowImageSuggestions,
-                  budgetMs: clampedBudgetMs,
-                  scanContext,
-                  brandPrefixHint,
-                  autoCountNonPublicWithEvidence: s.autoCountNonPublicWithEvidence ?? true,
-                }),
-              });
+              // P4 (#28): fetchWithBackoff replaces the old inline capped-at-30s/single-retry-no-
+              // jitter block. It honors Retry-After IN FULL (up to its own safety ceiling, not the
+              // old 30s cap) and applies full jitter on the exponential fallback so a burst of 429s
+              // does not retry in a synchronized wave. onRetryDecision reads the (cloned) 429 body to
+              // veto a retry outright on daily_cap/account_daily_cap - those never clear by waiting,
+              // exactly as before. maxAttempts: 2 preserves the existing single-retry cost/latency
+              // budget; the ORIGINAL (unread) response is returned when exhausted/vetoed so the
+              // reasonCode handling below is unchanged.
+              res = await fetchWithBackoff(
+                "/api/ai-lookup",
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  signal: abortController.signal,
+                  body: JSON.stringify({
+                    ...(await aiRequestAuth(state.businessId)),
+                    mode: "decode",
+                    deterministicOnly,
+                    proRecheck: review.reopenedFromWrong === true, // auto-escalate a marked-wrong code to the stronger model
+                    rawCode: rawCodeSanitized,
+                    cleanCode: cleanCodeSanitized,
+                    codeType,
+                    confidenceThreshold: 0.8,
+                    allowImageSuggestions: s.allowImageSuggestions,
+                    budgetMs: clampedBudgetMs,
+                    scanContext,
+                    brandPrefixHint,
+                    autoCountNonPublicWithEvidence: s.autoCountNonPublicWithEvidence ?? true,
+                  }),
+                },
+                {
+                  maxAttempts: 2,
+                  onRetryDecision: async (cloned) => {
+                    const body = await cloned.json().catch(() => ({}) as { reasonCode?: string });
+                    return { retry: body?.reasonCode !== "account_daily_cap" && body?.reasonCode !== "daily_cap" };
+                  },
+                },
+              );
             } catch (fetchErr) {
               // An abort is NEVER a retry case (there is nowhere to retry TO - the decode keeps
               // running server-side and the client just gave up waiting). Every other fetch-level
@@ -3280,8 +3822,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             //  - daily_cap: the server-side daily AI spend cap is reached. There is no automatic
             //    decode-on-cap-reset queue anywhere in the app, so retrying now is pointless (it will
             //    just 429 again) - fail fast with an honest reason instead of burning a wait.
-            //  - anything else: a self-inflicted rate limit (costs $0). Keep the single retry with
-            //    backoff, respecting Retry-After, exactly as before.
+            //  - anything else: a self-inflicted rate limit (costs $0) that fetchWithBackoff already
+            //    retried (with full Retry-After honor + jitter) before returning this final response.
             if (res.status === 429) {
               const body = await res.json().catch(() => ({}) as { reasonCode?: string; floor?: PrefixFloorResult });
               // P2: thread the server's $0 prefix floor into the error so the cap-blocked row is named
@@ -3291,24 +3833,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               // its own honest account-scoped copy (accountScoped=true drives the message below).
               if (body?.reasonCode === "account_daily_cap") throw new DailyCapReachedError(undefined, body?.floor, true);
               if (body?.reasonCode === "daily_cap") throw new DailyCapReachedError(undefined, body?.floor);
-              const retryAfterSec = Math.min(Number(res.headers.get("Retry-After") || "5"), 30);
-              await new Promise((r) => setTimeout(r, retryAfterSec * 1000));
-              const retry = await fetch("/api/ai-lookup", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                // Review hardening 2026-07-15: the retry leg carries the same abort signal as the
-                // initial call so a hung retry can never block the scanner past the abort window.
-                signal: abortController.signal,
-                body: JSON.stringify({
-                  ...(await aiRequestAuth(state.businessId)),
-                  mode: "decode", proRecheck: review.reopenedFromWrong === true,
-                  rawCode: rawCodeSanitized, cleanCode: cleanCodeSanitized, codeType,
-                  confidenceThreshold: 0.8, allowImageSuggestions: s.allowImageSuggestions,
-                  budgetMs: clampedBudgetMs, scanContext, brandPrefixHint,
-                }),
-              });
-              if (!retry.ok) throw new Error(`decode failed ${retry.status} after 429 retry`);
-              return retry.json();
+              throw new Error(`decode failed 429 after retries`);
             }
             if (!res.ok) throw new Error(`decode failed ${res.status}`);
             return res.json();
@@ -3323,6 +3848,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           } finally {
             clearTimeout(abortTimer);
           }
+          // A clear-session/cache/sign-out/tenant-switch action is authoritative. The network request
+          // may still complete, but a response from the previous generation must become a pure no-op
+          // before any product, review, count, audit, or sync mutation can run.
+          if (wasInvalidated()) return;
           // BUG #14 (QA hardening 2026-07-16): CLIENT-SIDE defense in depth. The server already
           // sanitizes reasonText/decision.reason (pipeline.ts) before responding, but this store must
           // not trust that unconditionally - sanitize both here too, ONCE, right at the response
@@ -3339,6 +3868,102 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const decision = data.decision;
           const results: AiLookupResult[] = data.results ?? [];
           const best = results[0] ?? null;
+          const canonicalId = trustedExactCanonicalId(data);
+          if (canonicalId && best) {
+            settleTrustedExactIdentity(
+              reviewId,
+              canonicalId,
+              best,
+              decision?.reason || "Authenticated trusted exact corpus match.",
+            );
+            return;
+          }
+          if (deterministicOnly) {
+            const current = get();
+            const currentSettings = current.settings;
+            const currentNow = new Date(now()).getTime();
+            // OWNER RULE (2026-08-05): a trusted-exact miss is never a dead end. The code continues into
+            // the ordinary ladder in every environment unless the ordinary ladder's own gate blocks it.
+            // dailyCount is intentionally forced to 0 so paid-rung cap math stays server-side while the
+            // free corpus/cache rungs still run. GTIN shape and misread-likelihood never suppress the handoff.
+            const continuationGate = evaluateAutoDecode({
+              aiEnabled: currentSettings.aiLookupEnabled,
+              status: current.aiStatus,
+              online: current.online,
+              dailyCount: 0,
+              dailyLimit: currentSettings.dailyLookupLimit,
+              breaker: current.breaker,
+              now: currentNow,
+            });
+            if (continuationGate.allowed) {
+              const persisted = materializeTrustedExactMiss(reviewId, decision?.reason || "No trusted exact match was found.");
+              if (persisted) {
+                set((state) => ({
+                  needsReviewQueue: state.needsReviewQueue.map((item) =>
+                    item.id === persisted.id
+                      ? { ...item, decodeStatus: "decoding" as const }
+                      : item,
+                  ),
+                  // Guard by decodeStatus === "decoding" (matches the sibling patterns at
+                  // materializeTrustedExactMiss above and the decode-settle write below): sessionId+
+                  // cleanCode alone can match a DIFFERENT, already-resolved scanFeed row for a repeat
+                  // scan of the same code in this session (e.g. an earlier occurrence already
+                  // "verified") - without the guard this would wrongly revert that unrelated row back
+                  // to "decoding".
+                  scanFeed: state.scanFeed.map((event) =>
+                    event.sessionId === persisted.sessionId
+                      && event.cleanCode === persisted.cleanCode
+                      && event.decodeStatus === "decoding"
+                      ? { ...event, decodeStatus: "decoding" as const }
+                      : event,
+                  ),
+                }));
+                void get().liveDecode(persisted.id, { invalidationGeneration });
+              } else {
+                // Hardening: materializeTrustedExactMiss found neither the in-flight probe nor a
+                // needsReviewQueue entry for this id (e.g. the session/cache was cleared mid-flight).
+                // There is nothing left to continue into the ladder for - resolve honestly instead of
+                // silently doing nothing and leaving a stale row behind.
+                const fallbackReason = decision?.reason || "No trusted exact match was found.";
+                set((state) => ({
+                  needsReviewQueue: state.needsReviewQueue.map((item) =>
+                    item.id === reviewId
+                      ? { ...item, decodeStatus: "needs_review" as const, reason: fallbackReason, decodeNote: undefined }
+                      : item,
+                  ),
+                  scanFeed: state.scanFeed.map((event) =>
+                    event.sessionId === review.sessionId
+                      && event.cleanCode === review.cleanCode
+                      && event.decodeStatus === "decoding"
+                      ? { ...event, decodeStatus: "needs_review" as const, reason: fallbackReason, decodeNote: undefined }
+                      : event,
+                  ),
+                }));
+              }
+              return;
+            }
+            const missReasonBase = decision?.reason || "No trusted exact match was found.";
+            const missReason = `${missReasonBase} Decode did not continue: ${continuationGate.reason}`;
+            if (trustedExactProbes.has(reviewId)) {
+              materializeTrustedExactMiss(reviewId, missReason);
+              return;
+            }
+            set((current) => ({
+              scanFeed: current.scanFeed.map((event) =>
+                event.sessionId === review.sessionId
+                  && event.cleanCode === review.cleanCode
+                  && event.decodeStatus === "decoding"
+                  ? { ...event, decodeStatus: "needs_review" as const, reason: missReason, decodeNote: undefined }
+                  : event,
+              ),
+              needsReviewQueue: current.needsReviewQueue.map((item) =>
+                item.id === reviewId
+                  ? { ...item, decodeStatus: "needs_review" as const, reason: missReason, decodeNote: undefined }
+                  : item,
+              ),
+            }));
+            return;
+          }
           // Phase 10: for a tire scan, parse the messy decode into structured columns (size -> specs,
           // brand, part number, clean description). Display/storage only - it does NOT touch the firewall
           // or the tireAutoCountOk (size + model) auto-count gate below (those read the ORIGINAL `best`).
@@ -3822,14 +4447,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     // name-parsed brand, or genuinely empty), never silently lock in the wrong brand next
                     // to a now-correct decoded name. A brand set by any OTHER means (a prior real decode,
                     // a human edit) still wins untouched, since p.name would no longer equal the floor text.
-                    const brandIsOnlyFloorGuess = isBareUnidentifiedLabel(p.name, code) || p.name === provisionalPlaceholderName(code);
+                    //
+                    // CLASS FIX (2026-08-04, cocacola-bug-report.md): this used to be the ONLY of three
+                    // vulnerable call sites carrying this guard - moved into enrichProductIdentity itself
+                    // (via existingBrandIsFloorGuess) so the other two call sites (resolveUnknown's
+                    // reuse/orphan-upgrade branches) can share the exact same protection.
                     const enrichIdentity = enrichProductIdentity({
                       payload: { name: provName, brand: best?.brand, category: best?.category, specsShort: best?.specsShort, specsFull: best?.specsFull },
-                      existing: {
-                        name: p.name,
-                        brand: brandIsOnlyFloorGuess ? "" : p.brand,
-                        category: p.category, specsShort: p.specsShort, specsFull: p.specsFull,
-                      },
+                      existing: { name: p.name, brand: p.brand, category: p.category, specsShort: p.specsShort, specsFull: p.specsFull },
+                      existingBrandIsFloorGuess: brandIsOnlyFloorGuess(p.name, code),
                     });
                     return {
                           ...p,
@@ -4061,6 +4687,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             syncDecodedState(reviewId);
           }
         } catch (e) {
+          if (wasInvalidated()) return;
+          if (deterministicOnly && trustedExactProbes.has(reviewId)) {
+            materializeTrustedExactMiss(
+              reviewId,
+              "Trusted exact lookup was unavailable. Saved locally and counted as unverified; retry to identify when back online.",
+            );
+            return;
+          }
           const nextBreaker = recordFailure(gate.breaker, nowMs);
           // Emit only on the closed/half-open -> open transition. This best-effort request must not
           // participate in the scan/decode control flow or report a raw scan/provider error.
@@ -4467,7 +5101,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         try {
           // D4-follow-up: live-auth mode requires idToken + businessId on every POST (route.ts:294-324)
           // or this 401s "unauthenticated" - mock mode resolves {} and is unaffected.
-          const res = await fetch("/api/ai-lookup", {
+          // P4 (#28): shared backoff helper - background enrichment only, still silently gives up
+          // (`if (!res.ok) return;` below) on a final 429, unchanged; this only adds honest-Retry-
+          // After/jittered resilience before that give-up point.
+          const res = await fetchWithBackoff("/api/ai-lookup", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -5147,9 +5784,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   // parse of the (cleaned) name - never a guess. `enriched.name` is the CLEANED name
                   // (tireListingNormalizer's cleanListingTitle) - use it wherever np.name would have
                   // been written raw before.
+                  // CLASS FIX (2026-08-04, cocacola-bug-report.md): `p.brand` at this point may be
+                  // NOTHING MORE than the statistical prefix-floor guess ensureProvisionalCount wrote
+                  // synchronously before any decode ever ran (this is the second EXACT unguarded sibling
+                  // of the 2026-07-21 "PREFIX-FLOOR BRAND LOCK FIX" - the dedup-reuse path). Compute it
+                  // once and pass it through so enrichProductIdentity treats that guess as empty rather
+                  // than a trustworthy prior brand.
+                  const pBrandIsFloorGuess = brandIsOnlyFloorGuess(p.name, p.primaryBarcode || review.cleanCode);
                   const enriched = enrichProductIdentity({
                     payload: { name: np.name ?? p.name, brand: np.brand, category: np.category, specsShort: np.specsShort, specsFull: np.specsFull },
                     existing: { name: p.name, brand: p.brand, category: p.category, specsShort: p.specsShort, specsFull: p.specsFull },
+                    existingBrandIsFloorGuess: pBrandIsFloorGuess,
                   });
                   // B1 FIX (owner-reported, 268-row review, 2026-07-20): this re-match/reuse path used to
                   // drop specsShort/specsFull/primarySku/category entirely - a decode payload's structured
@@ -5167,7 +5812,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   if (!p.specsShort) updates.specsShort = enriched.specsShort;
                   if (!p.specsFull) updates.specsFull = enriched.specsFull;
                   if (!p.primarySku && np.primarySku) updates.primarySku = np.primarySku;
-                  if (!p.brand) updates.brand = enriched.brand;
+                  // CLASS FIX: a floor-guess-only brand must yield to enrichProductIdentity's resolution
+                  // (payload brand, then a name-parsed brand) even though p.brand is technically
+                  // non-empty - it was never a trustworthy prior identity in the first place.
+                  if (!p.brand || pBrandIsFloorGuess) updates.brand = enriched.brand;
                   if (!p.structuredModel && enriched.structuredModel) updates.structuredModel = enriched.structuredModel;
                   // Task 4: (re)structure only when the name/brand actually changed above; the guard
                   // inside structuredFieldsFor never overwrites a row already stamped "human". Uses
@@ -5199,9 +5847,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // permanently blank even though the size/brand/model are cleanly parseable from the
             // name. Route through the shared helper: payload field wins when present; a still-empty
             // field falls back to a deterministic parse of the (cleaned) name - never a guess.
+            //
+            // CLASS FIX (2026-08-04, cocacola-bug-report.md): `orphan.brand` at this point may be
+            // NOTHING MORE than the statistical prefix-floor guess ensureProvisionalCount wrote
+            // synchronously before any decode ever ran (this is the EXACT unguarded sibling of the
+            // 2026-07-21 "PREFIX-FLOOR BRAND LOCK FIX" above - the fresh-single-scan path a brand-new
+            // 049000-prefixed tire scan actually takes). existingBrandIsFloorGuess tells
+            // enrichProductIdentity to treat that guess as empty rather than a trustworthy prior brand.
             const orphanEnriched = enrichProductIdentity({
               payload: { name: np.name, brand: np.brand, category: np.category, specsShort: np.specsShort, specsFull: np.specsFull },
               existing: { name: orphan.name, brand: orphan.brand, category: orphan.category, specsShort: orphan.specsShort, specsFull: orphan.specsFull },
+              existingBrandIsFloorGuess: brandIsOnlyFloorGuess(orphan.name, review.cleanCode),
             });
             const upgraded: Product = {
               ...orphan,
@@ -6547,7 +7203,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         try {
           // D4-follow-up: live-auth mode requires idToken + businessId on every POST (route.ts:294-324)
           // or this 401s "unauthenticated" - mock mode resolves {} and is unaffected.
-          const res = await fetch("/api/ai-lookup", {
+          // P4 (#28): shared backoff helper - a human-triggered single action, not a storm contributor,
+          // but gets the same honest-Retry-After/jitter resilience for consistency.
+          const res = await fetchWithBackoff("/api/ai-lookup", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             // proRecheck selects the strongest configured Gemini model server-side. Correction-only:
@@ -6680,7 +7338,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       pendingCount: () => get().pendingSyncQueue.length,
       getProduct: (id) => (id ? get().products.find((p) => p.id === id) : undefined),
 
-      clearSession: () =>
+      clearSession: () => {
+        clearTrustedExactProbes();
         set({
           scanFeed: [],
           finalCounts: [],
@@ -6688,9 +7347,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           pendingSyncQueue: [],
           syncedScanEventIds: [],
           lastSyncError: null,
-        }),
+        });
+      },
 
       clearLocalCache: () => {
+        clearTrustedExactProbes();
         // Clear ONLY browser-local data. In CLOUD mode we must NEVER call db.reset() (FirebaseSyncTarget
         // guards against a destructive cloud wipe and throws) and must NEVER reseed mock data over the
         // real cloud catalog - the cloud data re-loads on the next page load. In MOCK mode, reset the
@@ -7131,6 +7792,7 @@ const appDeps: ScanStoreDeps = {
     ? new FirebaseSyncTarget(getDb(), { emulator: process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATOR === "1" })
     : getMockDb(),
   cloudBackend: useFirebaseBackend,
+  trustedExactProbeEnabled: useFirebaseBackend,
   loadBusinessData: useFirebaseBackend ? (businessId) => loadBusinessData(getDb(), businessId) : undefined,
   // Cloud audit sink: append-only auditLog. Fire-and-forget; swallows its own errors so a failed audit
   // write can never break a scan/resolution. No-op on the mock/default path (undefined).
@@ -7339,8 +8001,14 @@ export const useScanStore = create<ScanState>()(
     // synchronously out of set() inside processScan and bricked the /scan page (fresh tab still broken
     // until localStorage was cleared). This wrapper fails SOFT (never throws out of a scan) and COALESCES
     // the ~6 writes/scan into one per tick (flushed on pagehide/visibilitychange so nothing is lost).
-    // See scanPersistStorage.ts. IndexedDB migration remains the recommended architectural follow-up.
-    storage: createJSONStorage(() => createCoalescedFailSoftStorage(() => localStorage)),
+    // Defect #37 layer 3 (fresh-device restore freeze, 2026-08-06): a plain `createJSONStorage(...)`
+    // wrapper still runs JSON.stringify of the FULL state synchronously on every single set() call,
+    // before this coalescing even sees it (zustand's persist middleware calls storage.setItem from every
+    // state change - see scanPersistStorage.ts header). createCoalescedFailSoftPersistStorage implements
+    // PersistStorage<S> directly so the stringify itself, not just the disk write, is coalesced to at
+    // most one per tick. See scanPersistStorage.ts. IndexedDB migration remains the recommended
+    // architectural follow-up.
+    storage: createCoalescedFailSoftPersistStorage(() => localStorage),
     skipHydration: true,
     migrate: scanStoreMigrate,
     // Sec-4: split persisted state by access level. A customer browser must NEVER persist the reusable
@@ -7371,6 +8039,7 @@ export function createTestScanStore(overrides?: Partial<ScanStoreDeps>) {
     now: overrides?.now ?? (() => "2026-06-12T10:00:00.000Z"),
     persistName: null,
     cloudBackend: overrides?.cloudBackend ?? false,
+    trustedExactProbeEnabled: overrides?.trustedExactProbeEnabled,
     loadBusinessData: overrides?.loadBusinessData,
     audit: overrides?.audit,
     lookupGlobalCatalog: overrides?.lookupGlobalCatalog,

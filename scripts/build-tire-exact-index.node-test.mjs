@@ -1,0 +1,454 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createHash, createHmac } from "node:crypto";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
+const SCRIPT = resolve("scripts/build-tire-exact-index.mjs");
+const { buildExactIndex, canonicalGtin } = await import(pathToFileURL(SCRIPT).href);
+const TEST_BOSS_HMAC_KEY = "synthetic-test-key-only-not-for-real-artifacts-0001";
+const COLLISION_HMAC_DOMAINS = [
+  "collision-canonical-key:v1", "collision-global-source-pointer:v1", "collision-boss-source-pointer:v1",
+  "collision-global-value:v1", "collision-boss-value:v1",
+];
+
+const sha256 = (value) => createHash("sha256").update(value).digest("hex").toUpperCase();
+const hmac = (key, domain, value) => createHmac("sha256", key).update(`${domain}\0${value}`).digest("hex").toUpperCase();
+
+function localEnvValue(name) {
+  const local = existsSync(resolve(".env.local")) ? readFileSync(resolve(".env.local"), "utf8") : "";
+  return process.env[name] ?? local.match(new RegExp(`^${name}=(.+)$`, "m"))?.[1]?.trim();
+}
+
+function requiredProductionHmacKey() {
+  const key = localEnvValue("BOSS_EXACT_INDEX_HMAC_KEY");
+  assert.ok(key && Buffer.byteLength(key, "utf8") >= 32, "offline production proof requires BOSS_EXACT_INDEX_HMAC_KEY");
+  return key;
+}
+
+function requiredProductionInputs() {
+  const globalPath = localEnvValue("BOSS_GLOBAL_CORPUS_PATH");
+  const repairPath = localEnvValue("BOSS_REPAIR_DB_PATH");
+  const reconciliationPath = localEnvValue("BOSS_RECONCILIATION_PATH");
+  assert.ok(globalPath && repairPath && reconciliationPath, "offline production proof requires pinned private input paths");
+  return { globalPath, repairPath, reconciliationPath };
+}
+
+function hasProductionInputs() {
+  try { return Object.values(requiredProductionInputs()).every(existsSync); }
+  catch { return false; }
+}
+
+function fixture() {
+  const root = mkdtempSync(join(tmpdir(), "tire-exact-index-"));
+  const outputDir = join(root, "exact-index");
+  const globalPath = join(root, "global.json");
+  const repairPath = join(root, "repair.json");
+  const reconciliationPath = join(root, "reconciliation.csv");
+  const dispositionPath = join(root, "collision-dispositions.json");
+  const global = { barcodeIndex: {
+    "036000291452": { canonical_product_uid: "unit", brand: "Acme", model: "Road", size: "225/45R17", manufacturer_part_number: "UNIT-1", barcode: "036000291452", barcode_type: "upc" },
+    "30029885620210": { canonical_product_uid: "case", brand: "Acme", model: "Case", size: "225/45R17", manufacturer_part_number: "CASE-1", barcode: "30029885620210", barcode_type: "gtin14" },
+  } };
+  const repair = { tires: [{ barcode: "036000291452", canonical_product_uid: "unit", brand: "Acme", model: "Road", size: "225/45R17", manufacturer_part_number: "UNIT-1" }] };
+  const reconciliation = [
+    "sheet,row,raw_barcode,normalized_barcode_candidates,gtin_valid,gtin_level,source_part_number,part_number_base_key,part_number_affix_core,brand,size,matched_stable_product_id,matched_barcode,match_method,evidence,final_status",
+    "Sheet1,2,036000291452,036000291452|0036000291452,true,UPC-A,UNIT-1,UNIT1,,Acme,225/45R17,unit,036000291452,exact_barcode,,accepted",
+    "Sheet1,3,SHORT-UNIT-A,SHORT-UNIT-A,false,,UNIT-1,UNIT1,,Acme,225/45R17,unit,036000291452,exact_part_number,,accepted",
+    "Sheet1,4,SHORT-UNIT-B,SHORT-UNIT-B,false,,UNIT-1,UNIT1,,Acme,225/45R17,unit,036000291452,affix_core_brand_size,,alias",
+    "Sheet1,5,,,false,,UNIT-1,UNIT1,,Acme,225/45R17,unit,036000291452,affix_core_brand_size,,alias",
+    "Sheet2,8,30029885620210,30029885620210,true,GTIN-14,CASE-1,CASE1,,,,case,30029885620210,packaging_code,,packaging_code",
+  ].join("\n") + "\n";
+  writeFileSync(globalPath, JSON.stringify(global));
+  writeFileSync(repairPath, JSON.stringify(repair));
+  writeFileSync(reconciliationPath, reconciliation);
+  // 2026-08-05 orchestrator ruling: the production ledger moved from 42 to 41 entries (one entry
+  // reclassified into the shared_barcode_variant_pair reviewed class); this synthetic fixture ledger
+  // mirrors the same exhaustive count so schema validation in loadDispositionLedger stays consistent.
+  const entries = Array.from({ length: 41 }, (_, index) => ({
+    action: "omit_conflicting_field",
+    canonicalKeyHmacSha256: hmac(TEST_BOSS_HMAC_KEY, COLLISION_HMAC_DOMAINS[0], `synthetic-${index}`),
+    globalSourcePointerHmacSha256: hmac(TEST_BOSS_HMAC_KEY, COLLISION_HMAC_DOMAINS[1], `synthetic-${index}`),
+    bossSourcePointerHmacSha256: hmac(TEST_BOSS_HMAC_KEY, COLLISION_HMAC_DOMAINS[2], `synthetic-${index}`),
+    globalValueHmacSha256: hmac(TEST_BOSS_HMAC_KEY, COLLISION_HMAC_DOMAINS[3], `synthetic-${index}`),
+    bossValueHmacSha256: hmac(TEST_BOSS_HMAC_KEY, COLLISION_HMAC_DOMAINS[4], `synthetic-${index}`),
+  }));
+  writeFileSync(dispositionPath, JSON.stringify({ schemaVersion: "2.0.0", keyFingerprintHmacSha256: hmac(TEST_BOSS_HMAC_KEY, "key-fingerprint:v1", "scanbin-boss-exact-index"), entries }));
+  return { root, outputDir, globalPath, repairPath, reconciliationPath, dispositionPath, hashes: { global: sha256(readFileSync(globalPath)), repair: sha256(readFileSync(repairPath)), reconciliation: sha256(readFileSync(reconciliationPath)) } };
+}
+
+function build(fx, overrides = {}) {
+  return buildExactIndex({
+    globalPath: fx.globalPath, repairPath: fx.repairPath, reconciliationPath: fx.reconciliationPath,
+    outputDir: fx.outputDir, dispositionPath: fx.dispositionPath, expectedHashes: fx.hashes, expectedCounts: null, enforceLedgerCompleteness: false,
+    bossHmacKey: TEST_BOSS_HMAC_KEY, ...overrides,
+  });
+}
+
+function check(fx) {
+  return build(fx, { dryRun: true, check: true });
+}
+
+test("honors explicit private-source environment paths without copying them into the worktree", () => {
+  const fx = fixture();
+  const previousGlobal = process.env.BOSS_GLOBAL_CORPUS_PATH;
+  const previousRepair = process.env.BOSS_REPAIR_DB_PATH;
+  const previousReconciliation = process.env.BOSS_RECONCILIATION_PATH;
+  try {
+    process.env.BOSS_GLOBAL_CORPUS_PATH = fx.globalPath;
+    process.env.BOSS_REPAIR_DB_PATH = fx.repairPath;
+    process.env.BOSS_RECONCILIATION_PATH = fx.reconciliationPath;
+    const result = buildExactIndex({
+      outputDir: fx.outputDir, expectedHashes: fx.hashes,
+      dispositionPath: fx.dispositionPath, expectedCounts: null, enforceLedgerCompleteness: false, bossHmacKey: TEST_BOSS_HMAC_KEY,
+    });
+    assert.equal(result.manifest.acceptedSpellings, 4);
+  } finally {
+    if (previousGlobal === undefined) delete process.env.BOSS_GLOBAL_CORPUS_PATH; else process.env.BOSS_GLOBAL_CORPUS_PATH = previousGlobal;
+    if (previousRepair === undefined) delete process.env.BOSS_REPAIR_DB_PATH; else process.env.BOSS_REPAIR_DB_PATH = previousRepair;
+    if (previousReconciliation === undefined) delete process.env.BOSS_RECONCILIATION_PATH; else process.env.BOSS_RECONCILIATION_PATH = previousReconciliation;
+    rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+function rewriteOverlap(fx, { globalBrand, bossBrand, globalSize, bossSize }) {
+  const global = JSON.parse(readFileSync(fx.globalPath, "utf8"));
+  global.barcodeIndex["036000291452"] = {
+    ...global.barcodeIndex["036000291452"], brand: globalBrand, size: globalSize,
+  };
+  const repair = JSON.parse(readFileSync(fx.repairPath, "utf8"));
+  repair.tires[0] = { ...repair.tires[0], brand: bossBrand, size: bossSize };
+  writeFileSync(fx.globalPath, JSON.stringify(global));
+  writeFileSync(fx.repairPath, JSON.stringify(repair));
+  fx.hashes.global = sha256(readFileSync(fx.globalPath));
+  fx.hashes.repair = sha256(readFileSync(fx.repairPath));
+}
+
+test("canonical GTIN preserves nonzero package indicators while collapsing zero padding", () => {
+  assert.equal(canonicalGtin("036000291452"), canonicalGtin("0036000291452"));
+  assert.notEqual(canonicalGtin("30029885620210"), canonicalGtin("036000291452"));
+});
+
+test("admits approved non-GTIN exact identifiers under their repair-issued product identity and ledgers blank aliases", () => {
+  const fx = fixture();
+  try {
+    const result = build(fx);
+    const rows = Object.values(result.manifest.shardCounts).flatMap((_, index) =>
+      Object.entries(JSON.parse(readFileSync(join(fx.outputDir, `${index.toString(16).padStart(2, "0")}.json`), "utf8"))),
+    );
+    const shortRows = rows.filter(([, row]) => row.sourceScope === "authenticated_boss_corpus" && row.barcode_type === "approved_non_gtin");
+
+    assert.equal(shortRows.length, 2, "approved non-GTIN identifiers must not be silently dropped");
+    assert.deepEqual(new Set(shortRows.map(([, row]) => row.boss_canonical_product_id)), new Set(["trusted-exact:v1:385CFDBC00EC32031699460779C15099"]),
+      "all approved spellings for one repair product share one opaque reconciliation identity");
+    assert.ok(shortRows.every(([key, row]) => /^boss:v1:[A-F0-9]{64}$/.test(key) && row.barcode === "" && row.canonical_product_uid === ""),
+      "Boss-only artifacts contain neither raw lookup keys, barcodes, nor repair UIDs");
+    assert.equal(result.manifest.nonGtinApprovedIdentifiers, 2);
+    assert.equal(result.manifest.nonGtinApprovedRows, 2);
+    assert.equal(result.manifest.nonGtinBlankAliasConflicts, 1);
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test("rejects a non-GTIN spelling approved for different repair-issued products", () => {
+  const fx = fixture();
+  try {
+    const repair = JSON.parse(readFileSync(fx.repairPath, "utf8"));
+    repair.tires.push({ barcode: "009999999999", canonical_product_uid: "other", brand: "Acme", model: "Other", size: "225/45R17", manufacturer_part_number: "UNIT-2" });
+    writeFileSync(fx.repairPath, JSON.stringify(repair));
+    const conflict = "Sheet1,6,SHORT-UNIT-A,SHORT-UNIT-A,false,,UNIT-2,UNIT2,,Acme,225/45R17,other,009999999999,exact_part_number,,accepted\n";
+    writeFileSync(fx.reconciliationPath, readFileSync(fx.reconciliationPath, "utf8") + conflict);
+    fx.hashes.repair = sha256(readFileSync(fx.repairPath));
+    fx.hashes.reconciliation = sha256(readFileSync(fx.reconciliationPath));
+
+    assert.throws(() => build(fx), /cross-product approved non-GTIN identifier/i);
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test("rejects a GTIN reconciliation row whose stable product identity disagrees with repair", () => {
+  const fx = fixture();
+  try {
+    const changed = readFileSync(fx.reconciliationPath, "utf8").replace(",unit,036000291452,exact_barcode", ",other,036000291452,exact_barcode");
+    writeFileSync(fx.reconciliationPath, changed);
+    fx.hashes.reconciliation = sha256(changed);
+    assert.throws(() => build(fx), /disagrees with repair-issued canonical product identity/i);
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test("pinned source bytes, status, checksum, and package rules fail closed while approved non-GTIN identifiers remain exact", () => {
+  const fx = fixture();
+  mkdirSync(fx.outputDir); writeFileSync(join(fx.outputDir, "sentinel"), "prior");
+  try {
+    assert.throws(() => build(fx, { expectedHashes: { ...fx.hashes, global: "0".repeat(64) } }), /SHA-256 mismatch/);
+    assert.equal(existsSync(join(fx.outputDir, "sentinel")), true);
+    const bad = readFileSync(fx.reconciliationPath, "utf8").replace("true,UPC-A", "false,UPC-A");
+    writeFileSync(fx.reconciliationPath, bad);
+    fx.hashes.reconciliation = sha256(bad);
+    const result = build(fx);
+    assert.equal(result.manifest.admittedBossCodes, 3, "a non-GTIN row stays an opaque approved exact identifier rather than being GTIN-normalized");
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test("builds deterministic minimal shards, blocks case packs, and atomically preserves prior index on failure", () => {
+  const fx = fixture();
+  try {
+    const first = build(fx);
+    assert.equal(existsSync(join(fx.outputDir, "verified-repair.json")), false, "the staged verified input is not promoted as a serving artifact");
+    assert.equal(first.manifest.excludedCasePacks, 1);
+    assert.equal(first.manifest.totalKeys, 4);
+    assert.equal(first.manifest.shardAlgorithm, "sha256-first-byte-mod-64-v1");
+    assert.deepEqual(Object.keys(first.manifest.shardCounts).sort(), Array.from({ length: 64 }, (_, i) => i.toString(16).padStart(2, "0")));
+    const bytes = readFileSync(join(fx.outputDir, "manifest.json"));
+    const second = build(fx);
+    assert.deepEqual(readFileSync(join(fx.outputDir, "manifest.json")), bytes);
+    assert.equal(second.manifest.contentDigest, first.manifest.contentDigest);
+    const shards = Object.values(first.manifest.shardCounts);
+    assert.ok(shards.every((count) => count <= 1));
+    assert.ok(first.totalBytes <= 40 * 1024 * 1024);
+    assert.ok(Object.values(first.shardBytes).every((size) => size <= 1024 * 1024));
+    const publicRow = Object.keys(first.manifest.shardCounts)
+      .flatMap((shard) => Object.values(JSON.parse(readFileSync(join(fx.outputDir, `${shard}.json`), "utf8"))))
+      .find((row) => row.sourceScope === "global_corpus");
+    const bossRows = Object.keys(first.manifest.shardCounts)
+      .flatMap((shard) => Object.values(JSON.parse(readFileSync(join(fx.outputDir, `${shard}.json`), "utf8"))))
+      .filter((row) => row.sourceScope === "authenticated_boss_corpus");
+    assert.equal(publicRow.sourceScope, "global_corpus", "public overlap remains globally available");
+    assert.equal(publicRow.bossTrusted, false, "public rows carry no private Boss attestation");
+    assert.equal(bossRows.length, 3, "each Boss lookup key is stored only in the keyed namespace");
+    assert.ok(bossRows.every((row) => /^trusted-exact:v1:[A-F0-9]{32}$/.test(row.boss_canonical_product_id)));
+    const collision = JSON.parse(readFileSync(fx.globalPath, "utf8"));
+    collision.barcodeIndex["0036000291452"] = { ...collision.barcodeIndex["036000291452"], brand: "Other" };
+    writeFileSync(fx.globalPath, JSON.stringify(collision)); fx.hashes.global = sha256(readFileSync(fx.globalPath));
+    assert.throws(() => build(fx), /collision|ambigu/i);
+    assert.deepEqual(readFileSync(join(fx.outputDir, "manifest.json")), bytes, "failed validation preserves the complete prior index");
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test("preserves distinct public and Boss identities on an overlap", () => {
+  const fx = fixture();
+  try {
+    const global = JSON.parse(readFileSync(fx.globalPath, "utf8"));
+    global.barcodeIndex["036000291452"].canonical_product_uid = "public-unit";
+    writeFileSync(fx.globalPath, JSON.stringify(global));
+    fx.hashes.global = sha256(readFileSync(fx.globalPath));
+
+    const result = build(fx);
+    const rows = Object.keys(result.manifest.shardCounts)
+      .flatMap((shard) => Object.values(JSON.parse(readFileSync(join(fx.outputDir, `${shard}.json`), "utf8"))));
+    const publicRow = rows.find((row) => row.sourceScope === "global_corpus");
+    const bossRow = rows.find((row) => row.sourceScope === "authenticated_boss_corpus");
+    assert.equal(publicRow.canonical_product_uid, "public-unit", "unauthenticated callers retain the public identity");
+    assert.equal(bossRow.boss_canonical_product_id, "trusted-exact:v1:385CFDBC00EC32031699460779C15099", "authenticated Boss callers retain the opaque reconciliation identity");
+    assert.notEqual(publicRow.canonical_product_uid, bossRow.boss_canonical_product_id);
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test("rejects conflicting Boss identities for one canonical lookup key", () => {
+  const fx = fixture();
+  try {
+    const repair = JSON.parse(readFileSync(fx.repairPath, "utf8"));
+    repair.tires.push({ barcode: "0036000291452", canonical_product_uid: "other-unit", brand: "Acme", model: "Road", size: "225/45R17", manufacturer_part_number: "UNIT-1" });
+    writeFileSync(fx.repairPath, JSON.stringify(repair));
+    writeFileSync(fx.reconciliationPath, readFileSync(fx.reconciliationPath, "utf8")
+      + "Sheet1,6,0036000291452,0036000291452,true,GTIN-13,UNIT-1,UNIT1,,Acme,225/45R17,other-unit,0036000291452,exact_barcode,,accepted\n");
+    fx.hashes.repair = sha256(readFileSync(fx.repairPath));
+    fx.hashes.reconciliation = sha256(readFileSync(fx.reconciliationPath));
+
+    assert.throws(() => build(fx), /conflicting Boss identities for one lookup key/i);
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test("serializes digest-covered blocked package canonical keys without a loader dependency", () => {
+  const fx = fixture();
+  try {
+    const result = build(fx);
+    const manifest = JSON.parse(readFileSync(join(fx.outputDir, "manifest.json"), "utf8"));
+    const packageKey = canonicalGtin("30029885620210");
+
+    assert.equal(manifest.blockedBossPackageKeys.length, 1);
+    assert.match(manifest.blockedBossPackageKeys[0], /^boss:v1:[A-F0-9]{64}$/);
+    assert.deepEqual(manifest.blockedBossPackageKeys, [...manifest.blockedBossPackageKeys].sort());
+    assert.equal(canonicalGtin("30029885620210"), packageKey);
+    assert.equal(canonicalGtin(" 30029885620210 "), packageKey);
+    assert.equal(Object.values(manifest.shardCounts).reduce((total, count) => total + count, 0), manifest.totalKeys);
+    for (const shard of Object.keys(manifest.shardCounts)) {
+      const shardRows = JSON.parse(readFileSync(join(fx.outputDir, `${shard}.json`), "utf8"));
+      assert.equal(shardRows[packageKey], undefined);
+      assert.equal(shardRows[manifest.blockedBossPackageKeys[0]], undefined);
+    }
+    assert.equal(result.manifest.contentDigest, manifest.contentDigest, "Task 1 emits all loader-needed package truth in the manifest");
+
+    const stale = { ...manifest, blockedBossPackageKeys: [] };
+    writeFileSync(join(fx.outputDir, "manifest.json"), JSON.stringify(stale, null, 2) + "\n");
+    assert.throws(() => check(fx), /artifact mismatch|content digest|manifest/i, "a stale package block list is rejected");
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test("check mode validates the on-disk manifest and all and only projected artifacts", () => {
+  const fx = fixture();
+  try {
+    build(fx);
+    assert.doesNotThrow(() => check(fx));
+
+    const shard = Object.entries(JSON.parse(readFileSync(join(fx.outputDir, "manifest.json"), "utf8")).shardCounts)
+      .find(([, count]) => count === 1)[0];
+    writeFileSync(join(fx.outputDir, `${shard}.json`), "{\"tampered\":true}\n");
+    assert.throws(() => check(fx), /artifact mismatch|shard hash|content digest/i, "tampered shard is rejected");
+
+    build(fx);
+    const manifestPath = join(fx.outputDir, "manifest.json");
+    const stale = JSON.parse(readFileSync(manifestPath, "utf8"));
+    stale.totalKeys += 1;
+    writeFileSync(manifestPath, JSON.stringify(stale, null, 2) + "\n");
+    assert.throws(() => check(fx), /artifact mismatch|content digest|manifest/i, "stale manifest is rejected");
+
+    build(fx);
+    const bytes = readFileSync(join(fx.outputDir, `${shard}.json`));
+    writeFileSync(join(fx.outputDir, `${shard}.json`), bytes.subarray(0, Math.max(1, bytes.length - 1)));
+    assert.throws(() => check(fx), /artifact mismatch|shard hash|content digest/i, "truncated shard is rejected");
+
+    build(fx);
+    rmSync(join(fx.outputDir, `${shard}.json`));
+    assert.throws(() => check(fx), /artifact set mismatch|missing|required/i, "missing shard is rejected");
+
+    build(fx);
+    writeFileSync(join(fx.outputDir, "unexpected.json"), "{}\n");
+    assert.throws(() => check(fx), /artifact set mismatch|unexpected/i, "extra artifact is rejected");
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test("overlap normalizers accept only the reviewed Toyo and tire-size spellings", () => {
+  const fx = fixture();
+  try {
+    rewriteOverlap(fx, { globalBrand: "Toyo Tire", bossBrand: "Toyo", globalSize: "42/13.5R17", bossSize: "42X13.50R17LT" });
+    assert.doesNotThrow(() => build(fx), "the two reviewed equivalent spellings are accepted");
+
+    rewriteOverlap(fx, { globalBrand: "Toyo Tires", bossBrand: "Toyo", globalSize: "42/13.5R17", bossSize: "42X13.50R17LT" });
+    assert.throws(() => build(fx), /incompatibility|fields=brand/i, "nearby Toyo value is not fuzzy-normalized");
+
+    rewriteOverlap(fx, { globalBrand: "Toyo Tire", bossBrand: "Toyo", globalSize: "42x13.50r17", bossSize: "42X13.50R17LT" });
+    assert.throws(() => build(fx), /incompatibility|fields=size/i, "nearby size value is not broadened into the reviewed equivalence");
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test("production build contract pins all three supplied inputs and fixed cardinalities", { skip: !hasProductionInputs() }, () => {
+  const reviewedLedger = JSON.parse(readFileSync(resolve("scripts/tire-exact-index-collision-dispositions.json"), "utf8"));
+  assert.equal(reviewedLedger.entries.length, 41, "the exhaustive reviewed MPN collision census is pinned exactly (42 -> 41, 2026-08-05 orchestrator ruling)");
+  const result = buildExactIndex({ root: resolve("."), ...requiredProductionInputs(), outputDir: join(mkdtempSync(join(tmpdir(), "tire-exact-production-")), "exact-index"), dryRun: true, bossHmacKey: requiredProductionHmacKey() });
+  assert.equal(result.manifest.admittedBossCodes, 6354);
+  assert.equal(result.manifest.acceptedSpellings, 10344);
+  assert.equal(result.manifest.bossCanonicalProductIds, 6024);
+  assert.equal(result.manifest.nonGtinApprovedRows, 303);
+  assert.equal(result.manifest.nonGtinApprovedIdentifiers, 299);
+  assert.equal(result.manifest.nonGtinBlankAliasConflicts, 3);
+  assert.equal(result.manifest.excludedCasePacks, 1);
+  assert.equal(result.manifest.collisionDispositionCount, 41);
+  assert.match(result.manifest.collisionDispositionLedgerSha256, /^[A-F0-9]{64}$/);
+});
+
+test("uses the verified staged repair bytes when the source changes after verification", () => {
+  const fx = fixture();
+  try {
+    let mutated = false;
+    const result = build(fx, {
+      afterInputVerification() {
+        mutated = true;
+        writeFileSync(fx.repairPath, JSON.stringify({ tires: [{
+          barcode: "036000291452", canonical_product_uid: "evil", brand: "Wrong", model: "Wrong",
+          size: "1/1R1", manufacturer_part_number: "WRONG",
+        }] }));
+      },
+    });
+    assert.equal(mutated, true, "the deterministic test seam must run after byte verification");
+    const shard = Object.entries(result.manifest.shardCounts).find(([, count]) => count === 1)[0];
+    const row = Object.values(JSON.parse(readFileSync(join(fx.outputDir, `${shard}.json`), "utf8")))[0];
+    assert.equal(row.brand, "Acme", "projection must read the verified staged copy, not replacement source bytes");
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test("restores the previous complete index when promotion fails after its move", () => {
+  const fx = fixture();
+  try {
+    build(fx);
+    const before = readFileSync(join(fx.outputDir, "manifest.json"));
+    let moves = 0;
+    assert.throws(() => build(fx, {
+      fileSystem: {
+        renameSync(from, to) {
+          moves++;
+          if (moves === 2) throw new Error("injected promotion failure");
+          return renameSync(from, to);
+        },
+      },
+    }), /injected promotion failure/);
+    assert.deepEqual(readFileSync(join(fx.outputDir, "manifest.json")), before);
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test("the committed collision source and generated conflict ledger use only domain-separated HMAC fields", () => {
+  const source = JSON.parse(readFileSync(resolve("scripts/tire-exact-index-collision-dispositions.json"), "utf8"));
+  assert.equal(source.schemaVersion, "2.0.0");
+  assert.equal(source.entries.length, 41, "42 -> 41, 2026-08-05 orchestrator ruling (shared_barcode_variant_pair reclassification)");
+  assert.deepEqual(Object.keys(source).sort(), ["entries", "keyFingerprintHmacSha256", "schemaVersion"]);
+  assert.match(source.keyFingerprintHmacSha256, /^[A-F0-9]{64}$/);
+  const sourceKeys = [...new Set(source.entries.flatMap(Object.keys))].sort();
+  assert.deepEqual(sourceKeys, [
+    "action", "bossSourcePointerHmacSha256", "bossValueHmacSha256", "canonicalKeyHmacSha256",
+    "globalSourcePointerHmacSha256", "globalValueHmacSha256",
+  ]);
+  assert.ok(source.entries.every((entry) => Object.entries(entry)
+    .filter(([key]) => key.endsWith("HmacSha256"))
+    .every(([, value]) => /^[A-F0-9]{64}$/.test(value))));
+  assert.ok(source.entries.every((entry) => entry.action === "omit_conflicting_field"));
+
+  const fx = fixture();
+  try {
+    build(fx);
+    const generated = JSON.parse(readFileSync(join(fx.outputDir, "conflict-ledger.json"), "utf8"));
+    const generatedKeys = [...new Set(generated.entries.flatMap(Object.keys))].sort();
+    assert.deepEqual(generatedKeys, ["finalStatus", "identifierHmacSha256", "reason", "sourcePointerHmacSha256"]);
+    assert.ok(generated.entries.every((entry) => Object.entries(entry)
+      .filter(([key]) => key.endsWith("HmacSha256"))
+      .every(([, value]) => /^[A-F0-9]{64}$/.test(value))));
+    assert.ok(generated.entries.every((entry) =>
+      ["accepted", "alias"].includes(entry.finalStatus) &&
+      ["blank_non_gtin_identifier", "reviewed_mpn_field_omitted"].includes(entry.reason)));
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test("a wrong HMAC key cannot validate the committed collision dispositions", () => {
+  const fx = fixture();
+  try {
+    assert.throws(() => buildExactIndex({
+      globalPath: fx.globalPath, repairPath: fx.repairPath, reconciliationPath: fx.reconciliationPath,
+      dispositionPath: resolve("scripts/tire-exact-index-collision-dispositions.json"), outputDir: fx.outputDir,
+      expectedHashes: fx.hashes, expectedCounts: null, enforceLedgerCompleteness: false, dryRun: true,
+      bossHmacKey: TEST_BOSS_HMAC_KEY,
+    }), /collision disposition.*HMAC key mismatch/i);
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test("a missing HMAC key fails before private input processing", () => {
+  const fx = fixture();
+  try {
+    assert.throws(() => buildExactIndex({
+      globalPath: fx.globalPath, repairPath: fx.repairPath, reconciliationPath: fx.reconciliationPath,
+      dispositionPath: fx.dispositionPath, outputDir: fx.outputDir, expectedHashes: fx.hashes,
+      expectedCounts: null, enforceLedgerCompleteness: false, dryRun: true, bossHmacKey: "",
+    }), /BOSS_EXACT_INDEX_HMAC_KEY/i);
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test("validates and globally deduplicates accepted spellings instead of counting CSV occurrences", () => {
+  const fx = fixture();
+  try {
+    const accepted = readFileSync(fx.reconciliationPath, "utf8").replace(
+      "036000291452|0036000291452",
+      "036000291452|036000291452|0036000291452|not-a-gtin"
+    );
+    writeFileSync(fx.reconciliationPath, accepted);
+    fx.hashes.reconciliation = sha256(accepted);
+    assert.throws(() => build(fx), /accepted spelling.*GTIN|malformed.*accepted/i);
+  } finally { rmSync(fx.root, { recursive: true, force: true }); }
+});

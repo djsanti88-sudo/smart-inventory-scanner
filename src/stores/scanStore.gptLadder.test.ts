@@ -18,7 +18,11 @@ function aiOnStore() {
 }
 
 function openReview(store: ReturnType<typeof aiOnStore>, code: string) {
-  store.getState().processScan(code); // AI is off by default -> passive review, no auto-trigger
+  // Trusted-exact now performs a free probe even when AI is off. Keep this helper's contract explicit:
+  // create a passive review offline, then restore connectivity before the manually controlled decode.
+  store.getState().setOnline(false);
+  store.getState().processScan(code);
+  store.getState().setOnline(true);
   store.getState().updateSettings({ aiLookupEnabled: true }); // enable AFTER the scan so we control the fetch below
   return store.getState().needsReviewQueue.find((r) => r.cleanCode === code && r.status === "open")!;
 }
