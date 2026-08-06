@@ -3,6 +3,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { adminDb, clearLocalCorpusTenant, LOCAL_CORPUS_BUSINESS_ID, LOCAL_CORPUS_EMAIL, LOCAL_CORPUS_PASSWORD } from "./admin";
 
+// File-level skip: the private corpus source is never committed, so this proof only runs on
+// machines that hold it (CI does not). Must sit at file scope so the admin-SDK afterEach hook
+// never runs either.
+test.skip(!process.env.BOSS_RECONCILIATION_PATH, "BOSS_RECONCILIATION_PATH not set");
+
 const ALLOWED_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const SCANNER_INTERVAL_MS = 100; // declared local keyboard-wedge arrival rate: 10 scans/s
 const SETTLEMENT_TIMEOUT_MS = 2_000;
@@ -87,7 +92,6 @@ async function settledCount(expectedEvents: number, expectedIdentities: Map<stri
 }
 
 test("synthetic normal-member UI proves short and boundary trusted exact barcode settlement", async ({ page }, testInfo) => {
-  test.skip(!process.env.BOSS_RECONCILIATION_PATH, "BOSS_RECONCILIATION_PATH not set: the private corpus source is never committed, so this proof only runs on machines that hold it (CI does not).");
   test.setTimeout(180_000);
   const fixtureModule = await import("./fixtures.mjs");
   const fixtures = fixtureModule.loadCorpusFixtures(process.env.BOSS_RECONCILIATION_PATH, manifest());
