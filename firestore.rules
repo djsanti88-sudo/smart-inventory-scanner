@@ -63,6 +63,37 @@ service cloud.firestore {
       return hasRole(bid, ['counter'])
         && counterProductDataOk(request.resource.data, bid, productId);
     }
+    // Campaign #32 fix (P1b fix round 1): a counter's decode/settlement re-save of a product it created
+    // (fresh idempotency key, same entity id) is an update, not a create. The BEFORE doc must already be
+    // this counter's own provisional/unverified row (the same invariant the create rule enforces) - that
+    // is the ownership proxy, since only a counter-authored row can satisfy counterProductDataOk.
+    // Identity (businessId/id) is pinned. Content is now an EXPLICIT allowlist derived from the actual
+    // SAVE_PRODUCT re-save payloads in firebaseSyncTarget.ts (trusted-exact settlement + the paired
+    // archived-provisional write): decode/identity/settlement fields only. unitCost and aliases are
+    // deliberately NEVER in the allowlist (panel MUST-FIX 1: no cost/price smuggling, no alias grafting) -
+    // enforced twice, once implicitly (any diff key outside the allowlist denies the whole write) and once
+    // explicitly for readability. verified/provisional MAY move true/false (ruling R1: the app is
+    // client-only, trusted-exact settlement legitimately promotes a counter-owned provisional to
+    // verified:true) - but only within this allowlist, and only once: after promotion the BEFORE-state
+    // gate above (counterProductDataOk requires verified==false) can never fire again on this doc, so a
+    // counter cannot touch it a second time. status may only move 'active' -> 'archived' (the
+    // orphan-provisional-after-merge write), never back.
+    function counterProductUpdateOk(bid, productId) {
+      let before = resource.data;
+      let after = request.resource.data;
+      return hasRole(bid, ['counter'])
+        && counterProductDataOk(before, bid, productId)
+        && after.businessId == bid
+        && after.id == productId
+        && !('unitCost' in after)
+        && after.get('aliases', []) == before.get('aliases', [])
+        && (after.status == before.status || (before.status == 'active' && after.status == 'archived'))
+        && after.diff(before).affectedKeys().hasOnly([
+          'name', 'brand', 'category', 'specsShort', 'specsFull', 'primarySku', 'primaryBarcode',
+          'gtin', 'upc', 'ean', 'source', 'confidence', 'verified', 'provisional', 'provenanceTier',
+          'trustedExactCanonicalId', 'status', 'updatedAt', 'updatedBy'
+        ]);
+    }
     function validCounterSessionState() {
       return (
         request.resource.data.status == 'active'
@@ -91,7 +122,10 @@ service cloud.firestore {
         && request.resource.data.businessId == bid
         && request.resource.data.id == sessionId
         && request.resource.data.createdBy == uid()
-        && request.resource.data.startedAt == resource.data.startedAt
+        // Panel MUST-FIX 5: a direct `.startedAt` field access errors (denies non-deterministically)
+        // rather than cleanly denying when a legacy/partial session doc lacks the key. `.get(key,
+        // default)` makes a missing key on either side compare deterministically instead of erroring.
+        && request.resource.data.get('startedAt', null) == resource.data.get('startedAt', null)
         && isUnlockedSession(request.resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'name',
@@ -104,6 +138,85 @@ service cloud.firestore {
           'updatedAt'
         ])
         && validCounterSessionState();
+    }
+    // Campaign #32 fix (P1b fix round 1): the same "fresh key, same entity id, own doc" re-save pattern
+    // for scanEvents and unknownCodeReviews. Ownership proxy is counterOwnActiveSession on the BEFORE
+    // doc's sessionId - the same helper the create rule uses - and tenancy/identity are pinned immutable
+    // on both sides. Panel MUST-FIX 2: matchedProductId/rawCode/cleanCode are now ALSO pinned immutable
+    // (in addition to businessId/id/sessionId/createdAt/quantityDelta), which kills the count-remap
+    // forgery vector (a re-save cannot redirect a scan event's identity to a different product/code).
+    // KNOWN TRADE-OFF (reported, not fixed here - out of this round's file scope): the markWrong-transfer
+    // and trusted-exact-merge-to-a-different-existing-product flows legitimately repoint
+    // ScanEvent.matchedProductId via this same SAVE_SCAN_EVENT re-save path (scanStore.ts ~L1093,
+    // ~L1451). Pinning it here means those two flows, if performed under the `counter` role (not proven
+    // role-gated to owner/admin in the UI), will newly deny with permission_denied instead of the count
+    // forgery the panel found. See task-p1b-report.md for the flagged app-code/product decision.
+    function counterScanEventUpdateOk(bid, eventId) {
+      let before = resource.data;
+      let after = request.resource.data;
+      return hasRole(bid, ['counter'])
+        && before.businessId == bid
+        && before.id == eventId
+        && counterOwnActiveSession(bid, before.sessionId)
+        && after.businessId == bid
+        && after.id == eventId
+        && after.sessionId == before.sessionId
+        && after.createdAt == before.createdAt
+        && after.quantityDelta == before.quantityDelta
+        && after.matchedProductId == before.matchedProductId
+        && after.rawCode == before.rawCode
+        && after.cleanCode == before.cleanCode
+        && after.diff(before).affectedKeys().hasOnly([
+          'status', 'decodeStatus', 'reason', 'decodeNote', 'resolverStatus', 'matchType',
+          'provenance', 'offCategory', 'suggestion', 'syncStatus', 'syncedAt'
+        ]);
+    }
+    // Panel MUST-FIX 3: rawCode/cleanCode are pinned immutable (unlike ScanEvent's createdAt, they are
+    // NOT touched by FirebaseSyncTarget's SAVE_UNKNOWN_SCAN write, so pinning them is safe). status is
+    // restricted to exactly the shape the legit trusted-exact settlement flow produces (scanStore.ts
+    // settledReview, ~L1464-1496) via counterUnknownResolutionOk below, closing the resolvedBy
+    // impersonation vector.
+    // NOTE (unchanged from prior round, still true): FirebaseSyncTarget.apply() stamps a fresh
+    // serverTimestamp() into `createdAt` on EVERY unknownCodeReviews write (create and update alike), so
+    // createdAt is NOT pinned here; pinning it would make every legitimate re-save fail, re-creating the
+    // exact bug this fix resolves. Flagged as a reportable payload/rule mismatch in task-p1b-report.md.
+    function counterUnknownResolutionOk(before, after) {
+      return (
+        after.status == before.status
+        && after.get('resolvedBy', null) == before.get('resolvedBy', null)
+        && after.get('resolutionAction', null) == before.get('resolutionAction', null)
+        && after.get('resolvedAt', null) == before.get('resolvedAt', null)
+        && after.get('exactCodeEvidenceVerifiedByApp', false) == before.get('exactCodeEvidenceVerifiedByApp', false)
+      ) || (
+        (before.status == 'open' || before.status == 'suggested')
+        && after.status == 'resolved'
+        && after.resolvedBy == 'system:trusted_exact'
+        && after.resolutionAction == 'trusted_exact'
+        && after.exactCodeEvidenceVerifiedByApp == true
+      );
+    }
+    function counterUnknownUpdateOk(bid, reviewId) {
+      let before = resource.data;
+      let after = request.resource.data;
+      return hasRole(bid, ['counter'])
+        && before.businessId == bid
+        && before.id == reviewId
+        && counterOwnActiveSession(bid, before.sessionId)
+        && after.businessId == bid
+        && after.id == reviewId
+        && after.sessionId == before.sessionId
+        && after.rawCode == before.rawCode
+        && after.cleanCode == before.cleanCode
+        && counterUnknownResolutionOk(before, after)
+        && after.diff(before).affectedKeys().hasOnly([
+          'suggestedProductName', 'suggestedBrand', 'suggestedCategory', 'suggestedSpecsShort',
+          'suggestedSpecsFull', 'suggestedPrimarySku', 'suggestedPrimaryBarcode', 'suggestedGtin',
+          'suggestedUpc', 'suggestedEan', 'suggestedAliases', 'sourceUrls', 'verifiedFacts', 'guesses',
+          'reason', 'decodeNote', 'providerName', 'confidence', 'hasSuggestion', 'decodeStatus',
+          'evidenceStrength', 'exactCodeEvidenceVerifiedByApp', 'crossCheckDecision',
+          'suggestedLinkProductId', 'status', 'resolvedAt', 'resolvedBy', 'resolutionAction',
+          'syncStatus', 'idempotencyKey', 'createdAt'
+        ]);
     }
     function markerFieldsOk(bid) {
       return request.resource.data.keys().hasAll([
@@ -132,6 +245,14 @@ service cloud.firestore {
         && request.resource.data.payloadHash is string
         && request.resource.data.at == request.time;
     }
+    // Panel MUST-FIX 4 (Gemini C4, Phase-1-blocking): this marker check used to re-require the POST-write
+    // product to still satisfy counterProductDataOk (verified==false), but legit trusted-exact
+    // settlement writes verified:true in the SAME transaction as this marker create - transactions are
+    // atomic, so that made the WHOLE settlement fail, not just narrow a field. Authorization for the
+    // products/{id} write itself is the collection-level rule's job (counterProductCreateOk on create;
+    // counterProductUpdateOk's BEFORE-state + diff-allowlist gate on update) - this marker only needs to
+    // confirm the marker's own bookkeeping (which product, which transaction) is self-consistent, not
+    // re-derive the full authorization a second time against a shape that no longer applies post-update.
     function counterProductMarkerOk(bid) {
       let marker = request.resource.data;
       let target = getAfter(
@@ -141,8 +262,9 @@ service cloud.firestore {
         && marker.entityType == 'Product'
         && marker.entityId == marker.targetId
         && marker.scanEventId == null
-        && target.updatedAt == request.time
-        && counterProductDataOk(target, bid, marker.entityId);
+        && target.businessId == bid
+        && target.id == marker.entityId
+        && target.updatedAt == request.time;
     }
     function counterSessionMarkerOk(bid) {
       let marker = request.resource.data;
@@ -381,7 +503,9 @@ service cloud.firestore {
         allow create: if (
           hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid)
         ) || counterProductCreateOk(bid, id);
-        allow update: if hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid);
+        allow update: if (
+          hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid)
+        ) || counterProductUpdateOk(bid, id);
         allow delete: if hasRole(bid, ['owner', 'admin']);
       }
       // Aliases/settings/shopOverrides remain owner/admin-only writes.
@@ -425,7 +549,8 @@ service cloud.firestore {
           && request.resource.data.id == id
           && counterOwnActiveSession(bid, request.resource.data.sessionId)
         );
-        allow update, delete: if hasRole(bid, ['owner', 'admin']);
+        allow update: if hasRole(bid, ['owner', 'admin']) || counterScanEventUpdateOk(bid, id);
+        allow delete: if hasRole(bid, ['owner', 'admin']);
       }
 
       // inventoryCounts: counters write only inside their own active, unlocked session.
@@ -450,7 +575,9 @@ service cloud.firestore {
           && request.resource.data.id == id
           && counterOwnActiveSession(bid, request.resource.data.sessionId)
         );
-        allow update: if hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid);
+        allow update: if (
+          hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid)
+        ) || counterUnknownUpdateOk(bid, id);
         allow delete: if hasRole(bid, ['owner', 'admin']);
       }
 
