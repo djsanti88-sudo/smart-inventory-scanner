@@ -41,8 +41,25 @@ export default function HistoryPage() {
   const accessLevel = useAccessLevel();
   const cloudBackend = process.env.NEXT_PUBLIC_FIREBASE_BACKEND === "1";
 
+  const refreshFromCloud = useScanStore((s) => s.refreshFromCloud);
+
   const sessions = listSessions();
   const historyBySessionId = new Map(sessionHistory.map((e) => [e.sessionId, e]));
+
+  // Cloud backend: a past session's rows land in finalCounts only after a refreshFromCloud merge
+  // (additive cross-session - refreshFromCloud.store.test.ts). A tab that finished a session and
+  // rotated to a new one holds no local rows for it, which left its Download button disabled even
+  // though the cloud has every row (owner 10k-campaign finding, 2026-08-05). Fire the merge once on
+  // mount when any past session is missing local rows; refreshFromCloud is idempotent and
+  // generation-guarded, so a redundant call is safe.
+  useEffect(() => {
+    if (!cloudBackend) return;
+    const missingPast = sessions.some(
+      (s) => s.id !== currentSession?.id && !finalCounts.some((c) => c.sessionId === s.id),
+    );
+    if (missingPast) void refreshFromCloud?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudBackend]);
 
   // Past-session mock counts, fetched once per session id (not reactive - matches the detail page's
   // non-reactive timeline fetch). Keyed by sessionId -> rows, or null while unavailable/unfetched.

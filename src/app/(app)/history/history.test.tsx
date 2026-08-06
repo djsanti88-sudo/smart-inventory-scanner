@@ -266,6 +266,67 @@ describe("HistoryPage", () => {
     expect(mocks.getSessionCounts).not.toHaveBeenCalledWith("s2");
   });
 
+  // Owner requirement (2026-08-05 10k campaign): a past session's counts must stay downloadable on the
+  // cloud backend. finalCounts only contains a past session's rows after a refreshFromCloud merge
+  // (additive cross-session - see refreshFromCloud.store.test.ts); a tab that finished the session and
+  // rotated to a new one has no local rows for it, so History must trigger the merge itself instead of
+  // leaving the download button permanently disabled while the cloud holds every row.
+  it("cloud backend: triggers refreshFromCloud when a past session has no local finalCounts rows", () => {
+    process.env.NEXT_PUBLIC_FIREBASE_BACKEND = "1";
+    const refreshFromCloud = vi.fn(() => Promise.resolve());
+    const s1 = session({ id: "s1", status: "active", startedAt: "2026-07-20T10:00:00.000Z" });
+    const s2 = session({ id: "s2", status: "completed", startedAt: "2026-07-19T10:00:00.000Z" });
+    mocks.storeState = {
+      businessId: "b1",
+      currentSession: s1,
+      sessions: [],
+      listSessions: () => [s1, s2],
+      finalCounts: [{ sessionId: "s1", productId: "p1", quantity: 1 }], // s2 has NO local rows
+      products: [],
+      refreshFromCloud,
+    };
+    render(<HistoryPage />);
+    expect(refreshFromCloud).toHaveBeenCalledTimes(1);
+  });
+
+  it("cloud backend: does NOT trigger refreshFromCloud when every past session already has local rows", () => {
+    process.env.NEXT_PUBLIC_FIREBASE_BACKEND = "1";
+    const refreshFromCloud = vi.fn(() => Promise.resolve());
+    const s1 = session({ id: "s1", status: "active", startedAt: "2026-07-20T10:00:00.000Z" });
+    const s2 = session({ id: "s2", status: "completed", startedAt: "2026-07-19T10:00:00.000Z" });
+    mocks.storeState = {
+      businessId: "b1",
+      currentSession: s1,
+      sessions: [],
+      listSessions: () => [s1, s2],
+      finalCounts: [
+        { sessionId: "s1", productId: "p1", quantity: 1 },
+        { sessionId: "s2", productId: "p2", quantity: 3 },
+      ],
+      products: [],
+      refreshFromCloud,
+    };
+    render(<HistoryPage />);
+    expect(refreshFromCloud).not.toHaveBeenCalled();
+  });
+
+  it("mock backend: never triggers refreshFromCloud (mock is already the source of truth)", () => {
+    const refreshFromCloud = vi.fn(() => Promise.resolve());
+    const s1 = session({ id: "s1", status: "active", startedAt: "2026-07-20T10:00:00.000Z" });
+    const s2 = session({ id: "s2", status: "completed", startedAt: "2026-07-19T10:00:00.000Z" });
+    mocks.storeState = {
+      businessId: "b1",
+      currentSession: s1,
+      sessions: [],
+      listSessions: () => [s1, s2],
+      finalCounts: [],
+      products: [],
+      refreshFromCloud,
+    };
+    render(<HistoryPage />);
+    expect(refreshFromCloud).not.toHaveBeenCalled();
+  });
+
   it("an archived session the data source no longer knows about still gets a row (auto-saved trace) and navigates on click", () => {
     const s1 = session({ id: "s1", status: "active", startedAt: "2026-07-20T10:00:00.000Z" });
     mocks.storeState = {
