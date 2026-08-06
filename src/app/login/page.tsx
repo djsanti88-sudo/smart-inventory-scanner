@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ensureWorkspace,
   signInWithPassword,
@@ -13,10 +13,23 @@ import {
 import { setSelectedBusinessId } from "@/lib/selectedBusiness";
 import type { AuthFlowResult } from "@/services/auth/provisioningTypes";
 
+const DEFAULT_DESTINATION = "/scan";
+
+// A returnTo query param is untrusted input (semantic firewall): only accept an internal
+// path (starts with "/", not a protocol-relative "//", no URL scheme) or fall back to /scan.
+function resolveReturnTo(raw: string | null): string {
+  if (!raw) return DEFAULT_DESTINATION;
+  if (!raw.startsWith("/")) return DEFAULT_DESTINATION;
+  if (raw.startsWith("//")) return DEFAULT_DESTINATION;
+  if (raw.includes("://") || raw.includes("\\")) return DEFAULT_DESTINATION;
+  return raw;
+}
+
 // Firebase email/password + Google login. In E2E/test bypass mode (never production) the form just routes
 // to /scan so existing Playwright specs keep working without a live auth backend.
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [mode, setMode] = useState<"signin" | "signup" | "reset">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,7 +41,7 @@ export default function LoginPage() {
   function handleAuthResult(result: AuthFlowResult) {
     if (result.status === "ready") {
       setSelectedBusinessId(result.businessId);
-      router.replace("/scan");
+      router.replace(resolveReturnTo(searchParams.get("returnTo")));
       return;
     }
     if (result.status === "workspace_failed") {
@@ -201,5 +214,14 @@ export default function LoginPage() {
         </div>
       </form>
     </main>
+  );
+}
+
+// useSearchParams() requires a Suspense boundary during static/production builds.
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }
