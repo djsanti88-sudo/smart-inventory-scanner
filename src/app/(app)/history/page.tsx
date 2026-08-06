@@ -47,31 +47,28 @@ export default function HistoryPage() {
   const sessions = listSessions();
   const historyBySessionId = new Map(sessionHistory.map((e) => [e.sessionId, e]));
 
-  // Cloud backend: a past session's rows land in finalCounts only after a refreshFromCloud merge
-  // (additive cross-session - refreshFromCloud.store.test.ts). A tab that finished a session and
-  // rotated to a new one holds no local rows for it, which left its Download button disabled even
-  // though the cloud held every row (owner 10k-campaign finding, 2026-08-05). Fire the merge once
-  // when any past session is missing local rows - but only after businessContextReady, because
-  // refreshFromCloud no-ops before the context resolves (a mount-only effect fires too early on a
-  // fresh page load and silently merges nothing). refreshFromCloud is idempotent and
-  // generation-guarded, so a redundant call is safe.
+  // Cloud backend: a past session's rows land in finalCounts (and its full session list lands in
+  // `sessions`) only after a refreshFromCloud merge (additive cross-session - see
+  // refreshFromCloud.store.test.ts). Fire that merge once per ready mount, UNCONDITIONALLY -
+  // regardless of what this device already appears to know locally.
+  //
+  // LIVE-REPRODUCED DEFECT (2026-08-06): the previous version only fired when a past session it
+  // ALREADY knew about (via listSessions()/sessionHistory) looked like it was missing local rows. On
+  // a genuinely fresh device (local state cleared, or a brand-new device signing in for the first
+  // time) both of those are empty - or contain only the just-auto-created current session - BEFORE
+  // the very refresh that would populate them. That made the "missing past session" candidate set
+  // always empty, so refreshFromCloud never ran, and a business with six completed cloud sessions
+  // showed only its most recent (or just the freshly created) one. Firing unconditionally instead
+  // (still only after businessContextReady, since refreshFromCloud no-ops before the context
+  // resolves) closes that gap. refreshFromCloud is idempotent and generation-guarded, so a redundant
+  // call when the device already had everything locally is harmless.
   const cloudRefreshFired = useRef(false);
   const businessContextReady = useScanStore((s) => s.businessContextReady);
   useEffect(() => {
     if (!cloudBackend || cloudRefreshFired.current) return;
     if (isLiveAuth() && !businessContextReady) return; // wait for the gate; effect re-fires when ready
-    // Candidates include ARCHIVE-ONLY sessions (in sessionHistory but not listSessions) - those are
-    // precisely the finished-and-rotated sessions whose counts only exist in the cloud.
-    const pastIds = new Set<string>([
-      ...sessions.map((s) => s.id),
-      ...sessionHistory.map((e) => e.sessionId),
-    ]);
-    pastIds.delete(currentSession?.id ?? "");
-    const missingPast = [...pastIds].some((id) => !finalCounts.some((c) => c.sessionId === id));
-    if (missingPast) {
-      cloudRefreshFired.current = true;
-      void refreshFromCloud?.();
-    }
+    cloudRefreshFired.current = true;
+    void refreshFromCloud?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudBackend, businessContextReady]);
 

@@ -295,7 +295,12 @@ describe("HistoryPage", () => {
     expect(refreshFromCloud).toHaveBeenCalledTimes(1);
   });
 
-  it("cloud backend: does NOT trigger refreshFromCloud when every past session already has local rows", () => {
+  // Superseded by the fresh-device fix below: refreshFromCloud is now fired unconditionally once per
+  // ready mount (idempotent + generation-guarded, so a redundant call when everything is already
+  // synced is harmless) rather than only when a locally-known past session looks incomplete. Kept as
+  // a "still fires" case rather than deleted, so a future regression that removes the call entirely
+  // is still caught here.
+  it("cloud backend: still fires refreshFromCloud once even when every locally-known past session already has local rows", () => {
     process.env.NEXT_PUBLIC_FIREBASE_BACKEND = "1";
     const refreshFromCloud = vi.fn(() => Promise.resolve());
     const s1 = session({ id: "s1", status: "active", startedAt: "2026-07-20T10:00:00.000Z" });
@@ -313,7 +318,32 @@ describe("HistoryPage", () => {
       refreshFromCloud,
     };
     render(<HistoryPage />);
-    expect(refreshFromCloud).not.toHaveBeenCalled();
+    expect(refreshFromCloud).toHaveBeenCalledTimes(1);
+  });
+
+  // LIVE-REPRODUCED DEFECT (2026-08-06): a Firestore emulator held SIX completed sessions, but after
+  // clearing local browser state and reloading, History showed only the freshly auto-created current
+  // session. Root cause: the old trigger only fired when a session it ALREADY knew about (via
+  // listSessions()/sessionHistory) looked like it was missing local rows. On a truly fresh device,
+  // both are empty (or only contain the brand-new current session) BEFORE the very refresh that would
+  // populate them - so pastIds was always empty and refreshFromCloud never ran. The full session list
+  // never made it into `sessions`, and History was permanently stuck at one row.
+  it("cloud backend: fires refreshFromCloud on a totally fresh device with zero known past sessions (restores full cloud history)", () => {
+    process.env.NEXT_PUBLIC_FIREBASE_BACKEND = "1";
+    const refreshFromCloud = vi.fn(() => Promise.resolve());
+    const s1 = session({ id: "s1", status: "active", startedAt: "2026-08-06T10:00:00.000Z" });
+    mocks.storeState = {
+      businessId: "b1",
+      currentSession: s1,
+      sessions: [], // fresh device: refreshFromCloud has never populated this yet
+      listSessions: () => [s1], // fresh device: only the brand-new auto-created session is known locally
+      finalCounts: [],
+      products: [],
+      refreshFromCloud,
+      sessionHistory: [], // fresh device: no local archive of any past session either
+    };
+    render(<HistoryPage />);
+    expect(refreshFromCloud).toHaveBeenCalledTimes(1);
   });
 
   // Archive-only variant (the live-caught residual): a finished-and-rotated session may exist ONLY in
