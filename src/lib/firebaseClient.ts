@@ -45,9 +45,16 @@ export function getDb(): Firestore {
   // the emulator e2e first ran against the real backend again). With the flag, undefined fields are
   // simply omitted from the written doc. initializeFirestore throws if called after getFirestore
   // for the same app, so fall back to the already-initialized instance.
+  // Emulator only: the Java emulator's WebChannel streaming breaks under large Listen snapshots
+  // (repeated transport errors observed at 4,500-doc restores), which stalls fresh-device
+  // bootstrap indefinitely. Long polling is the documented workaround; production keeps the
+  // SDK's default transport auto-detection.
   let d: Firestore;
   try {
-    d = initializeFirestore(app(), { ignoreUndefinedProperties: true });
+    d = initializeFirestore(app(), {
+      ignoreUndefinedProperties: true,
+      ...(useEmulator ? { experimentalForceLongPolling: true } : {}),
+    });
   } catch {
     d = getFirestore(app());
   }
