@@ -3956,7 +3956,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // AUDIT-6 FINDING 5 fix (2026-08-06, call-count only): a deterministic-only probe can ALSO
           // return a genuinely verified, exact-code-evidenced corpus hit that does not qualify for the
           // boss canonical-id settle above (e.g. a "global_corpus" trusted-exact hit, which deliberately
-          // omits trustedExactCanonicalProductId - see TireKnowledgeProvider.ts's
+          // omits trustedExactCanonicalProductId - see the server tire knowledge provider's
           // resolveTrustedExactBarcodeDecision). Treating that as a miss and firing the owner-ratified
           // miss-continuation below would just re-fetch and re-verify the SAME identity a second time -
           // the live-observed "~2 POST /api/ai-lookup for one settled corpus scan" defect. Reuse this
