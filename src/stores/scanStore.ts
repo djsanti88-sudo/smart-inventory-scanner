@@ -1722,9 +1722,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         (item) => item.businessId === activeBusinessId && item.status !== "quarantined",
       );
       if (batch.length === 0) return;
-      let syncedIds = new Set(get().syncedScanEventIds);
-      let appliedItems = new Set<string>();
-      let erroredItems = new Map<string, PendingSyncItem>();
+      const syncedIds = new Set(get().syncedScanEventIds);
+      const appliedItems = new Set<string>();
+      const erroredItems = new Map<string, PendingSyncItem>();
       let lastErr: string | null = null;
       let unflushedCount = 0;
 
