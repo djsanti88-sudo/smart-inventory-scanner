@@ -1723,8 +1723,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       );
       if (batch.length === 0) return;
       const syncedIds = new Set(get().syncedScanEventIds);
-      const appliedItems = new Set<string>();
-      const erroredItems = new Map<string, PendingSyncItem>();
+      let appliedItems = new Set<string>();
+      let erroredItems = new Map<string, PendingSyncItem>();
       let lastErr: string | null = null;
       let unflushedCount = 0;
 
