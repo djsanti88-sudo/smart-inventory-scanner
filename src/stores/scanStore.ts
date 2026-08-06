@@ -1298,6 +1298,30 @@ function idForReview(r: UnknownCodeReview): string {
   return parts[2] ?? r.id;
 }
 
+// Fix #41 (data-loss race, 2026-08-06): re-point a placeholder-scoped record onto the real business
+// once sign-in bootstrap resolves. Used by setBusinessContext's bootstrap-resolution branch below.
+function rescopePlaceholderRecord<T extends { businessId: string }>(entity: T, realBusinessId: string): T {
+  return entity.businessId === DEMO_BUSINESS_ID ? { ...entity, businessId: realBusinessId } : entity;
+}
+
+// Same idea for a queued sync item: rewrite its own businessId, its payload's businessId (if the
+// payload shape carries one), and the leading businessId segment of its idempotencyKey
+// (buildIdempotencyKey joins businessId:sessionId:...:operation with ":") - leaving every other
+// segment byte-identical so retries of this exact item keep deduping against the same identity.
+function rescopePlaceholderQueueItem(item: PendingSyncItem, realBusinessId: string): PendingSyncItem {
+  if (item.businessId !== DEMO_BUSINESS_ID) return item;
+  const payload = item.payload;
+  const rescopedPayload =
+    payload && typeof payload === "object" && "businessId" in (payload as Record<string, unknown>)
+      ? { ...(payload as Record<string, unknown>), businessId: realBusinessId }
+      : payload;
+  const prefix = `${DEMO_BUSINESS_ID}:`;
+  const idempotencyKey = item.idempotencyKey.startsWith(prefix)
+    ? realBusinessId + item.idempotencyKey.slice(DEMO_BUSINESS_ID.length)
+    : item.idempotencyKey;
+  return { ...item, businessId: realBusinessId, payload: rescopedPayload, idempotencyKey };
+}
+
 export function buildScanInitializer(deps: ScanStoreDeps) {
   const { db, idFactory, now } = deps;
   const cloudBackend = deps.cloudBackend ?? false;
@@ -1924,11 +1948,64 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // isolation law below) replaces tenant state.
         const contextState = get();
         const sameTenant = contextState.businessId === businessId && contextState.userId === userId;
+        // Bug #41 (data-loss race): a scan processed while THIS session still held the placeholder
+        // (cloud mode, sign-in bootstrap not yet resolved - userId still null) counted locally and
+        // queued for sync tagged with DEMO_BUSINESS_ID. That is not a real tenant switch (no real
+        // tenant was ever active in this session), so it must not go through the wipe-and-isolate
+        // branch below: the tenant-aware drain (:1731-ish, recomputeSyncStatus above) only matches
+        // queue items whose businessId equals the CURRENT tenant, and the placeholder id never
+        // becomes the current tenant again - those items would sit stranded forever, never synced,
+        // while the UI's own syncStatus derivation would misreport them as already "synced" (see
+        // recomputeSyncStatus: it also filters the queue by the CURRENT businessId).
+        // Only trigger the rescope path when there is actual placeholder-tagged activity to save -
+        // a fresh store's first-ever setBusinessContext call (the ordinary sign-up/cloud-init shape
+        // pinned by many existing tests) has an empty scanFeed/pendingSyncQueue/needsReviewQueue and
+        // must keep taking the normal wipe-to-clean-slate branch below unchanged.
+        const hasPlaceholderActivity =
+          contextState.scanFeed.some((e) => e.businessId === DEMO_BUSINESS_ID) ||
+          contextState.pendingSyncQueue.some((item) => item.businessId === DEMO_BUSINESS_ID) ||
+          contextState.needsReviewQueue.some((r) => r.businessId === DEMO_BUSINESS_ID);
+        const isBootstrapResolution =
+          cloudBackend &&
+          !sameTenant &&
+          contextState.businessId === DEMO_BUSINESS_ID &&
+          contextState.userId === null &&
+          hasPlaceholderActivity;
         if (sameTenant) {
           set({
             businessContextReady: true,
             businessDataLoaded: !needsLoad,
             lastSyncError: null,
+          });
+        } else if (isBootstrapResolution) {
+          // RE-SCOPE ON HYDRATION: keep every placeholder-scoped record (never wipe scanFeed/
+          // finalCounts/needsReviewQueue/sessions/products/aliases/settings/pendingSyncQueue) and
+          // re-point its businessId (plus queue payload + idempotencyKey) onto the real business.
+          // Counts/rows are never lost or doubled - idempotencyKeys keep every non-businessId
+          // segment, so an item already applied server-side (if that ever happened) still dedupes,
+          // and every future retry of a rescoped item keeps hitting its own new stable identity.
+          // The syncPending() call further below (shared with the other two branches) then drains
+          // the now-correctly-scoped queue immediately.
+          clearTrustedExactProbes();
+          set({
+            businessId,
+            userId,
+            businessContextReady: true,
+            businessDataLoaded: !needsLoad,
+            lastSyncError: null,
+            products: contextState.products.map((p) => rescopePlaceholderRecord(p, businessId)),
+            aliases: contextState.aliases.map((a) => rescopePlaceholderRecord(a, businessId)),
+            sessions: contextState.sessions.map((s) => rescopePlaceholderRecord(s, businessId)),
+            currentSession: contextState.currentSession
+              ? rescopePlaceholderRecord(contextState.currentSession, businessId)
+              : contextState.currentSession,
+            scanFeed: contextState.scanFeed.map((e) => rescopePlaceholderRecord(e, businessId)),
+            finalCounts: contextState.finalCounts.map((c) => rescopePlaceholderRecord(c, businessId)),
+            needsReviewQueue: contextState.needsReviewQueue.map((r) => rescopePlaceholderRecord(r, businessId)),
+            settings: rescopePlaceholderRecord(contextState.settings, businessId),
+            pendingSyncQueue: contextState.pendingSyncQueue.map((item) =>
+              rescopePlaceholderQueueItem(item, businessId),
+            ),
           });
         } else {
           clearTrustedExactProbes();

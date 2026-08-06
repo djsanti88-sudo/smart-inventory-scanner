@@ -42,12 +42,14 @@ describe("scanStore Firebase backend wiring (Loop 2)", () => {
     expect(store.getState().pendingSyncQueue.length).toBeGreaterThan(0);
   });
 
-  it("setBusinessContext preserves foreign-tenant (pre-context) queue items and never writes them into the new tenant", async () => {
-    // Certified tenant-queue model (fix/release-stabilization + tenantQueueIsolation.store.test.ts):
-    // a pre-context scan enqueues under the pre-context "demo-business" tenant. Establishing a
-    // DIFFERENT tenant ("biz-real") must NOT write those foreign items into biz-real (isolation), but
-    // it must also NOT drop them - the sync drain is tenant-aware, so they are preserved and drain
-    // only when their own tenant is active again. Nothing clogs under the wrong tenant.
+  it("setBusinessContext RE-SCOPES pre-context (placeholder-tenant) queue items onto the real business and drains them (fix #41)", async () => {
+    // Fix #41 (data-loss shaped, intermittent race): a pre-hydration scan enqueues under the
+    // placeholder ("demo-business") tenant because sign-in bootstrap has not resolved the real
+    // business yet - NOT a real tenant switch (no real tenant was ever active in this session). The
+    // OLD behavior treated this identically to a genuine tenant switch: it preserved the item
+    // tagged "demo-business" forever, and since "demo-business" never becomes the active tenant
+    // again in a real cloud session, it was silently stranded (never synced). The fix re-points
+    // those placeholder-tagged items onto the real business as soon as it resolves, then drains them.
     const target = new FakeAsyncTarget();
     const store = createTestScanStore({ db: target, cloudBackend: true });
 
@@ -63,10 +65,38 @@ describe("scanStore Firebase backend wiring (Loop 2)", () => {
     expect(store.getState().businessContextReady).toBe(true);
     expect(store.getState().userId).toBe("user-real");
     expect(store.getState().businessId).toBe("biz-real");
-    // Foreign-tenant items are never written to the new tenant, but they are preserved (not dropped).
+    // Re-scoped onto the real business and actually drained - never stranded under the placeholder.
+    expect(store.getState().pendingSyncQueue).toHaveLength(0);
+    expect(target.applied.length).toBe(queuedBefore);
+    expect(target.applied.every((q) => q.businessId === "biz-real")).toBe(true);
+  });
+
+  it("setBusinessContext still preserves a GENUINE foreign tenant's queue items (real tenant switch, not the placeholder bootstrap case) and never writes them into the new tenant", async () => {
+    // Distinguishes the fix above from an actual two-tenant scenario (tenantQueueIsolation.store.test.ts):
+    // when the PREVIOUS tenant was itself a real, already-resolved business (not the unresolved
+    // placeholder), a switch must still preserve its foreign items untouched and never write them into
+    // the new tenant - only the placeholder-bootstrap race gets re-scoped.
+    const target = new FakeAsyncTarget();
+    const store = createTestScanStore({ db: target, cloudBackend: true });
+    store.getState().setBusinessContext("biz-old", "user-old");
+    await flush();
+
+    // Inject a still-unsynced item directly (simulates biz-old work queued but not yet drained, e.g.
+    // offline) rather than via a real scan, so this test does not depend on drain timing.
+    store.setState({
+      pendingSyncQueue: [
+        { id: "q-old", businessId: "biz-old", sessionId: "session-1", entityType: "CountSession", entityId: "session-1", operation: "SAVE_SESSION", payload: {}, idempotencyKey: "biz-old:session-1:q-old:SAVE_SESSION", retryCount: 0, lastError: null, createdAt: "t", updatedAt: "t", scanEventId: null, status: "pending" } as never,
+      ],
+    });
+    const queuedBefore = store.getState().pendingSyncQueue.length;
+    expect(queuedBefore).toBeGreaterThan(0);
+
+    store.getState().setBusinessContext("biz-real", "user-real");
+    await flush();
+    expect(store.getState().businessId).toBe("biz-real");
     expect(target.applied).toHaveLength(0);
     expect(store.getState().pendingSyncQueue.length).toBe(queuedBefore);
-    expect(store.getState().pendingSyncQueue.every((q) => q.businessId === "demo-business")).toBe(true);
+    expect(store.getState().pendingSyncQueue.every((q) => q.businessId === "biz-old")).toBe(true);
   });
 
   it("scans made AFTER setBusinessContext drain to the cloud target", async () => {

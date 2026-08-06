@@ -12,8 +12,15 @@ vi.mock("@/server/tire-knowledge/TireKnowledgeProvider", () => ({
 }));
 
 const getTireExactIndexFingerprint = vi.fn();
+const hasBossHmacKeyConfigured = vi.fn(() => true);
 vi.mock("@/server/tire-knowledge/tireExactIndex", () => ({
   getTireExactIndexFingerprint: (...args: unknown[]) => getTireExactIndexFingerprint(...args),
+  hasBossHmacKeyConfigured: () => hasBossHmacKeyConfigured(),
+}));
+
+const logServerEvent = vi.fn();
+vi.mock("@/server/log", () => ({
+  logServerEvent: (...args: unknown[]) => logServerEvent(...args),
 }));
 
 const trustedExactCheck = vi.fn();
@@ -130,6 +137,8 @@ beforeEach(async () => {
   trustedExactCheck.mockReset().mockReturnValue({ allowed: true, retryAfterMs: 0 });
   resolveTrustedExactBarcodeDecision.mockReset().mockResolvedValue({ kind: "miss" });
   getTireExactIndexFingerprint.mockReset().mockResolvedValue(fingerprint);
+  hasBossHmacKeyConfigured.mockReset().mockReturnValue(true);
+  logServerEvent.mockReset();
   runDecodePipeline.mockReset().mockResolvedValue({ kind: "computed", payload: { debug: {} }, cached: false, paidComputeCharged: false });
   ladderStorage.mockReset().mockResolvedValue({});
   legacyRateLimit.mockReset().mockResolvedValue({ allowed: true, retryAfterMs: 0 });
@@ -352,6 +361,41 @@ describe("authenticated Boss trusted-exact route", () => {
     expect(body.reasonText).toBe("Trusted exact lookup requires review.");
     expect(body.trustedExact).toEqual({ path: "trusted_exact_unavailable" });
     expect(runDecodePipeline).not.toHaveBeenCalled();
+  });
+
+  // Regression for defect #42 (2026-08-06): a live deploy missing BOSS_EXACT_INDEX_HMAC_KEY produced
+  // this exact "unavailable" outcome for EVERY allowlisted business's scan, with zero server-side
+  // signal distinguishing it from a corrupt-asset failure. The route must now log which class fired.
+  it("logs a missing-hmac-key detail when the index is unavailable because the key is not configured", async () => {
+    resolveTrustedExactBarcodeDecision.mockResolvedValueOnce({ kind: "unavailable" });
+    hasBossHmacKeyConfigured.mockReturnValue(false);
+    const { POST } = await import("./route");
+
+    await POST(request("3220017438"));
+
+    expect(logServerEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: "/api/ai-lookup",
+        event: "trusted_exact_index_unavailable",
+        reasonCode: "exact_index_unavailable",
+        detail: "missing_hmac_key",
+      }),
+    );
+  });
+
+  it("logs a shard-or-manifest-invalid detail when the key is configured but the asset itself failed", async () => {
+    resolveTrustedExactBarcodeDecision.mockResolvedValueOnce({ kind: "unavailable" });
+    hasBossHmacKeyConfigured.mockReturnValue(true);
+    const { POST } = await import("./route");
+
+    await POST(request("3220017438"));
+
+    expect(logServerEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "trusted_exact_index_unavailable",
+        detail: "shard_or_manifest_invalid",
+      }),
+    );
   });
 
   it("returns trusted_exact_unavailable when a hit's index fingerprint cannot be verified", async () => {

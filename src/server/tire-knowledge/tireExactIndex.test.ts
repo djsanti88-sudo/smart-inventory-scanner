@@ -8,6 +8,7 @@ vi.mock("node:fs/promises", () => ({ readFile: readFileMock }));
 
 import {
   __resetTireExactIndexCacheForTests,
+  hasBossHmacKeyConfigured,
   lookupTrustedExactBarcode,
 } from "@/server/tire-knowledge/tireExactIndex";
 
@@ -213,6 +214,22 @@ describe("trusted tire exact index key binding", () => {
       if (previous === undefined) delete process.env.BOSS_EXACT_INDEX_HMAC_KEY;
       else process.env.BOSS_EXACT_INDEX_HMAC_KEY = previous;
       __resetTireExactIndexCacheForTests();
+    }
+  });
+
+  // Regression for defect #42 (2026-08-06): the live prod deploy hit "unavailable" for every
+  // allowlisted business's scan because BOSS_EXACT_INDEX_HMAC_KEY was never configured in Vercel -
+  // a class of failure indistinguishable from a corrupt shard/manifest until this diagnostic existed.
+  it("hasBossHmacKeyConfigured reports the missing-key class distinctly from other unavailability", () => {
+    const previous = process.env.BOSS_EXACT_INDEX_HMAC_KEY;
+    try {
+      delete process.env.BOSS_EXACT_INDEX_HMAC_KEY;
+      expect(hasBossHmacKeyConfigured()).toBe(false);
+      process.env.BOSS_EXACT_INDEX_HMAC_KEY = "synthetic-key-with-at-least-thirty-two-bytes-long";
+      expect(hasBossHmacKeyConfigured()).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.BOSS_EXACT_INDEX_HMAC_KEY;
+      else process.env.BOSS_EXACT_INDEX_HMAC_KEY = previous;
     }
   });
 });

@@ -186,20 +186,43 @@ describe("setBusinessContext refresh must not wipe the current tenant's data", (
     expect(store2.getState().finalCounts.length, "counts survive a true refresh").toBe(2);
   });
 
-  it("(f) a tenant SWITCH preserves another tenant's pending sync items (drained later when that tenant is active) and does NOT adopt the old tenant's session", () => {
+  it("(f) resolving the placeholder bootstrap context RE-SCOPES its pending sync item onto the real business (fix #41) instead of stranding it under the placeholder forever", () => {
+    // Fix #41: this store is still at its default placeholder businessId/userId (bootstrap never
+    // resolved yet) with a queue item minted under that placeholder ("demo-business"). This is NOT a
+    // genuine tenant switch (no real tenant was ever active), so setBusinessContext must re-scope the
+    // item onto the real business (never strand it tagged "demo-business" forever - "demo-business"
+    // is never itself a re-visitable tenant in a real cloud session).
+    const store = createTestScanStore({ cloudBackend: true, loadBusinessData: async () => ({ products: [], aliases: [], sessions: [], counts: [] }) });
+    store.setState({
+      pendingSyncQueue: [
+        { id: "q1", businessId: "demo-business", sessionId: "session-1", entityType: "CountSession", entityId: "session-1", operation: "SAVE_SESSION", payload: {}, idempotencyKey: "demo-business:session-1:k1", attempts: 0, status: "pending", createdAt: "t" } as never,
+      ],
+    });
+    store.getState().setBusinessContext("b-real", "u1");
+    expect(store.getState().pendingSyncQueue.map((q) => q.id)).toEqual(["q1"]); // preserved, not dropped
+    expect(store.getState().pendingSyncQueue[0].businessId).toBe("b-real"); // re-scoped, not stranded
+    expect(store.getState().pendingSyncQueue[0].idempotencyKey).toBe("b-real:session-1:k1");
+    // The bootstrap session itself is re-scoped onto the real business (never adopted with a foreign id).
+    expect(store.getState().currentSession?.businessId).toBe("b-real");
+  });
+
+  it("(f2) a tenant SWITCH between two REAL businesses still preserves the other tenant's pending sync items (drained later when that tenant is active) and does NOT adopt the old tenant's session", () => {
     // Certified model (fix/release-stabilization, tenantQueueIsolation.store.test.ts): the sync drain
     // is tenant-aware, so a foreign-tenant queue item is NOT dropped on a context switch - it is
     // preserved and drains when its own tenant becomes active again, so it never clogs under the wrong
     // tenant. What the switch MUST do is null the old tenant's session object: ensureAutoSession would
     // otherwise ADOPT it (keeping its old businessId) and re-enqueue foreign saves on the next scan.
+    // This is the genuine two-real-tenant case (unlike (f) above, the placeholder-bootstrap case).
     const store = createTestScanStore({ cloudBackend: true, loadBusinessData: async () => ({ products: [], aliases: [], sessions: [], counts: [] }) });
+    store.getState().setBusinessContext("b-old", "u-old");
     store.setState({
       pendingSyncQueue: [
-        { id: "q1", businessId: "demo-business", sessionId: "session-1", entityType: "CountSession", entityId: "session-1", operation: "SAVE_SESSION", payload: {}, idempotencyKey: "k1", attempts: 0, status: "pending", createdAt: "t" } as never,
+        { id: "q1", businessId: "b-old", sessionId: "session-1", entityType: "CountSession", entityId: "session-1", operation: "SAVE_SESSION", payload: {}, idempotencyKey: "k1", attempts: 0, status: "pending", createdAt: "t" } as never,
       ],
     });
     store.getState().setBusinessContext("b-real", "u1");
     expect(store.getState().pendingSyncQueue.map((q) => q.id)).toEqual(["q1"]); // foreign item preserved, not dropped
+    expect(store.getState().pendingSyncQueue[0].businessId).toBe("b-old"); // untouched: a genuine foreign tenant
     expect(store.getState().currentSession).toBeNull();
   });
 
