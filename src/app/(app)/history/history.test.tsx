@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   storeState: {} as Record<string, unknown>,
   push: vi.fn(),
   accessLevel: "platform" as "platform" | "business",
+  liveAuth: false,
   downloadCsv: vi.fn(),
   getSessionCounts: vi.fn(() => [] as Array<{ businessId: string; sessionId: string; productId: string; quantity: number; scanEventIds: string[]; appliedIdempotencyKeys: string[] }>),
 }));
@@ -17,6 +18,10 @@ vi.mock("@/stores/scanStore", () => ({
 
 vi.mock("@/services/security/useAccessLevel", () => ({
   useAccessLevel: () => mocks.accessLevel,
+}));
+
+vi.mock("@/services/auth/authMode", () => ({
+  isLiveAuth: () => mocks.liveAuth,
 }));
 
 vi.mock("@/services/mockDb", () => ({
@@ -49,6 +54,7 @@ function session(over: Record<string, unknown>) {
 
 beforeEach(() => {
   mocks.accessLevel = "platform";
+  mocks.liveAuth = false;
   mocks.push.mockClear();
   mocks.downloadCsv.mockClear();
   mocks.getSessionCounts.mockReset();
@@ -308,6 +314,34 @@ describe("HistoryPage", () => {
     };
     render(<HistoryPage />);
     expect(refreshFromCloud).not.toHaveBeenCalled();
+  });
+
+  // The live-auth regression the first version of this fix shipped with: on a fresh page load the
+  // effect fired on mount, BEFORE BusinessContextGate resolved businessContextReady, and
+  // refreshFromCloud silently no-opped - the download stayed disabled. The trigger must wait for
+  // readiness and fire when it lands.
+  it("cloud backend + live auth: waits for businessContextReady, then fires refreshFromCloud on the re-render where it turns true", () => {
+    process.env.NEXT_PUBLIC_FIREBASE_BACKEND = "1";
+    mocks.liveAuth = true;
+    const refreshFromCloud = vi.fn(() => Promise.resolve());
+    const s1 = session({ id: "s1", status: "active", startedAt: "2026-07-20T10:00:00.000Z" });
+    const s2 = session({ id: "s2", status: "completed", startedAt: "2026-07-19T10:00:00.000Z" });
+    mocks.storeState = {
+      businessId: "b1",
+      businessContextReady: false,
+      currentSession: s1,
+      sessions: [],
+      listSessions: () => [s1, s2],
+      finalCounts: [],
+      products: [],
+      refreshFromCloud,
+    };
+    const view = render(<HistoryPage />);
+    expect(refreshFromCloud).not.toHaveBeenCalled(); // context not ready yet - firing now would no-op
+
+    mocks.storeState = { ...mocks.storeState, businessContextReady: true };
+    view.rerender(<HistoryPage />);
+    expect(refreshFromCloud).toHaveBeenCalledTimes(1);
   });
 
   it("mock backend: never triggers refreshFromCloud (mock is already the source of truth)", () => {

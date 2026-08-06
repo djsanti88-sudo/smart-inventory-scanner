@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getMockDb } from "@/services/mockDb";
 import { exportSessionCounts } from "@/services/csvExport";
 import { downloadCsv } from "@/services/exportFormats";
 import { useAccessLevel } from "@/services/security/useAccessLevel";
+import { isLiveAuth } from "@/services/auth/authMode";
 import { aggregateSessionCounts, aggregateHistoryRows, type SessionCountRow, type SessionAggregate } from "@/services/sessions/history";
 import type { SessionHistoryEntry } from "@/services/sessions/sessionHistory";
 import { BusinessContextGate } from "@/components/BusinessContextGate";
@@ -49,17 +50,25 @@ export default function HistoryPage() {
   // Cloud backend: a past session's rows land in finalCounts only after a refreshFromCloud merge
   // (additive cross-session - refreshFromCloud.store.test.ts). A tab that finished a session and
   // rotated to a new one holds no local rows for it, which left its Download button disabled even
-  // though the cloud has every row (owner 10k-campaign finding, 2026-08-05). Fire the merge once on
-  // mount when any past session is missing local rows; refreshFromCloud is idempotent and
+  // though the cloud held every row (owner 10k-campaign finding, 2026-08-05). Fire the merge once
+  // when any past session is missing local rows - but only after businessContextReady, because
+  // refreshFromCloud no-ops before the context resolves (a mount-only effect fires too early on a
+  // fresh page load and silently merges nothing). refreshFromCloud is idempotent and
   // generation-guarded, so a redundant call is safe.
+  const cloudRefreshFired = useRef(false);
+  const businessContextReady = useScanStore((s) => s.businessContextReady);
   useEffect(() => {
-    if (!cloudBackend) return;
+    if (!cloudBackend || cloudRefreshFired.current) return;
+    if (isLiveAuth() && !businessContextReady) return; // wait for the gate; effect re-fires when ready
     const missingPast = sessions.some(
       (s) => s.id !== currentSession?.id && !finalCounts.some((c) => c.sessionId === s.id),
     );
-    if (missingPast) void refreshFromCloud?.();
+    if (missingPast) {
+      cloudRefreshFired.current = true;
+      void refreshFromCloud?.();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cloudBackend]);
+  }, [cloudBackend, businessContextReady]);
 
   // Past-session mock counts, fetched once per session id (not reactive - matches the detail page's
   // non-reactive timeline fetch). Keyed by sessionId -> rows, or null while unavailable/unfetched.
