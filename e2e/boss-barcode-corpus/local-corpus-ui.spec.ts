@@ -87,6 +87,7 @@ async function settledCount(expectedEvents: number, expectedIdentities: Map<stri
 }
 
 test("synthetic normal-member UI proves short and boundary trusted exact barcode settlement", async ({ page }, testInfo) => {
+  test.skip(!process.env.BOSS_RECONCILIATION_PATH, "BOSS_RECONCILIATION_PATH not set: the private corpus source is never committed, so this proof only runs on machines that hold it (CI does not).");
   test.setTimeout(180_000);
   const fixtureModule = await import("./fixtures.mjs");
   const fixtures = fixtureModule.loadCorpusFixtures(process.env.BOSS_RECONCILIATION_PATH, manifest());
