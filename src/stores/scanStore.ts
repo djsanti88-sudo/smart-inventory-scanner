@@ -2155,7 +2155,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           scanFeed: [],
           finalCounts: [],
           needsReviewQueue: [],
-          pendingSyncQueue: [],
+          // DATA-LOSS FIX (owner 4k campaign, 2026-08-05): pendingSyncQueue is deliberately NOT
+          // wiped here. Rotating while the previous session's backlog is still draining was
+          // silently discarding its unsynced cloud writes (measured live: 1,000 of 4,000 scan
+          // events never reached Firestore). Queue items carry their own sessionId/businessId and
+          // the drain is session-agnostic, so the backlog keeps draining under the new session -
+          // same principle as setBusinessContext's "deliberately NOT filtered" tenant rule.
+          // Guard: sessionRotationSyncSafety.store.test.ts.
           syncedScanEventIds: [],
           lastSyncError: null,
         });
