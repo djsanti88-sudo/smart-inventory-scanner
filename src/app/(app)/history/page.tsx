@@ -60,9 +60,14 @@ export default function HistoryPage() {
   useEffect(() => {
     if (!cloudBackend || cloudRefreshFired.current) return;
     if (isLiveAuth() && !businessContextReady) return; // wait for the gate; effect re-fires when ready
-    const missingPast = sessions.some(
-      (s) => s.id !== currentSession?.id && !finalCounts.some((c) => c.sessionId === s.id),
-    );
+    // Candidates include ARCHIVE-ONLY sessions (in sessionHistory but not listSessions) - those are
+    // precisely the finished-and-rotated sessions whose counts only exist in the cloud.
+    const pastIds = new Set<string>([
+      ...sessions.map((s) => s.id),
+      ...sessionHistory.map((e) => e.sessionId),
+    ]);
+    pastIds.delete(currentSession?.id ?? "");
+    const missingPast = [...pastIds].some((id) => !finalCounts.some((c) => c.sessionId === id));
     if (missingPast) {
       cloudRefreshFired.current = true;
       void refreshFromCloud?.();

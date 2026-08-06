@@ -316,6 +316,36 @@ describe("HistoryPage", () => {
     expect(refreshFromCloud).not.toHaveBeenCalled();
   });
 
+  // Archive-only variant (the live-caught residual): a finished-and-rotated session may exist ONLY in
+  // sessionHistory (listSessions no longer returns it) - exactly the session whose counts live only in
+  // the cloud. The trigger must consider archive entries too, or those rows stay download-disabled.
+  it("cloud backend: triggers refreshFromCloud for an archive-only past session missing local rows", () => {
+    process.env.NEXT_PUBLIC_FIREBASE_BACKEND = "1";
+    const refreshFromCloud = vi.fn(() => Promise.resolve());
+    const s1 = session({ id: "s1", status: "active", startedAt: "2026-07-20T10:00:00.000Z" });
+    mocks.storeState = {
+      businessId: "b1",
+      currentSession: s1,
+      sessions: [],
+      listSessions: () => [s1], // the archived session is NOT in the data-source list
+      finalCounts: [{ sessionId: "s1", productId: "p1", quantity: 1 }],
+      products: [],
+      refreshFromCloud,
+      sessionHistory: [
+        {
+          sessionId: "gone-2",
+          startedAt: "2026-07-18T09:00:00.000Z",
+          endedAt: "2026-07-18T09:30:00.000Z",
+          scanRows: [{ time: "2026-07-18T09:05:00.000Z", code: "444", productName: "Tire", quantityDelta: 1 }],
+          totalScans: 1,
+          totalUnits: 1,
+        },
+      ],
+    };
+    render(<HistoryPage />);
+    expect(refreshFromCloud).toHaveBeenCalledTimes(1);
+  });
+
   // The live-auth regression the first version of this fix shipped with: on a fresh page load the
   // effect fired on mount, BEFORE BusinessContextGate resolved businessContextReady, and
   // refreshFromCloud silently no-opped - the download stayed disabled. The trigger must wait for
