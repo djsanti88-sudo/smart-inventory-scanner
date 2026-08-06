@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
+import { persist } from "zustand/middleware";
 import type {
   Alias,
   AiLookupLog,
@@ -87,7 +87,7 @@ import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
-import { createCoalescedFailSoftStorage } from "@/stores/scanPersistStorage";
+import { createCoalescedFailSoftPersistStorage } from "@/stores/scanPersistStorage";
 import { emptyTenantState } from "@/stores/scanReset";
 import { clearSelectedBusinessId } from "@/lib/selectedBusiness";
 import { persistKeyForUid, migrateLegacyBlobOnce } from "@/stores/scanPersistNamespace";
@@ -8001,8 +8001,14 @@ export const useScanStore = create<ScanState>()(
     // synchronously out of set() inside processScan and bricked the /scan page (fresh tab still broken
     // until localStorage was cleared). This wrapper fails SOFT (never throws out of a scan) and COALESCES
     // the ~6 writes/scan into one per tick (flushed on pagehide/visibilitychange so nothing is lost).
-    // See scanPersistStorage.ts. IndexedDB migration remains the recommended architectural follow-up.
-    storage: createJSONStorage(() => createCoalescedFailSoftStorage(() => localStorage)),
+    // Defect #37 layer 3 (fresh-device restore freeze, 2026-08-06): a plain `createJSONStorage(...)`
+    // wrapper still runs JSON.stringify of the FULL state synchronously on every single set() call,
+    // before this coalescing even sees it (zustand's persist middleware calls storage.setItem from every
+    // state change - see scanPersistStorage.ts header). createCoalescedFailSoftPersistStorage implements
+    // PersistStorage<S> directly so the stringify itself, not just the disk write, is coalesced to at
+    // most one per tick. See scanPersistStorage.ts. IndexedDB migration remains the recommended
+    // architectural follow-up.
+    storage: createCoalescedFailSoftPersistStorage(() => localStorage),
     skipHydration: true,
     migrate: scanStoreMigrate,
     // Sec-4: split persisted state by access level. A customer browser must NEVER persist the reusable

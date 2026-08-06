@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { customerDisplayName } from "@/services/displayName";
@@ -47,6 +47,16 @@ function resolvedSizeDisplay(product: Product): string {
   return matchTireSize(product.specsShort)?.canonical.split(" ")[0] ?? product.sizeTag ?? "-";
 }
 
+// DEFECT #29/#37 residual (live-reproduced 2026-08-05/06, canelo round 2): same freeze class as
+// LiveScanFeed - a fresh-device restore with ~1,800 count rows synchronously mounted ALL of them into
+// the DOM. WINDOWING (display-only, sanctioned contingency - no new dependency): render only the first
+// COUNTS_RENDER_WINDOW rows of the already-sorted list, plus a summary row stating exactly how many
+// more products are hidden, with a "Show more" control that grows the window by COUNTS_RENDER_CHUNK
+// per click. The header total ("N of M products") and all store totals are computed over the FULL
+// filtered set, never the rendered window.
+export const COUNTS_RENDER_WINDOW = 200;
+export const COUNTS_RENDER_CHUNK = 300;
+
 // Final count database: spreadsheet-style, grouped by PRODUCT (not by code). Raw codes (barcode +
 // aliases) are platformOwner-only. Row actions let the owner fix a wrong saved decode safely:
 // Correct (edit product fields), Remove from count (session-only), Mark wrong (platformOwner: deactivate
@@ -58,6 +68,7 @@ export function FinalCountTable() {
   const needsReviewQueue = useScanStore((s) => s.needsReviewQueue);
   const isPlatform = useIsPlatformOwner();
   const [filterQuery, setFilterQuery] = useState("");
+  const [renderWindow, setRenderWindow] = useState(COUNTS_RENDER_WINDOW);
 
   // F2 fix (Phase 3 review): refreshFromCloud intentionally does an ADDITIVE cross-session merge into
   // finalCounts (a tested cross-device sync path - see refreshFromCloud.store.test.ts). This table
@@ -103,6 +114,14 @@ export function FinalCountTable() {
     const kept = new Set(filterProducts(filterable, filterQuery).map((f) => f.id));
     return rows.filter((r) => kept.has(r.count.id));
   }, [rows, filterQuery]);
+
+  // Display-only window over the already-sorted/filtered set. Reset to the default window whenever the
+  // filter changes so a narrowed search never inherits a stale, oversized window from a prior filter.
+  useEffect(() => {
+    setRenderWindow(COUNTS_RENDER_WINDOW);
+  }, [filterQuery]);
+  const windowedRows = useMemo(() => visibleRows.slice(0, renderWindow), [visibleRows, renderWindow]);
+  const hiddenCount = Math.max(0, visibleRows.length - windowedRows.length);
 
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -165,9 +184,26 @@ export function FinalCountTable() {
                 </td>
               </tr>
             ) : (
-              visibleRows.map(({ count, product }) => (
+              <>
+              {windowedRows.map(({ count, product }) => (
                 <CountRow key={count.id} count={count} product={product} isPlatform={isPlatform} needsReviewQueue={needsReviewQueue} />
-              ))
+              ))}
+              {hiddenCount > 0 && (
+                <tr className="border-t border-zinc-100 bg-zinc-50">
+                  <td colSpan={isPlatform ? 15 : 14} className="px-4 py-3 text-center text-sm text-zinc-600" data-testid="counts-hidden-summary">
+                    + {hiddenCount} more {hiddenCount === 1 ? "product" : "products"}
+                    <button
+                      type="button"
+                      onClick={() => setRenderWindow((w) => w + COUNTS_RENDER_CHUNK)}
+                      data-testid="counts-show-more"
+                      className="ml-2 rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
+                    >
+                      Show more
+                    </button>
+                  </td>
+                </tr>
+              )}
+              </>
             )}
           </tbody>
         </table>
