@@ -42,6 +42,7 @@
 // like the byte-write coalescing above already does for the string case.
 
 import type { PersistStorage, StateStorage, StorageValue } from "zustand/middleware";
+import type { AsyncBacking } from "@/stores/idbBacking";
 
 /** The wrapper adds a synchronous force-flush so tests are deterministic and hide-events can drain. */
 export interface CoalescedFailSoftStorage extends StateStorage {
@@ -251,6 +252,141 @@ export function createCoalescedFailSoftPersistStorage<S>(
     },
     setItem: (name: string, value: StorageValue<S>) => {
       // Coalesce: remember only the latest RAW value; stringify happens once, at flush time.
+      pendingName = name;
+      pendingValue = value;
+      hasPending = true;
+      schedule();
+    },
+    flush,
+  };
+}
+
+/**
+ * #27: same coalesce/fail-soft/flush-on-hide contract as createCoalescedFailSoftPersistStorage,
+ * backed by an ASYNC store (IndexedDB). Differences, all deliberate:
+ *  - getItem is async (zustand persist supports Promise-returning storage; the store already runs
+ *    skipHydration + explicit rehydrate(), so the async read slots into the existing flow).
+ *  - MIGRATION: on an IDB miss, opts.migrateFrom (localStorage) is consulted; a hit is returned to
+ *    the caller immediately and copied into IDB in the background; the legacy key is removed ONLY
+ *    after that copy resolves, so the data always exists in at least one store.
+ *  - flush() STARTS the pending IDB put synchronously. On pagehide that is best-effort (the browser
+ *    usually completes an already-started transaction); the localStorage version could write fully
+ *    synchronously - this is the one contract weakening of the migration, bounded to one tick of data.
+ */
+export function createAsyncCoalescedFailSoftPersistStorage<S>(
+  getAsyncBacking: () => AsyncBacking,
+  opts: { migrateFrom?: Pick<Storage, "getItem" | "removeItem"> } = {},
+): CoalescedFailSoftPersistStorage<S> {
+  let pendingName: string | null = null;
+  let pendingValue: StorageValue<S> | null = null;
+  let hasPending = false;
+  let scheduled = false;
+
+  const warnDrop = (name: string, step: string, err: unknown) =>
+    console.warn(
+      `[scanStore] Could not ${step} '${name}' (IndexedDB unavailable or failed); this write was dropped. ` +
+        `Scanning continues in memory. (#27 fail-soft)`,
+      err,
+    );
+
+  const doWrite = (name: string, value: StorageValue<S>): Promise<void> => {
+    let serialized: string;
+    try {
+      serialized = JSON.stringify(value);
+    } catch (err) {
+      warnDrop(name, "serialize", err);
+      return Promise.resolve();
+    }
+    return getAsyncBacking()
+      .setItem(name, serialized)
+      .catch((err) => warnDrop(name, "persist", err));
+  };
+
+  const flush = () => {
+    scheduled = false;
+    if (!hasPending || pendingName === null || pendingValue === null) return;
+    const name = pendingName;
+    const value = pendingValue;
+    hasPending = false;
+    pendingName = null;
+    pendingValue = null;
+    void doWrite(name, value);
+  };
+
+  const schedule = () => {
+    if (scheduled) return;
+    scheduled = true;
+    if (typeof setTimeout === "function") setTimeout(flush, 0);
+    else flush();
+  };
+
+  if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+    window.addEventListener("pagehide", flush);
+    if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") flush();
+      });
+    }
+  }
+
+  const readLegacy = (name: string): string | null => {
+    if (!opts.migrateFrom) return null;
+    try {
+      return opts.migrateFrom.getItem(name);
+    } catch {
+      return null;
+    }
+  };
+
+  return {
+    getItem: async (name: string) => {
+      let raw: string | null = null;
+      try {
+        raw = await getAsyncBacking().getItem(name);
+      } catch (err) {
+        console.warn(`[scanStore] Could not read '${name}' from IndexedDB.`, err);
+      }
+      if (raw === null) {
+        const legacyRaw = readLegacy(name);
+        if (legacyRaw !== null) {
+          // Copy-then-clear: legacy is removed only after IDB provably holds the value.
+          getAsyncBacking()
+            .setItem(name, legacyRaw)
+            .then(() => {
+              try {
+                opts.migrateFrom?.removeItem(name);
+              } catch {
+                /* legacy removal is best-effort; a stale copy is harmless (IDB wins on next read) */
+              }
+            })
+            .catch((err) => warnDrop(name, "migrate", err));
+          raw = legacyRaw;
+        }
+      }
+      if (raw === null) return null;
+      try {
+        return JSON.parse(raw) as StorageValue<S>;
+      } catch (err) {
+        console.warn(`[scanStore] Could not parse persisted '${name}'; treating as absent.`, err);
+        return null;
+      }
+    },
+    removeItem: (name: string) => {
+      if (pendingName === name) {
+        hasPending = false;
+        pendingName = null;
+        pendingValue = null;
+      }
+      getAsyncBacking()
+        .removeItem(name)
+        .catch((err) => console.warn(`[scanStore] Could not remove '${name}' from IndexedDB.`, err));
+      try {
+        opts.migrateFrom?.removeItem(name);
+      } catch {
+        /* fail-soft */
+      }
+    },
+    setItem: (name: string, value: StorageValue<S>) => {
       pendingName = name;
       pendingValue = value;
       hasPending = true;
