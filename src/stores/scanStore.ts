@@ -88,7 +88,8 @@ import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
-import { createCoalescedFailSoftPersistStorage } from "@/stores/scanPersistStorage";
+import { createCoalescedFailSoftPersistStorage, createAsyncCoalescedFailSoftPersistStorage } from "@/stores/scanPersistStorage";
+import { createIdbBacking } from "@/stores/idbBacking";
 import { emptyTenantState } from "@/stores/scanReset";
 import { clearSelectedBusinessId } from "@/lib/selectedBusiness";
 import { persistKeyForUid, migrateLegacyBlobOnce } from "@/stores/scanPersistNamespace";
@@ -8363,7 +8364,18 @@ export const useScanStore = create<ScanState>()(
     // PersistStorage<S> directly so the stringify itself, not just the disk write, is coalesced to at
     // most one per tick. See scanPersistStorage.ts. IndexedDB migration remains the recommended
     // architectural follow-up.
-    storage: createCoalescedFailSoftPersistStorage(() => localStorage),
+    // #27: IndexedDB is the primary persist backing (localStorage's ~5MB quota bricked large real-
+    // backend sessions ~500 scans in). Feature-detected once at store creation: no indexedDB (SSR,
+    // jsdom, lockdown) -> the previous localStorage path, byte-for-byte identical behavior. When IDB
+    // is active, migrateFrom copies a legacy localStorage blob forward on first read (copy-then-clear).
+    storage: (() => {
+      const idb = typeof indexedDB !== "undefined" ? createIdbBacking() : null;
+      return idb
+        ? createAsyncCoalescedFailSoftPersistStorage(() => idb, {
+            migrateFrom: typeof localStorage !== "undefined" ? localStorage : undefined,
+          })
+        : createCoalescedFailSoftPersistStorage(() => localStorage);
+    })(),
     skipHydration: true,
     migrate: scanStoreMigrate,
     // Sec-4: split persisted state by access level. A customer browser must NEVER persist the reusable
