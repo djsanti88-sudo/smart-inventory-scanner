@@ -9,6 +9,7 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   sendPasswordResetEmail,
+  sendEmailVerification,
 } from "firebase/auth";
 import { doc, getDoc, getDocs, query, collection, where } from "firebase/firestore";
 import { getFirebaseAuth, getDb } from "@/lib/firebaseClient";
@@ -267,6 +268,14 @@ export async function signInWithPassword(email: string, password: string): Promi
 export async function signUp(email: string, password: string): Promise<AuthFlowResult> {
   try {
     const cred = await createUserWithEmailAndPassword(getFirebaseAuth(), email, password);
+    // Fire-and-forget verification email: signup must never fail because the mail send did
+    // (fail-soft; the in-app banner offers resend). Guarded synchronously too, since an
+    // unavailable/unmocked provider function can throw before returning a promise.
+    try {
+      sendEmailVerification(cred.user).catch(() => undefined);
+    } catch {
+      /* verification email is best-effort */
+    }
     return finishAuthentication(cred.user, true);
   } catch (e) {
     return {
