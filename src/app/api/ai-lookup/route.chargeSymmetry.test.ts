@@ -37,6 +37,12 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: vi.fn().mockResolvedValue({ uid: "u1", email: "a@b.co" }) }),
   getAdminDb: () => ({ doc: () => ({ get: async () => ({ exists: true }) }) }),
 }));
+// Boss-for-everyone (Option A, 2026-08-07): every authed member now reaches the trusted-exact path
+// before the ladder. Mock a clean MISS so the authed decode falls through to the real pipeline (this
+// test forces a mid-paid-ladder throw to prove charge symmetry, which requires reaching the ladder).
+vi.mock("@/server/tire-knowledge/TireKnowledgeProvider", () => ({
+  resolveTrustedExactBarcodeDecision: vi.fn().mockResolvedValue({ kind: "miss" }),
+}));
 
 // The heart of the test: force the PAID ladder to throw AFTER chargePaidSlot has already charged the
 // global slot. The pipeline calls runLadder TWICE - first the FREE run (must MISS so the total-free-miss

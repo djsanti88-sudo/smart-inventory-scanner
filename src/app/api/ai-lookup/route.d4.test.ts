@@ -24,6 +24,13 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: vi.fn().mockResolvedValue({ uid: "u1", email: "a@b.co" }) }),
   getAdminDb: () => ({ doc: () => ({ get: memberGet }) }),
 }));
+// Boss-for-everyone (Option A, 2026-08-07): every authed member now reaches the trusted-exact path, so
+// this test's authed decodes consult resolveTrustedExactBarcodeDecision before the ladder. Mock it to a
+// clean MISS so the flow falls through to the pipeline exactly as before (these tests exercise the
+// pipeline/policy gates, not the trusted-exact corpus).
+vi.mock("@/server/tire-knowledge/TireKnowledgeProvider", () => ({
+  resolveTrustedExactBarcodeDecision: vi.fn().mockResolvedValue({ kind: "miss" }),
+}));
 
 const ORIG = { ...process.env };
 beforeEach(() => {
