@@ -51,7 +51,7 @@ import {
   type BreakerState,
 } from "@/services/circuitBreaker";
 import { sanitizeForAiLookup } from "@/services/sanitizer";
-import { sanitizeCustomerReason } from "@/services/ai/decodeFallback";
+import { sanitizeCustomerReason, MISS_REASON_TEXT } from "@/services/ai/decodeFallback";
 import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
 import { buildCleanupRecommendations } from "@/services/cleanup/recommendations";
 import type { CatalogEntry, CatalogHit, ShopOverride } from "@/services/catalog/catalogTypes";
@@ -1298,6 +1298,30 @@ function idForReview(r: UnknownCodeReview): string {
   return parts[2] ?? r.id;
 }
 
+// Fix #41 (data-loss race, 2026-08-06): re-point a placeholder-scoped record onto the real business
+// once sign-in bootstrap resolves. Used by setBusinessContext's bootstrap-resolution branch below.
+function rescopePlaceholderRecord<T extends { businessId: string }>(entity: T, realBusinessId: string): T {
+  return entity.businessId === DEMO_BUSINESS_ID ? { ...entity, businessId: realBusinessId } : entity;
+}
+
+// Same idea for a queued sync item: rewrite its own businessId, its payload's businessId (if the
+// payload shape carries one), and the leading businessId segment of its idempotencyKey
+// (buildIdempotencyKey joins businessId:sessionId:...:operation with ":") - leaving every other
+// segment byte-identical so retries of this exact item keep deduping against the same identity.
+function rescopePlaceholderQueueItem(item: PendingSyncItem, realBusinessId: string): PendingSyncItem {
+  if (item.businessId !== DEMO_BUSINESS_ID) return item;
+  const payload = item.payload;
+  const rescopedPayload =
+    payload && typeof payload === "object" && "businessId" in (payload as Record<string, unknown>)
+      ? { ...(payload as Record<string, unknown>), businessId: realBusinessId }
+      : payload;
+  const prefix = `${DEMO_BUSINESS_ID}:`;
+  const idempotencyKey = item.idempotencyKey.startsWith(prefix)
+    ? realBusinessId + item.idempotencyKey.slice(DEMO_BUSINESS_ID.length)
+    : item.idempotencyKey;
+  return { ...item, businessId: realBusinessId, payload: rescopedPayload, idempotencyKey };
+}
+
 export function buildScanInitializer(deps: ScanStoreDeps) {
   const { db, idFactory, now } = deps;
   const cloudBackend = deps.cloudBackend ?? false;
@@ -1318,11 +1342,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
     const trustedExactProbes = new Map<string, UnknownCodeReview>();
     const trustedExactProbeIdsByCode = new Map<string, string>();
     let trustedExactProbeGeneration = 0;
+    // TASK T3 fix (2026-08-06, audit-9 finding B): the deterministicOnly probe's reasonCode
+    // "trusted_exact_not_available" (server allowlist not configured / this business is not in it)
+    // must not be swallowed if the ladder it then continues into also misses. This set remembers
+    // (by reviewId, which materializeTrustedExactMiss/the continuation call always reuse - see
+    // materializeTrustedExactMiss below) which in-flight reviews had that specific config-gap probe
+    // outcome, so the eventual settle site can compose an honest reason instead of the generic
+    // "not found anywhere" bucket that a genuinely nonexistent code also produces.
+    const trustedExactConfigGapReviewIds = new Set<string>();
     const clearTrustedExactProbes = () => {
       trustedExactProbeGeneration++;
       trustedExactProbeReviewIds.clear();
       trustedExactProbes.clear();
       trustedExactProbeIdsByCode.clear();
+      trustedExactConfigGapReviewIds.clear();
     };
 
     const enqueueAndSync = (items: PendingSyncItem[]) => {
@@ -1915,11 +1948,64 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // isolation law below) replaces tenant state.
         const contextState = get();
         const sameTenant = contextState.businessId === businessId && contextState.userId === userId;
+        // Bug #41 (data-loss race): a scan processed while THIS session still held the placeholder
+        // (cloud mode, sign-in bootstrap not yet resolved - userId still null) counted locally and
+        // queued for sync tagged with DEMO_BUSINESS_ID. That is not a real tenant switch (no real
+        // tenant was ever active in this session), so it must not go through the wipe-and-isolate
+        // branch below: the tenant-aware drain (:1731-ish, recomputeSyncStatus above) only matches
+        // queue items whose businessId equals the CURRENT tenant, and the placeholder id never
+        // becomes the current tenant again - those items would sit stranded forever, never synced,
+        // while the UI's own syncStatus derivation would misreport them as already "synced" (see
+        // recomputeSyncStatus: it also filters the queue by the CURRENT businessId).
+        // Only trigger the rescope path when there is actual placeholder-tagged activity to save -
+        // a fresh store's first-ever setBusinessContext call (the ordinary sign-up/cloud-init shape
+        // pinned by many existing tests) has an empty scanFeed/pendingSyncQueue/needsReviewQueue and
+        // must keep taking the normal wipe-to-clean-slate branch below unchanged.
+        const hasPlaceholderActivity =
+          contextState.scanFeed.some((e) => e.businessId === DEMO_BUSINESS_ID) ||
+          contextState.pendingSyncQueue.some((item) => item.businessId === DEMO_BUSINESS_ID) ||
+          contextState.needsReviewQueue.some((r) => r.businessId === DEMO_BUSINESS_ID);
+        const isBootstrapResolution =
+          cloudBackend &&
+          !sameTenant &&
+          contextState.businessId === DEMO_BUSINESS_ID &&
+          contextState.userId === null &&
+          hasPlaceholderActivity;
         if (sameTenant) {
           set({
             businessContextReady: true,
             businessDataLoaded: !needsLoad,
             lastSyncError: null,
+          });
+        } else if (isBootstrapResolution) {
+          // RE-SCOPE ON HYDRATION: keep every placeholder-scoped record (never wipe scanFeed/
+          // finalCounts/needsReviewQueue/sessions/products/aliases/settings/pendingSyncQueue) and
+          // re-point its businessId (plus queue payload + idempotencyKey) onto the real business.
+          // Counts/rows are never lost or doubled - idempotencyKeys keep every non-businessId
+          // segment, so an item already applied server-side (if that ever happened) still dedupes,
+          // and every future retry of a rescoped item keeps hitting its own new stable identity.
+          // The syncPending() call further below (shared with the other two branches) then drains
+          // the now-correctly-scoped queue immediately.
+          clearTrustedExactProbes();
+          set({
+            businessId,
+            userId,
+            businessContextReady: true,
+            businessDataLoaded: !needsLoad,
+            lastSyncError: null,
+            products: contextState.products.map((p) => rescopePlaceholderRecord(p, businessId)),
+            aliases: contextState.aliases.map((a) => rescopePlaceholderRecord(a, businessId)),
+            sessions: contextState.sessions.map((s) => rescopePlaceholderRecord(s, businessId)),
+            currentSession: contextState.currentSession
+              ? rescopePlaceholderRecord(contextState.currentSession, businessId)
+              : contextState.currentSession,
+            scanFeed: contextState.scanFeed.map((e) => rescopePlaceholderRecord(e, businessId)),
+            finalCounts: contextState.finalCounts.map((c) => rescopePlaceholderRecord(c, businessId)),
+            needsReviewQueue: contextState.needsReviewQueue.map((r) => rescopePlaceholderRecord(r, businessId)),
+            settings: rescopePlaceholderRecord(contextState.settings, businessId),
+            pendingSyncQueue: contextState.pendingSyncQueue.map((item) =>
+              rescopePlaceholderQueueItem(item, businessId),
+            ),
           });
         } else {
           clearTrustedExactProbes();
@@ -3928,6 +4014,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const decision = data.decision;
           const results: AiLookupResult[] = data.results ?? [];
           const best = results[0] ?? null;
+          // TASK T3 fix (2026-08-06, audit-9 finding B): remember a config-gap probe outcome so the
+          // eventual continuation settle (below) can name the real cause instead of the generic
+          // all-miss bucket. Only the deterministicOnly probe leg ever sees this reasonCode.
+          if (deterministicOnly && data.reasonCode === "trusted_exact_not_available") {
+            trustedExactConfigGapReviewIds.add(reviewId);
+          }
           const canonicalId = trustedExactCanonicalId(data);
           if (canonicalId && best) {
             settleTrustedExactIdentity(
@@ -3938,7 +4030,36 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             );
             return;
           }
-          if (deterministicOnly) {
+          // AUDIT-6 FINDING 5 fix (2026-08-06, call-count only): a deterministic-only probe can ALSO
+          // return a genuinely verified, exact-code-evidenced corpus hit that does not qualify for the
+          // boss canonical-id settle above (e.g. a "global_corpus" trusted-exact hit, which deliberately
+          // omits trustedExactCanonicalProductId - see the server tire knowledge provider's
+          // resolveTrustedExactBarcodeDecision). Treating that as a miss and firing the owner-ratified
+          // miss-continuation below would just re-fetch and re-verify the SAME identity a second time -
+          // the live-observed "~2 POST /api/ai-lookup for one settled corpus scan" defect. Reuse this
+          // response instead of discarding it: skip the miss/continuation branch entirely so the review
+          // falls through into the ordinary decode-write path below (unchanged, shared with every
+          // non-deterministic decode), producing the identical result the second call would have.
+          //
+          // SECURITY NARROWING: this must NEVER become a laundering path for an incomplete/spoofed
+          // BOSS-scope response (the exact self-claim class scanStore.trustedExact.test.ts's "rejects
+          // self-claimed or incomplete trusted responses" guards - a response that claims the boss
+          // envelope via either corroborationPath or trustedExact.path but fails the strict canonical-id/
+          // digest/schema checks above). Only a response that never claims the boss scope in the first
+          // place (the plain non-boss "global_corpus" shape) is eligible here; anything claiming boss
+          // scope without a valid canonicalId falls through unchanged to the existing miss/continuation
+          // handling below, exactly as before this fix.
+          const claimsBossScope =
+            decision?.corroborationPath === "boss_trusted_exact_barcode"
+            || data.trustedExact?.path === "boss_trusted_exact_barcode";
+          const alreadySettledByProbe =
+            deterministicOnly
+            && !canonicalId
+            && !claimsBossScope
+            && decision?.status === "verified"
+            && decision?.exactCodeEvidenceVerifiedByApp === true
+            && Boolean(best);
+          if (deterministicOnly && !alreadySettledByProbe) {
             const current = get();
             const currentSettings = current.settings;
             const currentNow = new Date(now()).getTime();
@@ -4024,6 +4145,31 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             }));
             return;
           }
+          if (alreadySettledByProbe) {
+            // Move the transient probe into the real needsReviewQueue (same mechanic already proven by
+            // materializeTrustedExactMiss) so the shared decode-write code below - which looks the
+            // review up by id - has a row to update. Its placeholder reason/decodeStatus are
+            // immediately overwritten by the real decision a few lines down; this call is purely the
+            // carrier that makes the review addressable, never a second network request.
+            const persisted = materializeTrustedExactMiss(reviewId, decision?.reason || "Verified from the trusted corpus.");
+            if (!persisted) return; // hardening: nothing left to attach the verified identity to (rare race)
+          }
+          // TASK T3 fix (2026-08-06, audit-9 finding B): if the trusted-exact probe for THIS review
+          // reported reasonCode trusted_exact_not_available (the server allowlist is not configured /
+          // does not include this business) and the ladder we then continued into settles on the
+          // generic all-miss bucket (MISS_REASON_TEXT.product_not_found), that generic text is
+          // dishonest - it is indistinguishable from a code that genuinely does not exist anywhere.
+          // Compose the specific, customer-safe, denylist-clean reason instead. A genuine
+          // trusted_exact_miss (checked and missed) or any other miss reason (rate limit, cap,
+          // timeout, missing keys) is untouched - only this exact collapse is corrected. The set entry
+          // is consumed here (delete on read) so a later, unrelated re-decode of the same review id
+          // never inherits a stale config-gap marker.
+          const wasConfigGapProbe = trustedExactConfigGapReviewIds.has(reviewId);
+          if (wasConfigGapProbe) trustedExactConfigGapReviewIds.delete(reviewId);
+          const finalDecisionReason =
+            wasConfigGapProbe && decision?.reason === MISS_REASON_TEXT.product_not_found
+              ? "Trusted exact lookup is not enabled for this business, and no match was found in the databases. Saved to Needs Review."
+              : (decision?.reason ?? "");
           // Phase 10: for a tire scan, parse the messy decode into structured columns (size -> specs,
           // brand, part number, clean description). Display/storage only - it does NOT touch the firewall
           // or the tireAutoCountOk (size + model) auto-count gate below (those read the ORIGINAL `best`).
@@ -4099,7 +4245,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     sourceUrls: best?.sourceUrls ?? [],
                     verifiedFacts: best?.verifiedFacts ?? [],
                     guesses: best?.guesses ?? [],
-                    reason: decision?.reason ?? "",
+                    reason: finalDecisionReason,
                     providerName,
                     confidence: decision?.confidence ?? 0,
                     decodeStatus: decision?.status ?? "needs_review",
@@ -4148,7 +4294,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 provenance: displayedBadge === "suggested" ? decodeProvenance : undefined,
                 // BADGE/REASON INVARIANT: never write a "Verified...No AI lookup needed" reason under a
                 // non-verified badge (see honestReasonForBadge above - the owner-caught contradiction).
-                reason: honestReasonForBadge(decision?.reason, decision?.status, displayedBadge) || e.reason,
+                reason: honestReasonForBadge(finalDecisionReason, decision?.status, displayedBadge) || e.reason,
                 // STALE-NOTE FIX (goupc-cap-rootcause item 3): decodeNote was set once at scan time to the
                 // in-flight "Decoding with AI..." note and never refreshed - platformOwner saw that note
                 // forever on every settled row. The decode has now settled, so replace the in-flight note
@@ -4612,7 +4758,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             }
             // Prefer the server's HONEST reason (rate-limited / timed-out / not-found-after-search /
             // fallback) over the generic gate text, so the row never lies about why it needs review.
-            const honest = typeof data.reasonText === "string" ? data.reasonText : "";
+            // TASK T3 fix (2026-08-06, audit-9 finding B): this decode-everything settle site has its
+            // OWN reason write (reviewReason below), independent of the earlier one - it must not fall
+            // back to the raw generic reasonText and silently undo the config-gap override computed
+            // above (finalDecisionReason). Same rule: only substitute when this review's probe really
+            // was the config-gap outcome AND the raw text is exactly the generic all-miss bucket.
+            const honest =
+              wasConfigGapProbe && data.reasonText === MISS_REASON_TEXT.product_not_found
+                ? finalDecisionReason
+                : typeof data.reasonText === "string" ? data.reasonText : "";
             // Phase 8: a category/brand conflict gives the safe, product-facing reason (highest priority).
             // Phase 7: a usable tire decode blocked only for missing specs gets a precise reason.
             const tireIncomplete = isUsableProductName(best?.productName ?? "") && isTireContext(best) && !hasRequiredTireSpecs(best);

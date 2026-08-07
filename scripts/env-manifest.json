@@ -17,7 +17,8 @@
         "NEXT_PUBLIC_FIREBASE_APP_ID",
         "NEXT_PUBLIC_AUTH_MODE",
         "PLATFORM_OWNER_EMAILS",
-        "PLATFORM_OWNER_UIDS"
+        "PLATFORM_OWNER_UIDS",
+        "TRUSTED_EXACT_BOSS_BUSINESS_IDS"
       ],
       "forbidden": [],
       "optional": [
@@ -68,7 +69,8 @@
         "NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID",
         "NEXT_PUBLIC_FIREBASE_APP_ID",
         "NEXT_PUBLIC_FIREBASE_BACKEND",
-        "NEXT_PUBLIC_AUTH_MODE"
+        "NEXT_PUBLIC_AUTH_MODE",
+        "TRUSTED_EXACT_BOSS_BUSINESS_IDS"
       ],
       "forbidden": [
         "NEXT_PUBLIC_FIREBASE_USE_EMULATOR",

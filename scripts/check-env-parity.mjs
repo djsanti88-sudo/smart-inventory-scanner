@@ -68,35 +68,49 @@ function loadManifest() {
 }
 
 // Parses `vercel env ls <environment>` table output into a Set of var names present for that
-// environment. Vercel's table has columns: name | value | environments | created. We only ever
-// read `name` and `environments` - `value` is always the literal string "Encrypted" or "Plain"
-// (Vercel never prints the secret itself in `env ls`), so no secret material is parsed or stored.
-function parseVercelEnvLs(stdout, targetEnvironment) {
+// environment. We only ever read the `name` column and the environments column - `value` is
+// always shown as a status ("Encrypted"/"Hidden"/"Plain", or a redacted/truncated blob for
+// non-sensitive vars) never the real secret, so no secret material is parsed or stored.
+//
+// CLI format drift (observed live 2026-08-06 against sharpenly/inventory): older `vercel env ls`
+// output was `name | value | environments | created` (3 data columns before `created`). The
+// current CLI (58.7.0) inserts an extra `type` column: `name | value | type |
+// environments (git branch) | created`. A parser hardcoded to "environments is the 3rd column"
+// silently reads 0 vars against that format - exactly the defect that made the parity gate
+// invisible to a live env-var drift. Indexing `environments` and `created` from the END of the
+// row (rather than a fixed position from the start) is stable across both formats, since
+// `created` is always last and `environments` is always immediately before it.
+export function parseVercelEnvLs(stdout, targetEnvironment) {
   const names = new Set();
   const lines = stdout.split(/\r?\n/);
   // Vercel prints a capitalized environment label, e.g. "Production", "Preview", "Development".
   const targetLabel = targetEnvironment[0].toUpperCase() + targetEnvironment.slice(1);
 
   for (const line of lines) {
-    // Skip header, blanks, and the "Common next commands" footer block.
-    if (!line.trim()) continue;
-    if (/^\s*name\s+value\s+environments/i.test(line)) continue;
-    if (/^(Vercel CLI|Retrieving project|>|Common next commands|-\s*`vercel)/i.test(line.trim())) continue;
-
-    // Row format (whitespace-column-separated): "<name>   <value-status>   <environments...>   <created>"
-    // environments cell can be "Production", "Preview", "Preview, Production", "Development, Preview, Production".
     const trimmed = line.trim();
-    if (!trimmed) continue;
+    if (!trimmed) continue; // blank line
 
-    // The name is the first whitespace-delimited token cluster; split on 2+ spaces to respect columns.
+    // Row format (whitespace-column-separated, 2+ spaces between columns):
+    // "<name>  <value>  [<type>]  <environments...>  <created>"
+    // environments cell can be "Production", "Preview", "Preview, Production",
+    // "Preview (git-branch-name)", "Development, Preview, Production".
     const cols = trimmed.split(/\s{2,}/).filter(Boolean);
-    if (cols.length < 3) continue; // not a data row we can parse safely
-    const [name, , environmentsCell] = cols;
+    if (cols.length < 3) continue; // banner/footer/"Common next commands" lines never have 3+ columns
+
+    const name = cols[0];
+    if (/^name$/i.test(name)) continue; // header row, old or new format
     if (!/^[A-Za-z0-9_]+$/.test(name)) continue; // guard against stray non-name rows
 
-    if (environmentsCell && environmentsCell.split(",").map((s) => s.trim()).includes(targetLabel)) {
-      names.add(name);
-    }
+    // environments is always second-to-last; created ("11h ago", "3d ago", ...) is always last.
+    const environmentsCell = cols[cols.length - 2];
+    if (!environmentsCell) continue;
+
+    const matches = environmentsCell
+      .split(",")
+      .map((part) => part.trim())
+      .some((part) => part === targetLabel || part.startsWith(`${targetLabel} `));
+
+    if (matches) names.add(name);
   }
   return names;
 }
@@ -197,4 +211,17 @@ function main() {
   process.exit(0);
 }
 
-main();
+// Only auto-run when executed directly (`node scripts/check-env-parity.mjs ...`), never on import
+// - this file is imported by scripts/check-env-parity.test.mjs to unit-test parseVercelEnvLs
+// without shelling out to the real Vercel CLI or calling process.exit mid test run.
+const isDirectRun = (() => {
+  try {
+    return path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1] ?? "");
+  } catch {
+    return false;
+  }
+})();
+
+if (isDirectRun) {
+  main();
+}

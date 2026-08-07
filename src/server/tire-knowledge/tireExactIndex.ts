@@ -273,6 +273,16 @@ export async function lookupTrustedExactBarcode(
   return null;
 }
 
+// Diagnostic 2026-08-06 (fix-wave, defect #42): every trusted-exact "unavailable" outcome used to
+// collapse into one undiagnosable state with zero server-side visibility, which let a live gap - the
+// deployed environment missing BOSS_EXACT_INDEX_HMAC_KEY entirely - masquerade as a silent per-scan
+// failure for every allowlisted business until an owner noticed the pattern. This cheap, sync,
+// no-I/O check lets the route log WHICH class of unavailability fired (missing key vs a corrupt/
+// unreadable manifest or shard) without exposing the key value itself or touching the lookup contract.
+export function hasBossHmacKeyConfigured(): boolean {
+  return bossHmacKey() !== null;
+}
+
 export async function getTireExactIndexFingerprint(): Promise<{ schemaVersion: string; contentDigest: string } | null> {
   const manifest = await getManifest();
   return manifest.kind === "manifest" ? { schemaVersion: manifest.value.schemaVersion, contentDigest: manifest.value.contentDigest } : null;

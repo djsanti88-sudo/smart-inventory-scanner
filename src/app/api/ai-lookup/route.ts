@@ -25,7 +25,7 @@ import { buildMasterCatalogEntry, appendMasterCatalogEntry } from "@/server/cata
 import { logServerEvent } from "@/server/log";
 import { cleanScanCode } from "@/services/scanCleaner";
 import { resolveTrustedExactBarcodeDecision } from "@/server/tire-knowledge/TireKnowledgeProvider";
-import { getTireExactIndexFingerprint } from "@/server/tire-knowledge/tireExactIndex";
+import { getTireExactIndexFingerprint, hasBossHmacKeyConfigured } from "@/server/tire-knowledge/tireExactIndex";
 import { trustedExactRateLimiter } from "@/services/security/trustedExactRateLimit";
 
 // FAST-FIRST: cheap/fast models do the first pass (+ page-fetch). The slow PRO models are only used
@@ -477,6 +477,19 @@ export async function POST(request: Request) {
       return Response.json(deterministicMissBody("blocked_package", "This package barcode requires review.", "trusted_exact_blocked_package"));
     }
     if (exact.kind === "unavailable") {
+      // Defect #42 (2026-08-06): this outcome was previously silent server-side, letting the deployed
+      // environment missing BOSS_EXACT_INDEX_HMAC_KEY entirely masquerade as an unremarkable per-scan
+      // miss for every allowlisted business. Log which unavailability class fired so Vercel function
+      // logs distinguish a missing key (config gap) from a corrupt/unreadable manifest or shard
+      // (asset-integrity gap) - no code, identity, or key value is ever included.
+      logServerEvent({
+        route: "/api/ai-lookup",
+        event: "trusted_exact_index_unavailable",
+        reasonCode: "exact_index_unavailable",
+        businessId: authedBusinessId ?? undefined,
+        status: 200,
+        detail: hasBossHmacKeyConfigured() ? "shard_or_manifest_invalid" : "missing_hmac_key",
+      });
       return Response.json(deterministicMissBody("exact_index_unavailable", "Trusted exact lookup requires review.", "trusted_exact_unavailable"));
     }
   }
