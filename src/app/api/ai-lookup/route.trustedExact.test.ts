@@ -283,17 +283,43 @@ describe("authenticated Boss trusted-exact route", () => {
     expect(trustedExactCheck).not.toHaveBeenCalled();
   });
 
-  it("does not let request JSON or NEXT_PUBLIC variables mint the server-only corpus capability", async () => {
+  it("boss-for-everyone: an authed member NOT on the allowlist still reaches the server-verified corpus (auth, not the allowlist or NEXT_PUBLIC, grants access)", async () => {
+    // Owner 2026-08-07 (Option A full): the allowlist no longer gates access. business-a is NOT in the
+    // allowlist (business-b) yet, as a verified member, it still reaches the trusted index. The server
+    // ALWAYS derives authenticatedBossCorpus:true from auth - the request body / NEXT_PUBLIC var never
+    // changes that (this proves capability is server-verified, not client-mintable, and not allowlisted).
     process.env.TRUSTED_EXACT_BOSS_BUSINESS_IDS = "business-b";
     process.env.NEXT_PUBLIC_TRUSTED_EXACT_BOSS_BUSINESS_IDS = "business-a";
     const { POST } = await import("./route");
 
-    const response = await POST(request("3220017438", { authenticatedBossCorpus: true }));
+    const response = await POST(request("3220017438", { authenticatedBossCorpus: false }));
 
     expect(response.status).toBe(200);
-    expect(resolveTrustedExactBarcodeDecision).not.toHaveBeenCalled();
+    // Access granted by auth: the trusted index IS consulted, with server-derived authenticatedBossCorpus.
+    expect(resolveTrustedExactBarcodeDecision).toHaveBeenCalledWith("3220017438", { authenticatedBossCorpus: true });
     expect(runDecodePipeline).not.toHaveBeenCalled();
-    expect((await response.json()).decision.status).toBe("needs_review");
+    const body = await response.json();
+    // Default mock returns a miss; a deterministic-only miss for a reachable member is trusted_exact_miss.
+    expect(body.reasonCode).toBe("trusted_exact_miss");
+    expect(body.decision.status).toBe("needs_review");
+  });
+
+  it("boss-for-everyone: resolves a boss code to trusted_exact_hit for an authed member who is NOT on the allowlist", async () => {
+    // Failing-first (impl-boss-god-rate.md section 1): a non-allowlisted authed business decoding a boss
+    // code (8848116004503-shaped fixture) now returns trusted_exact_hit instead of trusted_exact_not_available.
+    process.env.TRUSTED_EXACT_BOSS_BUSINESS_IDS = "business-z"; // business-a is NOT allowlisted
+    resolveTrustedExactBarcodeDecision.mockResolvedValueOnce(bossHit("8848116004503"));
+    const { POST } = await import("./route");
+
+    const response = await POST(request("8848116004503"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(resolveTrustedExactBarcodeDecision).toHaveBeenCalledWith("8848116004503", { authenticatedBossCorpus: true });
+    expect(body.reasonCode).toBe("trusted_exact_hit");
+    expect(body.decision.status).toBe("verified");
+    expect(body.trustedExact).toEqual({ path: "boss_trusted_exact_barcode", index: fingerprint });
+    expect(runDecodePipeline).not.toHaveBeenCalled();
   });
 
   it("returns trusted_exact_miss for allowlisted deterministic-only misses before all egress", async () => {
@@ -315,7 +341,11 @@ describe("authenticated Boss trusted-exact route", () => {
     expect(legacyRateLimit).not.toHaveBeenCalled();
   });
 
-  it("returns trusted_exact_not_available for a non-allowlisted bare numeric deterministic-only miss", async () => {
+  it("boss-for-everyone: a NON-allowlisted authed member's bare-numeric deterministic-only miss now returns trusted_exact_miss (was trusted_exact_not_available)", async () => {
+    // Owner 2026-08-07 (Option A full, inverted expectation): the allowlist no longer withholds the
+    // trusted path. business-a is authed but NOT allowlisted (business-z); it is now CHECKED against the
+    // trusted index and a genuine miss is trusted_exact_miss - not the old "not enabled for this session"
+    // not_available. A truly non-authed / mock caller (no authedUid) still gets trusted_exact_not_available.
     process.env.TRUSTED_EXACT_BOSS_BUSINESS_IDS = "business-z";
     const { POST } = await import("./route");
 
@@ -323,12 +353,11 @@ describe("authenticated Boss trusted-exact route", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body.reasonCode).toBe("trusted_exact_not_available");
-    expect(body.reasonText).toBe("Trusted exact lookup is not enabled for this session, so the code was not checked against the trusted index.");
+    // The code WAS checked against the trusted index (auth grants access under Option A).
+    expect(resolveTrustedExactBarcodeDecision).toHaveBeenCalledWith("8848116004503", { authenticatedBossCorpus: true });
+    expect(body.reasonCode).toBe("trusted_exact_miss");
     expect(body.decision.status).toBe("needs_review");
-    // Fix-wave 2026-08-04: distinct from a real checked-and-missed lookup - the code was never
-    // checked against the trusted index at all, so the path must say so honestly.
-    expect(body.trustedExact).toEqual({ path: "trusted_exact_not_checked" });
+    expect(body.trustedExact).toEqual({ path: "trusted_exact_miss" });
     expect(runDecodePipeline).not.toHaveBeenCalled();
     expect(ladderStorage).not.toHaveBeenCalled();
     expect(legacyRateLimit).not.toHaveBeenCalled();
@@ -396,6 +425,40 @@ describe("authenticated Boss trusted-exact route", () => {
         detail: "shard_or_manifest_invalid",
       }),
     );
+  });
+
+  it("L16: a FULL (non-deterministic) decode with the trusted index unavailable FALLS THROUGH to the ladder instead of dead-ending", async () => {
+    // Round-1 fix: under Option A every authed user hits the trusted path, so a missing/rotated HMAC key
+    // or failed shard SHA (kind:"unavailable") must NOT short-circuit every customer's decode to Needs
+    // Review. A non-deterministic decode must continue to the full ladder (runDecodePipeline).
+    resolveTrustedExactBarcodeDecision.mockResolvedValueOnce({ kind: "unavailable" });
+    const { POST } = await import("./route");
+
+    const response = await POST(request("8848116004503", { deterministicOnly: false }));
+
+    // Reached the ladder rather than returning a terminal trusted_exact_unavailable body.
+    expect(runDecodePipeline).toHaveBeenCalledOnce();
+    const body = await response.json();
+    expect(body.reasonCode).not.toBe("exact_index_unavailable");
+    // The unavailability was still logged (observability preserved).
+    expect(logServerEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "trusted_exact_index_unavailable" }),
+    );
+  });
+
+  it("deterministicOnly PROBE still returns the honest trusted_exact_unavailable signal when the index is unavailable", async () => {
+    // The probe path is unchanged: it must report the honest signal (client work-reduction relies on it),
+    // even though the full-decode path now falls through (test above).
+    resolveTrustedExactBarcodeDecision.mockResolvedValueOnce({ kind: "unavailable" });
+    const { POST } = await import("./route");
+
+    const response = await POST(request("8848116004503")); // deterministicOnly:true by default
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.reasonCode).toBe("exact_index_unavailable");
+    expect(body.trustedExact).toEqual({ path: "trusted_exact_unavailable" });
+    expect(runDecodePipeline).not.toHaveBeenCalled();
   });
 
   it("returns trusted_exact_unavailable when a hit's index fingerprint cannot be verified", async () => {

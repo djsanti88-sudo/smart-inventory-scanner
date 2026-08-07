@@ -526,6 +526,14 @@ export interface DecodePipelineRequest {
    *  Undefined for anonymous/unauthenticated requests - the gate falls back to today's plain global cap,
    *  byte-identical to pre-A2 behavior. */
   capContext?: { authedBusinessId?: string; accountCapCleared: boolean };
+  /** GOD ACCOUNT (server-verified platform owner, owner order 2026-08-07): set TRUE by route.ts ONLY
+   *  from isPlatformOwnerServer(verified uid/email) - never a client/header/body flag. When true the
+   *  paid ladder's spend/cap GATES do not BLOCK: chargePaidSlot never throws DailyCapExceededError, the
+   *  GPT $/day budget always allows, and the Go-UPC monthly cap is unlimited. Cost-truth is preserved -
+   *  every charge/record still fires (chargeDailySlot, recordGptLadderSpend, Go-UPC record), so god
+   *  spend is still counted; only the block/throw is skipped. The kill switch is NOT affected here (it
+   *  is enforced in route.ts for everyone, god included). Undefined/false = today's behavior exactly. */
+  god?: boolean;
 }
 
 /** The settled decode payload (the response body the route serializes; debug is loose because each
@@ -558,7 +566,7 @@ export type DecodePipelineResult =
  * Behavior is identical to the former inline `isDecodeMode` block in route.ts.
  */
 export async function runDecodePipeline(req: DecodePipelineRequest): Promise<DecodePipelineResult> {
-  const { code, codeType, rawCodeSanitized, cleanCodeSanitized, threshold, allowNonPublicAutoCount, forceRetry, budgetMs, capContext } = req;
+  const { code, codeType, rawCodeSanitized, cleanCodeSanitized, threshold, allowNonPublicAutoCount, forceRetry, budgetMs, capContext, god } = req;
 
   // A4 (owner-ratified 2026-07-15, "trace every non-decode"): started at the very TOP of the OUTER
   // function (not computeDecode) so durationMs covers the corpus peek, the L2 persisted-decode peek,
@@ -916,7 +924,10 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // shouldRunGptRung checks priorStatus/codeType/e2e/apiKeyPresent FIRST and only calls this
       // thunk once all of those pass, so a code that never had a chance to reach the ladder never
       // pays for that storage round-trip.
-      budget: async () => checkGptLadderBudget({ worstCaseUsd: GPT_LADDER_WORST_CASE_USD, storage: await ladderStorage() }),
+      // GOD ACCOUNT: the platform owner's GPT rung is never blocked by the daily $/day budget. The
+      // rung still runs and recordGptLadderSpend still fires below, so god spend is recorded (cost-truth);
+      // only the pre-call block is lifted.
+      budget: async () => god ? { allowed: true, spentUsd: 0, capUsd: Infinity } : checkGptLadderBudget({ worstCaseUsd: GPT_LADDER_WORST_CASE_USD, storage: await ladderStorage() }),
     });
     if (!rung.run) return { payload: null, skipReason: rung.skipReason, surfaceSkip: true };
     const r = await gptFromScratch(code, { apiKey: process.env.OPENAI_API_KEY!, signal: opts.signal });
@@ -1228,7 +1239,9 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         apiKey: process.env.GO_UPC_API_KEY,
         client: (c, d) => goUpcLookup(c, d),
         gate: goUpcGate,
-        usage: goUpcUsage(ladderStore),
+        // GOD ACCOUNT: unlimited Go-UPC monthly cap for the platform owner (record() still fires inside
+        // the rung, so subscription usage is still tracked - only the cap gate is lifted).
+        usage: god ? goUpcUsage(ladderStore, { limit: Infinity }) : goUpcUsage(ladderStore),
         storage: ladderStore,
         prefixLookup: goUpcPrefixLookup,
       });
@@ -1569,7 +1582,9 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         ? intEnv(process.env.AI_LOOKUP_GLOBAL_BACKSTOP, dailyLimit * 10)
         : dailyLimit;
       const used = await readDailyUsed(ladderStore);
-      if (used >= limit) throw new DailyCapExceededError(used, limit);
+      // GOD ACCOUNT: the platform owner is never BLOCKED by the daily cap, but MUST still be COUNTED
+      // (cost-truth law) - skip only the throw, keep the charge below so god spend is recorded exactly.
+      if (used >= limit && !god) throw new DailyCapExceededError(used, limit);
       await chargeDailySlot(ladderStore, { limit });
       // FINDING B (P6 fix wave, accounting symmetry): the per-account charge now happens HERE, at the
       // SAME site as the global charge, immediately after it - not later at the route on a clean return.

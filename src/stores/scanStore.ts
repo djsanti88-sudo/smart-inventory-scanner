@@ -28,6 +28,7 @@ import { canonicalGtin } from "@/services/upc/gtin";
 import { clampDecodeBudgetMs, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
 import { fetchWithBackoff } from "@/services/net/fetchWithBackoff";
 import { hashPin, verifyPin, isValidPinFormat } from "@/services/security/pinLock";
+import { isPlatformOwnerClient } from "@/services/security/roleAccess";
 import { resolveScanToProductTiered } from "@/services/aliasMatcher";
 import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/services/productDedup";
 import { incrementInventoryCount } from "@/services/inventory";
@@ -260,12 +261,23 @@ function evaluateAutoDecode(p: {
   dailyLimit: number;
   breaker: BreakerState;
   now: number;
+  /** GOD CLIENT (owner-approved 2026-08-07): the client-side platformOwner UI hint (derived from the
+   *  SAME `effectiveClientAccessLevel` allowlist check `useAccessLevel`/`useIsPlatformOwner` use - never
+   *  a server-trusted flag). When true, this only stops the CLIENT from pre-blocking the owner's own
+   *  scans on the cap/breaker/emergency-stop gates below so a decode attempt always fires; the server
+   *  remains the sole security-authoritative gate (isGod re-derived there from a verified token). Every
+   *  OTHER client gate (AI off, server live-disabled, auto-decode-on-scan off, offline, missing keys)
+   *  still applies unchanged - those are not caps/breaker/emergency, they are real preconditions for a
+   *  decode attempt to make sense at all. */
+  platformOwner?: boolean;
 }): { allowed: boolean; reason: string } {
   if (!p.aiEnabled) return { allowed: false, reason: "AI lookup is off. Turn it on in Settings to auto-decode." };
   if (!p.status.liveEnabled)
     return { allowed: false, reason: "Live AI lookup is disabled on the server (ENABLE_LIVE_AI_LOOKUP=false)." };
   if (!p.status.autoDecodeOnScan) return { allowed: false, reason: "Auto decode on scan is disabled." };
-  if (p.status.emergencyStop) return { allowed: false, reason: "Emergency stop is active. AI calls are paused." };
+  const isGodClient = p.platformOwner === true;
+  if (!isGodClient && p.status.emergencyStop)
+    return { allowed: false, reason: "Emergency stop is active. AI calls are paused." };
   if (!p.online) return { allowed: false, reason: "Offline. Saved locally; AI was not called." };
   const freeDecodeAvailable = p.status.freeDecodeAvailable === true;
   // When the server advertises free/local decode rungs (tire corpus, retail corpus, caches), do not
@@ -276,11 +288,43 @@ function evaluateAutoDecode(p: {
     const missing = p.status.missingKeys.join(", ") || "GEMINI_API_KEY, OPENAI_API_KEY";
     return { allowed: false, reason: `No API keys configured (missing: ${missing}). Set them server-side, then retry live decode.` };
   }
-  if (!freeDecodeAvailable && isDailyCapReached(p.dailyCount, p.dailyLimit))
+  if (!isGodClient && !freeDecodeAvailable && isDailyCapReached(p.dailyCount, p.dailyLimit))
     return { allowed: false, reason: "Daily AI lookup cap reached. Routed to Needs Review." };
-  if (!canRequest(p.breaker, p.now).allowed)
+  if (!isGodClient && !canRequest(p.breaker, p.now).allowed)
     return { allowed: false, reason: "AI circuit breaker is open after repeated failures. Routed to Needs Review." };
   return { allowed: true, reason: "Decoding with AI..." };
+}
+
+/** GATE-BYPASS hint ONLY (advisory only - see evaluateAutoDecode's `platformOwner` doc). Deliberately
+ *  uses `isPlatformOwnerClient` (the raw NEXT_PUBLIC_PLATFORM_OWNER_UIDS/EMAILS allowlist check), NOT
+ *  `effectiveClientAccessLevel`/`useAccessLevel`/`useIsPlatformOwner` - those ALSO honor
+ *  `NEXT_PUBLIC_E2E_PLATFORM_OWNER=1` (the mock-E2E full-UI-access override used by the 11 mock
+ *  Playwright specs), which must grant the platformOwner UI ROLE without ever granting a cap/breaker/
+ *  emergency-stop BYPASS to an arbitrary E2E-mocked identity. A dedicated name (not shared with the UI
+ *  role hint) keeps that distinction impossible to blur at a future call site. */
+function isPlatformOwnerForGateBypass(userId: string | null): boolean {
+  return isPlatformOwnerClient({ uid: userId });
+}
+
+/**
+ * GOD CLIENT (owner-approved 2026-08-07): shared override for every `evaluateAiGate` re-check on a
+ * decode-execution path (`runLiveDecodeOnce`, `lookupUnknown` manual retry, `backgroundVerifyDeep`
+ * follow-up). `evaluateAutoDecode` already bypasses the SAME cap/breaker/emergency-stop pre-block at
+ * enqueue time; `evaluateAiGate` is a separate, lower-level re-check each of those paths runs again
+ * just before actually firing (defense-in-depth against state drifting between enqueue and execution).
+ * Owner intent (2026-08-07 review): "god account has no caps, limits, or anything" - so ALL decode
+ * paths must never client-pre-block the platform owner, not only the primary scan-time path. Only
+ * `daily_cap`/`circuit_open` are overridden here; `disabled` (AI off) and `offline` remain real
+ * preconditions for everyone, god included - matching `evaluateAutoDecode`'s own scope exactly.
+ */
+function applyGodGateOverride<T extends { allowed: boolean; reason: AiGateReason }>(
+  gate: T,
+  isGodClient: boolean,
+): T {
+  if (isGodClient && (gate.reason === "daily_cap" || gate.reason === "circuit_open")) {
+    return { ...gate, allowed: true };
+  }
+  return gate;
 }
 
 /**
@@ -367,12 +411,64 @@ const MAX_CONCURRENT_TRUSTED_EXACT_DECODES = 4;
 // shrinkage report's history stays useful without growing localStorage unbounded.
 const COUNT_SNAPSHOT_CAP = 12;
 type DecodeTask = { run: () => Promise<void>; resolve: () => void; reject: (e: unknown) => void };
-type DecodeQueue = { pendingIds: string[]; tasks: Map<string, DecodeTask>; active: number; limit: number };
+
+/**
+ * BULK PACER (owner-approved 2026-08-07): a light client-side token bucket so a 500-2000 code paste
+ * self-throttles the RATE of decode dispatch instead of firing every queued request the instant a slot
+ * frees up. `MAX_CONCURRENT_DECODES` already bounds concurrency (how many requests are in flight at
+ * once) but not RATE (how fast slots turn over) - a fast-miss corpus round-trip (free rungs only, no
+ * network) can turn slots over fast enough to burst well past `AI_LOOKUP_RATE_LIMIT` (server default
+ * 20000/60s = ~333/s as of 2026-08-07; the legacy default was 600/60s = 10/s). Tuned deliberately far
+ * below the server ceiling (large margin) so ordinary bulk pastes never trip it even sharing an office
+ * IP with a second scanning station. Only the GENERAL queue is paced: the trusted-exact probe queue is
+ * server-side FREE of the rate limit (route.ts returns before `checkRateLimit` for `deterministicOnly`
+ * requests - see inv-bulk-ratelimit.md #1) and pacing it would only slow down decode with no rate-limit
+ * benefit. TOP LAW unaffected: counting already happened synchronously in `ensureProvisionalCount`
+ * before any code ever reaches this queue - the pacer only paces the decode POST cadence, never a row's
+ * appearance or count.
+ */
+const GENERAL_DECODE_RATE_PER_SEC = 50;
+// Burst allowance kept generous (well above any ordinary handful-of-scans session) so the pacer only
+// ever engages for a genuine bulk paste - never for normal single/few-code usage, which must stay
+// exactly as instant as before this change.
+const GENERAL_DECODE_BURST = 40;
+
+type TokenBucket = {
+  capacity: number;
+  tokens: number;
+  refillPerMs: number;
+  lastRefillAt: number;
+  timer: ReturnType<typeof setTimeout> | null;
+};
+
+function makeTokenBucket(ratePerSec: number, burst: number): TokenBucket {
+  return { capacity: burst, tokens: burst, refillPerMs: ratePerSec / 1000, lastRefillAt: Date.now(), timer: null };
+}
+
+/** Exported for tests only: resets a bucket's live time reference so fake-timer tests get deterministic
+ *  refill math instead of depending on wall-clock Date.now() drift between store construction and test run. */
+function resetTokenBucket(bucket: TokenBucket, nowMs: number): void {
+  bucket.tokens = bucket.capacity;
+  bucket.lastRefillAt = nowMs;
+  if (bucket.timer) {
+    clearTimeout(bucket.timer);
+    bucket.timer = null;
+  }
+}
+
+type DecodeQueue = {
+  pendingIds: string[];
+  tasks: Map<string, DecodeTask>;
+  active: number;
+  limit: number;
+  pacer?: TokenBucket;
+};
 const generalDecodeQueue: DecodeQueue = {
   pendingIds: [],
   tasks: new Map(),
   active: 0,
   limit: MAX_CONCURRENT_DECODES,
+  pacer: makeTokenBucket(GENERAL_DECODE_RATE_PER_SEC, GENERAL_DECODE_BURST),
 };
 const trustedExactDecodeQueue: DecodeQueue = {
   pendingIds: [],
@@ -387,6 +483,27 @@ const decodeTaskPromises = new Map<string, Promise<void>>();
 
 function drainDecodeQueue(queue: DecodeQueue): void {
   while (queue.active < queue.limit && queue.pendingIds.length > 0) {
+    const pacer = queue.pacer;
+    if (pacer) {
+      const nowMs = Date.now();
+      const elapsedMs = Math.max(0, nowMs - pacer.lastRefillAt);
+      pacer.tokens = Math.min(pacer.capacity, pacer.tokens + elapsedMs * pacer.refillPerMs);
+      pacer.lastRefillAt = nowMs;
+      if (pacer.tokens < 1) {
+        // Not enough budget to dispatch another request yet. Schedule exactly one resume once at
+        // least one token will exist, then stop dispatching for this tick - never drop or lose a
+        // queued review, it just waits its turn (still counted; only the decode POST is deferred).
+        if (!pacer.timer) {
+          const msUntilToken = (1 - pacer.tokens) / pacer.refillPerMs;
+          pacer.timer = setTimeout(() => {
+            pacer.timer = null;
+            drainDecodeQueue(queue);
+          }, Math.max(1, Math.ceil(msUntilToken)));
+        }
+        return;
+      }
+      pacer.tokens -= 1;
+    }
     const reviewId = queue.pendingIds.shift()!;
     const task = queue.tasks.get(reviewId);
     queue.tasks.delete(reviewId);
@@ -3109,6 +3226,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           dailyLimit: settings.dailyLookupLimit,
           breaker: get().breaker,
           now: new Date(createdAt).getTime(),
+          platformOwner: isPlatformOwnerForGateBypass(get().userId),
         });
         // A3 (owner-ratified 2026-07-15, narrowed by AM-2): a code whose GS1 check digit fails can
         // never decode via any GTIN rung (Go-UPC/fetchV2/GPT all key off the code) - dispatching the
@@ -3516,14 +3634,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           createdAt: nowIso,
         });
 
-        const gate = evaluateAiGate({
-          enabled: s.aiLookupEnabled,
-          online: state.online,
-          dailyCount,
-          dailyLimit: s.dailyLookupLimit,
-          breaker: state.breaker,
-          now: nowMs,
-        });
+        // GOD CLIENT (owner-approved 2026-08-07): manual "Retry live decode" must not silently re-block
+        // the platform owner on cap/breaker while every other decode path already lets the owner
+        // through - see `applyGodGateOverride`.
+        const gate = applyGodGateOverride(
+          evaluateAiGate({
+            enabled: s.aiLookupEnabled,
+            online: state.online,
+            dailyCount,
+            dailyLimit: s.dailyLookupLimit,
+            breaker: state.breaker,
+            now: nowMs,
+          }),
+          isPlatformOwnerForGateBypass(state.userId),
+        );
 
         if (!gate.allowed) {
           // Never fail silently: log the block and leave the code in Needs Review.
@@ -3737,6 +3861,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           dailyLimit: s.dailyLookupLimit,
           breaker: state.breaker,
           now: nowMs,
+          platformOwner: isPlatformOwnerForGateBypass(state.userId),
         });
         // A3 (owner-ratified 2026-07-15): same misread gate as processScan's direct dispatch - a
         // bad-check-digit code cannot decode via any GTIN rung even after a cloud-catalog miss.
@@ -3791,14 +3916,24 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           createdAt: nowIso,
         });
 
-        const gate = evaluateAiGate({
-          enabled: s.aiLookupEnabled,
-          online: state.online,
-          dailyCount,
-          dailyLimit: s.dailyLookupLimit,
-          breaker: state.breaker,
-          now: nowMs,
-        });
+        // GOD CLIENT (owner-approved 2026-08-07): this is the SAME cap/breaker re-check evaluateAutoDecode
+        // already bypassed at enqueue time (see its doc comment), run again here as defense-in-depth
+        // before the actual fetch fires (state can drift between enqueue and dequeue). Without also
+        // bypassing it here, the owner's decode would still be silently dropped to Needs Review with a
+        // "Daily AI lookup cap reached"/"circuit breaker" reason even though evaluateAutoDecode allowed
+        // it - defeating the whole point of the client bypass. See `applyGodGateOverride` for exactly
+        // what is/isn't bypassed.
+        const gate = applyGodGateOverride(
+          evaluateAiGate({
+            enabled: s.aiLookupEnabled,
+            online: state.online,
+            dailyCount,
+            dailyLimit: s.dailyLookupLimit,
+            breaker: state.breaker,
+            now: nowMs,
+          }),
+          isPlatformOwnerForGateBypass(state.userId),
+        );
         if (!gate.allowed && (!deterministicOnly || !state.online)) {
           // Fix-wave 2026-08-04: distinguish WHY this gate blocked instead of collapsing "disabled"
           // and "circuit_open" into the same "blocked_cap" label as a real daily-cap block - an
@@ -4075,6 +4210,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               dailyLimit: currentSettings.dailyLookupLimit,
               breaker: current.breaker,
               now: currentNow,
+              platformOwner: isPlatformOwnerForGateBypass(current.userId),
             });
             if (continuationGate.allowed) {
               const persisted = materializeTrustedExactMiss(reviewId, decision?.reason || "No trusted exact match was found.");
@@ -5294,14 +5430,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
         // Reuse the EXACT auto-decode gate (online + AI on + configured + not stopped + under cap +
         // breaker closed). No new gating is invented; a blocked state simply leaves the review open.
-        const gate = evaluateAiGate({
-          enabled: s.aiLookupEnabled,
-          online: state.online,
-          dailyCount,
-          dailyLimit: s.dailyLookupLimit,
-          breaker: state.breaker,
-          now: nowMs,
-        });
+        // GOD CLIENT (owner-approved 2026-08-07): background deep-verify follow-up must not silently
+        // re-block the platform owner either - see `applyGodGateOverride`.
+        const gate = applyGodGateOverride(
+          evaluateAiGate({
+            enabled: s.aiLookupEnabled,
+            online: state.online,
+            dailyCount,
+            dailyLimit: s.dailyLookupLimit,
+            breaker: state.breaker,
+            now: nowMs,
+          }),
+          isPlatformOwnerForGateBypass(state.userId),
+        );
         if (!gate.allowed) return;
 
         const rawCodeSanitized = sanitizeForAiLookup(review.rawCode).clean;
@@ -8264,4 +8405,12 @@ export function createTestScanStore(overrides?: Partial<ScanStoreDeps>) {
   // (DEFAULT_SETTINGS); firewall tests opt in via updateSettings({ scanContext: "tire" }).
   store.getState().updateSettings({ scanContext: "any" });
   return store;
+}
+
+/** TEST ONLY: the general decode queue's bulk pacer (`GENERAL_DECODE_RATE_PER_SEC` token bucket) is a
+ *  module-level singleton shared by every store instance (mirrors `decodeTaskPromises`/the queues
+ *  themselves), so a fake-timer pacing test needs a deterministic starting point instead of inheriting
+ *  leftover tokens/timers from whatever ran earlier in the same test file. Never used outside tests. */
+export function __resetGeneralDecodePacerForTest(nowMs: number = Date.now()): void {
+  if (generalDecodeQueue.pacer) resetTokenBucket(generalDecodeQueue.pacer, nowMs);
 }
