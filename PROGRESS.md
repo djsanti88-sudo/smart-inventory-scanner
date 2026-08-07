@@ -12,6 +12,31 @@
 
 Current status = the checkpoints below (newest first) + `REPO_HEALTH.md` for repo/branch sync truth.
 
+## Checkpoint 2026-08-07: IndexedDB persist migration (#27) implemented on worktree branch
+
+Plan `docs/superpowers/plans/2026-08-07-indexeddb-persist-migration.md` executed task-by-task (Opus
+orchestrator + Sonnet executors, per-task diff review, TDD). Moves the scan store's persisted state
+off localStorage's ~5MB quota (which bricked large real-backend sessions around 500 scans) onto
+IndexedDB, with a localStorage fallback and a copy-then-clear forward migration.
+
+- `src/stores/idbBacking.ts` - minimal promise KV over raw IndexedDB (db `sis-persist`, store `kv`), no
+  new npm dependency; returns null when `indexedDB` is absent (SSR/jsdom/lockdown -> localStorage path).
+- `src/stores/scanPersistStorage.ts` - new `createAsyncCoalescedFailSoftPersistStorage` (same
+  coalesce/fail-soft/flush-on-hide contract, async IDB backing, copy-then-clear localStorage migration).
+- `src/stores/scanStore.ts` - `storage:` feature-detects IDB once at store creation; sign-out wipe +
+  clearLocalCache wipe BOTH stores; adoptLegacyLocalData is IDB-aware.
+- `src/stores/scanPersistNamespace.ts` - IDB-aware adopt subsystem (getPersistedBlob,
+  hasMeaningfulLegacyBlobAsync [preserves N2 empty-blob-banner guard via a shared predicate],
+  migrateLegacyBlobOnceAsync [preserves quantityDelta:0->1 normalization], removePersistedKeyEverywhere).
+- `src/components/BusinessContextGate.tsx` - adopt banner + alreadyOwn checks are now async/IDB-aware.
+- Proof: `e2e/persist-indexeddb.spec.ts` (2/2 Chromium), `scanPersistStorage.async.test.ts` (6),
+  `scanPersistNamespace.async.test.ts` (13). Gates green: tsc, `npm run test` (only unrelated
+  pre-existing `patch-jwks-rsa.test.mjs` env failures - missing `node_modules/jwks-rsa/src/`),
+  `npm run test:ledger` 45/45.
+- OPEN (owner-gated): the sign-in ADOPT-vs-real-IDB flow is not exercised by mock E2E (no sign-in
+  there); needs a manual `dev:emulator` spot-check before merge. CANELO 4,500-scan rerun recommended
+  after merge to prove the quota wall is gone end to end. NOT pushed/deployed - awaiting owner review.
+
 ## Checkpoint 2026-07-29: $150/mo product-readiness master plan + docs-consolidation executed (~19 agents, 4 waves); virtual-shops harness proven live
 
 Two plans landed tonight, both on `chore/docs-consolidation`:
