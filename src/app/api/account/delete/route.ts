@@ -4,6 +4,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { isLiveAuth } from "@/services/auth/authMode";
+import { intEnv, checkRateLimit } from "@/services/security/aiSpendGuard";
+import { ladderStorage } from "@/server/upc/storage";
+import { logServerEvent } from "@/server/log";
 
 export const runtime = "nodejs";
 
@@ -124,6 +127,30 @@ export async function POST(request: NextRequest) {
   // destructive than day-to-day admin duties) must never be able to purge tenant data.
   if (memberRole !== "owner") {
     return json({ error: "Only the business owner can delete this account." }, 403);
+  }
+
+  // Rate limit AFTER role verification (rejected non-owners never consume the owner's bucket,
+  // mirroring the export route) and BEFORE the phrase check (a phrase-guessing loop is exactly
+  // the abuse this bounds). Durable Turso-backed limiter; verified identities only in the key;
+  // fail CLOSED - if the limiter store is down we refuse an irreversible action rather than
+  // allow an unmetered one.
+  try {
+    const rl = await checkRateLimit(`DELETE:${businessId}:${uid}`, {
+      limit: intEnv(process.env.ACCOUNT_DELETE_RATE_LIMIT, 3),
+      windowMs: intEnv(process.env.ACCOUNT_DELETE_RATE_WINDOW_MS, 3_600_000),
+      storage: await ladderStorage(),
+      failClosedOnStorageError: true,
+    });
+    if (!rl.allowed) {
+      logServerEvent({ route: "/api/account/delete", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
+      return NextResponse.json(
+        { error: "Too many deletion attempts. Wait and try again.", retryAfterMs: rl.retryAfterMs },
+        { status: 429, headers: { "Cache-Control": "no-store", "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } },
+      );
+    }
+  } catch {
+    logServerEvent({ route: "/api/account/delete", event: "error", reasonCode: "rate_limit_storage_failed", status: 503 });
+    return json({ error: "Could not verify request rate. Try again shortly." }, 503);
   }
 
   // Confirmation phrase is checked AFTER role verification (never leak deletion capability via the

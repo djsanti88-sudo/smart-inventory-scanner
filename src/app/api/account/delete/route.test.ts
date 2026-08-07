@@ -57,6 +57,13 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   }),
 }));
 
+vi.mock("@/server/upc/storage", () => ({ ladderStorage: vi.fn(async () => ({})) }));
+vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
+  return { ...real, checkRateLimit: vi.fn(async () => ({ allowed: true, retryAfterMs: 0, remaining: 99 })) };
+});
+vi.mock("@/server/log", () => ({ logServerEvent: vi.fn() }));
+
 import { POST } from "@/app/api/account/delete/route";
 
 function deleteRequest(body: unknown): NextRequest {

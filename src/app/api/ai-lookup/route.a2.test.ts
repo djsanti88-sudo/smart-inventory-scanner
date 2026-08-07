@@ -41,6 +41,12 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: vi.fn().mockResolvedValue({ uid: "u1", email: "a@b.co" }) }),
   getAdminDb: () => ({ doc: () => ({ get: async () => ({ exists: true }) }) }),
 }));
+// Boss-for-everyone (Option A, 2026-08-07): every authed member now reaches the trusted-exact path
+// before the ladder. Mock a clean MISS so authed decodes fall through to the real pipeline exactly as
+// before (these tests assert the per-account/global cap accounting done by the ladder, not the corpus).
+vi.mock("@/server/tire-knowledge/TireKnowledgeProvider", () => ({
+  resolveTrustedExactBarcodeDecision: vi.fn().mockResolvedValue({ kind: "miss" }),
+}));
 
 import { POST } from "@/app/api/ai-lookup/route";
 import { __resetForTest, readDailyUsed, readDailyUsedForAccount } from "@/services/security/aiSpendGuard";

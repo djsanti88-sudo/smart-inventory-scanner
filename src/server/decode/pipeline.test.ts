@@ -292,6 +292,23 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     expect(hitAnAiProvider()).toBe(false);
   });
 
+  it("god: an exhausted daily cap does NOT block the paid ladder, and the slot IS still charged (cost-truth)", async () => {
+    // GOD ACCOUNT (owner order 2026-08-07): the platform owner is never blocked by the daily cap, but
+    // MUST still be counted. Same setup as the cap-blocked test above (LIMIT=0, Brave key so paid work is
+    // possible) - the ONLY difference is god:true. Expect a computed (not cap_blocked) result AND the
+    // counter advanced by one (spend recorded), proving god skips the throw but keeps the charge.
+    process.env.AI_LOOKUP_DAILY_LIMIT = "0";
+    process.env.BRAVE_SEARCH_API_KEY = "test-brave-key";
+    const outcome = await runDecodePipeline({ ...makeReq("111000222333"), god: true });
+
+    // Not cap_blocked - god bypasses the DailyCapExceededError throw.
+    expect(outcome.kind).toBe("computed");
+    // But the slot was STILL charged (cost-truth: god spend is recorded, only the block is lifted).
+    expect(await readDailyUsed(await ladderStorage())).toBe(1);
+    // Still no LIVE provider was contacted (no OpenAI/Firecrawl keys; Brave discovery + stubbed 404s).
+    expect(hitAnAiProvider()).toBe(false);
+  });
+
   it("L6: a fully KEYLESS total-miss run NEVER charges the cap, even with AI_LOOKUP_DAILY_LIMIT=0 (no paid rung could run anyway)", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // already at/over the cap - but irrelevant with zero keys
     // beforeEach already deletes every provider key - paidWorkPossible("111000222333") is false, so the

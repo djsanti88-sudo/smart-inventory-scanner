@@ -27,6 +27,7 @@ import { cleanScanCode } from "@/services/scanCleaner";
 import { resolveTrustedExactBarcodeDecision } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { getTireExactIndexFingerprint, hasBossHmacKeyConfigured } from "@/server/tire-knowledge/tireExactIndex";
 import { trustedExactRateLimiter } from "@/services/security/trustedExactRateLimit";
+import { isPlatformOwnerServer } from "@/services/security/roleAccess";
 
 // FAST-FIRST: cheap/fast models do the first pass (+ page-fetch). The slow PRO models are only used
 // to escalate when the fast pass found no product. All overridable via env. (Reported by GET only;
@@ -327,6 +328,11 @@ export async function POST(request: Request) {
   // per-account - a 401/403 request must never touch a counter key.
   let authedBusinessId: string | null = null;
   let authedUid: string | null = null;
+  // GOD ACCOUNT (owner order 2026-08-07): the platform owner bypasses every server spend/rate/cap gate
+  // (but NOT the kill switch). Derived ONLY from the freshly verified token + the SERVER-ONLY
+  // PLATFORM_OWNER_UIDS/EMAILS allowlist (isPlatformOwnerServer) - never NEXT_PUBLIC_*, never a request
+  // header/body flag, so a customer cannot forge it. Stays false in mock/E2E (no verifiable token).
+  let isGod = false;
   if (isLiveAuth() && !e2eMode()) {
     const idToken = (body as { idToken?: string }).idToken ?? "";
     const bizId = (body as { businessId?: string }).businessId ?? "";
@@ -337,9 +343,16 @@ export async function POST(request: Request) {
       return Response.json({ error: "Missing businessId.", reasonCode: "no_business" }, { status: 400 });
     }
     let uid = "";
+    let email: string | null = null;
     try {
       const decoded = await getAdminAuth().verifyIdToken(idToken);
       uid = decoded.uid;
+      // GOD ACCOUNT security (2026-08-07): the god email arm must NEVER fire on an UNVERIFIED email
+      // claim - anyone presenting a project-valid token whose email == the owner's string with
+      // email_verified:false would otherwise become god. Trust the email ONLY when Firebase says it is
+      // verified; otherwise leave it null (the UID arm still lights up god for the real owner, whose
+      // uid is in PLATFORM_OWNER_UIDS). `email` is used exclusively for the isGod computation below.
+      email = decoded.email_verified ? (decoded.email ?? null) : null;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (/credential|GOOGLE_APPLICATION_CREDENTIALS|default credentials|service account|ENOENT/i.test(msg)) {
@@ -356,6 +369,9 @@ export async function POST(request: Request) {
     }
     authedBusinessId = bizId;
     authedUid = uid;
+    // Server-verified, un-spoofable: reads the NON-PUBLIC allowlist over the cryptographically verified
+    // token identity. An allowlisted UID OR email lights this up. Threaded into every gate below.
+    isGod = isPlatformOwnerServer({ uid: authedUid, email });
   }
 
   // Keep the exact scanned identifier local to the trusted index. The AI sanitizer intentionally masks
@@ -410,27 +426,40 @@ export async function POST(request: Request) {
   const isDecodeMode = body.mode === "decode" || body.mode === "decode-deep";
   const forceRetry = body.forceRetry === true;
 
-  // Authenticated Boss exact path. The request boolean can only reduce work; it never grants access.
-  // Access is derived exclusively from a freshly verified token, current membership, and a server-only
-  // business allowlist. The uid+business scanner limiter runs before both hits and misses.
+  // BOSS FOR EVERYONE (owner order 2026-08-07, Option A full): the boss/supplier corpus is main-database
+  // product identity meant for EVERY authenticated account, so access is now any verified member
+  // (authedUid + authedBusinessId present) - the TRUSTED_EXACT_BOSS_BUSINESS_IDS allowlist no longer
+  // gates it. The request boolean still can only reduce work; it never grants access. Every integrity
+  // gate is preserved downstream (HMAC manifest + per-shard SHA-256 in resolveTrustedExactBarcodeDecision,
+  // the package-code block, and the public-barcode-shape auto-count gate in decideDecode). The uid+business
+  // scanner limiter still runs before both hits and misses - EXCEPT for the god account, which bypasses it.
   const trustedBossAccess = Boolean(
-    isDecodeMode && authedUid && authedBusinessId && trustedBossBusinessIds().has(authedBusinessId),
+    isDecodeMode && authedUid && authedBusinessId,
   );
   if (trustedBossAccess && authedUid && authedBusinessId) {
-    const exactRate = trustedExactRateLimiter.check(authedUid, authedBusinessId);
-    if (!exactRate.allowed) {
-      return Response.json(
-        { error: "Too many trusted exact lookups. Slow down and try again.", reasonCode: "trusted_exact_rate_limited" },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(exactRate.retryAfterMs / 1000)) } },
-      );
+    if (!isGod) {
+      const exactRate = trustedExactRateLimiter.check(authedUid, authedBusinessId);
+      if (!exactRate.allowed) {
+        return Response.json(
+          { error: "Too many trusted exact lookups. Slow down and try again.", reasonCode: "trusted_exact_rate_limited" },
+          { status: 429, headers: { "Retry-After": String(Math.ceil(exactRate.retryAfterMs / 1000)) } },
+        );
+      }
     }
     const exact = await resolveTrustedExactBarcodeDecision(exactCode, { authenticatedBossCorpus: true });
     if (exact.kind === "hit") {
       const index = await getTireExactIndexFingerprint();
       const canonicalId = exact.result.decision.trustedExactCanonicalProductId;
       if (!index || (exact.sourceScope === "authenticated_boss_corpus" && !canonicalId)) {
-        return Response.json(deterministicMissBody("exact_index_unavailable", "Trusted exact index verification is unavailable.", "trusted_exact_unavailable"));
-      }
+        // L16 (probes never dead-end): the shard returned a hit but its integrity fingerprint cannot be
+        // verified, so the hit is untrustworthy. The deterministicOnly probe reports the honest
+        // unavailable signal; the FULL decode path falls through to the ladder rather than dead-ending
+        // this (and, under Option A, every) code to Needs Review on an index-integrity gap.
+        if (isDecodeMode && body.deterministicOnly === true) {
+          return Response.json(deterministicMissBody("exact_index_unavailable", "Trusted exact index verification is unavailable.", "trusted_exact_unavailable"));
+        }
+        // else: fall through to the full ladder (skip returning the unverifiable hit).
+      } else {
       const result = exact.result.results[0];
       return Response.json({
         mode: "decode",
@@ -472,6 +501,7 @@ export async function POST(request: Request) {
           index,
         },
       });
+      }
     }
     if (exact.kind === "blocked_package") {
       return Response.json(deterministicMissBody("blocked_package", "This package barcode requires review.", "trusted_exact_blocked_package"));
@@ -490,7 +520,15 @@ export async function POST(request: Request) {
         status: 200,
         detail: hasBossHmacKeyConfigured() ? "shard_or_manifest_invalid" : "missing_hmac_key",
       });
-      return Response.json(deterministicMissBody("exact_index_unavailable", "Trusted exact lookup requires review.", "trusted_exact_unavailable"));
+      // L16 (owner rule 2026-08-05, "probes never dead-end") + Option A: every authed user now hits this
+      // trusted path, so a missing/rotated HMAC key or a failed shard SHA must NOT short-circuit EVERY
+      // customer's decode to Needs Review. The deterministicOnly PROBE still returns its honest
+      // unavailable signal (so the client knows the index could not be consulted); the FULL decode path
+      // FALLS THROUGH to the cost-ordered ladder (Go-UPC/Fetch/GPT/corpus) so codes still resolve.
+      if (isDecodeMode && body.deterministicOnly === true) {
+        return Response.json(deterministicMissBody("exact_index_unavailable", "Trusted exact lookup requires review.", "trusted_exact_unavailable"));
+      }
+      // else: do not return - continue to the full ladder below.
     }
   }
 
@@ -515,18 +553,22 @@ export async function POST(request: Request) {
       logServerEvent({ route: "/api/ai-lookup", event: "kill_switch", reasonCode: "kill_switch", status: 503 });
       return Response.json({ error: "AI lookup is temporarily disabled.", reasonCode: "kill_switch" }, { status: 503 });
     }
-    const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "local";
-    try {
-      const rl = await checkRateLimit(clientIp, { storage: await ladderStorage() });
-      if (!rl.allowed) {
-        logServerEvent({ route: "/api/ai-lookup", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
-        return Response.json(
-          { error: "Too many requests. Slow down and try again.", reasonCode: "rate_limited" },
-          { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } },
-        );
+    // GOD ACCOUNT bypasses the per-IP rate limit (the kill switch above is NOT bypassed - it stays
+    // enforced for everyone, god included, because it is the owner's own emergency stop).
+    if (!isGod) {
+      const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "local";
+      try {
+        const rl = await checkRateLimit(clientIp, { storage: await ladderStorage() });
+        if (!rl.allowed) {
+          logServerEvent({ route: "/api/ai-lookup", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
+          return Response.json(
+            { error: "Too many requests. Slow down and try again.", reasonCode: "rate_limited" },
+            { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } },
+          );
+        }
+      } catch {
+        logServerEvent({ route: "/api/ai-lookup", event: "rate_limit_unavailable", reasonCode: "storage_error", status: 200 });
       }
-    } catch {
-      logServerEvent({ route: "/api/ai-lookup", event: "rate_limit_unavailable", reasonCode: "storage_error", status: 200 });
     }
   }
 
@@ -555,7 +597,8 @@ export async function POST(request: Request) {
       // Per-account cap FIRST (primary gate for authed traffic).
       const acctUsed = await readDailyUsedForAccount(ladderStore, authedBusinessId);
       const acctLimit = intEnv(process.env.AI_LOOKUP_ACCOUNT_DAILY_LIMIT, limit);
-      if (acctUsed >= acctLimit) {
+      // GOD ACCOUNT: never BLOCKED by the per-account cap, but still CHARGED below (cost-truth).
+      if (acctUsed >= acctLimit && !isGod) {
         logServerEvent({
           route: "/api/ai-lookup",
           event: "cap_blocked",
@@ -573,7 +616,8 @@ export async function POST(request: Request) {
       // has account budget remaining.
       const backstop = intEnv(process.env.AI_LOOKUP_GLOBAL_BACKSTOP, limit * 10);
       const used = await readDailyUsed(ladderStore);
-      if (used >= backstop) {
+      // GOD ACCOUNT: never BLOCKED by the global backstop either, but still CHARGED below (cost-truth).
+      if (used >= backstop && !isGod) {
         logServerEvent({
           route: "/api/ai-lookup",
           event: "cap_blocked",
@@ -638,7 +682,10 @@ export async function POST(request: Request) {
       const ladderStore = await ladderStorage();
       const acctUsed = await readDailyUsedForAccount(ladderStore, authedBusinessId);
       const acctLimit = intEnv(process.env.AI_LOOKUP_ACCOUNT_DAILY_LIMIT, intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 2000));
-      if (acctUsed >= acctLimit) {
+      // GOD ACCOUNT: never BLOCKED by the decode per-account cap. The pipeline's chargePaidSlot still
+      // charges the slot on a genuine paid compute (god:true only lifts the throw, not the charge), so
+      // god decode spend is still recorded. accountCapCleared stays true so nothing downstream re-gates.
+      if (acctUsed >= acctLimit && !isGod) {
         logServerEvent({
           route: "/api/ai-lookup",
           event: "cap_blocked",
@@ -673,6 +720,10 @@ export async function POST(request: Request) {
       // GC-A: undefined for anonymous traffic (pipeline default behavior unchanged); set for authed
       // traffic once the per-account gate above has run (accountCapCleared reflects the gate's outcome).
       capContext: authedBusinessId ? { authedBusinessId, accountCapCleared } : undefined,
+      // GOD ACCOUNT: lifts the pipeline's paid-ladder BLOCK gates (chargePaidSlot throw, GPT $/day
+      // budget, Go-UPC monthly cap) while every charge/record still fires (cost-truth). Server-verified
+      // above; never a client value.
+      god: isGod,
     });
     if (outcome.kind === "persisted") {
       // FIX 4 (review MEDIUM, stale-verified replay + transaction storm): NEVER appends here. A cached/
