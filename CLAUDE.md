@@ -146,7 +146,7 @@ is a plain local `node:test` suite (runs today, not gated); only live-app-drivin
 ## Optimistic State, Offline, Idempotent Sync
 - Known scans update Zustand immediately; the UI never waits on a server round-trip. Persist AFTER
   the user sees feedback. scanFeed, finalCounts, needsReviewQueue, pendingSyncQueue, and synced ids
-  survive refresh (localStorage; IndexedDB is the documented next upgrade).
+  survive refresh (IndexedDB primary since #27, localStorage fallback + one-time forward migration).
 - Scans work offline; failed sync marks items "pending" ("Saved locally, not synced yet") and retries
   on reconnect + via a visible Retry button. Never lose a completed scan to a network failure; never
   block scanning on the backend.

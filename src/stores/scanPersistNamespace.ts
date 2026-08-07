@@ -2,10 +2,31 @@
 // "sis-scan-v1" byte-for-byte so demos and every existing test are unaffected; a signed-in user gets
 // their own "sis-scan-<uid>" key so two users on one browser never share persisted state.
 
+import { createIdbBacking, type AsyncBacking } from "@/stores/idbBacking";
+
 const LEGACY_KEY = "sis-scan-v1";
+
+/** Exported alias so async consumers can import the literal key by name. */
+export const LEGACY_PERSIST_KEY = LEGACY_KEY;
 
 export function persistKeyForUid(uid: string | null): string {
   return uid ? `sis-scan-${uid}` : LEGACY_KEY;
+}
+
+function idb(): AsyncBacking | null {
+  try {
+    return createIdbBacking();
+  } catch {
+    return null;
+  }
+}
+
+function ls(): Pick<Storage, "getItem" | "setItem" | "removeItem"> | null {
+  try {
+    return typeof window !== "undefined" && window.localStorage ? window.localStorage : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -16,8 +37,11 @@ export function persistKeyForUid(uid: string | null): string {
  * needsReviewQueue is treated as ABSENT. Conservative on failure: a missing key, or a blob that cannot be
  * parsed, still counts as present (we never suppress the banner for something we could not inspect).
  */
-export function hasLegacyBlob(storage: Storage): boolean {
-  const raw = storage.getItem(LEGACY_KEY);
+// Shared predicate so the sync (localStorage-only) and async (IDB-aware) meaningful-blob checks
+// can never drift from each other. null -> false (nothing present); unparseable-but-present ->
+// true (conservative: never suppress the banner for something we could not inspect); else true
+// iff scanFeed OR finalCounts OR needsReviewQueue is non-empty.
+function legacyBlobIsMeaningful(raw: string | null): boolean {
   if (raw === null) return false;
   let parsed: unknown;
   try {
@@ -30,6 +54,10 @@ export function hasLegacyBlob(storage: Storage): boolean {
   const hasCounts = Array.isArray(state?.finalCounts) && state.finalCounts.length > 0;
   const hasReviews = Array.isArray(state?.needsReviewQueue) && state.needsReviewQueue.length > 0;
   return hasScans || hasCounts || hasReviews;
+}
+
+export function hasLegacyBlob(storage: Storage): boolean {
+  return legacyBlobIsMeaningful(storage.getItem(LEGACY_KEY));
 }
 
 /**
@@ -64,4 +92,96 @@ export function migrateLegacyBlobOnce(uid: string, storage: Storage): void {
   }
   storage.setItem(targetKey, JSON.stringify(parsed));
   storage.removeItem(LEGACY_KEY); // consumed: a second sign-in can never inherit it
+}
+
+// ---------------------------------------------------------------------------------------------
+// IDB-aware async variants (#27 IndexedDB migration). IDB is the primary backing when available;
+// localStorage is the fallback (SSR/jsdom/lockdown browsers with no indexedDB). These are used by
+// BusinessContextGate and scanStore once the persist backing has moved off localStorage.
+// ---------------------------------------------------------------------------------------------
+
+/** Reads `key` from IDB first (when available), falling back to localStorage. Fail-soft: null on any error. */
+export async function getPersistedBlob(key: string): Promise<string | null> {
+  const backing = idb();
+  if (backing) {
+    try {
+      const value = await backing.getItem(key);
+      if (value !== null) return value;
+    } catch {
+      // fall through to localStorage
+    }
+  }
+  const storage = ls();
+  if (!storage) return null;
+  try {
+    return storage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/** Plain existence check (IDB or localStorage). Use ONLY for a plain "does this key exist" check
+ * (e.g. the adopt banner's alreadyOwn check) - never for the legacy-blob adopt-banner decision,
+ * which needs the meaningful-data check below (N2). */
+export async function hasPersistedBlobAsync(key: string): Promise<boolean> {
+  return (await getPersistedBlob(key)) !== null;
+}
+
+/**
+ * Async counterpart to `hasLegacyBlob`, IDB-aware. Uses the SAME `legacyBlobIsMeaningful`
+ * predicate so the two can never drift (N2: sign-out's wipe write deposits an effectively-empty
+ * blob into the legacy key, and the adopt banner must NOT appear for it).
+ */
+export async function hasMeaningfulLegacyBlobAsync(): Promise<boolean> {
+  return legacyBlobIsMeaningful(await getPersistedBlob(LEGACY_KEY));
+}
+
+/**
+ * Async counterpart to `migrateLegacyBlobOnce`, IDB-aware. Same contract: idempotent (no-op if the
+ * per-uid slot already holds data), copies + normalizes quantityDelta:0 -> 1, then deletes the
+ * legacy blob from BOTH stores only after the copy has landed successfully.
+ */
+export async function migrateLegacyBlobOnceAsync(uid: string): Promise<void> {
+  const targetKey = persistKeyForUid(uid);
+  if (targetKey === LEGACY_KEY) return;
+  if (await hasPersistedBlobAsync(targetKey)) return; // already adopted: leave everything as-is
+  const raw = await getPersistedBlob(LEGACY_PERSIST_KEY);
+  if (raw === null) return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return; // unreadable legacy blob: nothing safe to adopt
+  }
+  const docState = parsed as { state?: { scanFeed?: Array<{ quantityDelta?: number }> } };
+  const feed = docState?.state?.scanFeed;
+  if (Array.isArray(feed)) {
+    for (const row of feed) {
+      if (row && row.quantityDelta === 0) row.quantityDelta = 1;
+    }
+  }
+  const normalized = JSON.stringify(parsed);
+  const backing = idb();
+  if (backing) {
+    await backing.setItem(targetKey, normalized); // throws propagate: never remove the anon blob on a failed copy
+  } else {
+    ls()?.setItem(targetKey, normalized);
+  }
+  removePersistedKeyEverywhere(LEGACY_PERSIST_KEY); // consumed only after the copy landed
+}
+
+/** Fail-soft removal of `key` from both stores. Never throws. */
+export function removePersistedKeyEverywhere(key: string): void {
+  try {
+    ls()?.removeItem(key);
+  } catch {
+    // ignore
+  }
+  try {
+    void idb()
+      ?.removeItem(key)
+      .catch(() => undefined);
+  } catch {
+    // ignore
+  }
 }

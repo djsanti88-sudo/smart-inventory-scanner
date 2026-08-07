@@ -88,10 +88,16 @@ import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
-import { createCoalescedFailSoftPersistStorage } from "@/stores/scanPersistStorage";
+import { createCoalescedFailSoftPersistStorage, createAsyncCoalescedFailSoftPersistStorage } from "@/stores/scanPersistStorage";
+import { createIdbBacking } from "@/stores/idbBacking";
 import { emptyTenantState } from "@/stores/scanReset";
 import { clearSelectedBusinessId } from "@/lib/selectedBusiness";
-import { persistKeyForUid, migrateLegacyBlobOnce } from "@/stores/scanPersistNamespace";
+import {
+  persistKeyForUid,
+  migrateLegacyBlobOnce,
+  migrateLegacyBlobOnceAsync,
+  removePersistedKeyEverywhere,
+} from "@/stores/scanPersistNamespace";
 import { getOrCreateDeviceId } from "@/services/deviceIdentity";
 import { shouldReuseSession, buildAutoSessionName } from "@/services/sessions/autoSession";
 import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
@@ -2376,7 +2382,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (typeof window !== "undefined" && window.localStorage) {
           try {
             clearSelectedBusinessId(); // sis-selected-business-v1 is NOT uid-namespaced: explicit clear
-            if (uid) window.localStorage.removeItem(persistKeyForUid(uid));
+            if (uid) removePersistedKeyEverywhere(persistKeyForUid(uid));
           } catch {
             // ignore storage errors: the in-memory reset above already holds
           }
@@ -2402,12 +2408,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         return Promise.resolve();
       },
 
-      adoptLegacyLocalData: (uid: string) => {
-        if (typeof window === "undefined" || !window.localStorage) return Promise.resolve();
+      adoptLegacyLocalData: async (uid: string) => {
+        if (typeof window === "undefined" || !window.localStorage) return;
         // OWNER-INITIATED adopt: copy sis-scan-v1 into this uid's key (normalizing quantityDelta:0),
         // DELETE the legacy blob, then hydrate from the adopted key. Returns the rehydrate promise so
         // callers can await it before setBusinessContext (same ordering rule as the main gate path).
-        migrateLegacyBlobOnce(uid, window.localStorage);
+        // IDB-aware: when IndexedDB is the active persist backing, migrate through the async/IDB path
+        // so the copy actually lands where the store will read it from; otherwise fall back to the
+        // original synchronous localStorage-only migration.
+        if (typeof indexedDB !== "undefined") {
+          await migrateLegacyBlobOnceAsync(uid);
+        } else {
+          migrateLegacyBlobOnce(uid, window.localStorage);
+        }
         return get().rehydrateForUid(uid);
       },
 
@@ -7714,7 +7727,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (!cloudBackend) db.reset();
         if (typeof window !== "undefined" && window.localStorage) {
           try {
-            window.localStorage.removeItem("sis-scan-v1");
+            removePersistedKeyEverywhere("sis-scan-v1");
+            const currentUid = get().userId;
+            if (currentUid) removePersistedKeyEverywhere(persistKeyForUid(currentUid));
             window.localStorage.removeItem("sis-mockdb-v1");
           } catch {
             // ignore
@@ -8363,7 +8378,18 @@ export const useScanStore = create<ScanState>()(
     // PersistStorage<S> directly so the stringify itself, not just the disk write, is coalesced to at
     // most one per tick. See scanPersistStorage.ts. IndexedDB migration remains the recommended
     // architectural follow-up.
-    storage: createCoalescedFailSoftPersistStorage(() => localStorage),
+    // #27: IndexedDB is the primary persist backing (localStorage's ~5MB quota bricked large real-
+    // backend sessions ~500 scans in). Feature-detected once at store creation: no indexedDB (SSR,
+    // jsdom, lockdown) -> the previous localStorage path, byte-for-byte identical behavior. When IDB
+    // is active, migrateFrom copies a legacy localStorage blob forward on first read (copy-then-clear).
+    storage: (() => {
+      const idb = typeof indexedDB !== "undefined" ? createIdbBacking() : null;
+      return idb
+        ? createAsyncCoalescedFailSoftPersistStorage(() => idb, {
+            migrateFrom: typeof localStorage !== "undefined" ? localStorage : undefined,
+          })
+        : createCoalescedFailSoftPersistStorage(() => localStorage);
+    })(),
     skipHydration: true,
     migrate: scanStoreMigrate,
     // Sec-4: split persisted state by access level. A customer browser must NEVER persist the reusable

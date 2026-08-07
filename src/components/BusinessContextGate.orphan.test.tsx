@@ -18,6 +18,8 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/stores/scanPersistNamespace", () => ({
   hasLegacyBlob: () => false,
+  hasMeaningfulLegacyBlobAsync: async () => false,
+  hasPersistedBlobAsync: async () => false,
   persistKeyForUid: () => "sis-scan-user",
 }));
 vi.mock("@/stores/scanStore", () => ({
