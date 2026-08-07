@@ -123,8 +123,11 @@ worktrees are unchanged apart from the 11 removed above.
 - A BOM character was found in the `NEXT_PUBLIC_AUTH_MODE` Vercel env value —
   strip it before it causes a string-comparison bug in auth-mode branching.
 - `post-deploy-smoke.yml` still needs `ref: github.sha` hardening (pending).
-- A restore drill (Firestore backup/PITR recovery proof) has never been run —
-  backup/recovery readiness is unverified.
+- Backup/recovery: VERIFIED 2026-08-07. The Firestore restore drill passed end to end
+  (PITR-window export -> import into scratch DB `drill-20260807`, 78,979 docs, spot-checked
+  vs live source, cleaned up) and a weekly scheduled backup is now live on `(default)`
+  (Sunday, 28-day retention). Root cause of the prior block: Firestore service agent missing
+  `roles/datastore.importExportAdmin` (now granted, retained). See `docs/RECOVERY.md` (F-08 CLOSED).
 - F-01/F-07 rules/indexes redeploy is pending, owner-gated (Firestore security rules
   and composite indexes not yet pushed live).
 - ~30 local worktrees exist under `C:/tmp/*` and `.claude/worktrees/*`, one per
