@@ -6,7 +6,7 @@ import { useScanStore } from "@/stores/scanStore";
 import { getSession, listMemberships } from "@/lib/auth";
 import { getSelectedBusinessId, isFirebaseBackend } from "@/lib/selectedBusiness";
 import { isLiveAuth } from "@/services/auth/authMode";
-import { hasLegacyBlob, persistKeyForUid } from "@/stores/scanPersistNamespace";
+import { hasMeaningfulLegacyBlobAsync, hasPersistedBlobAsync, persistKeyForUid } from "@/stores/scanPersistNamespace";
 
 // Bounded wait for the bootstrap chain's own async steps (getSession's onAuthStateChanged wait,
 // listMemberships' getDocs). Firebase Auth persistence restore / Firestore reads can hang
@@ -61,9 +61,9 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
         if (!membership) { setStatus("no-business"); return; }
 
         // Legacy pre-account data on this browser + no per-uid key yet: the OWNER decides.
-        const legacy = typeof window !== "undefined" && hasLegacyBlob(window.localStorage);
+        const legacy = typeof window !== "undefined" && (await hasMeaningfulLegacyBlobAsync());
         const alreadyOwn =
-          typeof window !== "undefined" && window.localStorage.getItem(persistKeyForUid(user.uid)) !== null;
+          typeof window !== "undefined" && (await hasPersistedBlobAsync(persistKeyForUid(user.uid)));
         if (legacy && !alreadyOwn) {
           setPendingCtx({ businessId: membership.businessId, uid: user.uid });
           setStatus("adopt-choice");
