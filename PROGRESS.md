@@ -2,7 +2,7 @@
 
 > Live status checkpoint. Update after every phase so a fresh session continues without guessing.
 > The full 2026-06 phase log is archived verbatim in `docs/archive/PROGRESS_HISTORY_2026-06.md`.
-> Last updated: 2026-07-28.
+> Last updated: 2026-08-07.
 
 ## Standing hazards
 
@@ -11,6 +11,27 @@
   `docs/CURRENT_CONTEXT.md`; see `docs/archive/CURRENT_CONTEXT-2026-07-12.md`.)
 
 Current status = the checkpoints below (newest first) + `REPO_HEALTH.md` for repo/branch sync truth.
+
+## Checkpoint 2026-08-07: Firestore restore drill PASSED — F-08 CLOSED + weekly backup live
+
+Executed the `2026-08-07-restore-drill-unblock.md` plan (owner-pre-approved), all four tasks, against
+the live `smart-inventory-scanner-app` GCP project. Production `(default)` was READ-ONLY throughout.
+
+- **Root cause found + fixed:** the 2026-07-29/30 import `PERMISSION_DENIED` was the Firestore service
+  agent (`service-368038862704@gcp-sa-firestore.iam.gserviceaccount.com`) missing project-level
+  `roles/datastore.importExportAdmin` (had only `roles/firestore.serviceAgent`). No org policy / VPC-SC
+  in play. Granted the role (retained for future drills).
+- **Drill passed end to end:** PITR-window export at snapshot `2026-08-07T14:09:00Z` (scoped to
+  `businesses,businessMembers,businessProvisioningRequests,userProfiles,catalogEntries`, excluding the
+  ~4M-doc `retailCatalogEntries` mirror) -> 78,979 docs -> imported into scratch DB `drill-20260807` on
+  the FIRST attempt (78,979 docs). Spot-check: `businesses` identical 55-doc set in restore vs live
+  source; 3 restored docs confirmed (TEACH-BOT Tire Shop business + two verified tire `catalogEntries`).
+- **Weekly backup live:** scheduled backup on `(default)`, Sunday, 28-day retention — makes the
+  `--source-backup` restore path available going forward.
+- **Cleanup:** scratch bucket + `drill-20260807` DB deleted; only `(default)` remains (delete protection
+  still enabled). Docs updated: `docs/RECOVERY.md` (Sections 1/2.1/3/5, F-08 CLOSED), `REPO_HEALTH.md`.
+- Cost: backup-storage only (single-digit GiB, small monthly) — true spend = billing console after the
+  first Sunday backup lands. No paid-API or app-runtime spend.
 
 ## Checkpoint 2026-07-29: $150/mo product-readiness master plan + docs-consolidation executed (~19 agents, 4 waves); virtual-shops harness proven live
 
