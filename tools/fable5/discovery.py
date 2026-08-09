@@ -6,6 +6,7 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Iterator
 
 from .config import FableConfig
 from .models import CapabilityInventory
@@ -100,13 +101,27 @@ def _load_package_scripts(root: Path) -> tuple[str, ...]:
     return tuple(sorted(str(name) for name in data.get("scripts", {})))
 
 
+def _safe_glob(base: Path, pattern: str) -> Iterator[Path]:
+    # A dangling junction/symlink anywhere under base makes the lazy glob iterator raise
+    # OSError mid-walk (WinError 3 on Windows), which previously killed the whole engine.
+    # External tool caches are not ours to keep healthy; skip what cannot be walked.
+    iterator = base.glob(pattern)
+    while True:
+        try:
+            yield next(iterator)
+        except StopIteration:
+            return
+        except OSError:
+            return
+
+
 def _discover_skills(home: Path) -> tuple[str, ...]:
     roots = (home / ".codex" / "skills", home / ".codex" / "plugins" / "cache")
     found: set[str] = set()
     for base in roots:
         if not base.is_dir():
             continue
-        for path in base.glob("**/SKILL.md"):
+        for path in _safe_glob(base, "**/SKILL.md"):
             found.add(path.parent.name)
     return tuple(sorted(found))
 
@@ -116,7 +131,7 @@ def _discover_plugins(home: Path) -> tuple[str, ...]:
     found: set[str] = set()
     if not base.is_dir():
         return ()
-    for manifest in base.glob("**/.codex-plugin/plugin.json"):
+    for manifest in _safe_glob(base, "**/.codex-plugin/plugin.json"):
         try:
             data = json.loads(manifest.read_text(encoding="utf-8"))
             found.add(str(data.get("name") or manifest.parents[1].name))

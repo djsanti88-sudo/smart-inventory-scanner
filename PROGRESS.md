@@ -12,6 +12,121 @@
 
 Current status = the checkpoints below (newest first) + `REPO_HEALTH.md` for repo/branch sync truth.
 
+## Checkpoint 2026-08-09 (late): three review loops + deep-review panel over the tier-3 branch
+
+Owner ordered three full review-and-fix loops over the whole tier-3 delivery, then the approved
+deep-review panel (Codex gpt-5.6-sol xhigh clean-room; the Gemini/agy leg failed twice on a CLI
+hang and produced no verdict - reported honestly, not faked). Every finding was adjudicated against
+the repo and either fixed TDD (failing test first) or explicitly deferred to the owner list below.
+
+Fixed this pass (all uncommitted, working tree):
+- Loop 1: adopt rescope bug CLASS closed (all embedded idempotencyKeys, appliedIdempotencyKeys,
+  aiLookupLogs; invariant test: no "demo-business" string survives adoption); IDB cached-rejection
+  retry; migration writes routed through the coalesce queue; adopt-click error UI; email banner
+  honesty; cross-account legacy-key resurrection leak closed; Argus engine repaired (safe-glob);
+  tsc noise cleanup (backups/ excluded, stale WIP test archived).
+- Loop 2: the Loop-1 demotion latch was adversarially BROKEN and replaced with a simpler provable
+  design: per-store write stamps + newest-wins hydration + write-through-to-legacy on every failed
+  backing write (latch is now perf-only); adopt post-copy honesty (start-fresh hidden after the
+  copy landed); persistDegraded flag + SyncStatusBar warning; ~230 lines dead code deleted.
+- Loop 3: six defects in the new stamp design fixed (stamp-aware adopt reads via one shared
+  newest-wins function; atomic blob+stamp multi-put transaction; clock-rollback floor seeding;
+  calm copy for probe-demotion vs real-failure alarm; post-copy classification widened; stamp-aware
+  key removal).
+- Panel (Codex Sol): IDB durability now settles on transaction commit, not request success;
+  removal-generation guard kills the failure-fallback resurrection; torn blob/stamp reads fixed via
+  single-transaction getItems; adoption re-checks the source stamp before deleting it; adoption
+  falls back to localStorage when IDB is broken; legacy store uses a prefix envelope so blob+stamp
+  cannot split on quota. Security: delete route verifies checkRevoked (revoked sessions 401);
+  god grant re-verifies checkRevoked only when god would be granted; owner member row now deletes
+  LAST so delete retries genuinely re-authorize; cap slots charge at actual provider egress
+  (negative-cache / budget-declined rungs charge ZERO - L12); legacy charge path fails closed;
+  bulk pacer default aligned to the real server default (env-overridable, prod unchanged).
+- Post-panel seam fix: two dom test failures root-caused to URL-blind fetch mocks counting the
+  unpaced prefix-floor enrichment as decode POSTs - mocks fixed, dedupe guard mutation-proved, no
+  production change needed.
+
+Final gates (all green, verified by the orchestrator): tsc 0 errors; full vitest 4,087 passed
+(446 files); ledger 45/45; production build clean; Argus PASS 0 blockers; persist-indexeddb
+Playwright 2/2.
+
+OWNER DECISION LIST (deliberately NOT auto-fixed):
+1. Drop businessId from buildIdempotencyKey (kills the whole rescope-rewrite obligation; touches
+   server _appliedKeys compat).
+2. Atomic conditional daily-cap increment (needs the LadderStorage seam + an owner ruling on god
+   charged-but-never-blocked semantics at cap).
+3. Decouple the delete-route rate limiter from ladderStorage (GDPR erasure availability should not
+   depend on the decode cache DB).
+4. Multi-tab same-session scanning merges (whole-snapshot-wins is pre-existing; needs per-record
+   or leader design).
+5. Port the stranded cross-route rate-limit fix from worktree agent-a47380b0deaa5e8d2.
+6. Alerting on trusted-index integrity fallthrough (a missing HMAC key now walks every unknown
+   code into the paid ladder for all tenants - capped but silent).
+7. Retry-After retries bypass the client pacer budget (bounded, flagged, needs a proving test).
+8. Sweep the URL-blind fetch-mock class in store tests.
+9. Single-blob persist growth is unbounded now that the quota wall is gone (per-record IDB keys
+   would remove the main-thread stringify cost).
+
+## Checkpoint 2026-08-09: adopt sync defect found + fixed; both #27 proof gates PASSED
+
+Parallel verification run over `feat/tier3-hardening` (uncommitted working-tree state, owner review pending):
+
+- **Emulator adopt spot-check (round 1): FAIL, real defect found.** Adopting an anonymous session
+  rewrote only the OUTER `idempotencyKey` on queued sync items; the embedded `payload.idempotencyKey`
+  kept the stale `demo-business:` prefix, so `firebaseSyncSafety` rejected every adopted
+  `INCREMENT_COUNT` with `payload_idempotency_mismatch` - adopted scans could never sync (UI honest,
+  "Not saved yet", but permanent stranding).
+- **Fix (TDD, failing test first):** `rescopePlaceholderQueueItem` in `src/stores/scanStore.ts` now
+  remaps the embedded `payload.idempotencyKey` with the exact same prefix-only rule as the outer key
+  (retry-dedup identity preserved). New regression test in
+  `businessContextRescopeOnHydration.store.test.ts`. Gates: rescope 3/3, stores 669/669,
+  `test:ledger` 45/45, tsc clean for the change.
+- **Emulator adopt spot-check (round 2, against the fix): PASS.** Fresh emulators + fresh user;
+  pendingSyncQueue drained to 0 after adopt, Admin-SDK query showed correct `inventoryCounts` docs
+  for the adopted products, scan 4 = count 4, signed-in reload survival twice. Proof screenshots in
+  `e2e/proof/adopt-emulator-spotcheck/` (`rerun-*`). Note: reaching the signed-in flow locally needs
+  `NEXT_PUBLIC_AUTH_MODE=live` on top of `dev:emulator` (doc gap). Minor non-blocking observation:
+  transient "0 of 0 products" for a few seconds right after Adopt until the products listener fills.
+- **CANELO 4,500 rerun on IndexedDB: PASS.** 4,500 scans -> exactly 4,500 in feed and sumQty, pre AND
+  post reload; 7.4MB state blob proven in IDB `sis-scan-v1`, legacy localStorage key absent; 0 console
+  errors, 0 ai-lookup requests (mock isolation held). The localStorage quota wall is gone end to end.
+  Report + screenshots in `e2e/proof/canelo-idb-rerun/`.
+- **Housekeeping completion:** the two remaining tier-3 agent worktrees' dirt was verified to be
+  placeholder test residue (canonical `testing/app-knowledge/*` intact in the main tree); both
+  worktrees force-removed and branches deleted. The last agent worktree (`agent-a47380b0deaa5e8d2`,
+  old master PR #15 tip) holds an UNMERGED real fix: route-prefixed rate-limit keys + regression test
+  (ai-lookup POST and the three catalog routes currently share one raw-IP bucket). Worktree preserved;
+  porting the fix is a pending owner decision.
+
+**Open:** push/PR for `feat/tier3-hardening` (owner-gated); decision on porting the stranded
+rate-limit fix; optional doc note for the `NEXT_PUBLIC_AUTH_MODE=live` emulator recipe.
+
+## Checkpoint 2026-08-07: tier-3 trio merged into `feat/tier3-hardening` + housekeeping pass
+
+The three tier-3 execution worktree branches (IndexedDB #27, F-08 restore drill closure, auth
+hardening trio) are all merged into the local `feat/tier3-hardening` branch: merge commits
+`1e897480` (auth trio), `a804fa64` (IndexedDB #27), `6e9d033b` (F-08 docs + weekly backup
+schedule). Branch is unpushed; push/PR remains owner-gated.
+
+- Auth hardening trio (worktree tip `8d2ab358`): fail-closed DELETE rate limit (3/hour),
+  signup verification email, non-blocking verify banner on sign-in.
+- IndexedDB #27 persist migration (worktree tip `b90ebfb0`): see the checkpoint below for detail.
+- F-08 restore drill closure + weekly Sunday backup schedule (worktree tip `ed62675b`): see the
+  checkpoint below for detail.
+- Housekeeping (2026-08-07, this pass): `audit-fixes` branch re-verified 0 commits ahead of
+  master (100 behind) and deleted locally (`git branch -d`). Merged tier-3 agent worktree
+  `agent-a060cd1e7a15b8fa2` (F-08 docs) removed and its branch deleted. Two other tier-3 agent
+  worktrees (`agent-afca4b13cfa5c4430` IndexedDB, `agent-a7033b7cd3086551b` auth trio) were left
+  in place - both have uncommitted changes to `testing/app-knowledge/*` files and were skipped
+  per the no-force-delete rule; their content is already merged into `feat/tier3-hardening`; only
+  the worktree/branch cleanup is outstanding.
+
+**Open / parked:** (all resolved in the 2026-08-09 checkpoint above except push/PR)
+- Manual `dev:emulator` spot-check of the sign-in ADOPT-vs-real-IDB flow (IndexedDB #27) - DONE
+  2026-08-09: round 1 FAIL (adopt idempotency defect), fixed TDD, round 2 PASS.
+- CANELO 4,500-scan rerun - DONE 2026-08-09: PASS on IndexedDB.
+- Push/PR for `feat/tier3-hardening` - owner-gated, not pushed.
+
 ## Checkpoint 2026-08-07: IndexedDB persist migration (#27) implemented on worktree branch
 
 Plan `docs/superpowers/plans/2026-08-07-indexeddb-persist-migration.md` executed task-by-task (Opus

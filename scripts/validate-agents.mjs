@@ -22,8 +22,11 @@ export function validateAgentFile(text) {
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const dir = path.resolve('.claude/agents');
+  // External tool agents (copied in by plugins, not part of the review fleet) do not follow the
+  // house findings-block/score contract; validating them creates permanent false failures.
+  const EXTERNAL_AGENTS = new Set(['playwright-test-generator.md', 'playwright-test-healer.md', 'playwright-test-planner.md']);
   let bad = 0;
-  for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.md'))) {
+  for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.md') && !EXTERNAL_AGENTS.has(f))) {
     const res = validateAgentFile(fs.readFileSync(path.join(dir, f), 'utf8'));
     if (!res.ok) { bad++; console.error(`FAIL ${f}: ${res.errors.join('; ')}`); }
   }
