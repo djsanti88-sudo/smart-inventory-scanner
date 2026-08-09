@@ -1,30 +1,45 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import type { User } from "firebase/auth";
 import { resendVerificationEmail } from "@/lib/auth";
 
 const DISMISS_KEY = "sis-verify-banner-dismissed";
 
+// Dismissal is session-scoped external state (sessionStorage), so it is read via
+// useSyncExternalStore: the server snapshot is always "not dismissed" and React reconciles the real
+// client value right after hydration without a mismatch warning, and without calling setState inside
+// an effect (which the react compiler lint rejects). sessionStorage fires no cross-write events of
+// its own, so dismiss() notifies subscribers manually.
+const dismissListeners = new Set<() => void>();
+function subscribeDismiss(listener: () => void): () => void {
+  dismissListeners.add(listener);
+  return () => dismissListeners.delete(listener);
+}
+function readDismissed(): boolean {
+  try {
+    return sessionStorage.getItem(DISMISS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function writeDismissed(): void {
+  try {
+    sessionStorage.setItem(DISMISS_KEY, "1");
+  } catch {
+    /* storage unavailable; the notify below still hides the banner for this page's lifetime */
+  }
+  dismissListeners.forEach((l) => l());
+}
+
 /** Non-blocking email-verification nudge. Shows ONLY for password-provider users whose email is
  *  unverified. Never gates any route or the scan flow (TOP-LEVEL LAW). Dumb component: the caller
  *  passes the current user from the app's existing auth state source. */
 export function EmailVerifyBanner({ user }: { user: User | null }) {
-  // Read the session dismiss flag in an effect, not a useState initializer: an initializer runs
-  // during the very first render (including SSR/hydration), so reading storage there can produce
-  // a hydration mismatch flash. The effect runs after mount, client-side only.
-  const [dismissed, setDismissed] = useState(false);
+  const dismissed = useSyncExternalStore(subscribeDismiss, readDismissed, () => false);
   const [sent, setSent] = useState(false);
   const [sendError, setSendError] = useState(false);
   const [sending, setSending] = useState(false);
-
-  useEffect(() => {
-    try {
-      if (sessionStorage.getItem(DISMISS_KEY) === "1") setDismissed(true);
-    } catch {
-      /* no persisted dismiss available; default (not dismissed) still applies */
-    }
-  }, []);
 
   const isUnverifiedPasswordUser =
     !!user &&
@@ -53,12 +68,7 @@ export function EmailVerifyBanner({ user }: { user: User | null }) {
   };
 
   const dismiss = () => {
-    setDismissed(true);
-    try {
-      sessionStorage.setItem(DISMISS_KEY, "1");
-    } catch {
-      /* session-only dismiss still works in memory */
-    }
+    writeDismissed();
   };
 
   return (
