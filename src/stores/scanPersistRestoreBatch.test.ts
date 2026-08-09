@@ -1,10 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import {
-  createCoalescedFailSoftStorage,
-  createCoalescedFailSoftPersistStorage,
-} from "@/stores/scanPersistStorage";
+import { createCoalescedFailSoftPersistStorage } from "@/stores/scanPersistStorage";
 
 // Defect #37 layer 3 (fresh-device restore freeze, live-reproduced 2026-08-06): a 4,500-scanEvent /
 // 4,499-inventoryCount / ~1,800-product business restoring onto a fresh device froze the renderer in
@@ -57,6 +54,36 @@ function makeBacking() {
   };
 }
 
+// The OLD composition this file documents as the bug was `createJSONStorage(() => byteCoalescer)`,
+// where `byteCoalescer` was `createCoalescedFailSoftStorage` - a StateStorage that coalesced only the
+// already-serialized BYTES. That export was deleted in review round 2 (zero production callers; the
+// store uses the PersistStorage variants). Its shape is reproduced inline here so this test keeps
+// documenting the real historical composition and its exact costs.
+function makeByteCoalescedStorage(backing: ReturnType<typeof makeBacking>) {
+  let pendingName: string | null = null;
+  let pendingValue = "";
+  let scheduled = false;
+  const flush = () => {
+    scheduled = false;
+    if (pendingName === null) return;
+    const [name, value] = [pendingName, pendingValue];
+    pendingName = null;
+    pendingValue = "";
+    backing.setItem(name, value);
+  };
+  return {
+    getItem: (name: string) => backing.getItem(name),
+    removeItem: (name: string) => backing.removeItem(name),
+    setItem: (name: string, value: string) => {
+      pendingName = name;
+      pendingValue = value;
+      if (scheduled) return;
+      scheduled = true;
+      setTimeout(flush, 0);
+    },
+  };
+}
+
 // Fires the exact shape of the restore chain: N back-to-back set() calls with NO await/timer between
 // them (persist.rehydrate, setHasHydrated, setBusinessContext's sync branch, and its async loader's
 // single merge all land inside the same microtask/tick in the real restore path).
@@ -83,7 +110,7 @@ describe("restore-batch persist serialization (defect #37 layer 3)", () => {
         }),
         {
           name: "restore-batch-old",
-          storage: createJSONStorage(() => createCoalescedFailSoftStorage(() => backing)),
+          storage: createJSONStorage(() => makeByteCoalescedStorage(backing)),
         },
       ),
     );
