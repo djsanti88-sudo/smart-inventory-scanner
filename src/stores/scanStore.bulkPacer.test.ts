@@ -3,11 +3,16 @@ import { createTestScanStore, __resetGeneralDecodePacerForTest } from "@/stores/
 import { MockDb } from "@/services/mockDb";
 
 // BULK PACER (owner-approved 2026-08-07, impl-boss-god-rate.md #4): a 500-2000 code paste must
-// self-throttle the decode POST *rate* (not just concurrency) so it stays comfortably under
-// AI_LOOKUP_RATE_LIMIT (20000/60s as of 2026-08-07; the historical/legacy default was 600/60s) even
-// when every code free-misses the corpus and round-trips fast. This proves a burst of 1000 queued
+// self-throttle the decode POST *rate* (not just concurrency) so it stays under AI_LOOKUP_RATE_LIMIT
+// even when every code free-misses the corpus and round-trips fast. This proves a burst of 1000 queued
 // decodes gets paced - never all fired in one instant - AND that every one of the 1000 eventually
 // fires (none silently dropped) once the fake clock is advanced far enough.
+//
+// S6 (deep review 2026-08-09): the client default is now 10 req/s, MATCHING aiSpendGuard's real server
+// default of 600/60s (it used to dispatch 50/s against a comment that wrongly claimed a 20000/60s
+// server ceiling - that drains the real bucket in ~12s and 429-storms anywhere the env override is not
+// raised). The drain window below is sized for the corrected rate; the pacing assertions are unchanged
+// in spirit and simply got stricter.
 
 const MISS = { providerNames: [], results: [], decision: { status: "needs_review", confidence: 0, reason: "no fixture" } };
 
@@ -68,8 +73,9 @@ describe("BULK PACER: the general decode queue self-throttles request rate", () 
       expect(after1s).toBeGreaterThan(afterMicrotaskFlush);
       expect(after1s).toBeLessThan(200); // well under 1000 after only 1 simulated second
 
-      // Advance far enough for the ENTIRE burst to drain (1000 codes at the paced rate, generous margin).
-      await vi.advanceTimersByTimeAsync(30_000);
+      // Advance far enough for the ENTIRE burst to drain (1000 codes at the paced 10/s default needs
+      // ~100 simulated seconds; 150s leaves generous margin).
+      await vi.advanceTimersByTimeAsync(150_000);
       await Promise.all(promises); // none of the 1000 decode calls is ever dropped/lost/rejected
 
       const finalCalls = (fetchSpy as unknown as { mock: { calls: unknown[][] } }).mock.calls.length;
@@ -79,6 +85,45 @@ describe("BULK PACER: the general decode queue self-throttles request rate", () 
       // already counted at scan time (before liveDecode was ever called), independent of the pacer.
       expect(store.getState().needsReviewQueue.length).toBe(1000);
       expect(store.getState().scanFeed.length).toBe(1000);
+    } finally {
+      globalThis.fetch = originalFetch;
+      vi.useRealTimers();
+    }
+  }, 20000);
+
+  // S6: the client pacer must not dispatch faster than the SERVER's own default bucket
+  // (AI_LOOKUP_RATE_LIMIT default 600 per 60s = 10 req/s, aiSpendGuard.checkRateLimit). Measured over
+  // a multi-second window so the sustained rate - not the one-off burst allowance - is what is asserted.
+  it("default pacing stays at or under the server default rate (600/60s = 10 req/s)", async () => {
+    const SERVER_DEFAULT_PER_SEC = 600 / 60;
+    const { store, ids } = makeStoreWithOpenReviews(400);
+
+    const fetchSpy = vi.fn(async () => ({ ok: true, json: async () => MISS })) as unknown as typeof fetch;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchSpy;
+    const calls = () => (fetchSpy as unknown as { mock: { calls: unknown[][] } }).mock.calls.length;
+
+    vi.useFakeTimers();
+    __resetGeneralDecodePacerForTest(Date.now());
+
+    try {
+      const promises = ids.map((id) => store.getState().liveDecode(id));
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+
+      const SECONDS = 10;
+      await vi.advanceTimersByTimeAsync(SECONDS * 1000);
+      const dispatched = calls();
+
+      // Allowance: sustained rate over the window, plus at most one full burst bucket of head start.
+      const ceiling = SERVER_DEFAULT_PER_SEC * SECONDS + SERVER_DEFAULT_PER_SEC;
+      expect(dispatched).toBeLessThanOrEqual(ceiling);
+      // Sanity: it is genuinely dispatching, not stalled (this is a rate cap, not a freeze).
+      expect(dispatched).toBeGreaterThan(SERVER_DEFAULT_PER_SEC);
+
+      // Drain the rest so no unresolved promise leaks into the next test.
+      await vi.advanceTimersByTimeAsync(120_000);
+      await Promise.all(promises);
+      expect(calls()).toBe(400);
     } finally {
       globalThis.fetch = originalFetch;
       vi.useRealTimers();

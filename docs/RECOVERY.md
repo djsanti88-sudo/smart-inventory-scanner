@@ -1,8 +1,10 @@
 # Firestore Recovery Runbook (F-08, F-01, F-07)
 
-Status: **OWNER-GATED / OPEN.** Nothing in this document has been run against production. This is the
+Status: **OWNER-GATED.** F-01/F-07 (rules+indexes) CLOSED 2026-07-29 and F-08 (PITR + restore proof)
+CLOSED 2026-08-07, both via explicit owner-approved in-session runs (see Section 5). This remains the
 prepared runbook the owner executes; agents and automation must never run the mutating commands below
-without the owner's explicit in-the-moment approval (see `CLAUDE.md` "No-Deploy Rule").
+(restore, import, IAM grants, backup schedule changes, rules deploys) without the owner's explicit
+in-the-moment approval (see `CLAUDE.md` "No-Deploy Rule").
 
 ## 1. Current production state (verified live, read-only, 2026-07-29 - updated same day)
 
@@ -29,9 +31,10 @@ executed by the owner between the two reads.
 Plain language: as of the 2026-07-29 update, PITR and delete protection are both live in production -
 a mistaken `gcloud firestore databases delete`, a bad migration, or a bug that mass-deletes/corrupts
 documents now has a 7-day window to restore from, and the database itself cannot be deleted without
-first disabling delete protection. **The restore drill (Section 3) has NOT yet been run** - enabling
-PITR proves the setting is on, not that a restore actually works end to end. F-08 stays open until a
-drill passes and is recorded here.
+first disabling delete protection. **The restore drill (Section 3) PASSED end to end on 2026-08-07** -
+a PITR-window export was imported into a scratch database and spot-checked against the live source;
+F-08 is now CLOSED (see the 2026-08-07 drill log in Section 3 and the closure in Section 5). A weekly
+scheduled backup is also live (Section 2.1), so future restores use the simpler `--source-backup` path.
 
 Separately (F-01 / F-07), the same live read confirmed the **rules and indexes gap**: the deployed
 Firestore rules are an older, less-hardened ruleset (missing the owner-role-escalation guard that the
@@ -81,6 +84,32 @@ gcloud firestore databases update \
 The `firebase` CLI does not currently expose a dedicated PITR/delete-protection toggle command; use
 Option A or B. (`firebase firestore:databases:update` may gain this in a future CLI version — check
 `firebase firestore:databases:update --help` before assuming it is unavailable.)
+
+### 2.1 Scheduled backups (LIVE since 2026-08-07)
+
+A **weekly scheduled backup** is now live on the `(default)` database, created in the 2026-08-07 drill.
+This is what makes the simple `gcloud firestore databases restore --source-backup` path available (the
+only restore mode the installed CLI supports); before this, the project had zero backups and no schedule.
+
+- Schedule id: `projects/smart-inventory-scanner-app/databases/(default)/backupSchedules/deb171e8-11ba-4beb-8de8-9381054abd0a`
+- Recurrence: weekly, Sunday (UTC). Retention: 28 days (`2419200s`), i.e. 4 weekly backups retained.
+- First backup lands the next Sunday after creation; verify with `gcloud firestore backups list --project=smart-inventory-scanner-app`.
+
+Command used (note the real SDK flags — `--recurrence=weekly` + `--day-of-week=SUN`, NOT the
+`--weekly-recurrence` form; verify with `gcloud firestore backups schedules create --help`):
+
+```bash
+gcloud firestore backups schedules create \
+  --database='(default)' --project=smart-inventory-scanner-app \
+  --recurrence=weekly --day-of-week=SUN --retention=28d
+# verify:
+gcloud firestore backups schedules list --database='(default)' --project=smart-inventory-scanner-app
+```
+
+Cost note (cost-truth rule): backup storage bills per GiB-month at the Firestore backup rate. The
+`(default)` database is single-digit GiB (dominated by the ~4M-doc `retailCatalogEntries` mirror), and
+up to 4 weekly backups are retained, so expect a small monthly figure — but confirm the real number in
+the billing console after the first backup lands; do not quote a wallet figure before that.
 
 ## 3. Restore drill procedure (run once after enabling PITR, and periodically thereafter)
 
@@ -133,34 +162,101 @@ Owner-approved in-session attempt. Findings for whoever resumes this:
    rather than one created fresh in the same session), then (b) re-run export+import with a fresh
    snapshot time and a fresh scratch database id, spot-check a known business's documents, record
    elapsed time here, and delete the scratch resources again.
+   **[RESOLVED 2026-08-07 — the resume steps above were executed; see the passing drill log below.]**
 
+### Drill 2026-08-07 — PASSED end to end (F-08 root-caused and CLOSED)
 
+Owner-pre-approved in-session. The 2026-07-29/30 import `PERMISSION_DENIED` was root-caused and fixed.
 
-Firestore PITR restores **into a brand-new database**, never in place over the live one, so a drill
-cannot damage production data. Follow this sequence:
-
-1. Pick a recent timestamp within the retention window (7 days after enabling) and a scratch
-   destination database id, e.g. `restore-drill-<date>`.
-2. Run the restore:
+1. **Root cause (confirmed, not guessed).** A read-only IAM check showed the Firestore service agent
+   `service-368038862704@gcp-sa-firestore.iam.gserviceaccount.com` held ONLY `roles/firestore.serviceAgent`
+   and was MISSING `roles/datastore.importExportAdmin`. This is exactly the project-level datastore
+   permission hypothesized last time: export needs it implicitly but import requires it explicitly, which
+   is why export worked with zero grants while every bucket-level storage grant left import failing. No
+   org policies (`gcloud resource-manager org-policies list` empty) and no VPC-SC perimeter (personal
+   project, no org) — so IAM was the whole story. Fix (project-level grant):
    ```bash
-   gcloud firestore databases restore \
-     --source-database='projects/smart-inventory-scanner-app/databases/(default)' \
-     --snapshot-time='2026-08-05T12:00:00Z' \
-     --destination-database='restore-drill-2026-08-05' \
-     --project=smart-inventory-scanner-app
+   gcloud projects add-iam-policy-binding smart-inventory-scanner-app \
+     --member="serviceAccount:service-368038862704@gcp-sa-firestore.iam.gserviceaccount.com" \
+     --role="roles/datastore.importExportAdmin"
    ```
-3. Once the restore operation completes, open the new `restore-drill-*` database in the console (or via
-   `firestore_get_database` / `firestore_list_collections`) and spot-check a known business's
-   `businesses/{bid}/products` and `inventoryCounts` documents against what you expect for that
-   timestamp.
-4. Record the result (pass/fail, elapsed time, any surprises) in this file or `PROGRESS.md`.
-5. Delete the scratch `restore-drill-*` database when done so it does not accrue storage cost:
-   ```bash
-   gcloud firestore databases delete --database='restore-drill-2026-08-05' \
-     --project=smart-inventory-scanner-app
-   ```
-   (Delete protection, if enabled on this scratch database too, must be disabled first the same way as
-   Section 2 before this delete will succeed — that is expected and is the feature working.)
+   This grant is RETAINED (not rolled back) so future drills/restores work without re-granting; it is a
+   standard capability for the Firestore service agent. Rollback if ever desired: same command with
+   `remove-iam-policy-binding`.
+2. **Export succeeded.** Snapshot `2026-08-07T14:09:00Z` (within the 7-day PITR window;
+   `earliestVersionTime` was `2026-07-31T15:10:00Z`). Bucket `gs://smart-inventory-scanner-app-drill-20260807`
+   (`us`, created for the drill). Scoped to the REAL top-level collections
+   `--collection-ids='businesses,businessMembers,businessProvisioningRequests,userProfiles,catalogEntries'`
+   — this deliberately EXCLUDES the ~4M-doc `retailCatalogEntries` public mirror (a rebuildable shared
+   corpus, not customer data), cutting the export from the full-corpus ~12.5 min to about a minute.
+   **78,979 documents**, completed in roughly a minute. (Data-model note corrected from the last drill:
+   scan data is NOT nested as `businesses/{bid}/products|scanEvents|inventoryCounts` subcollections —
+   those don't exist; the real top-level collections are `businessMembers`, `businessProvisioningRequests`,
+   `businesses`, `catalogEntries`, `retailCatalogEntries`, `userProfiles`.)
+3. **Scratch database `drill-20260807` created** (`nam5`, delete protection explicitly DISABLED —
+   `deleteProtectionState: DELETE_PROTECTION_DISABLED` verified before import so cleanup would not block).
+4. **Import SUCCEEDED on the FIRST attempt** after the IAM grant — no `PERMISSION_DENIED`. All **78,979
+   documents** imported into `drill-20260807` (import operation reached `operationState: SUCCESSFUL`,
+   `completedWork: 78979`), roughly ten minutes wall-clock (import is slower than export). The single
+   missing IAM role was the entire blocker.
+5. **Spot-check verification (read-only, scratch DB via Firebase MCP `firestore_query_collection` against
+   database `drill-20260807`).** The `businesses` collection returned an IDENTICAL 55-document set in the
+   restored scratch DB and the live `(default)` source (byte-for-byte, down to the last doc
+   `businesses/loop8-biz` "Loop8 Co") — strong point-in-time fidelity. Three concrete restored documents:
+   - `businesses/047b7b93-87e4-459b-993e-f54b0570fd86` — name "TEACH-BOT Tire Shop", createdBy
+     `kdtJl9wO2XZ6UpUeFmLvU0zn0lB2`, createdAt `2026-07-26T16:22:07.740Z`.
+   - `catalogEntries/000000191180` — "Bridgestone Dueler A T Revo Uni-T 265/70R17 121/118R", brand
+     Bridgestone, barcodeType `upca`, `verificationStatus: verified`.
+   - `catalogEntries/0051342128136` — "Continental Extremecontact Dw 265/40R17 94W", brand Continental,
+     barcodeType `ean13`, `verificationStatus: verified`.
+   Counts: `businesses` = 55 docs (source and restore identical); total restored across the 5 exported
+   collections = 78,979 docs (`catalogEntries` is the bulk, ~78,900 tire-corpus rows).
+6. **Cleanup completed.** Scratch bucket deleted (`gcloud storage rm -r`; a follow-up
+   `gcloud storage buckets describe` returns 404). Scratch DB `drill-20260807` deleted via Firebase MCP
+   `firestore_delete_database` (deleteTime `2026-08-07T15:24:33Z`). Final
+   `gcloud firestore databases list` shows only `(default)` (still `DELETE_PROTECTION_ENABLED`,
+   never touched destructively at any point). No ongoing cost from the drill itself.
+
+### Future restore — the two REAL paths (the installed SDK 577.0.0)
+
+Firestore restores **into a brand-new database**, never in place over the live one, so a drill cannot
+damage production. `gcloud firestore databases restore` supports ONLY `--source-backup` (there is no
+`--source-database`/`--snapshot-time` restore form — that flag set does not exist in this SDK).
+
+**Path A — from a scheduled backup (simplest; available now via the Section 2.1 weekly schedule):**
+
+```bash
+gcloud firestore backups list --project=smart-inventory-scanner-app          # find the backup name
+gcloud firestore databases restore \
+  --source-backup='projects/smart-inventory-scanner-app/locations/nam5/backups/<BACKUP_ID>' \
+  --destination-database='restore-drill-<date>' \
+  --project=smart-inventory-scanner-app
+```
+
+**Path B — PITR-window point-in-time (export-at-snapshot then import; proven 2026-08-07):**
+
+```bash
+# 1. confirm the snapshot is inside the PITR window
+gcloud firestore databases describe --database='(default)' \
+  --project=smart-inventory-scanner-app --format="value(earliestVersionTime)"
+# 2. export at a whole-minute RFC3339 snapshot within the window (scope with --collection-ids to skip
+#    the ~4M-doc retailCatalogEntries mirror; omit --collection-ids for a full ~12.5-min export)
+gcloud firestore export gs://smart-inventory-scanner-app-drill-<date>/export-1 \
+  --database='(default)' --project=smart-inventory-scanner-app \
+  --snapshot-time='<RFC3339>' \
+  --collection-ids='businesses,businessMembers,businessProvisioningRequests,userProfiles,catalogEntries'
+# 3. create a scratch DB with delete protection OFF (no --delete-protection flag), then import
+gcloud firestore databases create --database=drill-<date> \
+  --project=smart-inventory-scanner-app --location=nam5 --type=firestore-native
+gcloud firestore import gs://smart-inventory-scanner-app-drill-<date>/export-1 \
+  --database=drill-<date> --project=smart-inventory-scanner-app
+```
+
+Then spot-check the scratch DB (Firebase MCP `firestore_query_collection` with `database=drill-<date>`;
+set the MCP active project to `smart-inventory-scanner-app` first, since it defaults to
+`smart-inventory-preview`), record evidence here, and delete the scratch bucket + scratch DB when done.
+Prerequisite for import: the Firestore service agent must hold project-level
+`roles/datastore.importExportAdmin` (granted 2026-08-07, retained).
 
 ## 4. Rules + indexes deploy command sheet (F-01, F-07)
 
@@ -213,12 +309,19 @@ effect, one command instead of two.)
 
 ## 5. Finding closure status
 
-- **F-08** (PITR / delete protection): Section 2 is now DONE - PITR and delete protection are verified
-  ENABLED in production as of 2026-07-29 (see Section 1 update). Stays **OPEN**: the restore drill
-  attempted 2026-07-29/30 got as far as a successful PITR-window export but was BLOCKED at the
-  import-into-scratch-database step by an unresolved `PERMISSION_DENIED` (see Section 3 drill log for
-  full diagnosis and exact resume steps). All scratch resources (bucket, database) were cleaned up;
-  production `(default)` was never touched destructively.
+- **F-08** (PITR / delete protection + restore proof): **CLOSED 2026-08-07**, owner-pre-approved
+  in-session. PITR and delete protection were verified ENABLED 2026-07-29 (Section 1), and the restore
+  drill now PASSES end to end (Section 3, "Drill 2026-08-07"). Root cause of the 2026-07-29/30 import
+  block: the Firestore service agent was missing project-level `roles/datastore.importExportAdmin` (had
+  only `roles/firestore.serviceAgent`); granting it made import succeed on the first attempt. Evidence of
+  record: PITR-window export at snapshot `2026-08-07T14:09:00Z` (78,979 docs, ~1 min) imported into
+  scratch DB `drill-20260807` (78,979 docs, ~10 min), spot-checked against live source — `businesses`
+  collection identical 55-doc set, and three restored documents confirmed:
+  `businesses/047b7b93-87e4-459b-993e-f54b0570fd86` ("TEACH-BOT Tire Shop"),
+  `catalogEntries/000000191180` (Bridgestone, verified), `catalogEntries/0051342128136` (Continental,
+  verified). A weekly scheduled backup is live (Section 2.1) so future restores use `--source-backup`.
+  All scratch resources (bucket + `drill-20260807` DB) were deleted; only `(default)` remains and it was
+  never touched destructively. The IAM grant is retained so future drills need no re-grant.
 - **F-01 / F-07** (hardened rules + missing indexes deployed): **CLOSED 2026-07-29**, owner-approved
   in-session. Ran `npm run deploy:rules:prod` (= `firebase deploy --only firestore:rules,firestore:indexes
   --project smart-inventory-scanner-app`). Deploy output: "latest version of firestore.rules already up

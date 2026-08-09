@@ -125,21 +125,26 @@ vi.mock("@/server/upc/storage", async (importOriginal) => {
 const realSpendGuard = vi.hoisted(() => ({
   recordGptLadderSpend: undefined as unknown as typeof import("@/services/security/aiSpendGuard").recordGptLadderSpend,
   recordGptLadderCall: undefined as unknown as typeof import("@/services/security/aiSpendGuard").recordGptLadderCall,
+  chargeDailySlotForAccount: undefined as unknown as typeof import("@/services/security/aiSpendGuard").chargeDailySlotForAccount,
 }));
 vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
   realSpendGuard.recordGptLadderSpend = actual.recordGptLadderSpend;
   realSpendGuard.recordGptLadderCall = actual.recordGptLadderCall;
+  realSpendGuard.chargeDailySlotForAccount = actual.chargeDailySlotForAccount;
   return {
     ...actual,
     recordGptLadderSpend: vi.fn(actual.recordGptLadderSpend),
     recordGptLadderCall: vi.fn(actual.recordGptLadderCall),
+    // S4 (2026-08-09): spied so one test can make the per-account half of the charge pair FAIL after
+    // the global half already succeeded (the split-exception case the old suite never covered).
+    chargeDailySlotForAccount: vi.fn(actual.chargeDailySlotForAccount),
   };
 });
 
 import { runDecodePipeline, DailyCapExceededError, classifySourceTier, classifyGptFailureDetail } from "@/server/decode/pipeline";
 import { detectCodeType } from "@/services/codeTypeDetector";
-import { __resetForTest, readDailyUsed, recordGptLadderSpend, recordGptLadderCall } from "@/services/security/aiSpendGuard";
+import { __resetForTest, readDailyUsed, readDailyUsedForAccount, recordGptLadderSpend, recordGptLadderCall, chargeDailySlotForAccount } from "@/services/security/aiSpendGuard";
 import { ladderStorage } from "@/server/upc/storage";
 import * as decodeCacheModule from "@/services/ai/decodeCache";
 import { clearDecodeCache } from "@/services/ai/decodeCache";
@@ -208,6 +213,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     vi.mocked(lookupRetailBarcodeAsync).mockReset().mockImplementation(realRetail.lookupRetailBarcodeAsync);
     vi.mocked(recordGptLadderSpend).mockReset().mockImplementation(realSpendGuard.recordGptLadderSpend);
     vi.mocked(recordGptLadderCall).mockReset().mockImplementation(realSpendGuard.recordGptLadderCall);
+    vi.mocked(chargeDailySlotForAccount).mockReset().mockImplementation(realSpendGuard.chargeDailySlotForAccount);
     // Sync Truth Task 4: default every test to a safe instant miss; the dedicated describe block below
     // overrides with mockResolvedValueOnce for a verified/suggestion hit.
     vi.mocked(lookupMasterCatalog).mockReset().mockResolvedValue({ kind: "miss" });
@@ -2609,6 +2615,13 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         process.env.AI_LOOKUP_DAILY_LIMIT = "100";
         process.env.GO_UPC_API_KEY = "test-key";
         process.env.OPENAI_API_KEY = "test-key";
+        // S5 (2026-08-09): this isolation is now LOAD-BEARING. The Go-UPC negative miss cache lives in
+        // the shared per-pid ladder-storage dir and is NOT cleared by the outer beforeEach; an earlier
+        // test in this block already cached a miss for VALID_GTIN. Since a negative-cache hit now
+        // correctly bills ZERO (the rung never reaches the provider), leaving the stale entry would
+        // make this test assert 1 charge for a reason that has nothing to do with pay-once. Clearing it
+        // restores the intended scenario: goupc GENUINELY calls the provider and misses.
+        try { fs.unlinkSync(path.join(os.tmpdir(), `ladder-storage-pipeline-test-${process.pid}`, ".go-upc-miss-cache.json")); } catch {}
         stubFreeSuggestionThenPaid({ goupcMiss: true });
         fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
           const url = String(input);
@@ -2639,6 +2652,106 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         // Two genuinely-run paid rungs (goupc + gpt; fetchv2 has no discovery keys so paidWorkPossible's
         // fetchV2CanPay is false and it never even attempts a charge) -> exactly 2 charges, never more.
         expect(await readDailyUsed(await ladderStorage())).toBe(2);
+      });
+
+      // ---- S5 (deep review 2026-08-09): CHARGE ONLY ON GENUINE PROVIDER EGRESS (L12) ----------------
+      // The charge used to fire immediately BEFORE each paid rung. A rung's own internal gates can then
+      // decline with zero network - Go-UPC's 30-day negative miss cache and monthly cap, GPT's $/day
+      // budget - so a slot was burned for a request that spent nothing. These prove the charge now
+      // happens at the egress boundary instead.
+      describe("charge fires only on genuine provider egress", () => {
+        const missCacheFile = () =>
+          path.join(os.tmpdir(), `ladder-storage-pipeline-test-${process.pid}`, ".go-upc-miss-cache.json");
+
+        it("(a) a Go-UPC NEGATIVE-CACHE hit bills ZERO daily slots (no provider call, no charge)", async () => {
+          process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+          process.env.GO_UPC_API_KEY = "test-key";
+          try { fs.unlinkSync(missCacheFile()); } catch {}
+          // Only Go-UPC is keyed: fetchv2/gpt can never pay, so goupc is the only chargeable rung.
+          stubFreeSuggestionThenPaid({ goupcMiss: true });
+
+          // Run 1: genuine egress (Go-UPC is actually called and 404s) -> exactly one charge, and the
+          // miss is written to the 30-day negative cache.
+          await runDecodePipeline(makeReq(VALID_GTIN));
+          expect(await readDailyUsed(await ladderStorage())).toBe(1);
+          expect(fetchSpy.mock.calls.some(([u]) => String(u).includes(GOUPC_API))).toBe(true);
+
+          // Reset the counter and the L1/L2 decode caches so run 2 re-walks the ladder for the same code.
+          try { fs.unlinkSync(ladderKvFile()); } catch {}
+          clearDecodeCache();
+          __resetDecodeCacheStoreForTest();
+          try { fs.unlinkSync(decodeCacheTestFile()); } catch {}
+          fetchSpy.mockClear();
+
+          // Run 2: the negative cache short-circuits goUpcRung BEFORE deps.client -> zero egress, and
+          // (the fix) zero charge. Pre-fix this billed a full slot for a request that spent nothing.
+          await runDecodePipeline(makeReq(VALID_GTIN));
+          expect(fetchSpy.mock.calls.some(([u]) => String(u).includes(GOUPC_API))).toBe(false);
+          expect(await readDailyUsed(await ladderStorage())).toBe(0);
+        });
+
+        it("(b) a GPT rung declined by its own $/day budget bills ZERO daily slots", async () => {
+          process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+          process.env.OPENAI_API_KEY = "test-key"; // gpt is the ONLY chargeable rung
+          // A zero dollar cap makes shouldRunGptRung's budget thunk decline (spent 0 + worst case > 0),
+          // so the rung never reaches api.openai.com.
+          const savedCap = process.env.GPT_LADDER_DAILY_USD;
+          process.env.GPT_LADDER_DAILY_USD = "0";
+          try {
+            stubFreeSuggestionThenPaid({ goupcMiss: true });
+            await runDecodePipeline(makeReq(VALID_GTIN));
+
+            expect(fetchSpy.mock.calls.some(([u]) => String(u).includes("api.openai.com"))).toBe(false);
+            expect(await readDailyUsed(await ladderStorage())).toBe(0);
+          } finally {
+            if (savedCap === undefined) delete process.env.GPT_LADDER_DAILY_USD;
+            else process.env.GPT_LADDER_DAILY_USD = savedCap;
+          }
+        });
+
+        it("(c) a genuine provider call bills exactly ONE global slot and ONE account slot (pair moves together)", async () => {
+          process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+          process.env.GO_UPC_API_KEY = "test-key";
+          try { fs.unlinkSync(missCacheFile()); } catch {}
+          stubFreeSuggestionThenPaid({ goupcMiss: true });
+
+          await runDecodePipeline({
+            ...makeReq(VALID_GTIN),
+            capContext: { authedBusinessId: "tenant-s5", accountCapCleared: true },
+          });
+
+          const store = await ladderStorage();
+          expect(fetchSpy.mock.calls.some(([u]) => String(u).includes(GOUPC_API))).toBe(true);
+          expect(await readDailyUsed(store)).toBe(1);
+          expect(await readDailyUsedForAccount(store, "tenant-s5")).toBe(1);
+        });
+
+        // S4 (deep review 2026-08-09), charge-pair ordering: the global slot is charged FIRST, then the
+        // per-account slot. If the ACCOUNT half throws, the global half has already advanced - and the
+        // spend it meters is genuine, because the provider call happens right after. Least-harm
+        // semantics chosen and documented in settlePaidCharge: do NOT abort the compute (that would
+        // leave a phantom global charge with zero work AND fail a request that cleared every gate);
+        // serve the request, keep the bill bounded by the global counter, and log the divergence.
+        it("(d) per-account charge throws after the global charge -> global still 1, compute still runs, request still served", async () => {
+          process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+          process.env.GO_UPC_API_KEY = "test-key";
+          try { fs.unlinkSync(missCacheFile()); } catch {}
+          stubFreeSuggestionThenPaid({ goupcMiss: true });
+          vi.mocked(chargeDailySlotForAccount).mockRejectedValueOnce(new Error("simulated per-account storage failure"));
+
+          const out = await runDecodePipeline({
+            ...makeReq(VALID_GTIN),
+            capContext: { authedBusinessId: "tenant-s4", accountCapCleared: true },
+          });
+
+          // The request is still served (no 5xx from a bookkeeping error) and the provider was reached.
+          expect(out.kind).toBe("computed");
+          expect(fetchSpy.mock.calls.some(([u]) => String(u).includes(GOUPC_API))).toBe(true);
+          const store = await ladderStorage();
+          // Global counter matches the genuine compute; only the tenant counter lags (logged divergence).
+          expect(await readDailyUsed(store)).toBe(1);
+          expect(await readDailyUsedForAccount(store, "tenant-s4")).toBe(0);
+        });
       });
     });
 

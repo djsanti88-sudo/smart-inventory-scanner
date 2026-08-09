@@ -57,6 +57,13 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   }),
 }));
 
+vi.mock("@/server/upc/storage", () => ({ ladderStorage: vi.fn(async () => ({})) }));
+vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
+  return { ...real, checkRateLimit: vi.fn(async () => ({ allowed: true, retryAfterMs: 0, remaining: 99 })) };
+});
+vi.mock("@/server/log", () => ({ logServerEvent: vi.fn() }));
+
 import { POST } from "@/app/api/account/delete/route";
 
 function deleteRequest(body: unknown): NextRequest {
@@ -230,8 +237,8 @@ describe("POST /api/account/delete partial-failure retryability", () => {
     mocks.memberRows = [
       {
         id: "biz-1_u1",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         get deleted(): boolean {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           return (this as any)._deleted ?? false;
         },
         set deleted(v: boolean) {
@@ -259,5 +266,86 @@ describe("POST /api/account/delete partial-failure retryability", () => {
     expect(secondPayload).toEqual({ deleted: true, businessId: "biz-1" });
     expect(mocks.memberRows[0].deleted).toBe(true);
     expect(mocks.recursiveDelete).toHaveBeenCalledTimes(2);
+  });
+
+  // S2 (deep review 2026-08-09): the test above only ever had ONE member row (the owner's), so it could
+  // not detect the real defect - with the old concurrent Promise.all, a multi-member business whose
+  // NON-owner row failed could still have had the owner's own row deleted, which makes the advertised
+  // retry impossible (the retry 403s on "Not a member of this business" and the residual rows are
+  // stranded forever). This test kills that order dependence: authorization is wired to the LIVE state
+  // of the owner row, exactly as Firestore would behave on a retry.
+  it("a non-owner member-row failure leaves the OWNER row intact, so the retry re-authorizes and purges everything", async () => {
+    let otherDeleteShouldFail = true;
+    const state = { owner: false, other: false };
+    mocks.memberRows = [
+      {
+        id: "biz-1_u2", // a NON-owner member row - the one that fails on the first attempt
+        get deleted(): boolean {
+          return state.other;
+        },
+        set deleted(v: boolean) {
+          if (otherDeleteShouldFail) throw new Error("simulated non-owner member-row delete failure");
+          state.other = v;
+        },
+      } as unknown as { id: string; deleted: boolean },
+      {
+        id: "biz-1_u1", // the CALLER's own owner row - must be deleted LAST, only after the others
+        get deleted(): boolean {
+          return state.owner;
+        },
+        set deleted(v: boolean) {
+          state.owner = v;
+        },
+      } as unknown as { id: string; deleted: boolean },
+    ];
+    // Authorization now reflects reality: once the owner's own row is gone, the caller is no longer a
+    // member and every retry would 403. This is what made the old "Retry" copy a lie.
+    mocks.memberGet.mockReset().mockImplementation(async () => !state.owner);
+
+    const first = await POST(deleteRequest(VALID_BODY));
+    expect(first.status).toBe(500);
+    expect((await first.json()).error).toMatch(/retry/i);
+    // THE INVARIANT: the failure did not consume the authorization anchor.
+    expect(state.owner).toBe(false);
+    expect(state.other).toBe(false);
+
+    otherDeleteShouldFail = false;
+    const second = await POST(deleteRequest(VALID_BODY));
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual({ deleted: true, businessId: "biz-1" });
+    // Everything is now gone - no stranded residual rows.
+    expect(state.other).toBe(true);
+    expect(state.owner).toBe(true);
+  });
+});
+
+describe("POST /api/account/delete revoked-session hardening (S1)", () => {
+  it("verifies the ID token with checkRevoked=true (irreversible action, one extra round-trip is fine)", async () => {
+    await POST(deleteRequest(VALID_BODY));
+    expect(mocks.verifyIdToken).toHaveBeenCalledWith("firebase-token", true);
+  });
+
+  it("refuses a REVOKED session with 401 and honest copy, deleting nothing", async () => {
+    const revoked = Object.assign(new Error("The Firebase ID token has been revoked."), {
+      code: "auth/id-token-revoked",
+    });
+    mocks.verifyIdToken.mockReset().mockRejectedValue(revoked);
+
+    const response = await POST(deleteRequest(VALID_BODY));
+    expect(response.status).toBe(401);
+    const payload = await response.json();
+    expect(payload.error).toMatch(/revoked/i);
+    expect(mocks.recursiveDelete).not.toHaveBeenCalled();
+    expect(mocks.memberRows[0].deleted).toBe(false);
+  });
+
+  it("refuses a DISABLED account with 401 and deletes nothing", async () => {
+    mocks.verifyIdToken
+      .mockReset()
+      .mockRejectedValue(Object.assign(new Error("user record is disabled"), { code: "auth/user-disabled" }));
+
+    const response = await POST(deleteRequest(VALID_BODY));
+    expect(response.status).toBe(401);
+    expect(mocks.recursiveDelete).not.toHaveBeenCalled();
   });
 });

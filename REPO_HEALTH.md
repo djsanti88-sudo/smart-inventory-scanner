@@ -1,17 +1,44 @@
 # Repo Health — sync truth
 
-Regenerate, don't hand-drift. Last updated: 2026-07-29
+Regenerate, don't hand-drift. Last updated: 2026-08-07
 
 ## CRITICAL callouts
 
-1. **`audit-fixes` is LOCAL-ONLY.** Its `origin/audit-fixes` upstream ref shows
-   `[gone]` and `git ls-remote origin audit-fixes` returns nothing — the branch is not
-   on GitHub. It carries the current audit-fixes work (22 commits ahead of master,
-   7 fully-merged `af/01`-`af/07` sub-branches folded in). Needs an owner push/PR
-   decision before it can be reviewed or land.
+1. **RESOLVED 2026-08-07: `audit-fixes` was fully merged into `master`, not stuck
+   local-only.** Re-verified with `git rev-list --left-right --count master...audit-fixes`
+   -> `100  0` (100 commits behind master, 0 ahead) — every commit on `audit-fixes`
+   (tip `9a2a9030`) is already reachable from `master` (PR #30, merge commit
+   `d80a34c5`). The prior "LOCAL-ONLY, 22 ahead, needs push/PR" callout below was stale
+   from 2026-07-29, before that PR landed. The branch was deleted locally
+   (`git branch -d audit-fixes`) on 2026-08-07 now that it is a strict subset of master.
 2. **`benchmark-tire-db-automation` is PARKED. Do NOT delete or merge.** It is 1,112
    commits behind master and 6 ahead; merging it would delete ~152k lines including
    the poison guard, per standing owner order. Leave it exactly as is.
+
+## Current branch truth (2026-08-07)
+
+Active work lives on local branch `feat/tier3-hardening` (unpushed, owner-gated — push/PR
+requires explicit owner approval). It contains the merged 2026-08-07 tier-3 trio via merge
+commits `1e897480` (auth hardening trio), `a804fa64` (IndexedDB #27 persist migration),
+`6e9d033b` (F-08 restore drill closure + weekly backup schedule):
+
+- **IndexedDB #27**: scan-store persisted state moved off localStorage's ~5MB quota onto
+  IndexedDB with a localStorage fallback and one-time forward migration.
+- **F-08 restore drill closure**: Firestore restore drill passed end to end and a weekly
+  Sunday backup schedule (28-day retention) is live on `(default)`.
+- **Auth hardening trio**: fail-closed DELETE rate limit (3/hour), signup verification
+  email, non-blocking verify banner on sign-in.
+
+2026-08-07 housekeeping pass: merged tier-3 agent worktree
+`.claude/worktrees/agent-a060cd1e7a15b8fa2` (F-08 docs, tip `ed62675b`) removed and its
+branch `worktree-agent-a060cd1e7a15b8fa2` deleted (clean worktree, ancestor-verified against
+`feat/tier3-hardening` HEAD). Two sibling tier-3 agent worktrees,
+`.claude/worktrees/agent-afca4b13cfa5c4430` (IndexedDB, tip `b90ebfb0`) and
+`.claude/worktrees/agent-a7033b7cd3086551b` (auth trio, tip `8d2ab358`), were left in place —
+both have uncommitted changes to `testing/app-knowledge/*` files (teach-bot knowledge
+artifacts) and were skipped per the no-force-delete rule, even though their commits are
+already merged into `feat/tier3-hardening`. `worktree-agent-a47380b0deaa5e8d2` remains
+untouched (unknown provenance, not in scope).
 
 ## Branch inventory (44 local branches, propose-only — no deletion or push without
 
@@ -20,7 +47,8 @@ per-branch owner approval)
 | Branch | Category | Last commit | Ahead/Behind master | Recommended action (proposal only) |
 |---|---|---|---|---|
 | master | active | — | — | base branch, tracks `origin/master` [behind 23] |
-| audit-fixes | active | 2026-07-29 | +22 / -0 | push + open PR (see CRITICAL #1) |
+| audit-fixes | **DELETED 2026-08-07** | 2026-07-29 | 0 / -100 (re-verified) | fully merged into master via PR #30 (see CRITICAL #1); `git branch -d` |
+| feat/tier3-hardening | active | 2026-08-07 | current | unpushed, owner-gated; see "Current branch truth" above |
 | chore/docs-consolidation | active | 2026-07-29 | current | this doc-consolidation branch |
 | af/01-scan-ledger | merged-into-audit-fixes | 2026-07-29 | +3 / -0 | delete once `audit-fixes` lands (content preserved there) |
 | af/02-api-auth | merged-into-audit-fixes | 2026-07-29 | +3 / -0 | delete once `audit-fixes` lands |
@@ -123,8 +151,11 @@ worktrees are unchanged apart from the 11 removed above.
 - A BOM character was found in the `NEXT_PUBLIC_AUTH_MODE` Vercel env value —
   strip it before it causes a string-comparison bug in auth-mode branching.
 - `post-deploy-smoke.yml` still needs `ref: github.sha` hardening (pending).
-- A restore drill (Firestore backup/PITR recovery proof) has never been run —
-  backup/recovery readiness is unverified.
+- Backup/recovery: VERIFIED 2026-08-07. The Firestore restore drill passed end to end
+  (PITR-window export -> import into scratch DB `drill-20260807`, 78,979 docs, spot-checked
+  vs live source, cleaned up) and a weekly scheduled backup is now live on `(default)`
+  (Sunday, 28-day retention). Root cause of the prior block: Firestore service agent missing
+  `roles/datastore.importExportAdmin` (now granted, retained). See `docs/RECOVERY.md` (F-08 CLOSED).
 - F-01/F-07 rules/indexes redeploy is pending, owner-gated (Firestore security rules
   and composite indexes not yet pushed live).
 - ~30 local worktrees exist under `C:/tmp/*` and `.claude/worktrees/*`, one per

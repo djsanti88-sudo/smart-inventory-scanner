@@ -372,6 +372,35 @@ export async function POST(request: Request) {
     // Server-verified, un-spoofable: reads the NON-PUBLIC allowlist over the cryptographically verified
     // token identity. An allowlisted UID OR email lights this up. Threaded into every gate below.
     isGod = isPlatformOwnerServer({ uid: authedUid, email });
+    // S1 (deep review 2026-08-09): the verify above deliberately does NOT pass checkRevoked - this is
+    // the bulk-scan hot path and one extra Admin round-trip per scan is real latency for every user.
+    // But a token that would grant GOD bypasses every spend/rate/cap gate, so a stolen owner token
+    // surviving session revocation is a direct bill-drain hole. Re-verify with checkRevoked=true ONLY
+    // on the god arm: rare (owner-only), cheap, and it closes the cap-bypass. A revoked token 401s
+    // rather than silently degrading to normal-user treatment - we now have POSITIVE knowledge that
+    // this credential was deliberately killed, and honoring it at all would be knowingly serving a
+    // revoked session; the honest answer to the caller is "sign in again", not a quiet downgrade.
+    if (isGod) {
+      try {
+        await getAdminAuth().verifyIdToken(idToken, true);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/credential|GOOGLE_APPLICATION_CREDENTIALS|default credentials|service account|ENOENT/i.test(msg)) {
+          return Response.json({ error: "Server auth is not configured.", reasonCode: "auth_unavailable" }, { status: 503 });
+        }
+        logServerEvent({
+          route: "/api/ai-lookup",
+          event: "auth_rejected",
+          reasonCode: "token_revoked",
+          businessId: bizId,
+          status: 401,
+        });
+        return Response.json(
+          { error: "This sign-in was revoked. Sign in again.", reasonCode: "token_revoked" },
+          { status: 401 }
+        );
+      }
+    }
   }
 
   // Keep the exact scanned identifier local to the trusted index. The AI sanitizer intentionally masks
@@ -558,7 +587,13 @@ export async function POST(request: Request) {
     if (!isGod) {
       const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "local";
       try {
-        const rl = await checkRateLimit(clientIp, { storage: await ladderStorage() });
+        // Route-family key prefix (matches this file's own GET handler's "GET:${ip}" and the export
+        // route's "EXPORT:${ip}" convention): without it this POST handler shared a raw-IP bucket
+        // with every OTHER route calling checkRateLimit(ip, ...) (catalog-dispute, catalog-review,
+        // catalog-review/[id]), so a bulk-scan session hammering ai-lookup could exhaust an
+        // unrelated catalog route's limit for the same client IP, and vice versa, even though each
+        // route configures its own distinct rate-limit env var.
+        const rl = await checkRateLimit(`POST:${clientIp}`, { storage: await ladderStorage() });
         if (!rl.allowed) {
           logServerEvent({ route: "/api/ai-lookup", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
           return Response.json(
@@ -638,8 +673,32 @@ export async function POST(request: Request) {
       // failure of EITHER charge, log a structured divergence event and STILL fall through to the normal
       // successful lookup response. Same fail-open philosophy as the rate limiter - a charge-accounting
       // error must never 429/500 a request that already cleared every real gate.
+      // S4 (deep review 2026-08-09) SPLIT THE PAIR - the two halves are NOT the same risk:
+      //  - GLOBAL charge fails  -> the meter that bounds the BILL never advanced. Continuing would run a
+      //    paid lookup that no counter ever saw = genuinely UNCHARGED SPEND, repeatable for as long as
+      //    the storage stays sick. FAIL CLOSED: refuse with an honest reason, make no paid call.
+      //  - ACCOUNT charge fails -> the spend IS already metered globally (the bill is still bounded by
+      //    the global backstop); only the per-tenant counter drifts by one. FAIL OPEN exactly as before
+      //    (proven by route.legacyChargePair.test.ts): never 5xx a request that cleared every real gate
+      //    over a per-tenant bookkeeping hiccup - log the divergence instead.
       try {
         await chargeDailySlot(ladderStore, { limit: backstop });
+      } catch (chargeErr) {
+        logServerEvent({
+          route: "/api/ai-lookup",
+          event: "error",
+          reasonCode: "charge_unavailable",
+          businessId: authedBusinessId,
+          status: 503,
+          detail: "legacy authed global charge failed; paid lookup refused rather than run uncharged",
+        });
+        void chargeErr;
+        return Response.json(
+          { error: "Could not record AI usage right now. No AI call made. Try again shortly.", reasonCode: "charge_unavailable" },
+          { status: 503 }
+        );
+      }
+      try {
         await chargeDailySlotForAccount(ladderStore, authedBusinessId);
       } catch (chargeErr) {
         logServerEvent({
@@ -648,7 +707,7 @@ export async function POST(request: Request) {
           reasonCode: "charge_error",
           businessId: authedBusinessId,
           status: 200,
-          detail: "legacy authed charge pair failed; request served, counters may have diverged by one",
+          detail: "legacy authed per-account charge failed; spend already metered globally, request served",
         });
         void chargeErr;
       }
@@ -662,7 +721,24 @@ export async function POST(request: Request) {
           { status: 429 }
         );
       }
-      await chargeDailySlot(ladderStore, { limit });
+      // S4: same fail-closed rule as the authed branch above - an unrecordable charge must never be
+      // followed by a paid lookup. Explicit 503 with honest copy instead of an opaque unhandled 500.
+      try {
+        await chargeDailySlot(ladderStore, { limit });
+      } catch (chargeErr) {
+        logServerEvent({
+          route: "/api/ai-lookup",
+          event: "error",
+          reasonCode: "charge_unavailable",
+          status: 503,
+          detail: "legacy anonymous global charge failed; paid lookup refused rather than run uncharged",
+        });
+        void chargeErr;
+        return Response.json(
+          { error: "Could not record AI usage right now. No AI call made. Try again shortly.", reasonCode: "charge_unavailable" },
+          { status: 503 }
+        );
+      }
     }
   }
 

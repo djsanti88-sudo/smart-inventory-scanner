@@ -4,6 +4,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { isLiveAuth } from "@/services/auth/authMode";
+import { intEnv, checkRateLimit } from "@/services/security/aiSpendGuard";
+import { ladderStorage } from "@/server/upc/storage";
+import { logServerEvent } from "@/server/log";
 
 export const runtime = "nodejs";
 
@@ -34,6 +37,15 @@ function authConfigurationError(error: unknown): boolean {
   );
 }
 
+// firebase-admin surfaces a revoked session / disabled account from verifyIdToken(token, true) as
+// `auth/id-token-revoked` (or `auth/user-disabled`), carried on the error's `code` and repeated in the
+// message. Matched on both so a mocked/rethrown error shape still classifies correctly.
+function revokedTokenError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  const text = `${typeof code === "string" ? code : ""} ${error instanceof Error ? error.message : String(error)}`;
+  return /id-token-revoked|session-cookie-revoked|user-disabled|token has been revoked/i.test(text);
+}
+
 function json(body: unknown, status = 200): NextResponse {
   return NextResponse.json(body, {
     status,
@@ -52,13 +64,29 @@ async function recursiveDeleteBusiness(businessId: string): Promise<void> {
   await db.recursiveDelete(businessRef);
 }
 
-async function deleteBusinessMembers(businessId: string): Promise<number> {
+// S2 (deep review 2026-08-09): the OWNER's own member row is deleted LAST, strictly after every other
+// member row has deleted successfully. The owner row is this route's authorization anchor (the role
+// check at the top reads exactly that document), so deleting it in the same concurrent Promise.all as
+// the others made the advertised "Retry to finish" a LIE: if the owner's row won the race and another
+// member's row failed, the retry hit "Not a member of this business." (403) and the residual member
+// rows were stranded forever with no path to remove them. Deleting non-owner rows first and the owner
+// row last means ANY partial failure leaves the authorization anchor intact, so the retry genuinely
+// re-authorizes and finishes the job.
+async function deleteBusinessMembers(businessId: string, ownerUid: string): Promise<number> {
   const db = getAdminDb();
   const snap = await db
     .collection(COLLECTIONS.businessMembers)
     .where("businessId", "==", businessId)
     .get();
-  await Promise.all(snap.docs.map((d) => d.ref.delete()));
+  const ownerRowId = memberDocId(businessId, ownerUid);
+  const ownerDocs = snap.docs.filter((d) => d.id === ownerRowId);
+  const otherDocs = snap.docs.filter((d) => d.id !== ownerRowId);
+  // Non-owner rows first, concurrently (unchanged throughput for the normal path).
+  await Promise.all(otherDocs.map((d) => d.ref.delete()));
+  // Owner row(s) last, only now that every other row is gone. A throw above never reaches this line.
+  for (const d of ownerDocs) {
+    await d.ref.delete();
+  }
   return snap.docs.length;
 }
 
@@ -93,11 +121,20 @@ export async function POST(request: NextRequest) {
 
   let uid: string;
   try {
-    const decoded = await getAdminAuth().verifyIdToken(idToken);
+    // S1 (deep review 2026-08-09): checkRevoked = TRUE. Account deletion is irreversible, so a token
+    // that was valid at issue time but whose session has since been revoked (owner signed out
+    // everywhere, password reset, account disabled after a laptop theft) must NOT still be able to
+    // purge the tenant. checkRevoked costs one extra Admin round-trip per call; that is trivially
+    // affordable on a rare, irreversible, rate-limited action - unlike the /api/ai-lookup hot path.
+    const decoded = await getAdminAuth().verifyIdToken(idToken, true);
     uid = decoded.uid;
   } catch (error) {
     if (authConfigurationError(error)) {
       return json({ error: "Server auth is not configured." }, 503);
+    }
+    if (revokedTokenError(error)) {
+      // Honest copy: this is NOT a generic bad token - the session was deliberately ended.
+      return json({ error: "This sign-in was revoked. Sign in again to delete this account." }, 401);
     }
     return json({ error: "Invalid or expired sign-in." }, 401);
   }
@@ -126,6 +163,30 @@ export async function POST(request: NextRequest) {
     return json({ error: "Only the business owner can delete this account." }, 403);
   }
 
+  // Rate limit AFTER role verification (rejected non-owners never consume the owner's bucket,
+  // mirroring the export route) and BEFORE the phrase check (a phrase-guessing loop is exactly
+  // the abuse this bounds). Durable Turso-backed limiter; verified identities only in the key;
+  // fail CLOSED - if the limiter store is down we refuse an irreversible action rather than
+  // allow an unmetered one.
+  try {
+    const rl = await checkRateLimit(`DELETE:${businessId}:${uid}`, {
+      limit: intEnv(process.env.ACCOUNT_DELETE_RATE_LIMIT, 3),
+      windowMs: intEnv(process.env.ACCOUNT_DELETE_RATE_WINDOW_MS, 3_600_000),
+      storage: await ladderStorage(),
+      failClosedOnStorageError: true,
+    });
+    if (!rl.allowed) {
+      logServerEvent({ route: "/api/account/delete", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
+      return NextResponse.json(
+        { error: "Too many deletion attempts. Wait and try again.", retryAfterMs: rl.retryAfterMs },
+        { status: 429, headers: { "Cache-Control": "no-store", "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } },
+      );
+    }
+  } catch {
+    logServerEvent({ route: "/api/account/delete", event: "error", reasonCode: "rate_limit_storage_failed", status: 503 });
+    return json({ error: "Could not verify request rate. Try again shortly." }, 503);
+  }
+
   // Confirmation phrase is checked AFTER role verification (never leak deletion capability via the
   // phrase-check response) but BEFORE any deletion runs. Exact match, case-sensitive, no trimming
   // beyond stringField's own trim - a fuzzy match here would be a footgun on an irreversible action.
@@ -140,9 +201,11 @@ export async function POST(request: NextRequest) {
   // delete. So the error copy tells the caller to retry rather than implying an unrecoverable half-state.
   // (Deleting members first would orphan a live business with no owner if the tree delete then failed -
   // strictly worse, so the order stays.)
+  // S2: retryability is only REAL because deleteBusinessMembers deletes the caller's OWN owner row last
+  // (see its doc comment) - that row is the authorization anchor the retry re-reads.
   try {
     await recursiveDeleteBusiness(businessId);
-    await deleteBusinessMembers(businessId);
+    await deleteBusinessMembers(businessId, uid);
   } catch (error) {
     if (authConfigurationError(error)) {
       return json({ error: "Server auth is not configured." }, 503);

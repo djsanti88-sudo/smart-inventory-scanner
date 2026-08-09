@@ -92,7 +92,7 @@ vi.mock("@/server/upc/storage", () => ({
 }));
 
 vi.mock("@/services/security/aiSpendGuard", () => ({
-  checkRateLimit: () => mocks.checkRateLimit(),
+  checkRateLimit: (...args: unknown[]) => mocks.checkRateLimit(...args),
   intEnv: (value: string | undefined, fallback: number) => {
     if (value === undefined) return fallback;
     const parsed = Number(value);
@@ -187,6 +187,20 @@ describe("GET /api/catalog-review rate limit and query length guards", () => {
     const payload = await response.json();
     expect(payload.reasonCode).toBe("rate_limited");
     expect(payload.error).toMatch(/Too many requests/i);
+  });
+
+  // Cross-route rate-limit bucket isolation (ported from the preserved worktree fix,
+  // .claude/worktrees/agent-a47380b0deaa5e8d2): this route used to call checkRateLimit(ip, ...)
+  // with the BARE client IP, sharing one bucket with every other route calling checkRateLimit
+  // with the same bare IP (ai-lookup POST, catalog-dispute POST, catalog-review/[id] POST) - a
+  // burst on one route could 429 an unrelated route for the same client IP even though each
+  // route defines its own distinct rate-limit env var. The key must carry a route-family
+  // prefix so route A's traffic can never burn route B's limit.
+  it("keys the rate limit with a route-family prefix, not the bare client IP", async () => {
+    await GET(listRequest());
+    expect(mocks.checkRateLimit).toHaveBeenCalledTimes(1);
+    const [key] = mocks.checkRateLimit.mock.calls[0] as [string, unknown];
+    expect(key).toMatch(/^CATALOG_REVIEW:/);
   });
 
   it("rejects a barcode query that exceeds the max length", async () => {

@@ -180,6 +180,56 @@ describe("aiSpendGuard", () => {
       expect((await checkRateLimit(ip, { limit: 1, windowMs: 1000, now: 999, storage: s })).allowed).toBe(false);
       expect((await checkRateLimit(ip, { limit: 1, windowMs: 1000, now: 1000, storage: s })).allowed).toBe(true);
     });
+
+    // Cross-route bucket isolation mechanism (ported from the preserved worktree fix,
+    // .claude/worktrees/agent-a47380b0deaa5e8d2): checkRateLimit's key IS the bucket, so callers that
+    // want per-route buckets must prefix the key with a route-family tag. This proves the mechanism
+    // works once callers do that (the actual route-level regression coverage - proving each real route
+    // NOW sends a prefixed key, not the bare IP - lives in the route test files: catalog-dispute,
+    // catalog-review, catalog-review/[id], and ai-lookup's route.rateLimitKeyPrefix.test.ts).
+    describe("cross-route bucket isolation (route-prefixed keys)", () => {
+      it("exhausting one route's bucket for an IP does not block a DIFFERENT route's bucket for the same IP", async () => {
+        const s = memStorage();
+        const ip = "42.42.42.42";
+        const now = 9_000_000;
+
+        // Route A ("ai-lookup" decode POST) exhausts its own tiny limit of 1.
+        const a1 = await checkRateLimit(`POST:${ip}`, { limit: 1, windowMs: 60_000, now, storage: s });
+        const a2 = await checkRateLimit(`POST:${ip}`, { limit: 1, windowMs: 60_000, now, storage: s });
+        expect(a1.allowed).toBe(true);
+        expect(a2.allowed).toBe(false); // route A's own bucket is exhausted
+
+        // Route B ("catalog-dispute") for the SAME client IP, same window, must still be allowed -
+        // it has its own bucket because the key carries a distinct route prefix.
+        const b1 = await checkRateLimit(`CATALOG_DISPUTE:${ip}`, { limit: 1, windowMs: 60_000, now, storage: s });
+        expect(b1.allowed).toBe(true);
+      });
+
+      // Reproduces the actual pre-fix call shape: every route calling checkRateLimit(ip, ...) with
+      // the bare IP (no prefix at all) collapses onto ONE shared key, so route A's traffic exhausts
+      // route B's limit even though the routes define different limits. This is the failing case
+      // that the route-prefix fix (checkRateLimit(`${routePrefix}:${ip}`, ...)) eliminates.
+      it("[pre-fix reproduction] bare-IP keys let one route's traffic exhaust a different route's limit", async () => {
+        const s = memStorage();
+        const ip = "42.42.42.42";
+        const now = 9_000_000;
+
+        // Simulates a bulk-scan session hammering ai-lookup POST's pre-fix call shape:
+        // checkRateLimit(clientIp, { storage }) - bare IP, ai-lookup's own (larger) limit of 600.
+        for (let i = 0; i < 5; i++) {
+          const a = await checkRateLimit(ip, { limit: 600, windowMs: 60_000, now, storage: s });
+          expect(a.allowed).toBe(true);
+        }
+
+        // Simulates catalog-dispute POST's pre-fix call: checkRateLimit(ip, { storage }) - same bare
+        // IP, same shared bucket/counter (now at 5), even though catalog-dispute configures its own
+        // much tighter limit (e.g. CATALOG_DISPUTE_RATE_LIMIT default of 5). The 6th increment on the
+        // SHARED counter blows past catalog-dispute's limit purely because of ai-lookup's traffic.
+        const b1 = await checkRateLimit(ip, { limit: 5, windowMs: 60_000, now, storage: s });
+        // With bare (unprefixed) keys this is falsely blocked by ai-lookup's traffic - proves the bug.
+        expect(b1.allowed).toBe(false);
+      });
+    });
   });
 
   // v2 (hardened): atomic, storage-backed daily cap. readDailyUsed is a pure read (gates + GET);

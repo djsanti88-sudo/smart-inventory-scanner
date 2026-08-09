@@ -142,6 +142,16 @@ config booleans + `geminiUsedForDecode: false` and never leaks secrets.
   (structured-field backfill, countSnapshots default). Never clobbers an already-migrated install.
 - Persistence goes through `scanPersistStorage.ts`: coalesced (~6 writes/scan -> 1/tick), fail-soft on
   quota errors (a quota throw out of processScan used to brick scanning).
+- Backing store (#27): IndexedDB is the PRIMARY persist backing (db `sis-persist`, store `kv`, via
+  `idbBacking.ts` + `createAsyncCoalescedFailSoftPersistStorage`), removing localStorage's ~5MB quota
+  wall that bricked large real-backend sessions around 500 scans. localStorage is the FALLBACK when
+  IndexedDB is absent (SSR/jsdom/lockdown browsers) - byte-for-byte the previous behavior. A legacy
+  localStorage `sis-scan-v1` blob is migrated forward on first read (copy-then-clear: the legacy key is
+  removed only after IDB provably holds the value). The per-uid namespace/adopt subsystem
+  (`scanPersistNamespace.ts`: adopt banner, alreadyOwn check, once-guard, clear-cache) is IDB-aware and
+  reads/wipes BOTH stores. Pagehide flush is best-effort under IDB (started synchronously; the browser
+  usually completes an already-started transaction) - the one bounded trade vs localStorage's fully
+  synchronous write, at most one coalesced tick of data.
 - Role-aware partialize: a customer browser NEVER persists aliases, catalog, scanFeed,
   needsReviewQueue, feedback, or cleanup backups. Caps: syncedScanEventIds 1000, feedbackEvents 500;
   customer count data is never capped.

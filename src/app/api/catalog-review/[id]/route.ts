@@ -60,7 +60,11 @@ export async function POST(
 ) {
   const ip = ipFromRequest(request);
   try {
-    const rl = await checkRateLimit(ip, {
+    // Route-family key prefix (matches ai-lookup GET's "GET:${ip}" / export's "EXPORT:${ip}"
+    // convention): without it this shared a raw-IP bucket with every other route calling
+    // checkRateLimit(ip, ...), so a burst on one route could 429 an unrelated route for the same
+    // client IP even though each route configures its own distinct rate-limit env var.
+    const rl = await checkRateLimit(`CATALOG_REVIEW_ID:${ip}`, {
       limit: intEnv(process.env.CATALOG_REVIEW_RATE_LIMIT, CATALOG_REVIEW_ID_RATE_LIMIT),
       storage: await ladderStorage(),
     });
