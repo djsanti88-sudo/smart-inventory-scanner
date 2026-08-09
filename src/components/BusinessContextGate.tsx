@@ -44,6 +44,13 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
   const [status, setStatus] = useState<"resolving" | "no-user" | "no-business" | "adopt-choice" | "ready" | "error">("resolving");
   const [pendingCtx, setPendingCtx] = useState<{ businessId: string; uid: string } | null>(null);
   const [retryToken, setRetryToken] = useState(0);
+  // B4 fix (owner-reported false-safety copy, 2026-08-09): "error" means the copy never landed (the
+  // anon blob is untouched - both "try again" and "start fresh" are safe). "error-postcopy" means the
+  // copy DID land before something else failed (scanStore tags this via postCopyAdoptFailure) - the
+  // anon blob is gone and the per-uid key already holds the adopted data, so "start fresh" must not be
+  // offered (it would silently discard nothing and just re-point at the already-adopted data, which
+  // looks like data loss to an owner who picked "start fresh" expecting an empty namespace).
+  const [adoptStatus, setAdoptStatus] = useState<"idle" | "adopting" | "error" | "error-postcopy">("idle");
 
   useEffect(() => {
     if (!cloud) return; // mock/local path: nothing to wire (context + data already "ready")
@@ -66,6 +73,7 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
           typeof window !== "undefined" && (await hasPersistedBlobAsync(persistKeyForUid(user.uid)));
         if (legacy && !alreadyOwn) {
           setPendingCtx({ businessId: membership.businessId, uid: user.uid });
+          setAdoptStatus("idle");
           setStatus("adopt-choice");
           return;
         }
@@ -89,34 +97,76 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
   if (!cloud) return <>{children}</>;
 
   if (status === "adopt-choice" && pendingCtx) {
+    const runAdopt = async () => {
+      setAdoptStatus("adopting");
+      // F5: the thrown error's tag alone left the post-copy window one line too narrow. Once
+      // adoptLegacyLocalData RESOLVES the copy has landed and the anon blob is already gone, so
+      // anything that throws after that point (setBusinessContext) is just as post-copy as a tagged
+      // failure from inside the store - and must not get the pre-copy "still safe" + Start fresh UI.
+      let copied = false;
+      try {
+        await useScanStore.getState().adoptLegacyLocalData(pendingCtx.uid);
+        copied = true;
+        setBusinessContext(pendingCtx.businessId, pendingCtx.uid);
+        setStatus("ready");
+      } catch (err) {
+        // Duck-typed (not instanceof) so this never depends on importing a class from scanStore -
+        // keeps this check robust across the store's various test mocks.
+        const tagged = !!(err && typeof err === "object" && (err as { postCopyAdoptFailure?: boolean }).postCopyAdoptFailure);
+        if (copied || tagged) {
+          // The anon blob is ALREADY GONE and the per-uid key already holds the adopted data: never
+          // claim "your local data is still safe" and never offer "start fresh" here (see state note
+          // above). Retry (re-running adoptLegacyLocalData) is idempotent and the only safe path.
+          setAdoptStatus("error-postcopy");
+        } else {
+          // The anon blob is untouched by design on a failed copy: never discard it and never
+          // silently fall through to a fresh empty namespace. Let the owner retry or start fresh.
+          setAdoptStatus("error");
+        }
+      }
+    };
     return (
       <div data-testid="adopt-banner" className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
         This device has local scan data saved from before sign-in. Adopt it into your account, or leave it and start fresh.
+        {adoptStatus === "error" && (
+          <div data-testid="adopt-error" className="mt-2 text-red-700">
+            We could not adopt that data. Your local data is still safe on this device. Try again, or start fresh instead.
+          </div>
+        )}
+        {adoptStatus === "error-postcopy" && (
+          <div data-testid="adopt-error-postcopy" className="mt-2 text-red-700">
+            Your data was copied to your account but finishing setup failed. Try again.
+          </div>
+        )}
         <div className="mt-2 flex gap-2">
           <button
             type="button"
-            data-testid="adopt-data"
-            onClick={async () => {
-              await useScanStore.getState().adoptLegacyLocalData(pendingCtx.uid);
-              setBusinessContext(pendingCtx.businessId, pendingCtx.uid);
-              setStatus("ready");
-            }}
-            className="inline-flex min-h-[40px] items-center rounded-lg bg-amber-600 px-3 font-medium text-white hover:bg-amber-700"
+            data-testid={adoptStatus === "error" || adoptStatus === "error-postcopy" ? "retry-adopt" : "adopt-data"}
+            disabled={adoptStatus === "adopting"}
+            onClick={runAdopt}
+            className="inline-flex min-h-[40px] items-center rounded-lg bg-amber-600 px-3 font-medium text-white hover:bg-amber-700 disabled:opacity-50"
           >
-            Adopt it into my account
+            {adoptStatus === "adopting"
+              ? "Adopting..."
+              : adoptStatus === "error" || adoptStatus === "error-postcopy"
+                ? "Try again"
+                : "Adopt it into my account"}
           </button>
-          <button
-            type="button"
-            data-testid="skip-adopt"
-            onClick={async () => {
-              await useScanStore.getState().rehydrateForUid(pendingCtx.uid);
-              setBusinessContext(pendingCtx.businessId, pendingCtx.uid);
-              setStatus("ready");
-            }}
-            className="inline-flex min-h-[40px] items-center rounded-lg border border-amber-400 px-3 font-medium hover:bg-amber-100"
-          >
-            Start fresh (leave it)
-          </button>
+          {adoptStatus !== "error-postcopy" && (
+            <button
+              type="button"
+              data-testid="skip-adopt"
+              disabled={adoptStatus === "adopting"}
+              onClick={async () => {
+                await useScanStore.getState().rehydrateForUid(pendingCtx.uid);
+                setBusinessContext(pendingCtx.businessId, pendingCtx.uid);
+                setStatus("ready");
+              }}
+              className="inline-flex min-h-[40px] items-center rounded-lg border border-amber-400 px-3 font-medium hover:bg-amber-100 disabled:opacity-50"
+            >
+              Start fresh (leave it)
+            </button>
+          )}
         </div>
       </div>
     );

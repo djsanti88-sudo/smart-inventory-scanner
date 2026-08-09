@@ -13,6 +13,7 @@ export function SyncStatusBar() {
     (s) => s.pendingSyncQueue.filter((item) => item.businessId === s.businessId).length,
   );
   const lastSyncError = useScanStore((s) => s.lastSyncError);
+  const persistDegraded = useScanStore((s) => s.persistDegraded);
   const simulateSyncFailure = useScanStore((s) => s.simulateSyncFailure);
   const setOnline = useScanStore((s) => s.setOnline);
   const setSimulateSyncFailure = useScanStore((s) => s.setSimulateSyncFailure);
@@ -37,6 +38,22 @@ export function SyncStatusBar() {
       {pending > 0 && (
         <span className="text-sm text-amber-900" data-testid="pending-warning">
           Saved locally, not synced yet.
+        </span>
+      )}
+
+      {/* Two honestly different states (F4). "demoted" only means this browser blocks or limits
+          IndexedDB (block-site-data, enterprise policy, lockdown mode) or that the perf latch routed
+          writes to the localStorage fallback - the fallback IS the design and writes keep landing, so
+          the alarming copy was a false alarm. Only a real dropped write or a failed migration means
+          data is genuinely at risk. */}
+      {persistDegraded?.kind === "demoted" && (
+        <span className="w-full text-sm text-zinc-600" data-testid="persist-fallback-notice">
+          This browser limits local storage. Data is saved with a fallback and syncs to the cloud.
+        </span>
+      )}
+      {persistDegraded && persistDegraded.kind !== "demoted" && (
+        <span className="w-full text-sm text-red-600" data-testid="persist-degraded-warning">
+          Device storage is failing. Keep this tab open and sync to the cloud.
         </span>
       )}
 

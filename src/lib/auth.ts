@@ -269,10 +269,15 @@ export async function signUp(email: string, password: string): Promise<AuthFlowR
   try {
     const cred = await createUserWithEmailAndPassword(getFirebaseAuth(), email, password);
     // Fire-and-forget verification email: signup must never fail because the mail send did
-    // (fail-soft; the in-app banner offers resend). Guarded synchronously too, since an
-    // unavailable/unmocked provider function can throw before returning a promise.
+    // (fail-soft; the in-app banner offers resend). Routed through resendVerificationEmail so every
+    // caller (this fire-and-forget send and the in-app resend banner) genuinely funnels through the
+    // same auth surface, including its isAuthBypassEnabled() guard (Task 3, 2026-08-09) - previously
+    // this called sendEmailVerification directly, so bypass/mock mode would hit real Firebase here even
+    // though every other send path was guarded. Guarded synchronously too, since an unavailable/unmocked
+    // provider function can throw before returning a promise; resendVerificationEmail itself never
+    // rejects (it catches and returns {error}), so the outer try/catch is defense in depth only.
     try {
-      sendEmailVerification(cred.user).catch(() => undefined);
+      resendVerificationEmail(cred.user).catch(() => undefined);
     } catch {
       /* verification email is best-effort */
     }
@@ -314,6 +319,22 @@ export async function signInWithGoogle(): Promise<AuthFlowResult> {
 export async function sendResetEmail(email: string): Promise<{ error: string | null }> {
   try {
     await sendPasswordResetEmail(getFirebaseAuth(), email.trim());
+    return { error: null };
+  } catch (e) {
+    return { error: firebaseAuthErrorMessage(e) };
+  }
+}
+
+/** Resend a verification email to the given user. Single-sourced here so every caller (signUp's
+ *  fire-and-forget send and the in-app resend banner) funnels through the same auth surface.
+ *  Errors are returned, not thrown, so the caller can show an honest failure state. Task 3 (2026-08-09):
+ *  guarded by isAuthBypassEnabled() the same way signOut is - in bypass/mock mode there is no real
+ *  Firebase user to send to, so this must never attempt a live send; it returns the same
+ *  success-shaped no-op result a real send would return on success. */
+export async function resendVerificationEmail(user: User): Promise<{ error: string | null }> {
+  if (isAuthBypassEnabled()) return { error: null };
+  try {
+    await sendEmailVerification(user);
     return { error: null };
   } catch (e) {
     return { error: firebaseAuthErrorMessage(e) };

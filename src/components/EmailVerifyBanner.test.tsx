@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 
-const sendEmailVerification = vi.fn(async (..._args: unknown[]) => undefined);
-vi.mock("firebase/auth", () => ({ sendEmailVerification: (...a: unknown[]) => sendEmailVerification(...a) }));
+const resendVerificationEmail = vi.fn(async (..._args: unknown[]) => ({ error: null as string | null }));
+vi.mock("@/lib/auth", () => ({ resendVerificationEmail: (...a: unknown[]) => resendVerificationEmail(...a) }));
 
 import { EmailVerifyBanner } from "./EmailVerifyBanner";
 
@@ -17,7 +17,8 @@ afterEach(() => cleanup());
 describe("EmailVerifyBanner", () => {
   beforeEach(() => {
     sessionStorage.clear();
-    sendEmailVerification.mockClear();
+    resendVerificationEmail.mockClear();
+    resendVerificationEmail.mockResolvedValue({ error: null });
   });
 
   it("shows for an unverified password user", () => {
@@ -45,11 +46,27 @@ describe("EmailVerifyBanner", () => {
     expect(screen.queryByText(/Verify your email/i)).toBeNull();
   });
 
-  it("resend calls sendEmailVerification and confirms", async () => {
+  it("resend calls resendVerificationEmail and confirms on success", async () => {
     render(<EmailVerifyBanner user={unverifiedPasswordUser as never} />);
     fireEvent.click(screen.getByRole("button", { name: /resend/i }));
-    expect(sendEmailVerification).toHaveBeenCalledTimes(1);
+    expect(resendVerificationEmail).toHaveBeenCalledTimes(1);
     expect(await screen.findByText(/Sent/i)).toBeInTheDocument();
+  });
+
+  it("shows a distinct failure state (not Sent) when resend fails, and allows retry", async () => {
+    resendVerificationEmail.mockResolvedValueOnce({ error: "network error" });
+    render(<EmailVerifyBanner user={unverifiedPasswordUser as never} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /resend/i }));
+
+    expect(await screen.findByText(/Could not send the email\. Try again\./i)).toBeInTheDocument();
+    expect(screen.queryByText(/^Sent\.$/)).toBeNull();
+
+    // Button must remain usable for a retry, and a retry can succeed.
+    resendVerificationEmail.mockResolvedValueOnce({ error: null });
+    fireEvent.click(screen.getByRole("button", { name: /resend/i }));
+    await waitFor(() => expect(resendVerificationEmail).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/^Sent\.$/)).toBeInTheDocument();
   });
 
   it("dismiss hides it and persists for the session", () => {
