@@ -580,6 +580,103 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // The route gates its own per-account chargeDailySlotForAccount on this flag, never on `!cached`.
   let paidComputeCharged = false;
 
+  // ---- PAID CAP: CHECK AT THE GATE, CHARGE AT THE EGRESS (S5, deep review 2026-08-09) -------------
+  // L12 says: charge exactly once per GENUINE compute. The old chargePaidSlot did the cap CHECK and the
+  // cap CHARGE together, immediately BEFORE each paid rung ran - but a rung's own internal gates can
+  // still short-circuit with ZERO provider egress after that point:
+  //   - Go-UPC returns on its 30-day negative miss cache, or on its monthly spend cap
+  //     (GoUpcProvider.ts goUpcRung: both branches return before deps.client is ever called);
+  //   - the GPT rung declines inside shouldRunGptRung's own $/day budget check.
+  // Every one of those burned a daily slot for a request that spent nothing. So the two halves are now
+  // SPLIT:
+  //   assertPaidCapAvailable()  READ-ONLY. Runs at exactly the old call sites, so a blown cap still
+  //                             throws DailyCapExceededError BEFORE any paid rung starts (unchanged
+  //                             429 semantics), and it never writes.
+  //   chargeOnEgress()          THE WRITE. Called by a rung immediately before REAL provider egress.
+  //                             A no-op unless a charge is currently armed, and it disarms itself first
+  //                             so one armed step can never charge twice.
+  //   withPaidChargeArmed(fn)   arms exactly one charge for the duration of one paid step, then
+  //                             disarms. Multiple paid rungs in one request may each charge (each is a
+  //                             distinct genuine compute - that is by design and unchanged); the
+  //                             full-paid-ladder branch arms ONCE for the whole ladder, exactly as it
+  //                             charged once before.
+  // Charge failure at egress propagates to the rung, which means the provider call never happens -
+  // fail closed, no unmetered spend.
+  let paidChargeArmed = false;
+
+  const assertPaidCapAvailable = async (): Promise<void> => {
+    if (e2eMode()) return;
+    const ladderStore = await ladderStorage();
+    const dailyLimit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 2000);
+    // GC-A (P6 Task A2): when the route already cleared this request's per-account cap, this internal
+    // global gate compares against the high platform-wide BACKSTOP instead of the plain daily limit -
+    // it must never independently 429 an authed tenant who is under their own account limit just
+    // because the shared global bucket is drained by other tenants. Anonymous/uncleared requests keep
+    // today's behavior byte-identical: gated by the plain limit.
+    const limit = capContext?.accountCapCleared
+      ? intEnv(process.env.AI_LOOKUP_GLOBAL_BACKSTOP, dailyLimit * 10)
+      : dailyLimit;
+    const used = await readDailyUsed(ladderStore);
+    // GOD ACCOUNT: the platform owner is never BLOCKED by the daily cap, but IS still charged below
+    // (cost-truth law) - skip only the throw.
+    if (used >= limit && !god) throw new DailyCapExceededError(used, limit);
+  };
+
+  const settlePaidCharge = async (): Promise<void> => {
+    if (e2eMode()) return;
+    const ladderStore = await ladderStorage();
+    const dailyLimit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 2000);
+    const limit = capContext?.accountCapCleared
+      ? intEnv(process.env.AI_LOOKUP_GLOBAL_BACKSTOP, dailyLimit * 10)
+      : dailyLimit;
+    // GLOBAL FIRST, and it must succeed: this is the meter that bounds the BILL. If it throws, the
+    // caller (the rung) aborts before egress - nothing is spent, so nothing went unrecorded.
+    await chargeDailySlot(ladderStore, { limit });
+    paidComputeCharged = true;
+    // FINDING B (accounting symmetry) kept: the per-account charge fires at the SAME site as the
+    // global one so the two move together on the exception path.
+    // S4 (deep review 2026-08-09), ordering least-harm: once the GLOBAL slot has advanced, a failure of
+    // the per-account increment must NOT abort the compute. Aborting here would leave the global
+    // counter advanced with zero compute (a phantom charge) AND fail a request that cleared every real
+    // gate. The bill stays bounded by the global counter; only the per-tenant counter can drift by one,
+    // and that divergence is logged instead of being silent.
+    if (capContext?.authedBusinessId) {
+      try {
+        await chargeDailySlotForAccount(ladderStore, capContext.authedBusinessId);
+      } catch (err) {
+        console.error(
+          JSON.stringify({
+            src: "scanbin",
+            route: "decode/pipeline.settlePaidCharge",
+            event: "charge_pair_incomplete",
+            businessId: capContext.authedBusinessId,
+            ts: new Date().toISOString(),
+            detail: "global slot charged, per-account slot failed; spend metered globally, tenant counter may lag by one",
+            error: err instanceof Error ? err.message : String(err),
+          })
+        );
+      }
+    }
+  };
+
+  /** Called by a rung at the exact moment real provider egress is about to happen. */
+  const chargeOnEgress = async (): Promise<void> => {
+    if (!paidChargeArmed) return;
+    paidChargeArmed = false; // consume BEFORE awaiting, so a re-entrant egress can never double-charge
+    await settlePaidCharge();
+  };
+
+  /** Arms exactly one charge for one paid step. The cap CHECK still happens up front (unchanged 429). */
+  const withPaidChargeArmed = async <T>(run: () => Promise<T>): Promise<T> => {
+    await assertPaidCapAvailable();
+    paidChargeArmed = true;
+    try {
+      return await run();
+    } finally {
+      paidChargeArmed = false;
+    }
+  };
+
   // L2 total ladder deadline (AM-1(b), owner-reported 36-70s blocking decodes): ONE request-scoped
   // deadline, derived once, passed to EVERY runLadder call below (free run, escalation Go-UPC-only
   // run, full paid run). DECODE_LADDER_TOTAL_MS default RAISED 15000ms -> 90000ms (wave-3, 2026-07-20
@@ -930,6 +1027,15 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       budget: async () => god ? { allowed: true, spentUsd: 0, capUsd: Infinity } : checkGptLadderBudget({ worstCaseUsd: GPT_LADDER_WORST_CASE_USD, storage: await ladderStorage() }),
     });
     if (!rung.run) return { payload: null, skipReason: rung.skipReason, surfaceSkip: true };
+    // S5 EGRESS POINT: shouldRunGptRung above can decline on its OWN $/day budget (checkGptLadderBudget)
+    // with zero network. Charging the daily slot here - after every gate, immediately before the only
+    // billed call - means a budget-declined rung costs ZERO slots instead of one.
+    try {
+      await chargeOnEgress();
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : "error";
+      return { payload: null, skipReason: `charge_unavailable:${detail}`, surfaceSkip: true };
+    }
     const r = await gptFromScratch(code, { apiKey: process.env.OPENAI_API_KEY!, signal: opts.signal });
     const gptLadderStore = await ladderStorage();
     // ALWAYS record both - success, error, or abort; never let one skip the other. recordGptLadderSpend
@@ -1237,7 +1343,15 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       const ladderStore = await ladderStorage();
       const r = await goUpcRung(code, {
         apiKey: process.env.GO_UPC_API_KEY,
-        client: (c, d) => goUpcLookup(c, d),
+        // S5 EGRESS POINT: goUpcRung calls `client` ONLY after its own GTIN gate, 30-day negative miss
+        // cache, and monthly spend cap have all passed (GoUpcProvider.ts goUpcRung) - i.e. exactly when
+        // a billed request is about to leave. Charging here instead of before the rung is what makes a
+        // negative-cache hit or a capped month cost ZERO daily slots. If the charge itself fails, the
+        // lookup never happens (runLadder records the rung error) - fail closed, no unmetered spend.
+        client: async (c, d) => {
+          await chargeOnEgress();
+          return goUpcLookup(c, d);
+        },
         gate: goUpcGate,
         // GOD ACCOUNT: unlimited Go-UPC monthly cap for the platform owner (record() still fires inside
         // the rung, so subscription usage is still tracked - only the cap gate is lifted).
@@ -1315,6 +1429,13 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
           return selectBarcodeUrls(c).slice(0, 4);
         },
       };
+      // S5 EGRESS POINT: the fetchV2 engine is the paid work for this rung; charge immediately before it.
+      try {
+        await chargeOnEgress();
+      } catch (e) {
+        const detail = e instanceof Error ? e.message : "error";
+        return { settled: false, reason: `Fetch V2 skipped: could not record paid usage (${detail})` };
+      }
       let fv2;
       try {
         fv2 = await fetchV2(code, deps, { mode: "balanced", maxSourcesPerCode: FETCHV2_MAX_SOURCES, maxTotalMs: FETCHV2_MAX_TOTAL_MS });
@@ -1562,43 +1683,13 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       return { rungs: kept, skippedReasons };
     };
 
-    // ---- LAZY DAILY CAP GATE, extracted ONCE (Task 7) -----------------------------------------------
-    // The single read-then-charge block, used by BOTH the escalation branch (before the Go-UPC-only run)
-    // and the full-paid branch (before the full ladder). READ-ONLY check first (never writes on a block),
-    // THEN one atomic charge - exactly once per request, immediately before genuine paid work starts. A
-    // blown cap throws DailyCapExceededError BEFORE any paid rung runs (its semantics are unchanged on
-    // both branches: every free stage has already completed and returned by this point). E2E is a no-op.
-    const chargePaidSlot = async (): Promise<void> => {
-      if (e2eMode()) return;
-      const ladderStore = await ladderStorage();
-      const dailyLimit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 2000);
-      // GC-A (P6 Task A2): when the route has already cleared this request's own per-account cap
-      // (capContext.accountCapCleared), this internal global gate compares against the high
-      // platform-wide BACKSTOP instead of the plain daily limit - it must never independently 429 an
-      // authed tenant who is under their own account limit just because the shared global bucket is
-      // drained by other tenants/anonymous traffic. Anonymous/uncleared requests (capContext undefined
-      // or accountCapCleared false) keep today's behavior byte-identical: gated by the plain limit.
-      const limit = capContext?.accountCapCleared
-        ? intEnv(process.env.AI_LOOKUP_GLOBAL_BACKSTOP, dailyLimit * 10)
-        : dailyLimit;
-      const used = await readDailyUsed(ladderStore);
-      // GOD ACCOUNT: the platform owner is never BLOCKED by the daily cap, but MUST still be COUNTED
-      // (cost-truth law) - skip only the throw, keep the charge below so god spend is recorded exactly.
-      if (used >= limit && !god) throw new DailyCapExceededError(used, limit);
-      await chargeDailySlot(ladderStore, { limit });
-      // FINDING B (P6 fix wave, accounting symmetry): the per-account charge now happens HERE, at the
-      // SAME site as the global charge, immediately after it - not later at the route on a clean return.
-      // Pre-fix the route charged the account slot only after runDecodePipeline resolved successfully, so
-      // a paid rung that threw AFTER this point left the global counter charged but the account counter
-      // untouched -> permanent drift on the exception path. Charging both together here makes them
-      // exception-consistent: either the pair advances or (on a cap block above) neither does. L12
-      // preserved - still exactly one global + one account charge per genuine paid compute, now at one
-      // site. Anonymous traffic (no authedBusinessId) charges only the global slot, exactly as before.
-      if (capContext?.authedBusinessId) {
-        await chargeDailySlotForAccount(ladderStore, capContext.authedBusinessId);
-      }
-      paidComputeCharged = true;
-    };
+    // ---- LAZY DAILY CAP GATE (Task 7; S5 split 2026-08-09) ------------------------------------------
+    // The cap CHECK + charge ARMING for BOTH the escalation branch (per paid step) and the full-paid
+    // branch (once for the whole ladder) now live in withPaidChargeArmed / assertPaidCapAvailable /
+    // chargeOnEgress, declared at the top of runDecodePipeline (see their doc comment). The check still
+    // runs at exactly these sites - a blown cap still throws DailyCapExceededError BEFORE any paid rung
+    // starts - but the WRITE now happens at real provider egress, so a rung that short-circuits on its
+    // own negative cache / monthly cap / $-budget bills nothing. E2E is a no-op on both halves.
 
     let ladderRun: LadderResult;
     if (freeSuggestion) {
@@ -1641,8 +1732,9 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       const goUpcRungOnly = buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt }).filter((r) => r.name === "goupc");
       const goUpcCanPay = goUpcRungOnly.length > 0 && !!process.env.GO_UPC_API_KEY;
       if (goUpcCanPay) {
-        await chargePaidSlot();
-        const goRun = await runLadder(code, goUpcRungOnly, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) });
+        const goRun = await withPaidChargeArmed(() =>
+          runLadder(code, goUpcRungOnly, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
+        );
         reasonsAcc.push(...goRun.reasons);
         // D6/Task 2 Step 3c (demotion ripple, CRITICAL): Go-UPC is now honestly labeled "suggested"
         // (never "verified" - see GoUpcProvider.ts), so this win-selection can no longer gate on the
@@ -1670,8 +1762,9 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         const gated = preflightTimeGate(fetchV2RungOnly, ladderDeadlineAt);
         reasonsAcc.push(...gated.skippedReasons);
         if (fetchV2CanPay && gated.rungs.length > 0) {
-          await chargePaidSlot();
-          const fv2Run = await runLadder(code, gated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) });
+          const fv2Run = await withPaidChargeArmed(() =>
+            runLadder(code, gated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
+          );
           reasonsAcc.push(...fv2Run.reasons);
           if (isBetterThanFree(fv2Run.outcome)) {
             winningOutcome = fv2Run.outcome;
@@ -1692,8 +1785,9 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         // additional (it fires before shouldRunGptRung ever runs, so a time-skipped GPT rung never even
         // reaches shouldRunGptRung's own budget-charging path - see preflightTimeGate's doc comment).
         if (gated.rungs.length > 0 && !!process.env.OPENAI_API_KEY) {
-          await chargePaidSlot();
-          const gptRun = await runLadder(code, gated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) });
+          const gptRun = await withPaidChargeArmed(() =>
+            runLadder(code, gated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
+          );
           reasonsAcc.push(...gptRun.reasons);
           if (isBetterThanFree(gptRun.outcome)) {
             winningOutcome = gptRun.outcome;
@@ -1709,13 +1803,19 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // provider keys configured, this branch degrades entirely to the AM-7 keyless pattern-URL scrape
       // and honest per-rung skips - never a slot for work that was never actually paid. Escalation
       // above already applies the equivalent gate (goUpcCanPay) for its own paid attempt.
-      if (paidWorkPossible(code)) await chargePaidSlot();
       // wave-3: fetchv2/gpt get their realistic budgets (withRealisticBudgets), and the money preflight
       // filters out either one whose minimum viable window no longer fits the remaining ladder deadline
       // BEFORE it is ever started (preflightTimeGate) - goupc is unaffected (kept at its existing
       // DECODE_LADDER_RUNG_MS default via runLadder's own opts.perRungTimeoutMs fallback).
       const preGated = preflightTimeGate(withRealisticBudgets(buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt })), ladderDeadlineAt);
-      const paidRun = await runLadder(code, preGated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) });
+      const runFullPaidLadder = () =>
+        runLadder(code, preGated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) });
+      // S5: ONE charge armed for the WHOLE paid ladder (unchanged from the single pre-ladder charge this
+      // branch always did) - but it is now only spent if some rung genuinely reaches a provider. A
+      // keyless/negative-cached/budget-declined run down this branch now bills zero instead of one.
+      const paidRun = paidWorkPossible(code)
+        ? await withPaidChargeArmed(runFullPaidLadder)
+        : await runFullPaidLadder();
       // Concatenate reasons free-phase-then-paid-phase so an unresolved response still lists every rung
       // that actually ran, honestly, in the order it ran (including any preflight-skipped rung).
       ladderRun = { settledBy: paidRun.settledBy, outcome: paidRun.outcome, reasons: [...freeRun.reasons, ...preGated.skippedReasons, ...paidRun.reasons] };

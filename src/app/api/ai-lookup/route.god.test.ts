@@ -228,4 +228,57 @@ describe("god account server bypass on /api/ai-lookup", () => {
     expect(res.status).toBe(429); // the per-IP limiter still applies -> not god
     expect(legacyRateLimit).toHaveBeenCalled();
   });
+
+  // S1 (deep review 2026-08-09): god bypasses every spend/rate/cap gate, so a STOLEN owner token that
+  // survives session revocation is a direct bill-drain hole. The base verify deliberately stays
+  // checkRevoked-free (hot path, every scan pays that round-trip); the god arm re-verifies with
+  // checkRevoked=true. Rare, cheap, and it closes the bypass.
+  describe("revoked-session hardening on the god arm", () => {
+    const revoked = () =>
+      Object.assign(new Error("The Firebase ID token has been revoked."), { code: "auth/id-token-revoked" });
+
+    it("a REVOKED god token is 401 token_revoked and never reaches the pipeline", async () => {
+      // Hot-path verify (no checkRevoked) still succeeds - exactly the attack: the token is structurally
+      // valid, only its SESSION was killed. The revocation is visible only to the checkRevoked re-verify.
+      verifyIdToken.mockReset().mockImplementation(async (_token: unknown, checkRevoked?: boolean) => {
+        if (checkRevoked) throw revoked();
+        return { uid: GOD_UID, email: GOD_EMAIL, email_verified: true };
+      });
+      const { POST } = await import("./route");
+
+      const res = await POST(decodeRequest());
+      expect(res.status).toBe(401);
+      expect((await res.json()).reasonCode).toBe("token_revoked");
+      expect(runDecodePipeline).not.toHaveBeenCalled();
+      // The re-verify really did run with checkRevoked=true.
+      expect(verifyIdToken).toHaveBeenCalledWith("token-a", true);
+    });
+
+    it("a NORMAL member is NOT put through the extra checkRevoked round-trip (hot path unchanged)", async () => {
+      verifyIdToken.mockReset().mockImplementation(async (_token: unknown, checkRevoked?: boolean) => {
+        if (checkRevoked) throw revoked();
+        return { uid: "normal-uid", email: "clerk@example.com", email_verified: true };
+      });
+      const { POST } = await import("./route");
+
+      const res = await POST(decodeRequest());
+      expect(res.status).toBe(200);
+      expect(runDecodePipeline).toHaveBeenCalledOnce();
+      expect(verifyIdToken).toHaveBeenCalledTimes(1);
+      expect(verifyIdToken).not.toHaveBeenCalledWith("token-a", true);
+    });
+
+    it("a god token whose re-verify fails on server auth CONFIG returns 503, not a false 401", async () => {
+      verifyIdToken.mockReset().mockImplementation(async (_token: unknown, checkRevoked?: boolean) => {
+        if (checkRevoked) throw new Error("Could not load the default credentials");
+        return { uid: GOD_UID, email: GOD_EMAIL, email_verified: true };
+      });
+      const { POST } = await import("./route");
+
+      const res = await POST(decodeRequest());
+      expect(res.status).toBe(503);
+      expect((await res.json()).reasonCode).toBe("auth_unavailable");
+      expect(runDecodePipeline).not.toHaveBeenCalled();
+    });
+  });
 });

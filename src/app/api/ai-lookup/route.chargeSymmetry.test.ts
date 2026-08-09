@@ -57,7 +57,20 @@ vi.mock("@/server/upc/ladder", async (importOriginal) => {
     runLadder: vi.fn(async (...args: Parameters<typeof actual.runLadder>) => {
       calls += 1;
       if (calls === 1) return actual.runLadder(...args); // FREE run: real, misses -> no outcome
-      throw new Error("simulated mid-ladder failure after chargePaidSlot"); // PAID run: throw
+      // PAID run. S5 (2026-08-09): the charge no longer fires before the ladder - it fires when a rung
+      // reaches REAL provider egress. So to reproduce "exception AFTER the charge" this must actually
+      // RUN the paid rung (which performs its egress charge against the stubbed 404 fetches) and only
+      // then throw. Simply throwing without running a rung would now prove nothing about symmetry,
+      // because no charge would ever have happened.
+      const [, rungs] = args;
+      for (const rung of rungs) {
+        try {
+          await rung.run({ signal: new AbortController().signal });
+        } catch {
+          // a rung's own failure is irrelevant here; the charge at its egress point is what matters
+        }
+      }
+      throw new Error("simulated mid-ladder failure after the paid rung's egress charge");
     }),
   };
 });
