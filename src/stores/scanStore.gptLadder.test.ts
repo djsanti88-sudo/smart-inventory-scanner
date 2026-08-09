@@ -1,15 +1,48 @@
-import { describe, it, expect, vi } from "vitest";
-import { createTestScanStore } from "@/stores/scanStore";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  createTestScanStore,
+  __resetGeneralDecodePacerForTest,
+  __drainGeneralDecodePacerForTest,
+} from "@/stores/scanStore";
 import { MockDb } from "@/services/mockDb";
 
 // Task 5: scan-store application of the GPT-5.5 ladder trust tiers + a bounded decode queue.
 // All fetch calls are mocked - no live tokens are spent.
 
+// S6 follow-up (2026-08-09): the general decode queue's bulk pacer is a MODULE-level token bucket
+// (production truth: the server rate limit is per browser/account, not per store instance, so every
+// store instance in a tab shares one budget - same lifetime as the module-level decode queues and
+// `decodeTaskPromises`). Within one test file that means an earlier case can drain the bucket and
+// leave a later case waiting on refill. Reset it before every test so each case starts from a full,
+// deterministic bucket instead of inheriting leftover tokens/timers.
+beforeEach(() => {
+  __resetGeneralDecodePacerForTest();
+});
+
+// URL-AWARE fetch stub (2026-08-09). `spy` counts ONLY /api/ai-lookup decode POSTs. `processScan`
+// also fires an UNPACED, fire-and-forget /api/prefix-floor enrichment request for any bare 8-14 digit
+// code (fetchPrefixFloorEnrichment) - a URL-blind spy counted that as a decode POST, so every
+// "how many decode calls happened" assertion silently depended on winning a race against it. When the
+// pacer default dropped from burst 40 @ 50/s to burst 10 @ 10/s, a queued decode began losing that
+// race and the enrichment call started landing inside the awaited window. Splitting the endpoints
+// makes the assertions measure what they always meant: decode POSTs, and nothing else.
 function stub(resp: object) {
   const original = globalThis.fetch;
   const spy = vi.fn(async () => ({ ok: true, json: async () => resp })) as unknown as typeof fetch;
-  globalThis.fetch = spy;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (requestUrl(input).includes("/api/prefix-floor")) {
+      return { ok: true, json: async () => ({ floor: null }) } as unknown as Response;
+    }
+    return (spy as unknown as (i: RequestInfo | URL, n?: RequestInit) => Promise<Response>)(input, init);
+  }) as unknown as typeof fetch;
   return { spy, restore: () => (globalThis.fetch = original) };
+}
+
+/** Normalizes every fetch input form (string / URL / Request) to a comparable URL string. */
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.href;
+  return (input as Request).url ?? String(input);
 }
 
 function aiOnStore() {
@@ -650,6 +683,47 @@ describe("Direct idempotency lock (liveDecode re-entry on an already-resolved re
       // D6 core: auto-suggest-apply (unlike the old gptTrusted auto-count path) never writes an alias -
       // a bare GPT self-report is never approved/aliased. Zero aliases for this code either call.
       expect(store.getState().aliases.filter((a) => a.cleanCode === "614141000418")).toHaveLength(0);
+    } finally {
+      restore();
+    }
+  });
+
+  // S6 follow-up guard (2026-08-09): the case above resolves the first decode BEFORE the second call,
+  // so it only proves the `review.status !== "open"` guard inside runLiveDecodeOnce. This proves the
+  // OTHER half - the one that only exists once the bulk pacer actually queues work: two liveDecode
+  // calls for the SAME review issued in the SAME tick while the token bucket is DRAINED. Both calls
+  // land while the first is still sitting in the pacer queue (never dequeued, so the open-status guard
+  // has not run yet), and the in-flight dedupe in `enqueueDecode` must collapse them into ONE task and
+  // ONE decode POST. Two POSTs here would waste rate budget and risk a double server-side cap charge
+  // during a genuine bulk session.
+  it("two liveDecode calls for the SAME review in one tick, on a DRAINED pacer bucket, produce exactly one decode POST", async () => {
+    const store = aiOnStore();
+    const review = openReview(store, "614141000419");
+    const RESP = {
+      providerNames: ["mock"],
+      results: [],
+      decision: {
+        status: "needs_review",
+        confidence: 0,
+        evidenceStrength: "none",
+        exactCodeEvidenceVerifiedByApp: false,
+        reason: "",
+        crossCheck: crossCheckSingleProvider(0),
+      },
+    };
+    const { spy, restore } = stub(RESP);
+    try {
+      // Drain the bucket to zero so the calls below MUST be queued by the pacer rather than dispatched
+      // synchronously out of the burst allowance - this is the bulk-session condition under test.
+      __drainGeneralDecodePacerForTest();
+
+      const first = store.getState().liveDecode(review.id);
+      const second = store.getState().liveDecode(review.id); // same tick, first has NOT been dequeued
+      await Promise.all([first, second]);
+
+      expect(spy).toHaveBeenCalledTimes(1); // one task, one POST - not two
+      // TOP LAW unaffected: the row was counted at scan time, entirely independent of the pacer.
+      expect(store.getState().scanFeed.filter((e) => e.cleanCode === "614141000419")).toHaveLength(1);
     } finally {
       restore();
     }

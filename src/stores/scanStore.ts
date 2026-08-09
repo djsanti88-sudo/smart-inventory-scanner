@@ -97,6 +97,8 @@ import {
   migrateLegacyBlobOnce,
   migrateLegacyBlobOnceAsync,
   removePersistedKeyEverywhere,
+  hasMeaningfulLegacyBlobAsync,
+  LEGACY_PERSIST_KEY,
 } from "@/stores/scanPersistNamespace";
 import { getOrCreateDeviceId } from "@/services/deviceIdentity";
 import { shouldReuseSession, buildAutoSessionName } from "@/services/sessions/autoSession";
@@ -423,21 +425,36 @@ type DecodeTask = { run: () => Promise<void>; resolve: () => void; reject: (e: u
  * self-throttles the RATE of decode dispatch instead of firing every queued request the instant a slot
  * frees up. `MAX_CONCURRENT_DECODES` already bounds concurrency (how many requests are in flight at
  * once) but not RATE (how fast slots turn over) - a fast-miss corpus round-trip (free rungs only, no
- * network) can turn slots over fast enough to burst well past `AI_LOOKUP_RATE_LIMIT` (server default
- * 20000/60s = ~333/s as of 2026-08-07; the legacy default was 600/60s = 10/s). Tuned deliberately far
- * below the server ceiling (large margin) so ordinary bulk pastes never trip it even sharing an office
- * IP with a second scanning station. Only the GENERAL queue is paced: the trusted-exact probe queue is
+ * network) can turn slots over fast enough to burst past `AI_LOOKUP_RATE_LIMIT`, whose SERVER DEFAULT
+ * is 600/60s = 10 requests/second (aiSpendGuard.checkRateLimit's AI_LOOKUP_RATE_LIMIT fallback). The
+ * client default is pinned to that same 10/s (S6 fix, see GENERAL_DECODE_RATE_PER_SEC below) and is
+ * raised by env only where the deployment has actually raised the server limit. Anything faster than
+ * the server bucket just converts a bulk paste into a 429 storm on the very next window.
+ * Only the GENERAL queue is paced: the trusted-exact probe queue is
  * server-side FREE of the rate limit (route.ts returns before `checkRateLimit` for `deterministicOnly`
  * requests - see inv-bulk-ratelimit.md #1) and pacing it would only slow down decode with no rate-limit
  * benefit. TOP LAW unaffected: counting already happened synchronously in `ensureProvisionalCount`
  * before any code ever reaches this queue - the pacer only paces the decode POST cadence, never a row's
  * appearance or count.
  */
-const GENERAL_DECODE_RATE_PER_SEC = 50;
-// Burst allowance kept generous (well above any ordinary handful-of-scans session) so the pacer only
-// ever engages for a genuine bulk paste - never for normal single/few-code usage, which must stay
-// exactly as instant as before this change.
-const GENERAL_DECODE_BURST = 40;
+// S6 (deep review 2026-08-09): the client default now MATCHES the server default. The comment above
+// used to claim a 20000/60s server ceiling, but aiSpendGuard.checkRateLimit's actual default is
+// 600/60s = 10 requests/second (aiSpendGuard.ts, the AI_LOOKUP_RATE_LIMIT fallback). Pacing at 50/s
+// against a 10/s bucket drains it in about 12 seconds and then 429-storms in ANY environment that has
+// not raised AI_LOOKUP_RATE_LIMIT. Defaulting to the server default makes the safe case the DEFAULT
+// case; a deployment that genuinely raises AI_LOOKUP_RATE_LIMIT (production does) raises the client
+// pacer with the env override below, so proven production behavior is unchanged. Both values must be
+// NEXT_PUBLIC_* to be readable in the browser bundle.
+function decodePacerEnvNumber(raw: string | undefined, fallback: number): number {
+  if (raw == null || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+const GENERAL_DECODE_RATE_PER_SEC = decodePacerEnvNumber(process.env.NEXT_PUBLIC_DECODE_RATE_PER_SEC, 10);
+// Burst allowance: one second's worth of the sustained rate. Kept at the same scale as the rate so an
+// ordinary handful-of-scans session never touches the pacer (it dispatches instantly out of the burst),
+// while a genuine bulk paste settles onto the sustained rate immediately after the burst is spent.
+const GENERAL_DECODE_BURST = decodePacerEnvNumber(process.env.NEXT_PUBLIC_DECODE_BURST, 10);
 
 type TokenBucket = {
   capacity: number;
@@ -825,9 +842,21 @@ export interface ScanState {
    *  rule, review F5) - live-auth mode mirroring this to the business doc is explicitly deferred to a
    *  future task, not built here. Reset to null on business switch / sign-out via emptyTenantState. */
   firstScanAt: string | null;
+  /** Task 2 (persist-failure surface, 2026-08-09): non-null once the async coalesced persist wrapper's
+   *  onPersistFailure has fired at least once (write/migrate/demoted - see scanPersistStorage.ts).
+   *  Latches on the FIRST failure (see setPersistDegraded) so a storm of repeated failures does not
+   *  spam re-renders; the kind recorded is always the first one seen. Never cleared automatically -
+   *  this reflects "this device's storage has shown a failure this session", not live health. Only the
+   *  async/IndexedDB persist path can report this (the plain localStorage-only fallback wrapper has no
+   *  onPersistFailure hook), so this stays null forever in SSR/jsdom-without-indexedDB/non-persisted
+   *  test stores - that is expected, not a bug. */
+  persistDegraded: { kind: "write" | "migrate" | "demoted" } | null;
 
   // actions
   setHasHydrated: (v: boolean) => void;
+  /** Task 2: latch-set persistDegraded on the first onPersistFailure callback; a no-op on later calls
+   *  (the flag never un-latches within a session). */
+  setPersistDegraded: (kind: "write" | "migrate" | "demoted") => void;
   /** Set the signed-in business context (Firebase backend). Enables cloud sync + drains the queue. */
   setBusinessContext: (businessId: string, userId: string) => void;
   /** Pre-sign-out drain guard (F1): if the pending-sync queue is non-empty, attempt one awaited cloud
@@ -1421,28 +1450,182 @@ function idForReview(r: UnknownCodeReview): string {
   return parts[2] ?? r.id;
 }
 
+// The ONE prefix-rewrite rule for every idempotencyKey-shaped string in this store: rewrite only the
+// leading businessId segment (buildIdempotencyKey joins businessId:sessionId:...:operation with ":"),
+// leaving every other segment byte-identical so retries of the exact same event keep deduping against
+// the same identity. Hoisted (F-5, 2026-08-09) so rescopePlaceholderRecord and rescopePlaceholderQueueItem
+// share the exact same rewrite - never duplicate this logic at a new call site.
+const PLACEHOLDER_ID_PREFIX = `${DEMO_BUSINESS_ID}:`;
+function rescopeKey(key: string, realBusinessId: string): string {
+  return key.startsWith(PLACEHOLDER_ID_PREFIX) ? realBusinessId + key.slice(DEMO_BUSINESS_ID.length) : key;
+}
+
 // Fix #41 (data-loss race, 2026-08-06): re-point a placeholder-scoped record onto the real business
 // once sign-in bootstrap resolves. Used by setBusinessContext's bootstrap-resolution branch below.
+// F-5 class closure (2026-08-09): businessId was the only field rewritten here, but several entities
+// also embed businessId-derived identity strings that stayed stale - ScanEvent/UnknownCodeReview/
+// Alias.idempotencyKey and InventoryCount.appliedIdempotencyKeys[]. Several existing enqueue sites
+// (~1792, 5341, 5361, 7137, 7519, 7683) rebuild a queue item straight from an entity's OWN stored
+// idempotencyKey, and server-side reconciliation compares appliedIdempotencyKeys against _appliedKeys -
+// either path would mis-dedupe (or permanently reject) if the entity's own embedded key still pointed
+// at the placeholder tenant while the queue item's copy of the same key had already been rescoped.
+// Generic over any embedded idempotencyKey-shaped field so every rescoped collection gets the same
+// treatment from one place. Never regenerates a key: only the leading businessId segment changes.
 function rescopePlaceholderRecord<T extends { businessId: string }>(entity: T, realBusinessId: string): T {
-  return entity.businessId === DEMO_BUSINESS_ID ? { ...entity, businessId: realBusinessId } : entity;
+  if (entity.businessId !== DEMO_BUSINESS_ID) return entity;
+  const next: T = { ...entity, businessId: realBusinessId };
+  const record = next as unknown as Record<string, unknown>;
+  if (typeof record.idempotencyKey === "string") {
+    record.idempotencyKey = rescopeKey(record.idempotencyKey, realBusinessId);
+  }
+  if (Array.isArray(record.appliedIdempotencyKeys)) {
+    record.appliedIdempotencyKeys = (record.appliedIdempotencyKeys as unknown[]).map((k) =>
+      typeof k === "string" ? rescopeKey(k, realBusinessId) : k,
+    );
+  }
+  return next;
 }
 
 // Same idea for a queued sync item: rewrite its own businessId, its payload's businessId (if the
-// payload shape carries one), and the leading businessId segment of its idempotencyKey
-// (buildIdempotencyKey joins businessId:sessionId:...:operation with ":") - leaving every other
-// segment byte-identical so retries of this exact item keep deduping against the same identity.
+// payload shape carries one), and the leading businessId segment of its idempotencyKey, reusing the
+// exact same rescopeKey rewrite rescopePlaceholderRecord uses above.
+// Bug fix (proven live 2026-08-09): some payload shapes (IncrementPayload for INCREMENT_COUNT,
+// UnknownCodeReview for SAVE_UNKNOWN_SCAN) ALSO embed their own copy of idempotencyKey, which must
+// stay byte-identical to the outer (queue item) idempotencyKey - firebaseSyncSafety.validatePendingSyncItem
+// hard-rejects a mismatch as payload_idempotency_mismatch. Only the outer key was rewritten here
+// before; the embedded copy kept the stale placeholder business prefix forever, so every rescoped
+// INCREMENT_COUNT item was permanently rejected by the server and never synced. Rescope the embedded
+// key with the exact same prefix-rewrite rule as the outer key so outer === payload after adoption.
 function rescopePlaceholderQueueItem(item: PendingSyncItem, realBusinessId: string): PendingSyncItem {
   if (item.businessId !== DEMO_BUSINESS_ID) return item;
   const payload = item.payload;
   const rescopedPayload =
-    payload && typeof payload === "object" && "businessId" in (payload as Record<string, unknown>)
-      ? { ...(payload as Record<string, unknown>), businessId: realBusinessId }
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (() => {
+          const record = payload as Record<string, unknown>;
+          const next: Record<string, unknown> = { ...record };
+          if ("businessId" in record) next.businessId = realBusinessId;
+          if (typeof record.idempotencyKey === "string") next.idempotencyKey = rescopeKey(record.idempotencyKey, realBusinessId);
+          if (Array.isArray(record.appliedIdempotencyKeys)) {
+            next.appliedIdempotencyKeys = (record.appliedIdempotencyKeys as unknown[]).map((k) =>
+              typeof k === "string" ? rescopeKey(k, realBusinessId) : k,
+            );
+          }
+          return next;
+        })()
       : payload;
-  const prefix = `${DEMO_BUSINESS_ID}:`;
-  const idempotencyKey = item.idempotencyKey.startsWith(prefix)
-    ? realBusinessId + item.idempotencyKey.slice(DEMO_BUSINESS_ID.length)
-    : item.idempotencyKey;
+  const idempotencyKey = rescopeKey(item.idempotencyKey, realBusinessId);
   return { ...item, businessId: realBusinessId, payload: rescopedPayload, idempotencyKey };
+}
+
+// ADOPTION RE-SYNC (verified live on the Firebase emulator, 2026-08-09 - proof in
+// e2e/proof/adopt-emulator-spotcheck/): the pre-auth cohort's anonymous session ran against the MOCK
+// backend, which marks every local write "synced" the instant it is applied and leaves
+// pendingSyncQueue EMPTY. When that blob is adopted into a signed-in LIVE Firebase account, the
+// bootstrap-resolution branch below re-scopes the rows correctly but there is nothing left in the
+// queue to re-scope, so the real cloud sync engine never pushes the adopted rows: local total 4,
+// Firestore holds only the 1 post-sign-in scan, and the UI honestly reports "All saved: 0". A silent
+// local-vs-cloud divergence.
+//
+// So adoption must REBUILD the sync work those adopted entities would have enqueued had they been
+// scanned under the live tenant. Two rules make this safe:
+//  1. Reuse each entity's OWN (already-rescoped) idempotencyKey - never regenerate one. Server-side
+//     `_appliedKeys` dedupe then swallows anything that genuinely HAD reached THIS backend before, so
+//     re-enqueueing can never double-count. Re-sending is idempotent BY DESIGN; not re-sending is
+//     unrecoverable data loss.
+//  2. Skip any key already present in the queue, so the ordinary fix-#41 shape (nothing drained yet,
+//     every write still queued under the placeholder) only gets re-scoped, never duplicated.
+// The rebuilt set mirrors exactly what the live scan path enqueues: SAVE_SCAN_EVENT + INCREMENT_COUNT
+// per counted event (processScan ~3147-3170), SAVE_UNKNOWN_SCAN per open review, and the provisional
+// SAVE_PRODUCT that ensureProvisionalCount mints (~5467). Catalog/seed products and sessions are NOT
+// pushed - a live scan of a known catalog product does not push the product either.
+function buildAdoptionResyncItems(params: {
+  businessId: string;
+  scanFeed: ScanEvent[];
+  finalCounts: InventoryCount[];
+  needsReviewQueue: UnknownCodeReview[];
+  products: Product[];
+  existingQueue: PendingSyncItem[];
+  adoptedEventIds: Set<string>;
+  adoptedReviewIds: Set<string>;
+  idFactory: () => string;
+  now: () => string;
+}): PendingSyncItem[] {
+  const { businessId, idFactory, now } = params;
+  const seenKeys = new Set(params.existingQueue.map((item) => item.idempotencyKey));
+  const items: PendingSyncItem[] = [];
+  const push = (item: PendingSyncItem) => {
+    if (seenKeys.has(item.idempotencyKey)) return;
+    seenKeys.add(item.idempotencyKey);
+    items.push(item);
+  };
+  const provisionalById = new Map(
+    params.products.filter((p) => p.provisional === true).map((p) => [p.id, p]),
+  );
+  const pushedProductIds = new Set<string>();
+
+  for (const event of params.scanFeed) {
+    if (!params.adoptedEventIds.has(event.id) || !event.idempotencyKey) continue;
+    push(
+      makeQueueItem({
+        idFactory, now, businessId, sessionId: event.sessionId,
+        entityType: "ScanEvent", entityId: event.id, operation: "SAVE_SCAN_EVENT", payload: event,
+        // Deterministic reconstruction of the key the scan path mints for this same event id
+        // (buildIdempotencyKey(businessId, sessionId, eventId, "SAVE_SCAN_EVENT")). SAVE_SCAN_EVENT is
+        // an upsert-by-id with no counting semantics, so even a key that differs from the original
+        // (e.g. a `:transfer:`-suffixed one) can only rewrite the same document, never add a count.
+        idempotencyKey: buildIdempotencyKey(businessId, event.sessionId, event.id, "SAVE_SCAN_EVENT"),
+        scanEventId: event.id,
+      }),
+    );
+    const productId = event.matchedProductId;
+    if (!productId || event.quantityDelta <= 0) continue;
+    const count = params.finalCounts.find(
+      (c) => c.productId === productId && c.sessionId === event.sessionId,
+    );
+    if (!count) continue;
+    const provisional = provisionalById.get(productId);
+    if (provisional && !pushedProductIds.has(productId)) {
+      pushedProductIds.add(productId);
+      push(
+        makeQueueItem({
+          idFactory, now, businessId, sessionId: event.sessionId,
+          entityType: "Product", entityId: productId, operation: "SAVE_PRODUCT", payload: provisional,
+          idempotencyKey: buildIdempotencyKey(businessId, event.sessionId, `${productId}:provisional`, "SAVE_PRODUCT"),
+          scanEventId: null,
+        }),
+      );
+    }
+    const incPayload: IncrementPayload = {
+      businessId,
+      sessionId: event.sessionId,
+      productId,
+      scanEventId: event.id,
+      quantityDelta: event.quantityDelta,
+      // The event's OWN counting key, verbatim (its INCREMENT_COUNT identity since it was minted).
+      idempotencyKey: event.idempotencyKey,
+    };
+    push(
+      makeQueueItem({
+        idFactory, now, businessId, sessionId: event.sessionId,
+        entityType: "InventoryCount", entityId: count.id, operation: "INCREMENT_COUNT", payload: incPayload,
+        idempotencyKey: event.idempotencyKey, scanEventId: event.id,
+      }),
+    );
+  }
+
+  for (const review of params.needsReviewQueue) {
+    if (!params.adoptedReviewIds.has(review.id) || !review.idempotencyKey) continue;
+    push(
+      makeQueueItem({
+        idFactory, now, businessId, sessionId: review.sessionId,
+        entityType: "UnknownCodeReview", entityId: review.id, operation: "SAVE_UNKNOWN_SCAN", payload: review,
+        idempotencyKey: review.idempotencyKey, scanEventId: null,
+      }),
+    );
+  }
+
+  return items;
 }
 
 export function buildScanInitializer(deps: ScanStoreDeps) {
@@ -2056,8 +2239,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       location: "Main",
       recentLocations: [],
       firstScanAt: null,
+      persistDegraded: null,
 
       setHasHydrated: (v) => set({ _hasHydrated: v }),
+      setPersistDegraded: (kind) =>
+        set((s) => {
+          // Latch on the first kind seen, with ONE exception (F4, 2026-08-09): "demoted" is not a
+          // data-loss event (a blocked IndexedDB plus a working localStorage fallback is the design,
+          // and the UI shows calm copy for it), so a REAL write/migrate failure that follows must be
+          // able to upgrade the latch - otherwise the calm copy stays on screen while writes are
+          // genuinely being dropped. A real kind never downgrades back to "demoted".
+          if (!s.persistDegraded) return { persistDegraded: { kind } };
+          if (s.persistDegraded.kind === "demoted" && kind !== "demoted") return { persistDegraded: { kind } };
+          return s;
+        }),
 
       setBusinessContext: (businessId, userId) => {
         const loadGeneration = ++businessLoadGeneration;
@@ -2110,25 +2305,68 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // The syncPending() call further below (shared with the other two branches) then drains
           // the now-correctly-scoped queue immediately.
           clearTrustedExactProbes();
+          // The set this branch is about to rescope IS the adopted set - capture it BEFORE rewriting
+          // businessId, so the re-sync rebuild below knows precisely which entities came from the
+          // placeholder/mock phase (never touching anything that already belonged to a live tenant).
+          const adoptedEventIds = new Set(
+            contextState.scanFeed.filter((e) => e.businessId === DEMO_BUSINESS_ID).map((e) => e.id),
+          );
+          const adoptedReviewIds = new Set(
+            contextState.needsReviewQueue.filter((r) => r.businessId === DEMO_BUSINESS_ID).map((r) => r.id),
+          );
+          const rescopedProducts = contextState.products.map((p) => rescopePlaceholderRecord(p, businessId));
+          const rescopedScanFeed = contextState.scanFeed.map((e) => rescopePlaceholderRecord(e, businessId));
+          const rescopedFinalCounts = contextState.finalCounts.map((c) => rescopePlaceholderRecord(c, businessId));
+          const rescopedReviews = contextState.needsReviewQueue.map((r) => rescopePlaceholderRecord(r, businessId));
+          const rescopedQueue = contextState.pendingSyncQueue.map((item) =>
+            rescopePlaceholderQueueItem(item, businessId),
+          );
+          // ADOPTION RE-SYNC: rebuild the sync work for adopted rows the mock backend already flagged
+          // "synced" (queue empty). Dedupes by idempotencyKey against the rescoped queue, so the
+          // ordinary not-yet-drained shape adds nothing. See buildAdoptionResyncItems.
+          const resyncItems = buildAdoptionResyncItems({
+            businessId,
+            scanFeed: rescopedScanFeed,
+            finalCounts: rescopedFinalCounts,
+            needsReviewQueue: rescopedReviews,
+            products: rescopedProducts,
+            existingQueue: rescopedQueue,
+            adoptedEventIds,
+            adoptedReviewIds,
+            idFactory,
+            now,
+          });
+          const nextQueue = resyncItems.length > 0 ? [...rescopedQueue, ...resyncItems] : rescopedQueue;
+          // Honest UI: rows with queued work read "pending" until the drain actually lands them, so
+          // the adopted inventory never claims a cloud save that has not happened yet.
+          const recomputed = recomputeSyncStatus({
+            businessId,
+            scanFeed: rescopedScanFeed,
+            finalCounts: rescopedFinalCounts,
+            needsReviewQueue: rescopedReviews,
+            pendingSyncQueue: nextQueue,
+          });
           set({
             businessId,
             userId,
             businessContextReady: true,
             businessDataLoaded: !needsLoad,
             lastSyncError: null,
-            products: contextState.products.map((p) => rescopePlaceholderRecord(p, businessId)),
+            products: rescopedProducts,
             aliases: contextState.aliases.map((a) => rescopePlaceholderRecord(a, businessId)),
             sessions: contextState.sessions.map((s) => rescopePlaceholderRecord(s, businessId)),
             currentSession: contextState.currentSession
               ? rescopePlaceholderRecord(contextState.currentSession, businessId)
               : contextState.currentSession,
-            scanFeed: contextState.scanFeed.map((e) => rescopePlaceholderRecord(e, businessId)),
-            finalCounts: contextState.finalCounts.map((c) => rescopePlaceholderRecord(c, businessId)),
-            needsReviewQueue: contextState.needsReviewQueue.map((r) => rescopePlaceholderRecord(r, businessId)),
+            scanFeed: recomputed.scanFeed,
+            finalCounts: recomputed.finalCounts,
+            needsReviewQueue: recomputed.needsReviewQueue,
             settings: rescopePlaceholderRecord(contextState.settings, businessId),
-            pendingSyncQueue: contextState.pendingSyncQueue.map((item) =>
-              rescopePlaceholderQueueItem(item, businessId),
-            ),
+            pendingSyncQueue: nextQueue,
+            // F-5 class closure (2026-08-09): aiLookupLogs carries businessId too and was not being
+            // rescoped at all - a platformOwner reading logs after adoption would still see the
+            // placeholder tenant id on pre-adoption entries.
+            aiLookupLogs: contextState.aiLookupLogs.map((l) => rescopePlaceholderRecord(l, businessId)),
           });
         } else {
           clearTrustedExactProbes();
@@ -2370,7 +2608,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           lastSyncError: null,
           // N2: the wipe write also deposits tenant-scoped SESSION IDENTITY + variance SNAPSHOTS into the
           // persisted blob. Clear them too so a signed-out browser holds no residue of the prior tenant's
-          // session/report data (and does not spuriously look "non-empty" to hasLegacyBlob). countSnapshots
+          // session/report data (and does not spuriously look "non-empty" to legacyBlobIsMeaningful,
+          // the shared predicate behind hasMeaningfulLegacyBlobAsync). countSnapshots
           // is the variance ring buffer; currentSession/sessionId are the active-session identity.
           // sessionId is typed `string` (non-nullable), so it is cleared to "" rather than null.
           // sessionHistory carries the tenant's scanned codes - same residue rule.
@@ -2382,7 +2621,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (typeof window !== "undefined" && window.localStorage) {
           try {
             clearSelectedBusinessId(); // sis-selected-business-v1 is NOT uid-namespaced: explicit clear
-            if (uid) removePersistedKeyEverywhere(persistKeyForUid(uid));
+            if (uid) {
+              // F-4 fix (resurrection leak, 2026-08-09): cancel any coalesced write still pending for
+              // this key FIRST (the wrapper's own removeItem does this, plus deletes from backing) - or
+              // that pending write could land after removePersistedKeyEverywhere and resurrect the key.
+              if (deps.persistName) scanPersistBackingStorage.removeItem(persistKeyForUid(uid));
+              removePersistedKeyEverywhere(persistKeyForUid(uid));
+            }
           } catch {
             // ignore storage errors: the in-memory reset above already holds
           }
@@ -2403,7 +2648,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // Returned so callers (BusinessContextGate) can AWAIT rehydrate before calling
           // setBusinessContext - only then does the store's businessId/userId reflect the persisted
           // state, letting the same-tenant refresh guard above actually match on a real refresh.
-          return Promise.resolve(persistApi.rehydrate());
+          return Promise.resolve(persistApi.rehydrate()).then(() => sweepEmptyLegacyResidue());
         }
         return Promise.resolve();
       },
@@ -2421,7 +2666,33 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         } else {
           migrateLegacyBlobOnce(uid, window.localStorage);
         }
-        return get().rehydrateForUid(uid);
+        // B4 fix (owner-reported false-safety copy, 2026-08-09): the migrate call above has now COPIED
+        // the anon blob to this uid's key AND DELETED the legacy blob (migrateLegacyBlobOnce(Async)'s own
+        // contract: throws propagate BEFORE that delete, so a throw from the block above always means
+        // the anon blob is still intact - "pre-copy"). Everything from this point on runs AFTER the copy
+        // has landed, so a failure here is a genuinely different situation: the anon blob no longer
+        // exists, and the per-uid key now HOLDS the adopted data. Tag any such failure so the caller
+        // (BusinessContextGate) never claims "your local data is still safe" (false) and never offers
+        // "start fresh" (which would re-point persist at a per-uid key that now silently contains the
+        // just-adopted inventory instead of a fresh empty one).
+        try {
+          // F-4 fix (resurrection leak, 2026-08-09): migrateLegacyBlobOnce(Async) deletes the legacy key
+          // by writing straight to the raw backing store(s), bypassing this store's own coalesced-write
+          // wrapper entirely. If a scan happened under the placeholder tenant moments before this adopt
+          // (still-pending, not yet flushed - the wrapper batches ~6 writes/scan into at most one write
+          // per tick), that pending write's target name/value are untouched by the raw delete above and
+          // can still flush AFTER it, re-creating "sis-scan-v1" with the previous user's stale scan data.
+          // On a shared device the NEXT sign-in would then see the adopt banner offering that resurrected
+          // (and by then orphaned) inventory. Cancel any such pending write for the legacy key now that
+          // the copy has landed - this never removes anything not already removed above, it only stops a
+          // stale in-flight write for THIS key from landing later.
+          if (deps.persistName) scanPersistBackingStorage.removeItem(LEGACY_PERSIST_KEY);
+          return await get().rehydrateForUid(uid);
+        } catch (err) {
+          const tagged = err instanceof Error ? err : new Error(String(err));
+          (tagged as Error & { postCopyAdoptFailure?: true }).postCopyAdoptFailure = true;
+          throw tagged;
+        }
       },
 
       recordFeedback: (type, payload) =>
@@ -7727,9 +7998,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (!cloudBackend) db.reset();
         if (typeof window !== "undefined" && window.localStorage) {
           try {
+            // F-4 fix (resurrection leak, 2026-08-09): cancel any coalesced write still pending for
+            // these keys FIRST via the wrapper's own removeItem, before the direct dual-store delete -
+            // otherwise a write already queued for "sis-scan-v1" (or the per-uid key) can land AFTER
+            // this clears it, resurrecting the just-wiped blob for the next user on a shared device.
+            if (deps.persistName) scanPersistBackingStorage.removeItem("sis-scan-v1");
             removePersistedKeyEverywhere("sis-scan-v1");
             const currentUid = get().userId;
-            if (currentUid) removePersistedKeyEverywhere(persistKeyForUid(currentUid));
+            if (currentUid) {
+              if (deps.persistName) scanPersistBackingStorage.removeItem(persistKeyForUid(currentUid));
+              removePersistedKeyEverywhere(persistKeyForUid(currentUid));
+            }
             window.localStorage.removeItem("sis-mockdb-v1");
           } catch {
             // ignore
@@ -8343,6 +8622,69 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
   return out as never;
 }
 
+// F-4 fix (resurrection leak, 2026-08-09): named module-level instance (was an inline IIFE passed
+// straight to `storage:` below, unreachable from anywhere else) so the direct legacy/per-uid key
+// deleters in resetForSignOut and clearLocalCache can route through THIS wrapper's own removeItem -
+// the only thing that cancels a pending coalesced write for that key (see scanPersistStorage.ts
+// removeItem: it clears pendingName/pendingValue AND cancels any in-flight IDB migration copy before
+// deleting from backing). Deleting the legacy/localStorage key directly (removePersistedKeyEverywhere
+// alone) does not touch this wrapper's pending-write queue, so a write already coalesced for that key
+// before the deletion could still land AFTER it, resurrecting a supposedly-deleted blob - on a shared
+// device that resurrected sis-scan-v1 is the PREVIOUS user's inventory, offered to the NEXT user via
+// the adopt banner (cross-account disclosure).
+const scanPersistBackingStorage = (() => {
+  const idb = typeof indexedDB !== "undefined" ? createIdbBacking() : null;
+  return idb
+    ? createAsyncCoalescedFailSoftPersistStorage(() => idb, {
+        migrateFrom: typeof localStorage !== "undefined" ? localStorage : undefined,
+        // Task 2 (persist-failure surface, 2026-08-09): this hook previously had no listener anywhere
+        // (a fail-soft write/migrate/demotion failure was logged via console.warn inside
+        // scanPersistStorage.ts and otherwise invisible). `useScanStore` is referenced here inside a
+        // closure, not at module-eval time - by the time IndexedDB can actually fail and call this back,
+        // module evaluation has long finished and `useScanStore` below is defined, so this is safe.
+        // Guarded because a persist failure must never itself throw (it already fails soft upstream).
+        onPersistFailure: (kind) => {
+          try {
+            useScanStore.getState().setPersistDegraded(kind);
+          } catch {
+            // never let a persist-failure listener throw
+          }
+        },
+      })
+    : createCoalescedFailSoftPersistStorage(() => localStorage);
+})();
+
+/**
+ * Sweep the EMPTY legacy-key residue a per-uid session leaves behind (root-caused 2026-08-09 from the
+ * adopt emulator spot-check: after adoption + reload an empty "sis-scan-v1" (+ its "::stamp" sibling)
+ * reappeared in IndexedDB).
+ *
+ * WHY IT APPEARS - entirely product code, no test artifact: `StoreHydrator` calls
+ * `useScanStore.persist.rehydrate()` on every page load, while the persist name is still the DEFAULT
+ * legacy key (the uid is only known after the async auth bootstrap in BusinessContextGate). Zustand's
+ * hydrate ends by invoking `onRehydrateStorage`'s callback -> `setHasHydrated(true)` -> a store `set()`
+ * -> the persist middleware's `setItem()` on the CURRENT name. So the initial (empty) state is written
+ * straight back to "sis-scan-v1", into whichever backing is primary (IndexedDB since #27, which is why
+ * localStorage stayed clean in the proof). Harmless on its own - `legacyBlobIsMeaningful` correctly
+ * ignores it, so no adopt banner - but it is a stray per-device trace of a signed-in session sitting in
+ * the SHARED (non-namespaced) key, and it makes "is the legacy key gone?" un-assertable after adoption.
+ *
+ * The fix is a sweep, not a delete-on-sight: only a blob with NO scans, counts, or reviews is removed -
+ * exactly the `hasMeaningfulLegacyBlobAsync` predicate the adopt banner itself uses. A real pre-account
+ * blob (adoptable, or deliberately kept by "Start fresh (leave it)") is never touched. Routed through
+ * the wrapper's own removeItem FIRST so a coalesced write still pending for that key is cancelled
+ * rather than left to land afterwards (the F-4 resurrection rule). Never throws.
+ */
+async function sweepEmptyLegacyResidue(): Promise<void> {
+  try {
+    if (await hasMeaningfulLegacyBlobAsync()) return; // real adoptable data: leave it exactly as-is
+    scanPersistBackingStorage.removeItem(LEGACY_PERSIST_KEY);
+    removePersistedKeyEverywhere(LEGACY_PERSIST_KEY); // blob + its "::stamp" sibling, both backings
+  } catch {
+    // Storage cleanup is best-effort: it must never break sign-in hydration.
+  }
+}
+
 export const useScanStore = create<ScanState>()(
   persist(buildScanInitializer(appDeps), {
     name: "sis-scan-v1",
@@ -8382,14 +8724,7 @@ export const useScanStore = create<ScanState>()(
     // backend sessions ~500 scans in). Feature-detected once at store creation: no indexedDB (SSR,
     // jsdom, lockdown) -> the previous localStorage path, byte-for-byte identical behavior. When IDB
     // is active, migrateFrom copies a legacy localStorage blob forward on first read (copy-then-clear).
-    storage: (() => {
-      const idb = typeof indexedDB !== "undefined" ? createIdbBacking() : null;
-      return idb
-        ? createAsyncCoalescedFailSoftPersistStorage(() => idb, {
-            migrateFrom: typeof localStorage !== "undefined" ? localStorage : undefined,
-          })
-        : createCoalescedFailSoftPersistStorage(() => localStorage);
-    })(),
+    storage: scanPersistBackingStorage,
     skipHydration: true,
     migrate: scanStoreMigrate,
     // Sec-4: split persisted state by access level. A customer browser must NEVER persist the reusable
@@ -8439,4 +8774,16 @@ export function createTestScanStore(overrides?: Partial<ScanStoreDeps>) {
  *  leftover tokens/timers from whatever ran earlier in the same test file. Never used outside tests. */
 export function __resetGeneralDecodePacerForTest(nowMs: number = Date.now()): void {
   if (generalDecodeQueue.pacer) resetTokenBucket(generalDecodeQueue.pacer, nowMs);
+}
+
+/** TEST ONLY: the mirror of `__resetGeneralDecodePacerForTest` - empties the bulk pacer's token bucket
+ *  so the very next `liveDecode` is genuinely QUEUED (waiting on refill) instead of dispatching
+ *  synchronously out of the burst allowance. Lets a test exercise the bulk-session path (in-flight
+ *  dedupe of two calls for the same review while the first is still queued) without pasting 1000 codes
+ *  first. Never used outside tests. */
+export function __drainGeneralDecodePacerForTest(nowMs: number = Date.now()): void {
+  const pacer = generalDecodeQueue.pacer;
+  if (!pacer) return;
+  pacer.tokens = 0;
+  pacer.lastRefillAt = nowMs;
 }

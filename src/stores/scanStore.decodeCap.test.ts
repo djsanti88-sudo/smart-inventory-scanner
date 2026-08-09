@@ -1,10 +1,18 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { postTelemetry } = vi.hoisted(() => ({ postTelemetry: vi.fn() }));
 vi.mock("@/lib/telemetry", () => ({ postTelemetry }));
 
-import { createTestScanStore } from "@/stores/scanStore";
+import { createTestScanStore, __resetGeneralDecodePacerForTest } from "@/stores/scanStore";
 import { MockDb } from "@/services/mockDb";
+
+// S6 follow-up (2026-08-09): the general decode queue's bulk pacer is a MODULE-level token bucket
+// shared by every store instance (production truth: the server rate limit is per browser/account, not
+// per store). Within this file the 12-decode breaker case above drains it, leaving later cases waiting
+// on refill. Reset before every test so each case starts from a full, deterministic bucket.
+beforeEach(() => {
+  __resetGeneralDecodePacerForTest();
+});
 
 // Task 2: a daily_cap 429 from /api/ai-lookup must NOT retry (there is no automatic
 // decode-on-cap-reset queue anywhere in the app - verified by grep: only the sync retry queue
@@ -140,11 +148,21 @@ describe("decodeOnce 429 handling (daily cap vs real rate limit)", () => {
 
     const calls: string[] = [];
     const original = globalThis.fetch;
-    let call = 0;
+    let decodeCall = 0;
+    // URL-AWARE (2026-08-09): the 429 must be aimed at the DECODE endpoint specifically. `processScan`
+    // also fires an unpaced, fire-and-forget /api/prefix-floor enrichment request for this bare numeric
+    // code, and the old call-INDEX mock ("first call gets the 429") handed the 429 to whichever request
+    // happened to arrive first. That was always a race; the S6 pacer default (burst 10 @ 10/s) made the
+    // decode POST lose it, so the decode got a clean 200 on attempt 1 and correctly never retried.
+    // Keying on the URL asserts exactly what this test always meant: the FIRST /api/ai-lookup attempt
+    // is rate limited, and the single Retry-After retry still fires.
     globalThis.fetch = vi.fn(async (url: string) => {
       calls.push(String(url));
-      call++;
-      if (call === 1) {
+      if (String(url).includes("/api/prefix-floor")) {
+        return new Response(JSON.stringify({ floor: null }), { status: 200 });
+      }
+      decodeCall++;
+      if (decodeCall === 1) {
         return new Response(JSON.stringify({ error: "rate limited" }), {
           status: 429,
           headers: { "Retry-After": "0" }, // keep the test fast
