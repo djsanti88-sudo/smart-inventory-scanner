@@ -13,14 +13,12 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   }),
 }));
 vi.mock("@/services/auth/authMode", () => ({ isLiveAuth: () => true }));
-vi.mock("@/server/upc/storage", () => ({ ladderStorage: vi.fn(async () => ({})) }));
 vi.mock("@/server/log", () => ({ logServerEvent: vi.fn() }));
 
-const checkRateLimit = vi.fn();
-vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
-  const real = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
-  return { ...real, checkRateLimit: (...args: unknown[]) => checkRateLimit(...args) };
-});
+const checkAccountDeleteRateLimit = vi.fn();
+vi.mock("@/services/security/accountDeleteRateLimit", () => ({
+  checkAccountDeleteRateLimit: (...args: unknown[]) => checkAccountDeleteRateLimit(...args),
+}));
 
 function makeRequest(body: unknown): NextRequest {
   return new NextRequest("http://localhost/api/account/delete", {
@@ -35,30 +33,30 @@ const VALID_BODY = { businessId: "biz-1", idToken: "tok", confirmPhrase: "DELETE
 describe("delete route rate limiting", () => {
   beforeEach(() => {
     vi.resetModules();
-    checkRateLimit.mockReset();
+    checkAccountDeleteRateLimit.mockReset();
     process.env.IS_E2E = "";
   });
 
   it("returns 429 with Retry-After when the limiter denies", async () => {
-    checkRateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 120_000 });
+    checkAccountDeleteRateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 120_000 });
     const { POST } = await import("./route");
     const res = await POST(makeRequest(VALID_BODY));
     expect(res.status).toBe(429);
     expect(res.headers.get("Retry-After")).toBe("120");
   });
 
-  it("keys the limiter on verified identities only (DELETE:<businessId>:<uid>)", async () => {
-    checkRateLimit.mockResolvedValue({ allowed: true, retryAfterMs: 0 });
+  it("keys the limiter on verified identities only (DELETE:<businessId>:<uid>) with the configured window", async () => {
+    checkAccountDeleteRateLimit.mockResolvedValue({ allowed: true, retryAfterMs: 0 });
     const { POST } = await import("./route");
     await POST(makeRequest(VALID_BODY));
-    expect(checkRateLimit).toHaveBeenCalledWith(
+    expect(checkAccountDeleteRateLimit).toHaveBeenCalledWith(
       "DELETE:biz-1:owner-uid",
-      expect.objectContaining({ failClosedOnStorageError: true }),
+      expect.objectContaining({ limit: 3, windowMs: 3_600_000 }),
     );
   });
 
-  it("fails closed when limiter storage errors (503, deletion does NOT run)", async () => {
-    checkRateLimit.mockRejectedValue(new Error("turso down"));
+  it("fails closed when the Firestore-backed limiter errors (503, deletion does NOT run)", async () => {
+    checkAccountDeleteRateLimit.mockRejectedValue(new Error("firestore down"));
     const { POST } = await import("./route");
     const res = await POST(makeRequest(VALID_BODY));
     expect(res.status).toBe(503);
@@ -78,6 +76,6 @@ describe("delete route rate limiting", () => {
     const { POST } = await import("./route");
     const res = await POST(makeRequest(VALID_BODY));
     expect(res.status).toBe(403);
-    expect(checkRateLimit).not.toHaveBeenCalled();
+    expect(checkAccountDeleteRateLimit).not.toHaveBeenCalled();
   });
 });

@@ -4,8 +4,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { isLiveAuth } from "@/services/auth/authMode";
-import { intEnv, checkRateLimit } from "@/services/security/aiSpendGuard";
-import { ladderStorage } from "@/server/upc/storage";
+import { intEnv } from "@/services/security/aiSpendGuard";
+import { checkAccountDeleteRateLimit } from "@/services/security/accountDeleteRateLimit";
 import { logServerEvent } from "@/server/log";
 
 export const runtime = "nodejs";
@@ -165,15 +165,16 @@ export async function POST(request: NextRequest) {
 
   // Rate limit AFTER role verification (rejected non-owners never consume the owner's bucket,
   // mirroring the export route) and BEFORE the phrase check (a phrase-guessing loop is exactly
-  // the abuse this bounds). Durable Turso-backed limiter; verified identities only in the key;
-  // fail CLOSED - if the limiter store is down we refuse an irreversible action rather than
-  // allow an unmetered one.
+  // the abuse this bounds). Durable Firestore-backed limiter (src/services/security/
+  // accountDeleteRateLimit.ts) - deliberately NOT the decode ladder's Turso storage, so this
+  // GDPR/CCPA erasure path never 503s because an unrelated decode-cache DB is down or misconfigured.
+  // It shares the SAME failure domain as the deletion itself (Firestore Admin SDK); verified
+  // identities only in the key; fail CLOSED - if Firestore is down we refuse an irreversible action
+  // rather than allow an unmetered one (and "limiter down" now means "deletion is impossible anyway").
   try {
-    const rl = await checkRateLimit(`DELETE:${businessId}:${uid}`, {
+    const rl = await checkAccountDeleteRateLimit(`DELETE:${businessId}:${uid}`, {
       limit: intEnv(process.env.ACCOUNT_DELETE_RATE_LIMIT, 3),
       windowMs: intEnv(process.env.ACCOUNT_DELETE_RATE_WINDOW_MS, 3_600_000),
-      storage: await ladderStorage(),
-      failClosedOnStorageError: true,
     });
     if (!rl.allowed) {
       logServerEvent({ route: "/api/account/delete", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
