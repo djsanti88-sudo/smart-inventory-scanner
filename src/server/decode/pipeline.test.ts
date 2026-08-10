@@ -126,25 +126,30 @@ const realSpendGuard = vi.hoisted(() => ({
   recordGptLadderSpend: undefined as unknown as typeof import("@/services/security/aiSpendGuard").recordGptLadderSpend,
   recordGptLadderCall: undefined as unknown as typeof import("@/services/security/aiSpendGuard").recordGptLadderCall,
   chargeDailySlotForAccount: undefined as unknown as typeof import("@/services/security/aiSpendGuard").chargeDailySlotForAccount,
+  chargeDailySlotForAccountConditional: undefined as unknown as typeof import("@/services/security/aiSpendGuard").chargeDailySlotForAccountConditional,
 }));
 vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
   realSpendGuard.recordGptLadderSpend = actual.recordGptLadderSpend;
   realSpendGuard.recordGptLadderCall = actual.recordGptLadderCall;
   realSpendGuard.chargeDailySlotForAccount = actual.chargeDailySlotForAccount;
+  realSpendGuard.chargeDailySlotForAccountConditional = actual.chargeDailySlotForAccountConditional;
   return {
     ...actual,
     recordGptLadderSpend: vi.fn(actual.recordGptLadderSpend),
     recordGptLadderCall: vi.fn(actual.recordGptLadderCall),
     // S4 (2026-08-09): spied so one test can make the per-account half of the charge pair FAIL after
-    // the global half already succeeded (the split-exception case the old suite never covered).
+    // the global half already succeeded (the split-exception case the old suite never covered). Item 1
+    // (2026-08-09) routed the NON-god per-account charge onto the atomic conditional variant, so that
+    // one is spied too - it now carries the S4 fail-open path for tenants.
     chargeDailySlotForAccount: vi.fn(actual.chargeDailySlotForAccount),
+    chargeDailySlotForAccountConditional: vi.fn(actual.chargeDailySlotForAccountConditional),
   };
 });
 
 import { runDecodePipeline, DailyCapExceededError, classifySourceTier, classifyGptFailureDetail } from "@/server/decode/pipeline";
 import { detectCodeType } from "@/services/codeTypeDetector";
-import { __resetForTest, readDailyUsed, readDailyUsedForAccount, recordGptLadderSpend, recordGptLadderCall, chargeDailySlotForAccount } from "@/services/security/aiSpendGuard";
+import { __resetForTest, readDailyUsed, readDailyUsedForAccount, recordGptLadderSpend, recordGptLadderCall, chargeDailySlotForAccount, chargeDailySlotForAccountConditional, chargeDailySlot } from "@/services/security/aiSpendGuard";
 import { ladderStorage } from "@/server/upc/storage";
 import * as decodeCacheModule from "@/services/ai/decodeCache";
 import { clearDecodeCache } from "@/services/ai/decodeCache";
@@ -214,6 +219,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     vi.mocked(recordGptLadderSpend).mockReset().mockImplementation(realSpendGuard.recordGptLadderSpend);
     vi.mocked(recordGptLadderCall).mockReset().mockImplementation(realSpendGuard.recordGptLadderCall);
     vi.mocked(chargeDailySlotForAccount).mockReset().mockImplementation(realSpendGuard.chargeDailySlotForAccount);
+    vi.mocked(chargeDailySlotForAccountConditional).mockReset().mockImplementation(realSpendGuard.chargeDailySlotForAccountConditional);
     // Sync Truth Task 4: default every test to a safe instant miss; the dedicated describe block below
     // overrides with mockResolvedValueOnce for a verified/suggestion hit.
     vi.mocked(lookupMasterCatalog).mockReset().mockResolvedValue({ kind: "miss" });
@@ -312,6 +318,60 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     // But the slot was STILL charged (cost-truth: god spend is recorded, only the block is lifted).
     expect(await readDailyUsed(await ladderStorage())).toBe(1);
     // Still no LIVE provider was contacted (no OpenAI/Firecrawl keys; Brave discovery + stubbed 404s).
+    expect(hitAnAiProvider()).toBe(false);
+  });
+
+  it("global cap race at egress: with ONE slot left, two concurrent paid decodes NEVER overshoot the cap (atomic charge)", async () => {
+    // Item 1 (2026-08-09): the paid charge at egress is an ATOMIC conditional increment, so two requests
+    // that both cleared the read-only cap gate (used < limit at gate time) cannot BOTH charge the last
+    // slot. Seed used = limit - 1 (one slot remains), then race two paid decodes. The counter must land
+    // on EXACTLY `limit`, never limit + 1. The old unconditional egress charge let both charge -> overshoot.
+    process.env.AI_LOOKUP_DAILY_LIMIT = "2";
+    process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // makes paid discovery possible so egress is reached
+    const store = await ladderStorage();
+    await chargeDailySlot(store, { limit: 2 }); // used now 1 of 2 -> exactly one slot left
+    expect(await readDailyUsed(store)).toBe(1);
+
+    const [a, b] = await Promise.all([
+      runDecodePipeline(makeReq("111000222333")),
+      runDecodePipeline(makeReq("444000555666")),
+    ]);
+
+    // The money invariant: the atomic charge grants at most the one remaining slot - the counter is
+    // capped at `limit`, never inflated past it by the race.
+    expect(await readDailyUsed(store)).toBe(2);
+    // EXACTLY one wins the last slot (computed) and the other is honestly cap_blocked. This guards the
+    // swallowed-denial bug: a denied egress inside the shared full-ladder arm must ABORT the ladder, not
+    // fall through to a downstream paid rung that then runs UNMETERED and returns a plain needs-review.
+    expect([a.kind, b.kind].sort()).toEqual(["cap_blocked", "computed"]);
+    // And no live provider was contacted (stubbed 404s; the point is the counter, not a real call).
+    expect(hitAnAiProvider()).toBe(false);
+  }, 30000);
+
+  it("account cap at egress: an authoritative per-account denial BLOCKS the paid compute (cap_blocked), never proceeds past the tenant cap", async () => {
+    // Item 1 deep-review Finding 2: the per-account conditional charge returning {granted:false} is an
+    // AUTHORITATIVE quota denial (distinct from a storage-error throw = S4 fail-open). It must ENFORCE the
+    // account cap, not pin-and-proceed. Setup: global has room, but the tenant is already AT its account
+    // cap when the egress charge fires (a race past the route's read gate). The paid compute must not run.
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100"; // global backstop has plenty of room
+    process.env.AI_LOOKUP_ACCOUNT_DAILY_LIMIT = "1";
+    process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // paid work possible so egress is reached
+    const store = await ladderStorage();
+    await chargeDailySlotForAccount(store, "tenant-cap"); // account now 1 of 1 -> at cap
+    expect(await readDailyUsedForAccount(store, "tenant-cap")).toBe(1);
+
+    const outcome = await runDecodePipeline({
+      ...makeReq("111000222333"),
+      capContext: { authedBusinessId: "tenant-cap", accountCapCleared: true, accountLimit: 1 },
+    });
+
+    // The tenant is over their account cap: the request is honestly cap_blocked, not a served compute.
+    expect(outcome.kind).toBe("cap_blocked");
+    // The account counter was NOT advanced past its cap by the denied charge.
+    expect(await readDailyUsedForAccount(store, "tenant-cap")).toBe(1);
+    // Deep-review Finding 4: the global slot charged just before the account denial is REFUNDED, so a
+    // burst of account-denied requests cannot inflate the shared global backstop (cross-tenant starvation).
+    expect(await readDailyUsed(store)).toBe(0);
     expect(hitAnAiProvider()).toBe(false);
   });
 
@@ -2737,7 +2797,10 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
           process.env.GO_UPC_API_KEY = "test-key";
           try { fs.unlinkSync(missCacheFile()); } catch {}
           stubFreeSuggestionThenPaid({ goupcMiss: true });
-          vi.mocked(chargeDailySlotForAccount).mockRejectedValueOnce(new Error("simulated per-account storage failure"));
+          // Item 1 (2026-08-09): the NON-god per-account charge runs through the atomic conditional
+          // variant, so THAT is the half made to fail here - the S4 fail-open contract (global already
+          // metered -> serve anyway, log the divergence, never 5xx) must still hold for the new function.
+          vi.mocked(chargeDailySlotForAccountConditional).mockRejectedValueOnce(new Error("simulated per-account storage failure"));
 
           const out = await runDecodePipeline({
             ...makeReq(VALID_GTIN),

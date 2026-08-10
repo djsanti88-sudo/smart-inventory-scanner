@@ -142,6 +142,8 @@ export type DailyCapStorage = {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<void>;
   increment(key: string): Promise<number>;
+  /** Atomic conditional charge: increment ONLY while below `limit`; see LadderStorage.incrementIfBelow. */
+  incrementIfBelow(key: string, limit: number): Promise<{ value: number; granted: boolean }>;
 };
 
 /**
@@ -197,6 +199,63 @@ export async function chargeDailySlotForAccount(
   dateKey: string = todayKey(),
 ): Promise<number> {
   return storage.increment(perAccountDailyKey(businessId, dateKey));
+}
+
+// ---------------------------------------------------------------------------
+// Daily cap v3 (item 1, 2026-08-09): atomic CONDITIONAL charge. chargeDailySlot/chargeDailySlotForAccount
+// above are UNCONDITIONAL (always increment, return the new total) - correct for the god charged-but-
+// never-blocked path, and for any caller that has already decided to proceed. The conditional variants
+// below fold the cap CHECK and the CHARGE into ONE atomic storage op (incrementIfBelow), so N concurrent
+// tenant requests racing at the boundary grant at most `limit - current` slots and never overshoot -
+// eliminating the bounded-but-real TOCTOU window the old readDailyUsed-then-chargeDailySlot dance had.
+// A `granted:false` result means the slot was NOT charged and the caller must treat the request as
+// cap-blocked (429 / Needs Review), exactly the honest-reason path today's read-check already drives.
+// ---------------------------------------------------------------------------
+
+/**
+ * Atomically charge one GLOBAL daily-cap slot IFF today's usage is still below `limit`. Returns the
+ * resulting `used` count, the effective `limit`, and whether the slot was `granted`. On a denied
+ * result the counter is unchanged and no slot was consumed. Same once-per-genuine-compute discipline
+ * as chargeDailySlot - call it at the single paid-charge site, never at a pure read gate.
+ */
+export async function chargeDailySlotConditional(
+  storage: DailyCapStorage,
+  opts: { limit?: number; dateKey?: string } = {},
+): Promise<{ used: number; limit: number; granted: boolean }> {
+  const limit = opts.limit ?? intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 2000);
+  const { value, granted } = await storage.incrementIfBelow(
+    DAILY_KEY_PREFIX + (opts.dateKey ?? todayKey()),
+    limit,
+  );
+  return { used: value, limit, granted };
+}
+
+/**
+ * Refund ONE global daily-cap slot (atomic -1). Used when a request charged the global slot but is then
+ * BLOCKED for another reason (deep-review Finding 4: an authoritative per-account denial under a burst)
+ * - without the refund, N account-denied requests would each leave a phantom +1 on the shared global
+ * backstop and could starve other tenants. Best-effort by convention at the call site: a refund failure
+ * at worst leaves the prior conservative over-count, never an under-count of the bill.
+ */
+export async function refundDailySlot(
+  storage: { incrementBy(key: string, delta: number): Promise<number> },
+  opts: { dateKey?: string } = {},
+): Promise<void> {
+  await storage.incrementBy(DAILY_KEY_PREFIX + (opts.dateKey ?? todayKey()), -1);
+}
+
+/**
+ * Atomically charge one PER-ACCOUNT daily-cap slot IFF that account's usage is still below `limit`.
+ * Same conditional semantics as chargeDailySlotConditional but scoped to the account key namespace.
+ */
+export async function chargeDailySlotForAccountConditional(
+  storage: DailyCapStorage,
+  businessId: string,
+  limit: number,
+  dateKey: string = todayKey(),
+): Promise<{ used: number; granted: boolean }> {
+  const { value, granted } = await storage.incrementIfBelow(perAccountDailyKey(businessId, dateKey), limit);
+  return { used: value, granted };
 }
 
 // ---------------------------------------------------------------------------

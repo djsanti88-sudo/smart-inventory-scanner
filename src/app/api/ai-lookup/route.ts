@@ -6,7 +6,7 @@ import { createOpenAiProvider } from "@/services/ai/openaiProvider";
 import { sanitizeForAiLookup } from "@/services/sanitizer";
 import { detectCodeType } from "@/services/codeTypeDetector";
 import { formatGs1Hint } from "@/services/gs1Prefixes";
-import { killSwitchOn, checkRateLimit, readDailyUsed, chargeDailySlot, intEnv, getGptLadderStatus } from "@/services/security/aiSpendGuard";
+import { killSwitchOn, checkRateLimit, readDailyUsed, chargeDailySlot, chargeDailySlotConditional, intEnv, getGptLadderStatus } from "@/services/security/aiSpendGuard";
 import { GPT_LADDER_WORST_CASE_USD, type GptFromScratchResult } from "@/services/ai/gptFromScratch";
 import { goUpcUsage } from "@/server/upc/goUpcUsage";
 import { ladderStorage } from "@/server/upc/storage";
@@ -20,7 +20,7 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { isLiveAuth } from "@/services/auth/authMode";
 import { clampConfidenceThreshold } from "@/services/security/decodePolicy";
-import { readDailyUsedForAccount, chargeDailySlotForAccount } from "@/services/security/aiSpendGuard";
+import { readDailyUsedForAccount, chargeDailySlotForAccount, chargeDailySlotForAccountConditional, refundDailySlot } from "@/services/security/aiSpendGuard";
 import { buildMasterCatalogEntry, appendMasterCatalogEntry } from "@/server/catalog/masterAppend";
 import { logServerEvent } from "@/server/log";
 import { cleanScanCode } from "@/services/scanCleaner";
@@ -681,8 +681,29 @@ export async function POST(request: Request) {
       //    the global backstop); only the per-tenant counter drifts by one. FAIL OPEN exactly as before
       //    (proven by route.legacyChargePair.test.ts): never 5xx a request that cleared every real gate
       //    over a per-tenant bookkeeping hiccup - log the divergence instead.
+      // ITEM 1 (2026-08-09): the global backstop charge is ATOMIC-CONDITIONAL for non-god traffic - the
+      // read-check above can pass while a concurrent request takes the last slot, so the charge itself
+      // makes the final grant/deny decision and can never overshoot the backstop. GOD is charged but
+      // never blocked (unconditional). Storage errors still fail CLOSED (503) exactly as before.
       try {
-        await chargeDailySlot(ladderStore, { limit: backstop });
+        if (isGod) {
+          await chargeDailySlot(ladderStore, { limit: backstop });
+        } else {
+          const g = await chargeDailySlotConditional(ladderStore, { limit: backstop });
+          if (!g.granted) {
+            logServerEvent({
+              route: "/api/ai-lookup",
+              event: "cap_blocked",
+              reasonCode: "daily_cap",
+              businessId: authedBusinessId,
+              status: 429,
+            });
+            return Response.json(
+              { error: `Daily AI lookup cap reached (${g.used}/${backstop}). No AI call made.`, reasonCode: "daily_cap" },
+              { status: 429 }
+            );
+          }
+        }
       } catch (chargeErr) {
         logServerEvent({
           route: "/api/ai-lookup",
@@ -698,18 +719,63 @@ export async function POST(request: Request) {
           { status: 503 }
         );
       }
-      try {
-        await chargeDailySlotForAccount(ladderStore, authedBusinessId);
-      } catch (chargeErr) {
-        logServerEvent({
-          route: "/api/ai-lookup",
-          event: "charge_pair_incomplete",
-          reasonCode: "charge_error",
-          businessId: authedBusinessId,
-          status: 200,
-          detail: "legacy authed per-account charge failed; spend already metered globally, request served",
-        });
-        void chargeErr;
+      // ITEM 1 + deep-review Finding 2 (2026-08-10): the per-account charge is ATOMIC-CONDITIONAL for
+      // non-god. Two outcomes are distinguished, mirroring the decode pipeline's settlePaidCharge:
+      //  - a STORAGE-ERROR throw = S4 fail-open (global already metered -> serve 200, log divergence);
+      //  - an authoritative {granted:false} = a real account-cap denial (raced past the read gate) ->
+      //    ENFORCE the cap with 429 account_daily_cap. Pinning-and-serving would let a tenant burst past
+      //    its own cap and under-count its meter. God charges unconditionally (never denied).
+      if (isGod) {
+        try {
+          await chargeDailySlotForAccount(ladderStore, authedBusinessId);
+        } catch (chargeErr) {
+          logServerEvent({
+            route: "/api/ai-lookup",
+            event: "charge_pair_incomplete",
+            reasonCode: "charge_error",
+            businessId: authedBusinessId,
+            status: 200,
+            detail: "god legacy authed per-account charge failed; spend already metered globally, request served",
+          });
+          void chargeErr;
+        }
+      } else {
+        let acct: { used: number; granted: boolean };
+        try {
+          acct = await chargeDailySlotForAccountConditional(ladderStore, authedBusinessId, acctLimit);
+        } catch (chargeErr) {
+          logServerEvent({
+            route: "/api/ai-lookup",
+            event: "charge_pair_incomplete",
+            reasonCode: "charge_error",
+            businessId: authedBusinessId,
+            status: 200,
+            detail: "legacy authed per-account charge failed; spend already metered globally, request served",
+          });
+          void chargeErr;
+          acct = { used: 0, granted: true }; // storage error is S4 fail-open, NOT a quota denial
+        }
+        if (!acct.granted) {
+          // Finding 4 (2026-08-10): the global backstop slot charged just above must be refunded when the
+          // request is blocked on its account cap, so a burst of account-denied requests cannot inflate
+          // the shared backstop and starve other tenants. Best-effort (see settlePaidCharge).
+          try {
+            await refundDailySlot(ladderStore);
+          } catch {
+            /* leave the conservative over-count if the refund itself fails */
+          }
+          logServerEvent({
+            route: "/api/ai-lookup",
+            event: "cap_blocked",
+            reasonCode: "account_daily_cap",
+            businessId: authedBusinessId,
+            status: 429,
+          });
+          return Response.json(
+            { error: `Your daily AI lookup cap is reached (${acct.used}/${acctLimit}).`, reasonCode: "account_daily_cap" },
+            { status: 429 }
+          );
+        }
       }
     } else {
       // Anonymous/unauthenticated traffic: unchanged behavior, gated by the plain global cap.
@@ -723,8 +789,18 @@ export async function POST(request: Request) {
       }
       // S4: same fail-closed rule as the authed branch above - an unrecordable charge must never be
       // followed by a paid lookup. Explicit 503 with honest copy instead of an opaque unhandled 500.
+      // ITEM 1 (2026-08-09): ATOMIC-CONDITIONAL charge - anonymous traffic is never god, so the charge
+      // itself is the authoritative grant/deny and can never overshoot the plain daily cap under a race
+      // (the read-check above is now just a fast pre-gate). A denied grant returns the same 429 daily_cap.
       try {
-        await chargeDailySlot(ladderStore, { limit });
+        const g = await chargeDailySlotConditional(ladderStore, { limit });
+        if (!g.granted) {
+          logServerEvent({ route: "/api/ai-lookup", event: "cap_blocked", reasonCode: "daily_cap", status: 429 });
+          return Response.json(
+            { error: `Daily AI lookup cap reached (${g.used}/${limit}). No AI call made.`, reasonCode: "daily_cap" },
+            { status: 429 }
+          );
+        }
       } catch (chargeErr) {
         logServerEvent({
           route: "/api/ai-lookup",
@@ -795,7 +871,15 @@ export async function POST(request: Request) {
       budgetMs: typeof body.budgetMs === "number" ? clampDecodeBudgetMs(body.budgetMs) : undefined,
       // GC-A: undefined for anonymous traffic (pipeline default behavior unchanged); set for authed
       // traffic once the per-account gate above has run (accountCapCleared reflects the gate's outcome).
-      capContext: authedBusinessId ? { authedBusinessId, accountCapCleared } : undefined,
+      // accountLimit is threaded so the pipeline's ATOMIC-CONDITIONAL per-account charge (item 1) uses
+      // the SAME limit this route's read-gate used - one source of the formula, no drift.
+      capContext: authedBusinessId
+        ? {
+            authedBusinessId,
+            accountCapCleared,
+            accountLimit: intEnv(process.env.AI_LOOKUP_ACCOUNT_DAILY_LIMIT, intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 2000)),
+          }
+        : undefined,
       // GOD ACCOUNT: lifts the pipeline's paid-ladder BLOCK gates (chargePaidSlot throw, GPT $/day
       // budget, Go-UPC monthly cap) while every charge/record still fires (cost-truth). Server-verified
       // above; never a client value.

@@ -413,6 +413,13 @@ function makeMockStorage(): LadderStorage & { kv: Map<string, string> } {
       kv.set(key, String(n));
       return n;
     },
+    async incrementIfBelow(key: string, limit: number) {
+      const current = Number(kv.get(key) ?? "0");
+      if (!(current < limit)) return { value: current, granted: false };
+      const next = current + 1;
+      kv.set(key, String(next));
+      return { value: next, granted: true };
+    },
   };
 }
 

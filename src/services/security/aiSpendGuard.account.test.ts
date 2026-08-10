@@ -7,6 +7,13 @@ function memStore() {
     async get(k: string) { return m.get(k) ?? null; },
     async set(k: string, v: string) { m.set(k, v); },
     async increment(k: string) { const n = (Number(m.get(k) ?? 0) || 0) + 1; m.set(k, String(n)); return n; },
+    async incrementIfBelow(k: string, limit: number) {
+      const current = (Number(m.get(k) ?? 0) || 0);
+      if (!(current < limit)) return { value: current, granted: false };
+      const next = current + 1;
+      m.set(k, String(next));
+      return { value: next, granted: true };
+    },
   };
 }
 
