@@ -2,7 +2,17 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { killSwitchOn, checkRateLimit, readDailyUsed, chargeDailySlot, __resetForTest } from "./aiSpendGuard";
+import {
+  killSwitchOn,
+  checkRateLimit,
+  readDailyUsed,
+  chargeDailySlot,
+  chargeDailySlotConditional,
+  readDailyUsedForAccount,
+  chargeDailySlotForAccountConditional,
+  refundDailySlot,
+  __resetForTest,
+} from "./aiSpendGuard";
 
 /** In-memory StorageLike stub matching the ladder storage's minimal get/set/increment surface. */
 function memStorage() {
@@ -11,6 +21,14 @@ function memStorage() {
     async get(k: string) { return m.get(k) ?? null; },
     async set(k: string, v: string) { m.set(k, v); },
     async increment(k: string) { const n = Number(m.get(k) ?? "0") + 1; m.set(k, String(n)); return n; },
+    async incrementIfBelow(k: string, limit: number) {
+      const current = Number(m.get(k) ?? "0");
+      if (!(current < limit)) return { value: current, granted: false };
+      const next = current + 1;
+      m.set(k, String(next));
+      return { value: next, granted: true };
+    },
+    async incrementBy(k: string, delta: number) { const n = Number(m.get(k) ?? "0") + delta; m.set(k, String(n)); return n; },
   };
 }
 
@@ -314,6 +332,78 @@ describe("aiSpendGuard", () => {
       // The check-then-charge window means up to (concurrency) overshoot, never unbounded:
       expect(charged).toBeGreaterThanOrEqual(10);
       expect(charged).toBeLessThanOrEqual(15);
+    });
+  });
+
+  // Daily cap v3 (item 1, 2026-08-09): the atomic conditional grant/deny that REPLACES the
+  // read-then-charge dance for every non-god caller. Unlike chargeDailySlot (unconditional, still used
+  // by the god charged-but-never-blocked path), chargeDailySlotConditional makes the cap check and the
+  // charge ONE atomic operation, so the TOCTOU overshoot documented above is eliminated for tenants.
+  describe("daily cap v3 (atomic conditional grant/deny)", () => {
+    it("grants while under the limit and reports the new used/limit", async () => {
+      const s = memStorage();
+      const r1 = await chargeDailySlotConditional(s, { limit: 3, dateKey: "2026-08-09" });
+      const r2 = await chargeDailySlotConditional(s, { limit: 3, dateKey: "2026-08-09" });
+      expect(r1).toEqual({ used: 1, limit: 3, granted: true });
+      expect(r2).toEqual({ used: 2, limit: 3, granted: true });
+    });
+
+    it("denies at the limit WITHOUT advancing the counter", async () => {
+      const s = memStorage();
+      await chargeDailySlotConditional(s, { limit: 1, dateKey: "2026-08-09" });
+      const denied = await chargeDailySlotConditional(s, { limit: 1, dateKey: "2026-08-09" });
+      expect(denied).toEqual({ used: 1, limit: 1, granted: false });
+      // The rejected charge must not have inflated the counter (the 232/200 class of bug).
+      expect(await readDailyUsed(s, "2026-08-09")).toBe(1);
+    });
+
+    it("under 100 concurrent conditional charges against a cap of 40, grants EXACTLY 40 - no overshoot", async () => {
+      // This is item 1 acceptance criterion #1: N concurrent charges, cap K (N > K) -> exactly K granted,
+      // never K+1. The legacy read-then-charge test above tops out at 15 (bounded overshoot); this one
+      // must be exact because the grant/deny is a single atomic step.
+      const s = memStorage();
+      const results = await Promise.all(
+        Array.from({ length: 100 }, () => chargeDailySlotConditional(s, { limit: 40, dateKey: "2026-08-09" })),
+      );
+      const granted = results.filter((r) => r.granted).length;
+      expect(granted).toBe(40);
+      expect(await readDailyUsed(s, "2026-08-09")).toBe(40);
+    });
+
+    it("defaults the limit from AI_LOOKUP_DAILY_LIMIT when none is passed (blank env -> 2000, not 0)", async () => {
+      const s = memStorage();
+      const prev = process.env.AI_LOOKUP_DAILY_LIMIT;
+      delete process.env.AI_LOOKUP_DAILY_LIMIT;
+      try {
+        const r = await chargeDailySlotConditional(s, { dateKey: "2026-08-09" });
+        expect(r).toEqual({ used: 1, limit: 2000, granted: true });
+      } finally {
+        if (prev === undefined) delete process.env.AI_LOOKUP_DAILY_LIMIT;
+        else process.env.AI_LOOKUP_DAILY_LIMIT = prev;
+      }
+    });
+
+    it("refundDailySlot decrements one global slot (compensates a charge that was then blocked)", async () => {
+      const s = memStorage();
+      await chargeDailySlotConditional(s, { limit: 100, dateKey: "2026-08-09" });
+      await chargeDailySlotConditional(s, { limit: 100, dateKey: "2026-08-09" });
+      expect(await readDailyUsed(s, "2026-08-09")).toBe(2);
+      await refundDailySlot(s, { dateKey: "2026-08-09" });
+      expect(await readDailyUsed(s, "2026-08-09")).toBe(1); // one charge compensated back
+    });
+
+    it("chargeDailySlotForAccountConditional grants/denies against the per-account key and limit", async () => {
+      const s = memStorage();
+      const biz = "biz-1";
+      const r1 = await chargeDailySlotForAccountConditional(s, biz, 2, "2026-08-09");
+      const r2 = await chargeDailySlotForAccountConditional(s, biz, 2, "2026-08-09");
+      const r3 = await chargeDailySlotForAccountConditional(s, biz, 2, "2026-08-09");
+      expect(r1).toEqual({ used: 1, granted: true });
+      expect(r2).toEqual({ used: 2, granted: true });
+      expect(r3).toEqual({ used: 2, granted: false });
+      // The per-account key is namespaced; the global counter is untouched by these charges.
+      expect(await readDailyUsedForAccount(s, biz, "2026-08-09")).toBe(2);
+      expect(await readDailyUsed(s, "2026-08-09")).toBe(0);
     });
   });
 });

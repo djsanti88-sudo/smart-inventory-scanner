@@ -312,6 +312,44 @@ describe("fileLadderStorage", () => {
       expect(JSON.parse(readFileSync(join(dir, ".ladder-kv.json"), "utf8"))).toMatchObject({ [key]: "601" });
     });
   });
+
+  // incrementIfBelow: the atomic conditional charge that backs the daily-cap grant/deny decision
+  // (aiSpendGuard's chargeDailySlotConditional). Unlike increment(), it MUST NOT advance the counter
+  // once the counter has reached `limit` - that is exactly the check-then-act race the daily cap had.
+  describe("incrementIfBelow (conditional atomic charge)", () => {
+    it("grants and increments while under the limit, returning the new value", async () => {
+      const store = fileLadderStorage(dir);
+      expect(await store.incrementIfBelow("cap-key", 3)).toEqual({ value: 1, granted: true });
+      expect(await store.incrementIfBelow("cap-key", 3)).toEqual({ value: 2, granted: true });
+      expect(await store.incrementIfBelow("cap-key", 3)).toEqual({ value: 3, granted: true });
+      expect(await store.get("cap-key")).toBe("3");
+    });
+
+    it("denies at the limit WITHOUT advancing the counter (returns the unchanged current value)", async () => {
+      const store = fileLadderStorage(dir);
+      await store.incrementIfBelow("cap-key", 1); // value now 1, at limit
+      const denied = await store.incrementIfBelow("cap-key", 1);
+      expect(denied).toEqual({ value: 1, granted: false });
+      // The denied call must not have written anything past the limit.
+      expect(await store.get("cap-key")).toBe("1");
+    });
+
+    it("denies a fresh key when the limit is 0 and writes nothing", async () => {
+      const store = fileLadderStorage(dir);
+      expect(await store.incrementIfBelow("cap-key", 0)).toEqual({ value: 0, granted: false });
+      expect(await store.get("cap-key")).toBeNull();
+    });
+
+    it("under 100 parallel conditional charges against a limit of 40, grants EXACTLY 40 (no overshoot)", async () => {
+      const store = fileLadderStorage(dir);
+      const results = await Promise.all(
+        Array.from({ length: 100 }, () => store.incrementIfBelow("race-key", 40)),
+      );
+      const granted = results.filter((r) => r.granted).length;
+      expect(granted).toBe(40);
+      expect(await store.get("race-key")).toBe("40");
+    });
+  });
 });
 
 describe("tursoLadderStorage", () => {
@@ -328,6 +366,18 @@ describe("tursoLadderStorage", () => {
       async execute({ sql, args }) {
         calls.push(sql.trim().split(/\s+/).slice(0, 2).join(" "));
         if (sql.includes("CREATE TABLE")) return { rows: [] };
+        if (sql.startsWith("INSERT INTO ladder_kv") && sql.includes("WHERE CAST(ladder_kv.value AS INTEGER) <")) {
+          // Conditional atomic charge: grant + increment only while current < limit, else a no-op that
+          // returns zero rows (the daily-cap grant/deny primitive). args = [key, limit, limit].
+          const [key, , limit] = args as [string, number, number];
+          const current = kv.get(key) ?? 0;
+          if (current < Number(limit)) {
+            const next = current + 1;
+            kv.set(key, next);
+            return { rows: [{ value: next }] };
+          }
+          return { rows: [] }; // denied: no mutation, no returned row
+        }
         if (sql.startsWith("INSERT INTO ladder_kv") && sql.includes("CAST(value AS INTEGER) + 1")) {
           // Atomic increment: the SQL itself computes the new value, never a JS-precomputed total.
           const [key] = args as [string];
@@ -528,6 +578,44 @@ describe("tursoLadderStorage", () => {
       expect(await store.increment("ai_daily_cap:2026-07-08")).toBe(1);
       expect(await store.increment("ai_daily_cap:2026-07-08")).toBe(2);
       expect(await store.increment("ai_daily_cap:2026-07-09")).toBe(1);
+    });
+
+    it("incrementIfBelow grants while under the limit and denies at it, using a single conditional statement", async () => {
+      const client = memTursoClient();
+      const store = tursoLadderStorage(client);
+      expect(await store.incrementIfBelow("cap-key", 2)).toEqual({ value: 1, granted: true });
+      expect(await store.incrementIfBelow("cap-key", 2)).toEqual({ value: 2, granted: true });
+      // At the limit: denied, counter unchanged, reported value is the true current (not the limit guess).
+      expect(await store.incrementIfBelow("cap-key", 2)).toEqual({ value: 2, granted: false });
+      expect(await store.get("cap-key")).toBe("2");
+      // The grant path must be a single in-SQL conditional upsert (never a JS read-then-write): the
+      // conditional statement carries the limit as an arg, it is not precomputed client-side.
+      expect(client.calls.some((c) => c.startsWith("INSERT INTO"))).toBe(true);
+    });
+
+    it("incrementIfBelow denies a fresh key when the limit is 0 and writes nothing", async () => {
+      const store = tursoLadderStorage(memTursoClient());
+      expect(await store.incrementIfBelow("cap-key", 0)).toEqual({ value: 0, granted: false });
+      expect(await store.get("cap-key")).toBeNull();
+    });
+
+    it("preserves an authoritative denial ({granted:false}) even when the diagnostic value read throws", async () => {
+      // Deep-review Finding 3 (2026-08-10): the conditional statement authoritatively DENIED (zero rows).
+      // The follow-up SELECT exists ONLY to fetch a display value - if IT throws, the helper must still
+      // return granted:false, never reject (a rejection is misread upstream as an S4 storage error and
+      // fail-opens the account cap). Client: conditional -> zero rows (deny); the diagnostic SELECT throws.
+      const denyThenReadFails: TursoClientLike = {
+        async execute({ sql }) {
+          if (sql.includes("CREATE TABLE")) return { rows: [] };
+          if (sql.includes("WHERE CAST(ladder_kv.value AS INTEGER) <")) return { rows: [] }; // authoritative deny
+          if (sql.startsWith("SELECT value FROM ladder_kv")) throw new Error("turso read timeout");
+          return { rows: [] };
+        },
+      };
+      const store = tursoLadderStorage(denyThenReadFails);
+      const res = await store.incrementIfBelow("cap-key", 5);
+      expect(res.granted).toBe(false); // the denial is authoritative regardless of the diagnostic read
+      expect(res.value).toBe(5); // safe fallback (the cap limit) when the true value can't be read
     });
   });
 });
