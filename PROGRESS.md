@@ -12,6 +12,90 @@
 
 Current status = the checkpoints below (newest first) + `REPO_HEALTH.md` for repo/branch sync truth.
 
+## Checkpoint 2026-08-10: PR #33 merged; tier-3 followups item 1 (atomic daily-cap increment) DONE
+
+- **PRs closed:** #33 (delete-route rate limiter decoupled from ladderStorage onto Firestore) MERGED to
+  master (`ff270d67`, squash) after full green CI - owner pre-authorized. #34 (docs: repo health + the
+  `2026-08-09-tier3-followups.md` backlog) update-branched + auto-merge enabled (merges on green).
+- **Backlog item 1 - Atomic daily-cap increment with a god charged-but-never-blocked path - COMPLETE**
+  on branch `fix/atomic-daily-cap-increment` (UNCOMMITTED/UNPUSHED working tree, owner review pending).
+  Built TDD (RED proven at every layer before GREEN):
+  - `LadderStorage.incrementIfBelow(key, limit)` - ONE atomic conditional charge. File adapter:
+    synchronous read-check-write. Turso: a single `INSERT ... SELECT ?, '1' WHERE ?>0 ON CONFLICT DO
+    UPDATE ... WHERE value < ? RETURNING` (empty rows = denied). Proven exact-K under 100 parallel
+    charges (file adapter) + mocked Turso grant/deny/limit-0.
+  - `aiSpendGuard.chargeDailySlotConditional` / `chargeDailySlotForAccountConditional` - fold the cap
+    CHECK and CHARGE into one atomic op; return `{ used, limit?, granted }`. Proven: 100 concurrent vs
+    cap 40 -> EXACTLY 40 granted (the old read-then-charge TOCTOU test is kept, still documents the
+    god/unconditional path's bounded overshoot).
+  - Wiring: every NON-god tenant charge site now atomic-conditional (route legacy anon global, route
+    legacy authed global-backstop + per-account, decode pipeline `settlePaidCharge` global + per-account);
+    every GOD site stays unconditional (charged, never blocked). Grep-audited: 4 unconditional callers
+    all inside `if (isGod)`, 5 conditional callers cover all tenant paths. `accountLimit` threaded through
+    `capContext` so route + pipeline share one limit formula.
+  - Two existing S4 fail-open tests (pipeline `(d)`, `route.legacyChargePair`) re-targeted from
+    `chargeDailySlotForAccount` -> `...Conditional` (the function the non-god path now calls) - same
+    fail-open contract proven, not weakened; documented inline.
+  - **Gates ALL green:** tsc 0 errors; full vitest 4,120 passed / 105 skipped / 0 failed; ledger 45/45;
+    eslint 0 errors (4 pre-existing unused-import warnings only); production build clean.
+  - Design note: kept `chargeDailySlot`'s existing signature and added SEPARATE conditional functions
+    rather than mutating the return type - the god path genuinely needs the unconditional charge, so two
+    named functions is the correct split (and every conditional call site is explicit by name).
+- **Deep-review panel (owner-triggered, radar scored 45pts):** Codex Sol (gpt-5.6-sol xhigh, ChatGPT
+  sub) clean-room review + a real-SQLite proof (better-sqlite3) of the Turso statement. Gemini/agy leg
+  failed twice (headless permission gate, then a backend timeout - the known item-9 hang) and was
+  reported honestly, not faked. Sol independently re-proved the Turso SQL against BOTH better-sqlite3
+  AND live @libsql/client (SQL confirmed correct). Sol found 2 real defects I INTRODUCED + flagged 2
+  pre-existing + 1 test gap; all adjudicated against the code and FIXED TDD:
+  - **CRITICAL (Fix 1):** in the total-free-miss `runFullPaidLadder` (one shared arm), a cap denial at
+    Fetch V2's egress was swallowed into a rung skip, `paidChargeArmed` was already consumed, so a
+    downstream keyed GPT rung ran a REAL paid call UNMETERED (and returned needs-review, not cap_blocked).
+    Root cause: `runLadder` catches every rung exception and continues. Fix = STICKY cap-denial in
+    `chargeOnEgress`/`withPaidChargeArmed` (once denied in an arm, every later egress re-throws so the
+    downstream rung skips BEFORE its provider; the arm re-throws after run -> honest cap_blocked). Fully
+    inside pipeline.ts, no runLadder change, no circular import. Regression test now asserts exactly one
+    computed + one cap_blocked (it previously only checked the counter, hence missed this - Finding 5).
+  - **HIGH (Fix 2):** an authoritative per-account `{granted:false}` was pinned-and-served, letting a
+    tenant burst past its own account cap and under-count its meter. Fix = distinguish a storage-error
+    throw (S4 fail-open, serve) from an authoritative denial (enforce: cap_blocked in the pipeline / 429
+    account_daily_cap in the legacy route). Global stays a conservative over-count on the rare race, never
+    an under-count of the bill. New tests at both the pipeline and route sites.
+  - **PRE-EXISTING (out of item-1 scope, for the backlog):** (3) Fetch V2 `chargeOnEgress` fires before
+    its keyless free pattern-URL door, so a free-only run down the full ladder can still charge (S5
+    placement, commit 70cd4ab9); (4) legacy `mode:"lookup"` with the mock/keyless provider charges before
+    selecting the mock. Both pre-date item 1 (my diff swapped charge FUNCTIONS, never moved the egress
+    site). Verified via git blame/diff.
+  - **Gates re-run ALL green:** tsc 0; full vitest 4,122 passed / 0 failed; ledger 45/45; eslint 0
+    errors; production build clean.
+- **Deep-review ROUND 2 (owner-triggered on the FIXES, radar 58pts):** Codex Sol (gpt-5.6-sol high) +
+  my own adjudication. Sol attacked the round-1 fixes and found 5 more issues; adjudicated each as
+  regression-vs-pre-existing and FIXED the 2 regressions I introduced, escalated the rest:
+  - **F3 (HIGH, regression, FIXED TDD):** `incrementIfBelow`'s Turso deny path did a diagnostic
+    follow-up SELECT; if THAT threw, the whole helper rejected -> misread upstream as an S4 storage error
+    -> fail-OPEN the account cap. Fix = guard the diagnostic read; an authoritative zero-row denial stays
+    granted:false with a safe `value:limit` fallback.
+  - **F4 (MEDIUM, regression from my Fix 2, FIXED TDD):** global-first + account-block meant a burst of N
+    account-denied requests each left a phantom +1 on the shared global backstop (up to N-1), which could
+    starve OTHER tenants. Fix = `refundDailySlot` (atomic -1) compensates the global charge on an
+    account-deny block, at both the pipeline and legacy-route sites. Best-effort (a refund failure leaves
+    the prior conservative over-count, never an under-count).
+  - **F1 (CRITICAL, PRE-EXISTING -> backlog):** a STORAGE-error (not cap) throw at a rung's egress
+    consumes the arm-flag, `runLadder` continues, a downstream rung runs unmetered. Predates item 1 (the
+    unconditional charge threw the same way). Fix = generalize arm-stickiness to ALL global settlement
+    failures (fail the arm closed). NEW backlog item.
+  - **F2 (CRITICAL but narrow, PRE-EXISTING -> backlog):** a charge that hangs PAST the 8s rung budget at
+    the cap boundary lets `runLadder` abandon the rung while the charge is pending -> downstream unmetered
+    / late denial leaks. Needs a per-arm settlement-promise + bounded charge-timeout redesign. NEW backlog.
+  - **F5 (LOW, cosmetic -> backlog):** a raced decode account denial is labeled generic `daily_cap`
+    instead of `account_daily_cap`; thread cap scope through DailyCapExceededError.
+  - **Gates re-run ALL green (round 2):** tsc 0; full vitest 4,124 passed / 0 failed; ledger 45/45;
+    eslint 0 errors; production build clean.
+  - NEW BACKLOG ITEMS for the tier-3 followups plan: (10) charge-settlement hardening = F1 + F2 (same
+    seam: sticky-all-failures + per-arm settlement promise + bounded charge timeout; consider an atomic
+    two-key global+account reservation); (11) F5 honest cap-scope reason code.
+- **Remaining backlog:** items 2-9 in `docs/superpowers/plans/2026-08-09-tire3-followups.md` (item 2 next
+  by priority but needs its own plan + attack panel; items 4/5/6 are small/isolated).
+
 ## Checkpoint 2026-08-09 (late): three review loops + deep-review panel over the tier-3 branch
 
 Owner ordered three full review-and-fix loops over the whole tier-3 delivery, then the approved
