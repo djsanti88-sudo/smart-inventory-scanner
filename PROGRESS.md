@@ -134,6 +134,9 @@ Final gates (all green, verified by the orchestrator): tsc 0 errors; full vitest
 (446 files); ledger 45/45; production build clean; Argus PASS 0 blockers; persist-indexeddb
 Playwright 2/2.
 
+Backlog plan for all deferred items: docs/superpowers/plans/2026-08-09-tier3-followups.md (owner rulings
+of 2026-08-09 recorded there).
+
 OWNER DECISION LIST (deliberately NOT auto-fixed):
 1. Drop businessId from buildIdempotencyKey (kills the whole rescope-rewrite obligation; touches
    server _appliedKeys compat).
