@@ -369,6 +369,81 @@ currently blocked on it.
 
 ---
 
+## Item 10 (needs its own attack panel first): Charge-settlement hardening (decode paid-cap egress)
+
+**Size:** L (concurrency-sensitive, money path; needs its own attack panel before code).
+
+**Priority:** high (unmetered-spend class).
+
+**Origin:** the 2026-08-10 deep-review panel (rounds 1-2) on the item-1 atomic daily-cap change
+(PROGRESS.md checkpoint 2026-08-10). Two REAL but PRE-EXISTING defects were found in
+`src/server/decode/pipeline.ts`'s charge-at-egress machinery and deferred here (they predate item 1).
+
+**Scope:**
+- F1 (CRITICAL): a STORAGE-error (not a cap denial) thrown at a rung's egress consumes the arm's
+  paid-charge flag; `runLadder` (`src/server/upc/ladder.ts`) catches the per-rung exception and
+  continues, so a downstream paid rung runs UNMETERED. Item-1 added sticky-ness for cap DENIALS only;
+  storage-error failures are not made sticky. Fix direction: generalize the arm-stickiness so ANY
+  global settlement failure fails the whole arm closed (no downstream provider egress), mapping a
+  global storage failure to a `charge_unavailable`/needs-review outcome rather than a 500.
+- F2 (CRITICAL, narrow): if the atomic charge (Turso `incrementIfBelow`) hangs PAST the per-rung
+  budget (`DECODE_LADDER_RUNG_MS`, default 8000ms), `runLadder`'s Promise.race timeout abandons the
+  rung while the charge promise is still pending; the arm-flag was already consumed, so the next rung
+  bypasses charging and runs unmetered, and a late-resolving denial can leak into the finally
+  (cap_blocked after paid work) or into the next arm. Fix direction: give each arm its own settlement
+  promise/token that later egresses await; do not complete/reuse an arm while its settlement is
+  pending; add a bounded, fail-closed charge timeout. Add regression tests using a deferred charge
+  that resolves/denies after the rung timeout.
+- Also evaluate a cleaner root fix: an ATOMIC two-key reservation that advances the global and
+  per-account counters together (or neither), which would also retire item-1's residual
+  "global-first phantom on account-deny + refund compensation" band-aid.
+
+**Acceptance criteria:**
+1. A concurrency test proves no unmetered provider egress under (a) a storage-error at the first
+   rung's charge and (b) a charge that resolves after the rung timeout.
+2. God is still charged-but-never-blocked (no regression to item 1's ruling).
+3. `npm run test:ledger` green.
+4. Full `npm run test` green.
+
+**Proof plan:**
+- Attack panel on a written plan first, per `docs/PLAN_EXECUTION.md` and GUARDRAILS.md, before any
+  code (this item does not get to skip straight to implementation).
+- Failing-first tests for F1 (storage-error at egress leaks a downstream unmetered rung) and F2
+  (charge promise resolving after the rung timeout leaks charging state), confirmed to fail against
+  current code, then confirmed to pass after the fix.
+- `npx vitest run` full unit project green.
+- `npm run test:ledger` green.
+- `npx tsc --noEmit` clean.
+
+---
+
+## Item 11 (small, cosmetic): Honest cap-scope reason code (account vs global)
+
+**Size:** S (under 2 agent-hours).
+
+**Priority:** low (cosmetic/observability).
+
+**Origin:** same 2026-08-10 deep review (F5).
+
+**Scope:**
+- When a decode request is denied on its PER-ACCOUNT cap at egress, the pipeline throws a generic
+  `DailyCapExceededError` and the route surfaces `reasonCode: "daily_cap"` (global) instead of
+  `account_daily_cap`, whereas the route's own pre-gate correctly emits `account_daily_cap`.
+- Fix: carry a cap scope ("global" | "account") through `DailyCapExceededError` and
+  `DecodePipelineResult`, and emit `account_daily_cap` for account-scoped denials.
+
+**Acceptance criteria:**
+1. A test where a raced decode account denial surfaces `account_daily_cap` (not `daily_cap`).
+2. No behavior change to global denials.
+
+**Proof plan:**
+- Failing-first test: force an account-scoped denial at egress, assert today's (wrong) `daily_cap`
+  reason code, confirm it fails after the fix (now `account_daily_cap`).
+- Existing daily-cap reason-code tests still pass unmodified for global denials.
+- `npx vitest run <the decode route/pipeline cap test file>` green.
+
+---
+
 ## Priority order summary
 
 0. (in-flight, not a todo) Delete-limiter off ladderStorage - branch `fix/delete-limiter-firestore`.
@@ -382,3 +457,6 @@ currently blocked on it.
 8. Adopted sessions/non-provisional catalog products not pushed on adoption (S) - blocked on an owner
    decision, not on engineering complexity.
 9. agy/Antigravity headless hang (S, tooling) - review-pipeline only, nothing product-facing blocked.
+10. Charge-settlement hardening / decode paid-cap egress (L) - unmetered-spend class, needs its own
+    attack panel first.
+11. Honest cap-scope reason code, account vs global (S) - cosmetic/observability.
