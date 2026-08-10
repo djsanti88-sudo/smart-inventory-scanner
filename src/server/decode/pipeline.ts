@@ -16,7 +16,7 @@ import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
 import { lookupPrefixFull as lookupPrefix, candidateKnownPrefixesFull as candidateKnownPrefixes, prefixFloorNameFull as prefixFloorName } from "@/server/catalog/prefixIndexServer";
 import { evaluatePrefixFirewall } from "@/services/catalog/prefixFirewall";
 import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerifier";
-import { readDailyUsed, chargeDailySlot, chargeDailySlotForAccount, intEnv, checkGptLadderBudget, recordGptLadderSpend, recordGptLadderCall } from "@/services/security/aiSpendGuard";
+import { readDailyUsed, chargeDailySlot, chargeDailySlotForAccount, chargeDailySlotConditional, chargeDailySlotForAccountConditional, refundDailySlot, intEnv, checkGptLadderBudget, recordGptLadderSpend, recordGptLadderCall } from "@/services/security/aiSpendGuard";
 import { gptFromScratch, type GptFromScratchResult, GPT_LADDER_WORST_CASE_USD } from "@/services/ai/gptFromScratch";
 import { shouldRunGptRung, gptResultToDecodePayload } from "@/services/ai/gptLadderRung";
 import { getPersistedDecode, persistDecode, type PersistedDecode } from "@/server/decodeCacheStore";
@@ -525,7 +525,7 @@ export interface DecodePipelineRequest {
    *  never 429'd purely because another tenant (or anonymous traffic) drained the shared global bucket.
    *  Undefined for anonymous/unauthenticated requests - the gate falls back to today's plain global cap,
    *  byte-identical to pre-A2 behavior. */
-  capContext?: { authedBusinessId?: string; accountCapCleared: boolean };
+  capContext?: { authedBusinessId?: string; accountCapCleared: boolean; accountLimit?: number };
   /** GOD ACCOUNT (server-verified platform owner, owner order 2026-08-07): set TRUE by route.ts ONLY
    *  from isPlatformOwnerServer(verified uid/email) - never a client/header/body flag. When true the
    *  paid ladder's spend/cap GATES do not BLOCK: chargePaidSlot never throws DailyCapExceededError, the
@@ -603,6 +603,12 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // Charge failure at egress propagates to the rung, which means the provider call never happens -
   // fail closed, no unmetered spend.
   let paidChargeArmed = false;
+  // STICKY CAP DENIAL (item 1 deep-review fix, 2026-08-10): set when a conditional charge in the current
+  // armed scope is DENIED (a cap race consumed the last slot between the read gate and this egress). Once
+  // set, every later egress in the same arm re-throws it, and withPaidChargeArmed re-throws it after the
+  // run completes - so a swallowed per-rung denial can never let a DOWNSTREAM paid rung run unmetered,
+  // and the request settles as an honest cap_blocked instead of a needs-review that hid the spend.
+  let capDenialInArm: DailyCapExceededError | null = null;
 
   const assertPaidCapAvailable = async (): Promise<void> => {
     if (e2eMode()) return;
@@ -631,7 +637,18 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       : dailyLimit;
     // GLOBAL FIRST, and it must succeed: this is the meter that bounds the BILL. If it throws, the
     // caller (the rung) aborts before egress - nothing is spent, so nothing went unrecorded.
-    await chargeDailySlot(ladderStore, { limit });
+    // ITEM 1 (2026-08-09): the global charge is now ATOMIC-CONDITIONAL for every non-god caller. The
+    // read-only gate (assertPaidCapAvailable) can pass while a concurrent request takes the last slot
+    // before this egress runs; the conditional charge closes that race - it grants at most the slots
+    // still available and, on a denied grant, throws DailyCapExceededError so this rung aborts BEFORE
+    // spending (fail closed, no overshoot). GOD is CHARGED but NEVER BLOCKED, so god keeps the
+    // unconditional increment and can never be denied here (cost-truth: god spend is still recorded).
+    if (god) {
+      await chargeDailySlot(ladderStore, { limit });
+    } else {
+      const g = await chargeDailySlotConditional(ladderStore, { limit });
+      if (!g.granted) throw new DailyCapExceededError(g.used, g.limit);
+    }
     paidComputeCharged = true;
     // FINDING B (accounting symmetry) kept: the per-account charge fires at the SAME site as the
     // global one so the two move together on the exception path.
@@ -640,40 +657,97 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // counter advanced with zero compute (a phantom charge) AND fail a request that cleared every real
     // gate. The bill stays bounded by the global counter; only the per-tenant counter can drift by one,
     // and that divergence is logged instead of being silent.
+    // ITEM 1 + deep-review Finding 2 (2026-08-10): the per-account charge is ATOMIC-CONDITIONAL for
+    // non-god. Two OUTCOMES are distinguished:
+    //  - a STORAGE-ERROR throw from the conditional call = S4 fail-open: the bill is already bounded by
+    //    the global charge above, so a per-account bookkeeping hiccup must NOT abort a request that
+    //    cleared every real gate. Log the divergence and proceed (tenant counter lags by one).
+    //  - an authoritative {granted:false} = a REAL per-account quota denial (the tenant raced past the
+    //    route's read gate to its own cap). ENFORCE the cap: throw DailyCapExceededError so the request
+    //    settles as an honest cap_blocked. Pinning-and-proceeding here would let the tenant burst past
+    //    its account cap and under-count its own meter (L12 "one account charge per genuine compute").
+    // The global slot charged just above is a conservative over-count on the 10x backstop for this rare
+    // raced denial - never an under-count of the bill. God charges unconditionally (never denied).
     if (capContext?.authedBusinessId) {
-      try {
-        await chargeDailySlotForAccount(ladderStore, capContext.authedBusinessId);
-      } catch (err) {
-        console.error(
-          JSON.stringify({
-            src: "scanbin",
-            route: "decode/pipeline.settlePaidCharge",
-            event: "charge_pair_incomplete",
-            businessId: capContext.authedBusinessId,
-            ts: new Date().toISOString(),
-            detail: "global slot charged, per-account slot failed; spend metered globally, tenant counter may lag by one",
-            error: err instanceof Error ? err.message : String(err),
-          })
-        );
+      if (god) {
+        try {
+          await chargeDailySlotForAccount(ladderStore, capContext.authedBusinessId);
+        } catch (err) {
+          console.error(
+            JSON.stringify({
+              src: "scanbin",
+              route: "decode/pipeline.settlePaidCharge",
+              event: "charge_pair_incomplete",
+              businessId: capContext.authedBusinessId,
+              ts: new Date().toISOString(),
+              detail: "god global slot charged, per-account slot failed; spend metered globally, tenant counter may lag by one",
+              error: err instanceof Error ? err.message : String(err),
+            })
+          );
+        }
+      } else {
+        const acctLimit = capContext.accountLimit ?? intEnv(process.env.AI_LOOKUP_ACCOUNT_DAILY_LIMIT, dailyLimit);
+        let acct: { used: number; granted: boolean };
+        try {
+          acct = await chargeDailySlotForAccountConditional(ladderStore, capContext.authedBusinessId, acctLimit);
+        } catch (err) {
+          console.error(
+            JSON.stringify({
+              src: "scanbin",
+              route: "decode/pipeline.settlePaidCharge",
+              event: "charge_pair_incomplete",
+              businessId: capContext.authedBusinessId,
+              ts: new Date().toISOString(),
+              detail: "global slot charged, per-account slot failed; spend metered globally, tenant counter may lag by one",
+              error: err instanceof Error ? err.message : String(err),
+            })
+          );
+          acct = { used: 0, granted: true }; // storage error is S4 fail-open, NOT a quota denial
+        }
+        if (!acct.granted) {
+          // Finding 4 (2026-08-10): this request charged the GLOBAL slot just above but is now BLOCKED on
+          // its account cap. Refund that global charge so a burst of account-denied requests cannot
+          // inflate the shared backstop by N-1 and starve other tenants. Best-effort: a refund failure at
+          // worst leaves the prior conservative over-count, never an under-count of the bill.
+          try {
+            await refundDailySlot(ladderStore);
+          } catch {
+            /* leave the conservative over-count if the refund itself fails */
+          }
+          throw new DailyCapExceededError(acct.used, acctLimit); // authoritative account-cap denial -> cap_blocked
+        }
       }
     }
   };
 
   /** Called by a rung at the exact moment real provider egress is about to happen. */
   const chargeOnEgress = async (): Promise<void> => {
+    // Sticky: a prior denial in this arm makes every later egress deny too, so the rung's own egress
+    // catch skips it BEFORE its provider call (no unmetered spend down the shared full-ladder arm).
+    if (capDenialInArm) throw capDenialInArm;
     if (!paidChargeArmed) return;
     paidChargeArmed = false; // consume BEFORE awaiting, so a re-entrant egress can never double-charge
-    await settlePaidCharge();
+    try {
+      await settlePaidCharge();
+    } catch (e) {
+      if (e instanceof DailyCapExceededError) capDenialInArm = e;
+      throw e;
+    }
   };
 
   /** Arms exactly one charge for one paid step. The cap CHECK still happens up front (unchanged 429). */
   const withPaidChargeArmed = async <T>(run: () => Promise<T>): Promise<T> => {
     await assertPaidCapAvailable();
     paidChargeArmed = true;
+    capDenialInArm = null;
     try {
       return await run();
     } finally {
       paidChargeArmed = false;
+      // If any egress in this arm hit a cap denial - even one swallowed by a rung's skip handling or by
+      // runLadder's per-rung catch - fail the WHOLE arm with it so the outer handler returns an honest
+      // cap_blocked, never a needs-review that concealed an unmetered downstream rung.
+      if (capDenialInArm) throw capDenialInArm;
     }
   };
 

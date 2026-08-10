@@ -40,13 +40,16 @@ vi.mock("@/lib/firebaseAdmin", () => ({
 // The heart of the test: the GLOBAL charge succeeds, but the SECOND charge (per-account) rejects. Pre-fix
 // this rejection propagated out of the un-try/catch'd pair and 500'd the whole request; post-fix it is
 // caught, logged as a divergence, and the request still serves its normal 200 lookup response.
+// Item 1 (2026-08-09/10): the NON-god legacy authed per-account charge runs through the atomic
+// conditional variant. A controllable spy lets each test choose that half's OUTCOME:
+//   - THROW (storage error) -> S4 fail-open: serve 200, log divergence, never 5xx.
+//   - resolve {granted:false} (authoritative account-cap denial) -> block 429 account_daily_cap.
+const acctCondSpy = vi.hoisted(() => vi.fn());
 vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
   return {
     ...actual,
-    chargeDailySlotForAccount: vi.fn(async () => {
-      throw new Error("simulated per-account charge failure");
-    }),
+    chargeDailySlotForAccountConditional: acctCondSpy,
   };
 });
 
@@ -86,6 +89,7 @@ describe("/api/ai-lookup legacy authed charge-pair fail-open (Item 1)", () => {
     __resetDecodeCacheStoreForTest();
     clearDecodeCache();
     logSpy.mockReset();
+    acctCondSpy.mockReset();
     try { fs.unlinkSync(ladderKvFile()); } catch {}
     for (const k of keys) saved[k] = process.env[k];
     delete process.env.IS_E2E;
@@ -114,9 +118,10 @@ describe("/api/ai-lookup legacy authed charge-pair fail-open (Item 1)", () => {
     vi.restoreAllMocks();
   });
 
-  it("per-account charge rejects on the legacy authed path -> response is still 200 and a divergence event is logged", async () => {
-    // A NON-decode mode so the legacy authed cap block (route.ts ~:424-425), not the decode pipeline's
-    // own charge, is the path under test. The mocked chargeDailySlotForAccount throws.
+  it("per-account charge rejects (storage error) on the legacy authed path -> response is still 200 and a divergence event is logged", async () => {
+    // A NON-decode mode so the legacy authed cap block, not the decode pipeline's own charge, is the path
+    // under test. The per-account conditional THROWS (a storage error, not a quota denial).
+    acctCondSpy.mockRejectedValueOnce(new Error("simulated per-account charge failure"));
     const res = await POST(makeRequest({ cleanCode: "111000222333", businessId: "tenant-legacy", idToken: "tok", mode: "lookup" }));
 
     // Fail-open: the request already cleared every real gate, so a charge bookkeeping error must NOT 500 it.
@@ -130,5 +135,17 @@ describe("/api/ai-lookup legacy authed charge-pair fail-open (Item 1)", () => {
     expect(diverged?.reasonCode).toBe("charge_error");
     expect(diverged?.status).toBe(200);
     expect(diverged?.businessId).toBe("tenant-legacy");
+  });
+
+  it("per-account authoritative denial ({granted:false}) on the legacy authed path -> 429 account_daily_cap, not a served lookup", async () => {
+    // Deep-review Finding 2 (2026-08-10): a {granted:false} from the per-account conditional is a REAL
+    // quota denial (the tenant raced past the read gate to its own cap), distinct from a storage-error
+    // throw. It must ENFORCE the account cap (429), never pin-and-serve past it.
+    acctCondSpy.mockResolvedValueOnce({ used: 3, granted: false });
+    const res = await POST(makeRequest({ cleanCode: "111000222333", businessId: "tenant-cap", idToken: "tok", mode: "lookup" }));
+
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { reasonCode?: string };
+    expect(body.reasonCode).toBe("account_daily_cap");
   });
 });

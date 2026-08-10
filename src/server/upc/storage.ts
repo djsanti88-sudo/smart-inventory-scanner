@@ -115,6 +115,18 @@ export interface LadderStorage {
    * previously used get-then-set and could undercount concurrent spend.
    */
   incrementBy(key: string, delta: number): Promise<number>;
+  /**
+   * Atomic CONDITIONAL increment: advance the counter at `key` by 1 ONLY if its current value is
+   * strictly below `limit`, and report whether the slot was granted. This is the daily-cap grant/deny
+   * primitive (aiSpendGuard.chargeDailySlotConditional): it collapses the old check-then-charge pair
+   * (readDailyUsed at the route gate, then chargeDailySlot at egress) into ONE atomic operation, so N
+   * concurrent requests racing at the cap boundary grant at most `limit - current` slots and never
+   * overshoot. Same atomicity contract as `increment`: the Turso adapter decides + increments in a
+   * single conditional SQL statement, never a JS-side read-then-write. On denial the counter is left
+   * unchanged and `granted` is false; `value` is the current (unchanged) count. `limit <= 0` always
+   * denies and writes nothing.
+   */
+  incrementIfBelow(key: string, limit: number): Promise<{ value: number; granted: boolean }>;
 }
 
 const USAGE_FILE = ".go-upc-usage.json";
@@ -240,6 +252,20 @@ export function fileLadderStorage(dir: string): LadderStorage {
       map[key] = String(n);
       writeJson(kvPath, map);
       return n;
+    },
+
+    async incrementIfBelow(key: string, limit: number): Promise<{ value: number; granted: boolean }> {
+      // Single-process file adapter: the read-check-write happens inside one synchronous block (no
+      // await between the read and the write), so Node's event loop never interleaves another caller
+      // mid-decision - the conditional is atomic for this adapter exactly the way increment() is.
+      ensureDir(dir);
+      const map = readJson<Record<string, string>>(kvPath, {});
+      const current = Number(map[key] ?? "0");
+      if (!(current < limit)) return { value: current, granted: false };
+      const next = current + 1;
+      map[key] = String(next);
+      writeJson(kvPath, map);
+      return { value: next, granted: true };
     },
   };
 }
@@ -464,6 +490,45 @@ export function tursoLadderStorage(client: TursoClientLike): LadderStorage {
         args: [key, String(delta), delta],
       });
       return Number(result.rows[0].value);
+    },
+
+    async incrementIfBelow(key: string, limit: number): Promise<{ value: number; granted: boolean }> {
+      await ensureTables();
+      // ONE atomic conditional upsert - the whole grant/deny decision happens in SQL, never a JS-side
+      // read-then-write, so concurrent serverless instances racing at the cap boundary can never both
+      // grant the same last slot (the check-then-act overshoot this method exists to kill).
+      //  - Fresh key: the SELECT emits a row ONLY when `limit > 0`, so the first grant inserts value 1;
+      //    a non-positive limit emits no row -> no insert -> denied.
+      //  - Existing key: the ON CONFLICT UPDATE fires ONLY while the stored value is still < limit;
+      //    at/over the limit the WHERE is false, the update is skipped, and RETURNING emits no row.
+      // Either way, a returned row means GRANTED (its value is the new count); zero rows means DENIED.
+      const result = await client.execute({
+        sql: `INSERT INTO ${TABLE_KV} (key, value)
+              SELECT ?, '1' WHERE ? > 0
+              ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1
+                WHERE CAST(${TABLE_KV}.value AS INTEGER) < ?
+              RETURNING CAST(value AS INTEGER) AS value`,
+        args: [key, limit, limit],
+      });
+      if (result.rows.length > 0) {
+        return { value: Number(result.rows[0].value), granted: true };
+      }
+      // Denied: the conditional statement ALREADY decided this authoritatively (zero rows). The follow-up
+      // SELECT only fetches a display value - it must NEVER be able to flip or hide the denial. If that
+      // read throws (Finding 3, 2026-08-10), swallow it and fall back to `limit` (a request denied at the
+      // cap is at/over `limit`), so the caller still sees granted:false and never misreads the denial as
+      // an S4 storage error that would fail-open the cap. A missing row means the counter is 0 (only
+      // possible when limit <= 0 denied a fresh key).
+      try {
+        const currentRaw = await client.execute({
+          sql: `SELECT value FROM ${TABLE_KV} WHERE key = ?`,
+          args: [key],
+        });
+        const value = currentRaw.rows.length > 0 ? Number(currentRaw.rows[0].value) : 0;
+        return { value, granted: false };
+      } catch {
+        return { value: limit, granted: false };
+      }
     },
   };
 }
