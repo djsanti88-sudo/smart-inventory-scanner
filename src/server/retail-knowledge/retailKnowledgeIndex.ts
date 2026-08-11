@@ -97,10 +97,10 @@ export async function getTursoClient(): Promise<TursoClient | null> {
   try {
     const { createClient } = (await import("@libsql/client")) as unknown as LibsqlClientModule;
     _tursoClient = createClient({ url, authToken: token }) as TursoClient;
-    console.log("[retail-knowledge] Turso client connected:", url);
+    console.log("[retail-knowledge] Turso client connected");
     return _tursoClient;
-  } catch (e) {
-    console.warn("[retail-knowledge] Failed to create Turso client:", (e as Error).message);
+  } catch {
+    console.warn("[retail-knowledge] Failed to create Turso client");
     _tursoClient = "unavailable";
     return null;
   }
@@ -128,8 +128,8 @@ async function lookupTurso(code: string): Promise<RetailLookupResult | null> {
       };
     }
     _lastStatus = "turso_miss";
-  } catch (e) {
-    console.warn("[retail-knowledge] Turso query error:", (e as Error).message);
+  } catch {
+    console.warn("[retail-knowledge] Turso query error");
     _lastStatus = "turso_error";
   }
   return null;

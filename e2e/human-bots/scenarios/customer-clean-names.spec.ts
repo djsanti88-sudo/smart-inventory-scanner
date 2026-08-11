@@ -39,8 +39,23 @@ test("CustomerCleanNamesBot: Counts shows clean Brand Model Size, no UPC/Fits (P
   const body = page.getByTestId("final-count-body");
   await expect(body).toBeVisible();
   await page.evaluate((state) => {
-    const store = (window as unknown as { __scanStore?: { setState: (partial: unknown) => void } }).__scanStore;
-    store?.setState(state);
+    type SeedState = typeof state;
+    type LiveStore = {
+      getState: () => { sessionId: string; currentSession: SeedState["currentSession"] };
+      setState: (partial: unknown) => void;
+    };
+    const store = (window as unknown as { __scanStore?: LiveStore }).__scanStore;
+    if (!store) throw new Error("scan store is unavailable");
+    // Keep the live page's already-registered boot session. Replacing it with the synthetic
+    // `startedAt: "t"` fixture makes the scan-page session effect correctly rotate it as stale and
+    // prune its counts. This bot is testing display cleanup, not session rotation.
+    const live = store.getState();
+    store.setState({
+      ...state,
+      sessionId: live.sessionId,
+      currentSession: live.currentSession,
+      finalCounts: state.finalCounts.map((count) => ({ ...count, sessionId: live.sessionId })),
+    });
   }, seed.state);
   await expect(body).toContainText("Defender LTX M/S 275/70R18");
   const text = await body.innerText();

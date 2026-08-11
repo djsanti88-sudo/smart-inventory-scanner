@@ -8,7 +8,7 @@
 // reads to show its error text + "Try saving again" / "Refresh" retry affordance. Without this
 // propagation, a bounded-but-unsurfaced rejection would still leave the UI hung.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createTestScanStore } from "@/stores/scanStore";
+import { BUSINESS_LOAD_TIMEOUT_MS, createTestScanStore } from "@/stores/scanStore";
 
 const mocks = vi.hoisted(() => ({
   getDocs: vi.fn(),
@@ -33,6 +33,24 @@ afterEach(() => {
 });
 
 describe("businessDataLoader retry propagates into the store (unblocks the eternal loading banner)", () => {
+  it("the store applies one total deadline even when a loader's staged reads never settle", async () => {
+    vi.useFakeTimers();
+    const store = createTestScanStore({
+      cloudBackend: true,
+      loadBusinessData: () => new Promise(() => {}),
+    });
+
+    store.getState().setBusinessContext("biz-1", "user-1");
+    expect(store.getState().businessDataLoaded).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(BUSINESS_LOAD_TIMEOUT_MS + 1);
+
+    // Fail closed: an unvalidated persisted same-tenant snapshot must not become renderable merely
+    // because the loader timed out. BusinessContextGate surfaces lastSyncError with a Retry action.
+    expect(store.getState().businessDataLoaded).toBe(false);
+    expect(store.getState().lastSyncError).toMatch(/business data.*timed out/i);
+  });
+
   it("a permanently hung Firestore transport eventually surfaces as lastSyncError + businessDataLoaded=true, never an eternal hang", async () => {
     vi.useFakeTimers();
     mocks.getDocs.mockReturnValue(new Promise(() => {})); // stuck transport channel: never settles
@@ -52,10 +70,9 @@ describe("businessDataLoader retry propagates into the store (unblocks the etern
     const totalBoundMs = LOAD_ATTEMPT_TIMEOUT_MS * LOAD_MAX_ATTEMPTS + 15_000;
     await vi.advanceTimersByTimeAsync(totalBoundMs);
 
-    // The bounded retry's rejection reached the store: businessDataLoaded flips true (Gate stops
-    // showing "Loading business data..." forever) and lastSyncError is set (SyncStatusBar's error
-    // text + Refresh/"Try saving again" retry button becomes visible instead of a silent hang).
-    expect(store.getState().businessDataLoaded).toBe(true);
+    // The bounded retry's rejection reached the store. The cache remains withheld while the gate
+    // uses lastSyncError to render an actionable error instead of either children or an eternal wait.
+    expect(store.getState().businessDataLoaded).toBe(false);
     expect(store.getState().lastSyncError).toMatch(/Timed out/i);
   });
 
@@ -107,7 +124,25 @@ describe("businessDataLoader retry propagates into the store (unblocks the etern
 
     // The other four reads resolved immediately; only the scan-events read was stuck. It must still be
     // bounded on its own, not left to hang the whole bootstrap forever.
-    expect(store.getState().businessDataLoaded).toBe(true);
+    expect(store.getState().businessDataLoaded).toBe(false);
     expect(store.getState().lastSyncError).toMatch(/Timed out/i);
+  });
+
+  it("keeps already-validated same-tenant data visible when only a background refresh fails", async () => {
+    const store = createTestScanStore({
+      cloudBackend: true,
+      loadBusinessData: async () => { throw new Error("refresh unavailable"); },
+    });
+    store.setState({
+      businessId: "biz-1",
+      userId: "user-1",
+      businessContextReady: true,
+      businessDataLoaded: true,
+    });
+
+    store.getState().setBusinessContext("biz-1", "user-1");
+    await vi.waitFor(() => expect(store.getState().lastSyncError).toMatch(/refresh unavailable/i));
+
+    expect(store.getState().businessDataLoaded).toBe(true);
   });
 });

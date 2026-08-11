@@ -68,9 +68,10 @@ function getJsonIndex(): TireJsonIndex | null {
     for (const row of Object.values(_jsonIndex.barcodeIndex)) _uidToRow.set(row.canonical_product_uid, row);
     _jsonIndexBarcodeRowCount = Object.keys(_jsonIndex.barcodeIndex).length;
     return _jsonIndex;
-  } catch (e) {
-    console.warn("[tire-knowledge] in-memory JSON index load failed:", (e as Error).message);
-    _jsonIndexError = (e as Error).message;
+  } catch {
+    // Parser/filesystem errors can disclose absolute paths or source contents.
+    console.warn("[tire-knowledge] In-memory JSON index load failed.");
+    _jsonIndexError = "load_failed";
     _jsonIndex = "missing";
     return null;
   }
@@ -78,8 +79,7 @@ function getJsonIndex(): TireJsonIndex | null {
 
 /** Operational visibility: the JSON fallback swallows load failures into a process-lifetime miss.
  *  This status lets /api/health surface that state instead of decoding silently returning nothing.
- *  `message` is for SERVER-SIDE logging only - /api/health (a public, unauthenticated endpoint) must
- *  never forward raw exception text to a caller, so it strips this field before responding. */
+ *  `message` is a bounded status marker only. /api/health still strips it from the public response. */
 export function tireJsonIndexStatus(): { state: "not_loaded" | "loaded" | "failed"; barcodeRows: number; message: string | null } {
   if (_jsonIndex === "missing") return { state: "failed", barcodeRows: 0, message: _jsonIndexError };
   if (_jsonIndex) return { state: "loaded", barcodeRows: _jsonIndexBarcodeRowCount, message: null };
@@ -231,8 +231,9 @@ async function lookupBarcodeTurso(key: string): Promise<TireKnowledgeRow | null>
     const result = await client.execute({ sql: "SELECT * FROM tires WHERE barcode = ?", args: [key] });
     if (result.rows.length === 0) return null;
     return rowFromTurso(result.rows[0]);
-  } catch (e) {
-    console.warn("[tire-knowledge] Turso barcode lookup failed:", (e as Error).message);
+  } catch {
+    // Driver errors can include the database URL, auth token, SQL, or row values.
+    console.warn("[tire-knowledge] Turso barcode lookup failed.");
     return null;
   }
 }
@@ -256,8 +257,8 @@ async function lookupPartNumberTurso(key: string): Promise<TireKnowledgeRow | nu
     });
     if (tireResult.rows.length === 0) return null;
     return rowFromTurso(tireResult.rows[0]);
-  } catch (e) {
-    console.warn("[tire-knowledge] Turso part-number lookup failed:", (e as Error).message);
+  } catch {
+    console.warn("[tire-knowledge] Turso part-number lookup failed.");
     return null;
   }
 }
@@ -391,8 +392,8 @@ async function lookupPartNumberAliasTurso(key: string): Promise<TireKnowledgeRow
     });
     if (tireResult.rows.length === 0) return null;
     return rowFromTurso(tireResult.rows[0]);
-  } catch (e) {
-    console.warn("[tire-knowledge] Turso part-number ALIAS lookup failed:", (e as Error).message);
+  } catch {
+    console.warn("[tire-knowledge] Turso part-number ALIAS lookup failed.");
     return null;
   }
 }
@@ -407,8 +408,8 @@ async function lookupAllPartNumberTurso(key: string): Promise<TireKnowledgeRow[]
       args: [key],
     });
     return result.rows.map((r) => rowFromTurso(r as Record<string, unknown>));
-  } catch (e) {
-    console.warn("[tire-knowledge] Turso all-part-number lookup failed:", (e as Error).message);
+  } catch {
+    console.warn("[tire-knowledge] Turso all-part-number lookup failed.");
     return [];
   }
 }
@@ -423,8 +424,8 @@ async function candidatesBySizeTurso(token: string): Promise<TireKnowledgeRow[]>
       args: [token],
     });
     return result.rows.map((r) => rowFromTurso(r as Record<string, unknown>));
-  } catch (e) {
-    console.warn("[tire-knowledge] Turso size lookup failed:", (e as Error).message);
+  } catch {
+    console.warn("[tire-knowledge] Turso size lookup failed.");
     return [];
   }
 }

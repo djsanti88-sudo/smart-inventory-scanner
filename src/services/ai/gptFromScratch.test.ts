@@ -16,6 +16,43 @@ const respBody = (json: unknown, searches = 2, inTok = 3000, outTok = 900) => ({
 const okFetch = (body: unknown) =>
   vi.fn(async () => ({ ok: true, status: 200, json: async () => body })) as unknown as typeof fetch;
 
+type CapturedGptRequestBody = {
+  input?: string;
+  model?: string;
+  tools?: unknown;
+  text?: {
+    format?: {
+      type?: string;
+      name?: string;
+      strict?: boolean;
+      schema?: { additionalProperties?: boolean; required?: string[] };
+    };
+  };
+};
+
+function parseCapturedBody(init: RequestInit | undefined): CapturedGptRequestBody {
+  return JSON.parse(String(init?.body ?? "{}")) as CapturedGptRequestBody;
+}
+
+function emptyOutputResponse(): Response {
+  return { ok: true, json: async () => ({ output: [] }) } as Response;
+}
+
+function captureGptRequest() {
+  let sentBody: CapturedGptRequestBody | null = null;
+  const fetchImpl: typeof fetch = async (_url, init) => {
+    sentBody = parseCapturedBody(init);
+    return emptyOutputResponse();
+  };
+  return {
+    fetchImpl,
+    body: (): CapturedGptRequestBody => {
+      if (!sentBody) throw new Error("expected gptFromScratch to send a request body");
+      return sentBody;
+    },
+  };
+}
+
 describe("gptTierFor", () => {
   test("trust tiers follow the owner gate exactly (probe parity 2026-07-06: every non-verified answer with a name is a suggestion)", () => {
     expect(gptTierFor(true, 0.8, "X")).toBe("verified");
@@ -213,14 +250,10 @@ describe("gptFromScratch", () => {
   });
 
   test("Z4: prompt teaches GTIN zero-padding equivalence (code property, not an answer hint)", async () => {
-    let sentBody: any = null;
-    const fetchImpl = (async (_url: any, init: any) => {
-      sentBody = JSON.parse(init.body);
-      return { ok: true, json: async () => ({ output: [] }) } as any;
-    }) as typeof fetch;
-    await gptFromScratch("0049000006346", { apiKey: "k", fetchImpl });
-    expect(sentBody.input).toContain("zero-padding variants");
-    expect(sentBody.input).toContain("shortest form");
+    const captured = captureGptRequest();
+    await gptFromScratch("0049000006346", { apiKey: "k", fetchImpl: captured.fetchImpl });
+    expect(captured.body().input).toContain("zero-padding variants");
+    expect(captured.body().input).toContain("shortest form");
   });
 
   describe("wave-3: GPT_SEARCH_CONTEXT env override (2026-07-20 owner-ratified)", () => {
@@ -242,39 +275,27 @@ describe("gptFromScratch", () => {
 
   describe("G2: GPT_LADDER_MODEL env override", () => {
     afterEach(() => { delete process.env.GPT_LADDER_MODEL; });
-    const capture = () => {
-      let sentBody: any = null;
-      const fetchImpl = (async (_u: any, init: any) => {
-        sentBody = JSON.parse(init.body);
-        return { ok: true, json: async () => ({ output: [] }) } as any;
-      }) as typeof fetch;
-      return { fetchImpl, body: () => sentBody };
-    };
     test("defaults to gpt-5.4-mini when unset", async () => {
-      const c = capture();
+      const c = captureGptRequest();
       await gptFromScratch("049000006346", { apiKey: "k", fetchImpl: c.fetchImpl });
       expect(c.body().model).toBe("gpt-5.4-mini");
     });
     test("uses the env model when set", async () => {
       process.env.GPT_LADDER_MODEL = "gpt-6-preview";
-      const c = capture();
+      const c = captureGptRequest();
       await gptFromScratch("049000006346", { apiKey: "k", fetchImpl: c.fetchImpl });
       expect(c.body().model).toBe("gpt-6-preview");
     });
   });
 
   test("G1: requests structured output via json_schema so non-JSON replies are impossible", async () => {
-    let sentBody: any = null;
-    const fetchImpl = (async (_u: any, init: any) => {
-      sentBody = JSON.parse(init.body);
-      return { ok: true, json: async () => ({ output: [] }) } as any;
-    }) as typeof fetch;
-    await gptFromScratch("049000006346", { apiKey: "k", fetchImpl });
-    expect(sentBody.text?.format?.type).toBe("json_schema");
-    expect(sentBody.text?.format?.name).toBe("product_identity");
-    expect(sentBody.text.format.strict).toBe(true);
-    expect(sentBody.text.format.schema.additionalProperties).toBe(false);
-    expect(sentBody.text.format.schema.required).toEqual(
+    const captured = captureGptRequest();
+    await gptFromScratch("049000006346", { apiKey: "k", fetchImpl: captured.fetchImpl });
+    expect(captured.body().text?.format?.type).toBe("json_schema");
+    expect(captured.body().text?.format?.name).toBe("product_identity");
+    expect(captured.body().text?.format?.strict).toBe(true);
+    expect(captured.body().text?.format?.schema?.additionalProperties).toBe(false);
+    expect(captured.body().text?.format?.schema?.required).toEqual(
       expect.arrayContaining(["brand", "productName", "confidence", "exactCodeFound", "basis", "sourceUrls"]),
     );
   });

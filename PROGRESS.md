@@ -865,3 +865,60 @@ production).
   `OWNER-FOLLOWUPS.md` (27 items: 25 open plus 2 closed-decisions, ranked now/soon/later). The
   GREEN-REPORT (D6's final all-green receipt) has not been produced yet; D6 has not run as of this
   checkpoint.
+
+## Checkpoint 2026-08-10 afternoon: product-readiness Task 1 evidence identity
+
+- Governing files reconciled: `AGENTS.md`, `CLAUDE.md`, and
+  `.superpowers/sdd/2026-08-10-full-product-readiness-closure/task-1-brief.md`.
+  Adopted rules: work only in `C:\tmp\scanbin-product-readiness-20260810` and
+  `C:\tmp\scanbin-audits\2026-08-10-product-readiness`; keep
+  `C:\Users\djsan\inventory` read-only; no commit, push, merge, deploy, production/cloud mutation,
+  paid/live provider call, or secret/customer-data output; use strict TDD for the external
+  manifest script; preserve existing files/worktrees.
+- Conflict reconciliation: the "full arsenal" doctrine does not expand owner-gated actions or the
+  Task 1 path boundary. The project no-deploy/no-live rules and task-specific no-production rules
+  all point the same direction. The task's explicit allowance to create the detached base worktree
+  and run `npm.cmd ci` there was used.
+- Identity bound: readiness worktree
+  `C:\tmp\scanbin-product-readiness-20260810` is branch
+  `audit/product-readiness-20260810` at `9f50440bb6a21b24efbbd03de3ad312147d1e68c`.
+  Detached base proof worktree
+  `C:\tmp\scanbin-readiness-baseline-9f50440b` is also at
+  `9f50440bb6a21b24efbbd03de3ad312147d1e68c`.
+- Evidence workspace: external audit directory
+  `C:\tmp\scanbin-audits\2026-08-10-product-readiness` now contains the Task 1 manifest test,
+  manifest capture script, and generated evidence manifest. The manifest records identity metadata
+  only: paths, modes, Git blob hashes, porcelain-v2 status, deletion markers, and aggregate SHA-256.
+- TDD proof: `node C:\tmp\scanbin-audits\2026-08-10-product-readiness\capture-tree.test.mjs`
+  first failed with `MODULE_NOT_FOUND` for the absent `capture-tree.mjs`, then passed `4/4` after the
+  minimal implementation.
+- Resume point: continue the product-readiness closure from Task 2 after reviewing
+  `C:\tmp\scanbin-product-readiness-20260810\.superpowers\sdd\2026-08-10-full-product-readiness-closure\task-1-report.md`
+  and the external audit artifacts under
+  `C:\tmp\scanbin-audits\2026-08-10-product-readiness`.
+
+## Checkpoint 2026-08-10 evening: product-readiness candidate assembled, production not certified
+
+- Overall verdict remains `NOT_PRODUCT_READY`. No push, merge, deployment, alias change, production
+  write, paid/live provider call, or real customer-data import was performed.
+- Current audit tree proof is green: `proof:full` passed TypeScript, 451 Vitest files / 4,147
+  tests (106 skipped), and the Next 16.3 production build; ledger passed 45/45; the strengthened
+  Firebase browser journey passed 1/1. The exact-SHA `qa:revision`, certification controller, and
+  Shop Owner controller are the next immutable-candidate gates and are not pre-claimed here.
+- Fixed locally with failing-first regressions: Next/transitive high-severity dependency chain;
+  exact production smoke-host allowlisting; Playwright/Vitest discovery and worker stability;
+  Firebase session claim preservation/idempotent adoption; fail-closed business-data loading with
+  same-tenant background-refresh continuity; fixed-marker Turso/SQLite/gzip/JSON error logging;
+  current recommended response headers; the first authenticated cloud load now publishes the full
+  session list; and the Firebase E2E now proves empty-device reload, logout/re-login, plus a genuinely
+  fresh browser reading History totals, parsing its CSV export, and opening the four-event timeline.
+- Independent security re-review passed for blocker/high/medium issues in the audited tenant,
+  server, and database paths. `npm audit --omit=dev` is down to 7 moderate, 0 high/critical.
+- Release approval remains `BLOCKED` until an immutable candidate exists and the owner approves its
+  exact SHA. Shop Owner remains `NOT_CERTIFIED` until its final controller run closes or reports the
+  remaining private-corpus/offline/performance gaps; production certification remains safely gated.
+- Cloud blockers: production alias still serves SHA `431c66e` while GitHub master is `9f50440b`;
+  later production-target deployments were canceled; no Vercel project checks are configured;
+  authenticated production/tenant proof, backup/PITR/failover, and observability remain unproven.
+- Final report and immutable tree manifest live under
+  `C:\tmp\scanbin-audits\2026-08-10-product-readiness`.

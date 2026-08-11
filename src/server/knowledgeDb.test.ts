@@ -12,6 +12,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 
 import {
   __resetKnowledgeDbForTests,
@@ -74,12 +75,28 @@ describe("knowledgeDb resolveDbPath fail-loud temp staleness gate", () => {
   });
 
   it("preserves production behavior: gz decompress path still writes+returns TMP_DB_PATH, never treated as stale on first write", () => {
-    const gzip = require("node:zlib").gzipSync as (b: Buffer) => Buffer;
-    fs.writeFileSync(gzPath, gzip(Buffer.from("decompressed-db-contents")));
+    fs.writeFileSync(gzPath, gzipSync(Buffer.from("decompressed-db-contents")));
 
     const resolved = __resolveDbPathForTests({ dbPath, gzPath, tmpDbPath });
     expect(resolved).toBe(tmpDbPath);
     expect(fs.readFileSync(tmpDbPath, "utf8")).toBe("decompressed-db-contents");
+  });
+
+  it("never logs raw gzip, SQLite, parser, or filesystem exception details", () => {
+    fs.writeFileSync(gzPath, "not-a-gzip-private-db-secret");
+
+    expect(__resolveDbPathForTests({ dbPath, gzPath, tmpDbPath })).toBeNull();
+
+    const output = warnSpy.mock.calls.flat().join(" ");
+    expect(output).toContain("[knowledge-db]");
+    expect(output).not.toContain(gzPath);
+    expect(output).not.toContain("not-a-gzip-private-db-secret");
+    expect(output).not.toMatch(/incorrect header|invalid|ENOENT|EPERM/i);
+
+    // getKnowledgeDb's native-module open path is hard to force without replacing the runtime
+    // package, so keep a source-level guard against reintroducing raw exception logging there.
+    const source = fs.readFileSync(path.resolve("src/server/knowledgeDb.ts"), "utf8");
+    expect(source).not.toMatch(/console\.warn\([\s\S]*?\(e as Error\)\.message/);
   });
 
   it("error message names the provisioning script so a fresh worktree session knows the exact fix", () => {

@@ -17,10 +17,12 @@ describe("smoke fingerprint route contract", () => {
   });
 
   it("accepts only this project's production and preview Vercel hosts", () => {
+    expect(isAllowedDeploymentUrl("https://inventory-sharpenly.vercel.app")).toBe(true);
     expect(isAllowedDeploymentUrl("https://inventory-lovat-six.vercel.app")).toBe(true);
     expect(isAllowedDeploymentUrl("https://inventory-bfkqewgfk-sharpenly.vercel.app")).toBe(true);
     expect(isAllowedDeploymentUrl("https://inventory-preview-sharpenly.vercel.app")).toBe(true);
     expect(isAllowedDeploymentUrl("https://unrelated-project.vercel.app")).toBe(false);
+    expect(isAllowedDeploymentUrl("https://inventory-sharpenly.vercel.app.evil.example")).toBe(false);
     expect(isAllowedDeploymentUrl("https://inventory-bfkqewgfk-sharpenly.vercel.app.evil.example")).toBe(false);
     expect(isAllowedDeploymentUrl("http://inventory-lovat-six.vercel.app")).toBe(false);
   });

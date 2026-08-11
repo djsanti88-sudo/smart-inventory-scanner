@@ -40,7 +40,9 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
   const cloud = isLiveAuth() && isFirebaseBackend();
   const businessContextReady = useScanStore((s) => s.businessContextReady);
   const businessDataLoaded = useScanStore((s) => s.businessDataLoaded);
+  const lastSyncError = useScanStore((s) => s.lastSyncError);
   const setBusinessContext = useScanStore((s) => s.setBusinessContext);
+  const refreshFromCloud = useScanStore((s) => s.refreshFromCloud);
   const [status, setStatus] = useState<"resolving" | "no-user" | "no-business" | "adopt-choice" | "ready" | "error">("resolving");
   const [pendingCtx, setPendingCtx] = useState<{ businessId: string; uid: string } | null>(null);
   const [retryToken, setRetryToken] = useState(0);
@@ -203,6 +205,27 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
           <>Select or create a business before Firebase sync can run.{" "}
             <Link href="/business" className="font-medium underline" data-testid="go-to-business">Choose a business</Link>.</>
         )}
+      </div>
+    );
+  }
+
+  // A bounded cloud-load failure must be actionable without ever rendering the unvalidated
+  // persisted cache. This is separate from bootstrap/auth failure above: the identity and business
+  // context resolved, but Firestore did not. Retry uses the store's generation-guarded refresh path.
+  if (businessContextReady && !businessDataLoaded && lastSyncError) {
+    return (
+      <div data-testid="business-context-error" className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">
+        We could not load your business data. Your saved local view is hidden until the cloud check succeeds.
+        <div className="mt-2">
+          <button
+            type="button"
+            data-testid="retry-business-data"
+            onClick={() => void refreshFromCloud()}
+            className="inline-flex min-h-[40px] items-center rounded-lg bg-red-600 px-3 font-medium text-white hover:bg-red-700"
+          >
+            Try again
+          </button>
+        </div>
       </div>
     );
   }

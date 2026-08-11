@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ScanPage from "@/app/(app)/scan/page";
 import SettingsPage from "@/app/(app)/settings/page";
@@ -17,6 +17,34 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Scan page focus safety", () => {
+  it("registers the local boot session so counted scans remain discoverable in History", async () => {
+    window.localStorage.clear();
+    useScanStore.setState({
+      businessContextReady: true,
+      businessDataLoaded: true,
+      sessionId: "session-local-boot",
+      currentSession: {
+        id: "session-local-boot",
+        businessId: "demo-business",
+        name: "Default Session",
+        location: "Main",
+        status: "active",
+        startedAt: new Date().toISOString(),
+        completedAt: null,
+        createdBy: "demo",
+        notes: "",
+        syncStatus: "synced",
+      },
+    });
+
+    render(<ScanPage />);
+
+    await waitFor(() => {
+      expect(useScanStore.getState().currentSession?.deviceId).toBeTruthy();
+    });
+    expect(useScanStore.getState().currentSession?.id).toBe("session-local-boot");
+  });
+
   it("auto-focuses the scan input on page load", () => {
     render(<ScanPage />);
     expect(screen.getByTestId("scanner-input")).toHaveFocus();
@@ -44,7 +72,10 @@ describe("Scan page focus safety", () => {
     render(<ScanPage />);
     const input = screen.getByTestId("scanner-input") as HTMLInputElement;
     await user.type(input, "UNKNOWNXYZ{Enter}");
-    expect(useScanStore.getState().needsReviewQueue.some((r) => r.cleanCode === "UNKNOWNXYZ")).toBe(true);
+    expect(input).toHaveFocus();
+    await waitFor(() => {
+      expect(useScanStore.getState().needsReviewQueue.some((r) => r.cleanCode === "UNKNOWNXYZ")).toBe(true);
+    }, { timeout: 5_000 });
     expect(input).toHaveFocus();
   });
 

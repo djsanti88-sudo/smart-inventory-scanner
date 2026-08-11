@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // Force the SQLite path unavailable deterministically (mirrors the real Vercel case: no DB file
 // in the bundle). A local dev machine may have a leftover knowledge.generated.db in %TEMP%
@@ -18,6 +18,14 @@ vi.mock("@libsql/client", () => ({
   }),
 }));
 
+const ORIGINAL_ENV = { ...process.env };
+
+afterEach(() => {
+  process.env = { ...ORIGINAL_ENV };
+  vi.restoreAllMocks();
+  vi.doUnmock("@libsql/client");
+});
+
 describe("retail Turso errors are distinguishable from misses", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -31,6 +39,88 @@ describe("retail Turso errors are distinguishable from misses", () => {
     const res = await mod.lookupRetailBarcodeAsync("049000006346");
     expect(res).toBeNull();
     expect(mod.getLastRetailLookupStatus()).toBe("turso_error");
+  });
+});
+
+describe("retail Turso logging does not disclose connection secrets", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("does not log Turso URL or token when the Turso client connects", async () => {
+    vi.doMock("@libsql/client", () => ({
+      createClient: () => ({
+        execute: async () => ({ rows: [] }),
+      }),
+    }));
+    const sentinelUrl = "libsql://scanbin-prod-secret.turso.io?leak=retail-success";
+    const sentinelToken = "retail-token-secret";
+    process.env.TURSO_DATABASE_URL = sentinelUrl;
+    process.env.TURSO_AUTH_TOKEN = sentinelToken;
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const mod = await import("@/server/retail-knowledge/retailKnowledgeIndex");
+    mod.__resetRetailKnowledgeCacheForTests();
+    await mod.getTursoClient();
+
+    const output = log.mock.calls.flat().join(" ");
+    expect(output).not.toContain(sentinelUrl);
+    expect(output).not.toContain("scanbin-prod-secret.turso.io");
+    expect(output).not.toContain("leak=retail-success");
+    expect(output).not.toContain(sentinelToken);
+  });
+
+  it("does not log Turso URL or token when client construction fails", async () => {
+    const sentinelUrl = "libsql://scanbin-prod-secret.turso.io?leak=retail-create";
+    const sentinelToken = "retail-token-secret";
+    vi.doMock("@libsql/client", () => ({
+      createClient: () => {
+        throw new Error(`failed for ${sentinelUrl} using ${sentinelToken}`);
+      },
+    }));
+    process.env.TURSO_DATABASE_URL = sentinelUrl;
+    process.env.TURSO_AUTH_TOKEN = sentinelToken;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const mod = await import("@/server/retail-knowledge/retailKnowledgeIndex");
+    mod.__resetRetailKnowledgeCacheForTests();
+    await mod.getTursoClient();
+
+    const output = warn.mock.calls.flat().join(" ");
+    expect(output).not.toContain(sentinelUrl);
+    expect(output).not.toContain("scanbin-prod-secret.turso.io");
+    expect(output).not.toContain("leak=retail-create");
+    expect(output).not.toContain(sentinelToken);
+    expect(output).not.toContain("failed for");
+  });
+
+  it("does not log Turso URL or token when a retail query fails", async () => {
+    const sentinelUrl = "libsql://scanbin-prod-secret.turso.io?leak=retail-query";
+    const sentinelToken = "retail-token-secret";
+    vi.doMock("@libsql/client", () => ({
+      createClient: () => ({
+        execute: async () => {
+          throw new Error(`query failed for ${sentinelUrl} using ${sentinelToken}`);
+        },
+      }),
+    }));
+    process.env.TURSO_DATABASE_URL = sentinelUrl;
+    process.env.TURSO_AUTH_TOKEN = sentinelToken;
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const mod = await import("@/server/retail-knowledge/retailKnowledgeIndex");
+    mod.__resetRetailKnowledgeCacheForTests();
+    const res = await mod.lookupRetailBarcodeAsync("049000006346");
+
+    expect(res).toBeNull();
+    expect(mod.getLastRetailLookupStatus()).toBe("turso_error");
+    const output = [...log.mock.calls, ...warn.mock.calls].flat().join(" ");
+    expect(output).not.toContain(sentinelUrl);
+    expect(output).not.toContain("scanbin-prod-secret.turso.io");
+    expect(output).not.toContain("leak=retail-query");
+    expect(output).not.toContain(sentinelToken);
+    expect(output).not.toContain("query failed for");
   });
 });
 

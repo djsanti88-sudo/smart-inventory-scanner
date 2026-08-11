@@ -28,6 +28,71 @@ function count(productId: string, quantity: number, scanEventIds: string[]): Inv
 }
 
 describe("setBusinessContext refresh must not wipe the current tenant's data", () => {
+  it("keeps already-loaded same-tenant UI available while a background refresh is pending", async () => {
+    const emptyBusiness = { products: [], aliases: [], sessions: [], counts: [], scanEvents: [] };
+    const loader = vi.fn().mockResolvedValueOnce(emptyBusiness);
+    const store = createTestScanStore({ cloudBackend: true, loadBusinessData: loader });
+
+    store.getState().setBusinessContext("b1", "u1");
+    await vi.waitFor(() => expect(store.getState().businessDataLoaded).toBe(true));
+
+    const ev = scanEvent("ev-visible", "p-visible", "111");
+    store.setState({
+      scanFeed: [ev],
+      finalCounts: [count("p-visible", 1, [ev.id])],
+    });
+
+    let finishRefresh!: (value: typeof emptyBusiness) => void;
+    loader.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        finishRefresh = resolve;
+      }),
+    );
+
+    store.getState().setBusinessContext("b1", "u1");
+
+    expect(store.getState().businessDataLoaded).toBe(true);
+    expect(store.getState().scanFeed).toEqual([ev]);
+    expect(store.getState().finalCounts).toEqual([count("p-visible", 1, [ev.id])]);
+
+    finishRefresh(emptyBusiness);
+    await vi.waitFor(() => expect(loader).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps a hard-page rehydrate blocked until the cloud refresh completes", async () => {
+    const emptyBusiness = { products: [], aliases: [], sessions: [], counts: [], scanEvents: [] };
+    let finishRefresh!: (value: typeof emptyBusiness) => void;
+    const loader = vi.fn().mockImplementation(
+      () => new Promise((resolve) => {
+        finishRefresh = resolve;
+      }),
+    );
+    const store = createTestScanStore({ cloudBackend: true, loadBusinessData: loader });
+    const ev = scanEvent("ev-rehydrated", "p-rehydrated", "222");
+
+    // Persisted tenant data has rehydrated into a fresh page. Readiness flags are intentionally
+    // transient, so they still have their cold defaults even though the per-uid tenant matches.
+    store.setState({
+      businessId: "b1",
+      userId: "u1",
+      businessContextReady: false,
+      businessDataLoaded: false,
+      scanFeed: [ev],
+      finalCounts: [count("p-rehydrated", 1, [ev.id])],
+    });
+
+    store.getState().setBusinessContext("b1", "u1");
+
+    expect(store.getState().businessContextReady).toBe(true);
+    expect(store.getState().businessDataLoaded).toBe(false);
+    expect(store.getState().scanFeed).toEqual([ev]);
+    expect(store.getState().finalCounts).toEqual([count("p-rehydrated", 1, [ev.id])]);
+
+    finishRefresh(emptyBusiness);
+    await vi.waitFor(() => expect(store.getState().businessDataLoaded).toBe(true));
+    expect(loader).toHaveBeenCalledTimes(1);
+  });
+
   it("(a) re-entering the SAME (businessId, userId) preserves scanFeed/finalCounts/needsReviewQueue", async () => {
     const laggingLoader = vi.fn().mockImplementation(
       () => new Promise((resolve) => setTimeout(() => resolve({ products: [], aliases: [], sessions: [], counts: [] }), 20)),

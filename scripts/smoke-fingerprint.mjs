@@ -46,6 +46,7 @@ export function isAllowedDeploymentUrl(value) {
     if (url.protocol !== "https:" || url.username || url.password || url.port) return false;
     const host = url.hostname.toLowerCase();
     return (
+      host === "inventory-sharpenly.vercel.app" ||
       host === "inventory-lovat-six.vercel.app" ||
       /^inventory-[a-z0-9-]+-sharpenly\.vercel\.app$/.test(host)
     );

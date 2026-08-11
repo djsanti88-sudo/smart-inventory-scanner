@@ -138,11 +138,9 @@ async function getTursoClient(): Promise<TursoClient | null> {
     const { createClient } = (await import("@libsql/client")) as unknown as LibsqlClientModule;
     tursoClient = createClient({ url, authToken }) as TursoClient;
     return tursoClient;
-  } catch (error) {
-    console.warn(
-      "[shareTokenStore] Failed to create Turso client, using local fallback:",
-      error instanceof Error ? error.message : String(error),
-    );
+  } catch {
+    // Driver errors can include the database URL, auth token, SQL, or row values.
+    console.warn("[shareTokenStore] Turso client unavailable; using local fallback.");
     tursoClient = "unavailable";
     return null;
   }
@@ -154,11 +152,8 @@ async function ensureTable(client: TursoClient): Promise<boolean> {
     await client.execute({ sql: DDL, args: [] });
     tableReady = true;
     return true;
-  } catch (error) {
-    console.warn(
-      "[shareTokenStore] Failed to ensure share_tokens table, using local fallback:",
-      error instanceof Error ? error.message : String(error),
-    );
+  } catch {
+    console.warn("[shareTokenStore] Turso table unavailable; using local fallback.");
     return false;
   }
 }
@@ -182,8 +177,8 @@ function isMemoryFallback(): boolean {
 function readFallbackFile(): FileShape {
   try {
     const file = fallbackFile();
-    if (!fs.existsSync(file)) return {};
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (!fs.existsSync(/*turbopackIgnore: true*/ file)) return {};
+    const parsed = JSON.parse(fs.readFileSync(/*turbopackIgnore: true*/ file, "utf8"));
     return record(parsed) ? (parsed as FileShape) : {};
   } catch {
     return {};
@@ -193,11 +188,9 @@ function readFallbackFile(): FileShape {
 function writeFallbackFile(data: FileShape): void {
   try {
     fs.writeFileSync(fallbackFile(), JSON.stringify(data), "utf8");
-  } catch (error) {
-    console.warn(
-      "[shareTokenStore] Failed to write local share-token fallback:",
-      error instanceof Error ? error.message : String(error),
-    );
+  } catch {
+    // Filesystem errors can disclose absolute paths and customer-controlled filenames.
+    console.warn("[shareTokenStore] Local share-token fallback write failed.");
   }
 }
 
@@ -285,11 +278,8 @@ export async function mintShareToken(payload: SharePayload, ttlMs: number): Prom
       });
       activeBackend = "turso";
       return token;
-    } catch (error) {
-      console.warn(
-        "[shareTokenStore] Turso insert failed, using local fallback:",
-        error instanceof Error ? error.message : String(error),
-      );
+    } catch {
+      console.warn("[shareTokenStore] Turso insert failed; using local fallback.");
       // M1 (resilience nit): a durable WRITE failure means this client instance is bad (or the
       // connection has gone stale) - invalidate the memoization so the NEXT call re-attempts
       // construction from scratch instead of hammering the same known-bad client on every request.
@@ -332,11 +322,8 @@ export async function resolveShareToken(token: string): Promise<SharePayload | n
           expiresAt: Number(row.expires_at),
         });
       }
-    } catch (error) {
-      console.warn(
-        "[shareTokenStore] Turso read failed, using local fallback:",
-        error instanceof Error ? error.message : String(error),
-      );
+    } catch {
+      console.warn("[shareTokenStore] Turso read failed; using local fallback.");
     }
   }
 

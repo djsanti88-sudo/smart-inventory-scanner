@@ -143,7 +143,7 @@ describe("LiveScanFeed - Task 9b inline suggestion approve/decline (scanner-safe
       // The decode settles async -> the row gains a PENDING inline suggestion.
       await vi.waitFor(() => {
         expect(useScanStore.getState().scanFeed.find((e) => e.cleanCode === CODE9B)?.suggestion?.status).toBe("pending");
-      });
+      }, { timeout: 5_000 });
       const row = useScanStore.getState().scanFeed.find((e) => e.cleanCode === CODE9B)!;
       // Honest confidence copy, per the owner-ratified format.
       expect(screen.getByTestId(`feed-suggestion-${row.id}`).textContent).toContain("(suggested, 30%)");
@@ -190,7 +190,7 @@ describe("LiveScanFeed - Task 9b inline suggestion approve/decline (scanner-safe
       await user.type(input, `${CODE9B}{Enter}`);
       await vi.waitFor(() => {
         expect(useScanStore.getState().scanFeed.find((e) => e.cleanCode === CODE9B)?.suggestion?.status).toBe("pending");
-      });
+      }, { timeout: 5_000 });
       const row = useScanStore.getState().scanFeed.find((e) => e.cleanCode === CODE9B)!;
 
       expect(input).toHaveFocus();

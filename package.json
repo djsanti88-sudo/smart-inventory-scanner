@@ -2,6 +2,9 @@
   "name": "inventory",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "postinstall": "node scripts/patch-jwks-rsa.cjs",
     "teach": "node e2e/teach/teach.mjs",
@@ -31,6 +34,7 @@
     "test:a11y": "playwright test e2e/a11y.spec.ts",
     "test:ct": "playwright test --config=playwright-ct.config.ts",
     "release:check": "node scripts/release-sentinel.mjs",
+    "cloud:readiness": "node scripts/cloud-recovery-observability-readiness.mjs",
     "proof:local": "tsc --noEmit && vitest run",
     "proof:full": "npm run proof:local && next build",
     "deploy:card": "node scripts/release-sentinel.mjs --deploy-card",
@@ -75,7 +79,7 @@
     "firebase-admin": "^14.0.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
-    "next": "16.2.12",
+    "next": "16.3.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "server-only": "^0.0.1",
@@ -97,7 +101,7 @@
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.0.2",
     "eslint": "^9",
-    "eslint-config-next": "16.2.9",
+    "eslint-config-next": "16.3.0",
     "jsdom": "^29.1.1",
     "nodemailer": "^9.0.1",
     "tailwindcss": "^4",

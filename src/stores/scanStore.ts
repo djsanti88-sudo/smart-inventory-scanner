@@ -125,6 +125,28 @@ export interface CsvImportSummary {
 
 const UNIT_COST_HEADERS = ["unit_cost", "unit cost", "cost", "unitcost"];
 
+// One business load can contain two sequential bounded phases (catalog/session/count reads, then the
+// restored session's scan-event read). Bound the whole operation too so those individually bounded
+// phases cannot add up to minutes of an unresponsive BusinessContextGate.
+export const BUSINESS_LOAD_TIMEOUT_MS = 75_000;
+
+async function withBusinessLoadTimeout<T>(operation: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Business data load timed out after ${BUSINESS_LOAD_TIMEOUT_MS}ms.`)),
+          BUSINESS_LOAD_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function parseUnitCost(row: Record<string, string>): number | undefined {
   for (const key of Object.keys(row)) {
     if (UNIT_COST_HEADERS.includes(key.trim().toLowerCase())) {
@@ -2266,6 +2288,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // isolation law below) replaces tenant state.
         const contextState = get();
         const sameTenant = contextState.businessId === businessId && contextState.userId === userId;
+        // Only a same-tenant snapshot that was already cloud-validated in this runtime may remain
+        // visible if a background refresh fails. Rehydrated persistence intentionally resets this
+        // transient flag, so a hard-page bootstrap failure stays fail-closed behind the gate.
+        const keepLoadedOnFailure = sameTenant && contextState.businessDataLoaded;
         // Bug #41 (data-loss race): a scan processed while THIS session still held the placeholder
         // (cloud mode, sign-in bootstrap not yet resolved - userId still null) counted locally and
         // queued for sync tagged with DEMO_BUSINESS_ID. That is not a real tenant switch (no real
@@ -2292,7 +2318,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (sameTenant) {
           set({
             businessContextReady: true,
-            businessDataLoaded: !needsLoad,
+            // Keep an already-loaded same-tenant client navigation usable while the refresh below
+            // runs. A hard page load intentionally keeps the transient flag false after rehydrate,
+            // so cached persisted rows are not blessed before the cloud loader validates the context.
+            // A genuine tenant/user switch also remains blocked in its separate branch below.
+            businessDataLoaded: contextState.businessDataLoaded || !needsLoad,
             lastSyncError: null,
           });
         } else if (isBootstrapResolution) {
@@ -2423,7 +2453,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // item wins over the remote snapshot until it syncs (proven by refreshWipe tests a3/a4).
           void (async () => {
             try {
-              const data = await loader(businessId, userId);
+              const data = await withBusinessLoadTimeout(loader(businessId, userId));
               if (
                 loadGeneration !== businessLoadGeneration ||
                 get().businessId !== businessId ||
@@ -2439,7 +2469,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               const sessions = [...data.sessions].sort(byStartedAtDesc);
               const restored = sessions.find((s) => s.status === "active") ?? sessions[0] ?? null;
               set((cur) => {
-                const next: Partial<ScanState> = { products: data.products, aliases: data.aliases, businessDataLoaded: true };
+                // Publish the complete cloud session list on the first authenticated load, not only
+                // during a later manual refresh. A fresh device may immediately rotate away from the
+                // most-recent active session because auto sessions are device-owned; History must still
+                // know about that restored session so its counts/timeline remain visible and exportable.
+                const next: Partial<ScanState> = {
+                  products: data.products,
+                  aliases: data.aliases,
+                  sessions: data.sessions,
+                  businessDataLoaded: true,
+                };
                 if (restored) {
                   // Same-tenant refresh guard (part 2): the synchronous guard above preserves the local
                   // feed/counts, so this restore must not quietly re-introduce the wipe by REPLACING
@@ -2528,8 +2567,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               ) {
                 return;
               }
-              // Surface the error but mark loaded so the UI does not hang forever (sync still paused on error).
-              set({ lastSyncError: e instanceof Error ? e.message : "Failed to load business data", businessDataLoaded: true });
+              // Surface the error without blessing an unvalidated persisted snapshot. An already
+              // cloud-validated same-tenant client navigation can keep rendering its prior data;
+              // a hard-page rehydrate or real tenant switch remains withheld behind the gate.
+              set({
+                lastSyncError: e instanceof Error ? e.message : "Failed to load business data",
+                businessDataLoaded: keepLoadedOnFailure,
+              });
             }
             if (
               loadGeneration !== businessLoadGeneration ||
@@ -3039,7 +3083,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const loadGeneration = ++businessLoadGeneration;
         let data;
         try {
-          data = await deps.loadBusinessData(businessId, userId);
+          data = await withBusinessLoadTimeout(deps.loadBusinessData(businessId, userId));
         } catch (e) {
           if (
             loadGeneration !== businessLoadGeneration ||
@@ -3140,11 +3184,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
           return {
             products: [...productsById.values()],
-            aliases: [...aliasesById.values()],
-            sessions: [...sessionsById.values()],
-            finalCounts: [...countsByKey.values()],
-            lastSyncError: null,
-          };
+              aliases: [...aliasesById.values()],
+              sessions: [...sessionsById.values()],
+              finalCounts: [...countsByKey.values()],
+              lastSyncError: null,
+              businessDataLoaded: true,
+            };
         });
       },
 

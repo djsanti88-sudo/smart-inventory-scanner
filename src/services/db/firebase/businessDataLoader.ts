@@ -2,7 +2,7 @@ import { type Firestore, collection, getDocs, orderBy, query, where } from "fire
 import type { Product, Alias, InventorySession, InventoryCount, ScanEvent } from "@/types";
 import { COLLECTIONS } from "@/services/db/types";
 import { toStoreProduct, toStoreAlias, toStoreSession, toStoreCount, toStoreScanEvent } from "./storeMappers";
-import { retryingRead, READ_ATTEMPT_TIMEOUT_MS, READ_MAX_ATTEMPTS, READ_RETRY_BACKOFF_MS } from "./boundedRead";
+import { retryingRead } from "./boundedRead";
 
 // Loads a business's persisted data from Firestore into the shapes the local store uses, so the
 // deterministic resolver sees products/aliases after a refresh or on a fresh device, and the active

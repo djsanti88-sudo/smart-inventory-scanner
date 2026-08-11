@@ -56,6 +56,18 @@ describe("toStoreSession", () => {
     expect(s.status).toBe("completed");
     expect(s.completedAt).toBe("2026-06-15T00:00:00Z");
   });
+
+  it("preserves the device claim and owner-lock state across a Firestore reload", () => {
+    const s = toStoreSession("s3", {
+      deviceId: "device-a",
+      locked: true,
+      lockedAt: "2026-08-10T12:00:00.000Z",
+    }, BIZ);
+
+    expect(s.deviceId).toBe("device-a");
+    expect(s.locked).toBe(true);
+    expect(s.lockedAt).toBe("2026-08-10T12:00:00.000Z");
+  });
 });
 
 describe("toStoreCount", () => {

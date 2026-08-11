@@ -10,6 +10,12 @@ const mocks = vi.hoisted(() => ({
   listMemberships: vi.fn(),
   setBusinessContext: vi.fn(),
   rehydrateForUid: vi.fn(),
+  refreshFromCloud: vi.fn(),
+  storeState: {
+    businessContextReady: false,
+    businessDataLoaded: false,
+    lastSyncError: null as string | null,
+  },
 }));
 
 vi.mock("@/services/auth/authMode", () => ({ isLiveAuth: () => true }));
@@ -30,9 +36,9 @@ vi.mock("@/stores/scanStore", () => ({
   useScanStore: Object.assign(
     (select: (state: Record<string, unknown>) => unknown) =>
       select({
-        businessContextReady: false,
-        businessDataLoaded: false,
+        ...mocks.storeState,
         setBusinessContext: mocks.setBusinessContext,
+        refreshFromCloud: mocks.refreshFromCloud,
       }),
     {
       getState: () => ({
@@ -52,6 +58,10 @@ afterEach(() => {
   mocks.listMemberships.mockReset();
   mocks.setBusinessContext.mockReset();
   mocks.rehydrateForUid.mockReset();
+  mocks.refreshFromCloud.mockReset();
+  mocks.storeState.businessContextReady = false;
+  mocks.storeState.businessDataLoaded = false;
+  mocks.storeState.lastSyncError = null;
 });
 
 describe("BusinessContextGate bootstrap failure surfacing", () => {
@@ -115,5 +125,28 @@ describe("BusinessContextGate bootstrap failure surfacing", () => {
     });
 
     expect(screen.getByTestId("business-context-error")).toBeInTheDocument();
+  });
+
+  it("withholds an unvalidated persisted cache and offers cloud-load Retry after the store loader fails", async () => {
+    mocks.storeState.businessContextReady = true;
+    mocks.storeState.businessDataLoaded = false;
+    mocks.storeState.lastSyncError = "Business data load timed out";
+    mocks.getSession.mockResolvedValue({ uid: "user-1" });
+    mocks.listMemberships.mockResolvedValue([{
+      id: "active_user-1",
+      businessId: "biz-1",
+      businessName: "Retry Shop",
+      userId: "user-1",
+      role: "owner",
+    }]);
+    mocks.rehydrateForUid.mockResolvedValue(undefined);
+    mocks.refreshFromCloud.mockResolvedValue(undefined);
+
+    render(<BusinessContextGate><div data-testid="child">scanner</div></BusinessContextGate>);
+
+    expect(await screen.findByTestId("business-context-error")).toBeInTheDocument();
+    expect(screen.queryByTestId("child")).toBeNull();
+    fireEvent.click(screen.getByTestId("retry-business-data"));
+    expect(mocks.refreshFromCloud).toHaveBeenCalledTimes(1);
   });
 });

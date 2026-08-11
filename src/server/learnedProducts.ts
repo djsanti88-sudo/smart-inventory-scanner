@@ -153,8 +153,8 @@ async function getTursoClient(): Promise<TursoClient | null> {
     const { createClient } = (await import("@libsql/client")) as unknown as LibsqlClientModule;
     _tursoClient = createClient({ url, authToken: token }) as TursoClient;
     return _tursoClient;
-  } catch (e) {
-    console.warn("[learned-products] Failed to create Turso client:", (e as Error).message);
+  } catch {
+    console.warn("[learned-products] Turso client unavailable.");
     _tursoClient = "unavailable";
     return null;
   }
@@ -166,8 +166,8 @@ async function ensureTursoTable(client: TursoClient): Promise<boolean> {
     await client.execute({ sql: DDL, args: [] });
     _tursoTableReady = true;
     return true;
-  } catch (e) {
-    console.warn("[learned-products] Failed to ensure learned_products table:", (e as Error).message);
+  } catch {
+    console.warn("[learned-products] Turso table unavailable.");
     return false;
   }
 }
@@ -196,7 +196,7 @@ function isValidRow(v: unknown): v is LearnedProductRow {
 
 function readFileStore(): FileShape {
   try {
-    const raw = JSON.parse(fs.readFileSync(storeFile(), "utf8"));
+    const raw = JSON.parse(fs.readFileSync(/*turbopackIgnore: true*/ storeFile(), "utf8"));
     if (raw && typeof raw === "object") return raw as FileShape;
   } catch {
     // no file yet / unreadable / corrupted JSON -> treat as empty, self-heals on next write
@@ -248,8 +248,8 @@ export async function getLearnedProduct(code: string): Promise<LearnedProductRow
     const store = readFileStore();
     const row = store[key];
     return isValidRow(row) ? row : null;
-  } catch (e) {
-    console.warn("[learned-products] getLearnedProduct failed:", (e as Error).message);
+  } catch {
+    console.warn("[learned-products] Turso read failed.");
     return null;
   }
 }
@@ -291,8 +291,8 @@ export async function upsertLearnedProduct(entry: LearnedProductRow): Promise<vo
     const store = readFileStore();
     store[key] = normalized;
     writeFileStore(store);
-  } catch (e) {
-    console.warn("[learned-products] upsertLearnedProduct failed:", (e as Error).message);
+  } catch {
+    console.warn("[learned-products] Turso write failed.");
     // best-effort; never throw - a broken learned-tier store must never break a live decode
   }
 }
@@ -338,8 +338,8 @@ export async function getLearnedProductsByPrefix(prefix: string): Promise<Learne
     }
     const store = readFileStore();
     return Object.values(store).filter((row) => isValidRow(row) && row.code.replace(/^0+/, "").startsWith(p.replace(/^0+/, "")));
-  } catch (e) {
-    console.warn("[learned-products] getLearnedProductsByPrefix failed:", (e as Error).message);
+  } catch {
+    console.warn("[learned-products] Turso prefix read failed.");
     return [];
   }
 }

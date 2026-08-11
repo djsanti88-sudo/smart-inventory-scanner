@@ -58,6 +58,34 @@ const dataFor = (entry: Product): LoadedData => ({
 });
 
 describe("business loader context generation", () => {
+  it("publishes the complete cloud session list during first-context hydration", async () => {
+    const load = deferred<LoadedData>();
+    const store = createTestScanStore({
+      cloudBackend: true,
+      loadBusinessData: () => load.promise,
+    });
+    const restored = {
+      id: "session-cloud",
+      businessId: "business-a",
+      name: "Cloud session",
+      location: "Main",
+      status: "active",
+      startedAt: "2026-08-10T12:00:00.000Z",
+      completedAt: null,
+      createdBy: "user-1",
+      notes: "",
+      syncStatus: "synced",
+      deviceId: "device-a",
+    } satisfies InventorySession;
+
+    store.getState().setBusinessContext("business-a", "user-1");
+    load.resolve({ ...dataFor(product("product-a", "business-a")), sessions: [restored] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(store.getState().currentSession?.id).toBe(restored.id);
+    expect(store.getState().sessions).toEqual([restored]);
+  });
+
   it("ignores tenant A when its loader resolves after tenant B", async () => {
     const a = deferred<LoadedData>();
     const b = deferred<LoadedData>();
@@ -142,7 +170,8 @@ describe("business loader context generation", () => {
       currentSession: null,
       sessionId: "",
       finalCounts: [],
-      businessDataLoaded: true,
+      // A failed hard tenant load stays fail-closed so the gate cannot render persisted cache.
+      businessDataLoaded: false,
       lastSyncError: "business B unavailable",
     });
 

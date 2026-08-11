@@ -559,10 +559,10 @@ async function getTursoLadderStorage(): Promise<LadderStorage | null> {
     const { createClient } = (await import("@libsql/client")) as unknown as LibsqlClientModule;
     const client = createClient({ url, authToken: token }) as TursoClientLike;
     _cachedTursoStorage = tursoLadderStorage(client);
-    console.log("[ladderStorage] Turso client connected:", url);
+    console.log("[ladderStorage] Turso client connected");
     return _cachedTursoStorage;
-  } catch (e) {
-    console.warn("[ladderStorage] Failed to create Turso client, falling back to file storage:", (e as Error).message);
+  } catch {
+    console.warn("[ladderStorage] Failed to create Turso client, falling back to file storage");
     _cachedTursoUnavailable = true;
     return null;
   }

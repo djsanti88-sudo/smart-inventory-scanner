@@ -19,8 +19,10 @@ vi.mock("@/server/retail-knowledge/retailKnowledgeIndex", () => ({
 }));
 
 import {
+  candidatesBySizeToken,
   lookupByExactBarcode,
   lookupByExactPartNumber,
+  lookupAllByPartNumber,
   __resetTireKnowledgeCacheForTests,
 } from "@/server/tire-knowledge/tireKnowledgeIndex";
 
@@ -54,13 +56,16 @@ function fakeTursoClient(options: {
   tiresByUid?: Record<string, typeof TIRE_ROW>;
   partNumberToUid?: Record<string, string>;
   throwOnExecute?: boolean;
+  throwMessage?: string;
 }) {
   const calls: { sql: string; args: unknown[] }[] = [];
   return {
     calls,
     async execute({ sql, args }: { sql: string; args: unknown[] }) {
       calls.push({ sql, args });
-      if (options.throwOnExecute) throw new Error("simulated Turso network error");
+      if (options.throwOnExecute) {
+        throw new Error(options.throwMessage ?? "simulated Turso network error");
+      }
       if (sql.includes("FROM tires WHERE barcode")) {
         const [key] = args as [string];
         const row = options.tiresByBarcode?.[key];
@@ -170,6 +175,27 @@ describe("tireKnowledgeIndex - Turso lookup path (SQLite absent, the Vercel case
     await expect(lookupByExactPartNumber("NOT-A-REAL-PART")).resolves.toBeNull();
     expect(warn).toHaveBeenCalled(); // logs a one-time warn, like retail does
 
+    warn.mockRestore();
+  });
+
+  it("never logs Turso URLs, tokens, driver messages, SQL, or row details on any lookup failure", async () => {
+    const secret =
+      "libsql://private-db.turso.io authToken=TOP_SECRET SQL=SELECT_SECRET row=customer-secret";
+    mockGetKnowledgeDb.mockReturnValue(null);
+    const client = fakeTursoClient({ throwOnExecute: true, throwMessage: secret });
+    mockGetRetailTursoClient.mockResolvedValue(client);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(lookupByExactBarcode("000000000000")).resolves.toBeNull();
+    await expect(lookupByExactPartNumber("NOT-A-REAL-PART")).resolves.toBeNull();
+    await expect(lookupAllByPartNumber("NOTAREALPART")).resolves.toEqual([]);
+    await expect(candidatesBySizeToken("999/99R99")).resolves.toEqual([]);
+
+    const output = warn.mock.calls.flat().join(" ");
+    expect(output).not.toContain("private-db.turso.io");
+    expect(output).not.toContain("TOP_SECRET");
+    expect(output).not.toContain("SELECT_SECRET");
+    expect(output).not.toContain("customer-secret");
     warn.mockRestore();
   });
 

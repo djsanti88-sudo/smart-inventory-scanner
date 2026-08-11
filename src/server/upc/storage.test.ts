@@ -680,6 +680,36 @@ describe("ladderStorage selector", () => {
     expect(existsSync(join(dir, ".go-upc-usage.json"))).toBe(false);
   });
 
+  it("does not log Turso URL or token when the Turso adapter connects", async () => {
+    vi.doMock("@libsql/client", () => ({
+      createClient: () => ({
+        execute: async ({ sql }: { sql: string }) => {
+          if (sql.includes("CREATE TABLE")) return { rows: [] };
+          if (sql.startsWith("SELECT month, used")) return { rows: [] };
+          return { rows: [] };
+        },
+      }),
+    }));
+    const sentinelUrl = "libsql://scanbin-prod-secret.turso.io?leak=storage-success";
+    const sentinelToken = "storage-token-secret";
+    process.env.TURSO_DATABASE_URL = sentinelUrl;
+    process.env.TURSO_AUTH_TOKEN = sentinelToken;
+    vi.resetModules();
+    const mod = await import("./storage");
+    mod.__resetLadderStorageSelectorForTests();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const store = await mod.ladderStorage(dir);
+    await store.readUsage();
+
+    const output = log.mock.calls.flat().join(" ");
+    expect(output).not.toContain(sentinelUrl);
+    expect(output).not.toContain("scanbin-prod-secret.turso.io");
+    expect(output).not.toContain("leak=storage-success");
+    expect(output).not.toContain(sentinelToken);
+    log.mockRestore();
+  });
+
   it("falls back to the file adapter when Turso client construction throws", async () => {
     vi.doMock("@libsql/client", () => ({
       createClient: () => {
@@ -695,6 +725,33 @@ describe("ladderStorage selector", () => {
     const store = await mod.ladderStorage(dir);
     await store.writeUsage({ month: "2026-07", used: 1 });
     expect(existsSync(join(dir, ".go-upc-usage.json"))).toBe(true);
+    warn.mockRestore();
+  });
+
+  it("does not log Turso URL or token when Turso client construction fails", async () => {
+    const sentinelUrl = "libsql://scanbin-prod-secret.turso.io?leak=storage-create";
+    const sentinelToken = "storage-token-secret";
+    vi.doMock("@libsql/client", () => ({
+      createClient: () => {
+        throw new Error(`failed for ${sentinelUrl} using ${sentinelToken}`);
+      },
+    }));
+    process.env.TURSO_DATABASE_URL = sentinelUrl;
+    process.env.TURSO_AUTH_TOKEN = sentinelToken;
+    vi.resetModules();
+    const mod = await import("./storage");
+    mod.__resetLadderStorageSelectorForTests();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const store = await mod.ladderStorage(dir);
+    await store.writeUsage({ month: "2026-07", used: 1 });
+
+    const output = warn.mock.calls.flat().join(" ");
+    expect(output).not.toContain(sentinelUrl);
+    expect(output).not.toContain("scanbin-prod-secret.turso.io");
+    expect(output).not.toContain("leak=storage-create");
+    expect(output).not.toContain(sentinelToken);
+    expect(output).not.toContain("failed for");
     warn.mockRestore();
   });
 });

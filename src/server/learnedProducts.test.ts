@@ -4,10 +4,15 @@
 //   1. shouldLearnDecode - the PURE write gate (no storage, no network).
 //   2. getLearnedProduct/upsertLearnedProduct - the storage roundtrip (file-fallback mode; no Turso
 //      in CI, same convention as decodeCacheStore.test.ts).
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
+
+const tursoMocks = vi.hoisted(() => ({ createClient: vi.fn() }));
+vi.mock("@libsql/client", () => ({
+  createClient: (...args: unknown[]) => tursoMocks.createClient(...args),
+}));
 
 import {
   shouldLearnDecode,
@@ -120,6 +125,7 @@ describe("learnedProducts storage (file-fallback mode; no Turso configured)", ()
 
   beforeEach(() => {
     __resetLearnedProductsForTest();
+    tursoMocks.createClient.mockReset();
     for (const k of keys) saved[k] = process.env[k];
     delete process.env.TURSO_DATABASE_URL;
     delete process.env.TURSO_AUTH_TOKEN;
@@ -250,5 +256,57 @@ describe("learnedProducts storage (file-fallback mode; no Turso configured)", ()
       const verdict = await siblingPrefixConflict("999999912345", { brand: "AnyBrand", category: "anything" });
       expect(verdict.conflict).toBe(false);
     });
+  });
+
+  it("never logs Turso URLs, tokens, driver messages, SQL, or row details on any failure path", async () => {
+    const privateUrl = "libsql://private-learned.example.invalid/db";
+    const privateToken = "learned-products-secret-token";
+    const leakedDriverText = `${privateUrl} authToken=${privateToken} SQL SELECT secret-row LEAK_SENTINEL`;
+    process.env.TURSO_DATABASE_URL = privateUrl;
+    process.env.TURSO_AUTH_TOKEN = privateToken;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const assertRedacted = () => {
+      const output = warn.mock.calls.flat().join(" ");
+      expect(output).not.toContain(privateUrl);
+      expect(output).not.toContain(privateToken);
+      expect(output).not.toContain("LEAK_SENTINEL");
+      expect(output).not.toContain("secret-row");
+      warn.mockClear();
+    };
+
+    __resetLearnedProductsForTest();
+    tursoMocks.createClient.mockImplementation(() => { throw new Error(leakedDriverText); });
+    await getLearnedProduct("086699998538");
+    assertRedacted();
+
+    const failingClient = (failSql: RegExp) => ({
+      execute: vi.fn(async ({ sql }: { sql: string }) => {
+        if (failSql.test(sql)) throw new Error(leakedDriverText);
+        return { rows: [] };
+      }),
+    });
+
+    __resetLearnedProductsForTest();
+    tursoMocks.createClient.mockReset().mockReturnValue(failingClient(/^CREATE /));
+    await getLearnedProduct("086699998538");
+    assertRedacted();
+
+    __resetLearnedProductsForTest();
+    tursoMocks.createClient.mockReset().mockReturnValue(failingClient(/^SELECT .*FROM learned_products WHERE code = /));
+    await getLearnedProduct("086699998538");
+    assertRedacted();
+
+    __resetLearnedProductsForTest();
+    tursoMocks.createClient.mockReset().mockReturnValue(failingClient(/^INSERT /));
+    await upsertLearnedProduct(row());
+    assertRedacted();
+
+    __resetLearnedProductsForTest();
+    tursoMocks.createClient.mockReset().mockReturnValue(failingClient(/^SELECT .*WHERE code LIKE /));
+    await getLearnedProductsByPrefix("086699");
+    assertRedacted();
+
+    warn.mockRestore();
   });
 });

@@ -18,6 +18,9 @@ export default defineConfig({
     },
   },
   test: {
+    // Bound aggregate concurrency so unrelated host processes cannot starve Vitest workers.
+    // Both projects inherit this root option through `extends: true` below.
+    maxWorkers: 4,
     // Emulator-backed rules tests (src/services/db/firebase/*.rules.test.ts) do real Firestore I/O
     // against a single emulator; under parallel load on Windows the first op in a file can exceed the
     // 5s default. Generous timeouts keep them reliable without weakening assertions (fast pure unit

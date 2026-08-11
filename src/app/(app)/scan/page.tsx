@@ -78,8 +78,15 @@ export default function ScanPage() {
 
   useEffect(() => {
     if (!businessContextReady || !businessDataLoaded) return;
+    // Fresh-device CLOUD bootstrap may restore an active session created by another browser/device.
+    // Do not rotate that session merely because /scan mounted: ensureAutoSession's rotation path wipes
+    // scanFeed/finalCounts by design. The mock backend is different: its seeded boot session is not in
+    // MockDb until ensureAutoSession adopts/saves it, so skipping there makes History lose the session.
+    // Actual cloud scans still call ensureAutoSession and enforce device ownership before counting.
+    const cloudBackend = process.env.NEXT_PUBLIC_FIREBASE_BACKEND === "1";
+    if (cloudBackend && session) return;
     ensureAutoSession();
-  }, [businessContextReady, businessDataLoaded, ensureAutoSession]);
+  }, [businessContextReady, businessDataLoaded, ensureAutoSession, session]);
 
   const hasKey = aiStatus.geminiConfigured || aiStatus.openaiConfigured;
   const isPlatform = useIsPlatformOwner(); // AI/provider status is platformOwner-only on the scan page

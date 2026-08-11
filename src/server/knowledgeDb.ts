@@ -49,7 +49,7 @@ function resolveDbPath(paths: ResolveDbPathPaths = { dbPath: DB_PATH, gzPath: GZ
     if (ageMs > TEMP_DB_STALENESS_MS) {
       const ageDays = (ageMs / (24 * 60 * 60 * 1000)).toFixed(1);
       throw new Error(
-        `[knowledge-db] Refusing to use a STALE temp DB copy at ${tmpDbPath} (${ageDays} days old, ` +
+        `[knowledge-db] Refusing to use a STALE temp DB copy (${ageDays} days old, ` +
           `> 7 day staleness bound). This looks like a leftover copy from an unrelated worktree or ` +
           `session, not a legitimate Vercel gz-decompress cache. A fresh worktree/checkout needs its ` +
           `own corpus DB provisioned -- run: node scripts/provision-worktree.mjs (or npm run ` +
@@ -59,7 +59,7 @@ function resolveDbPath(paths: ResolveDbPathPaths = { dbPath: DB_PATH, gzPath: GZ
     }
     if (!_warnedStaleTempOnce) {
       console.warn(
-        `[knowledge-db] Using a temp DB copy at ${tmpDbPath} (${(ageMs / (60 * 60 * 1000)).toFixed(1)}h old). ` +
+        `[knowledge-db] Using a temp DB copy (${(ageMs / (60 * 60 * 1000)).toFixed(1)}h old). ` +
           `If this worktree should have its own corpus DB, run: node scripts/provision-worktree.mjs`,
       );
       _warnedStaleTempOnce = true;
@@ -80,8 +80,9 @@ function resolveDbPath(paths: ResolveDbPathPaths = { dbPath: DB_PATH, gzPath: GZ
       const ms = Math.round(performance.now() - t0);
       console.log(`[knowledge-db] Decompressed ${(compressed.length / 1024 / 1024).toFixed(0)}MB -> ${(decompressed.length / 1024 / 1024).toFixed(0)}MB in ${ms}ms`);
       return tmpDbPath;
-    } catch (e) {
-      console.warn("[knowledge-db] Failed to decompress .gz:", (e as Error).message);
+    } catch {
+      // Native gzip/filesystem errors can disclose absolute paths or file contents.
+      console.warn("[knowledge-db] Failed to decompress the bundled knowledge DB.");
       return null;
     }
   }
@@ -113,10 +114,10 @@ export function getKnowledgeDb(): BetterSqlite3Database | null {
     _db = new Database(dbPath, { readonly: true, fileMustExist: true }) as BetterSqlite3Database;
     (_db as BetterSqlite3Database).pragma("cache_size = -8000");
     (_db as BetterSqlite3Database).pragma("mmap_size = 268435456");
-    console.log("[knowledge-db] SQLite DB opened (read-only):", dbPath);
+    console.log("[knowledge-db] SQLite DB opened (read-only).");
     return _db as BetterSqlite3Database;
-  } catch (e) {
-    console.warn("[knowledge-db] Failed to open SQLite DB:", (e as Error).message);
+  } catch {
+    console.warn("[knowledge-db] Failed to open the SQLite knowledge DB.");
     _db = "missing";
     return null;
   }

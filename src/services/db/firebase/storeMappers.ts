@@ -100,6 +100,13 @@ export function toStoreSession(id: string, data: Record<string, unknown>, busine
     createdBy: str(data.createdBy, str(data.startedBy, "human")),
     notes: str(data.notes),
     syncStatus: "synced",
+    // These fields control session reuse and write protection. Dropping deviceId makes an already
+    // claimed cloud session look legacy/unclaimed after every refresh, which replays the adoption
+    // SAVE_SESSION under the same idempotency key with a different payload. Dropping the lock fields
+    // can likewise reopen a locked session in the client until the next write.
+    deviceId: typeof data.deviceId === "string" ? data.deviceId : undefined,
+    locked: data.locked === true,
+    lockedAt: typeof data.lockedAt === "string" && data.lockedAt ? data.lockedAt : null,
   };
 }
 

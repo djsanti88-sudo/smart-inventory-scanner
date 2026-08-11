@@ -425,7 +425,7 @@ export async function recordGptLadderSpend(
 
   let all: Record<string, unknown> = {};
   try {
-    all = JSON.parse(fs.readFileSync(file, "utf8"));
+    all = JSON.parse(fs.readFileSync(/*turbopackIgnore: true*/ file, "utf8"));
   } catch {
     // no file yet / unreadable -> start fresh
   }
@@ -448,7 +448,7 @@ function readGptLadderCallsFromFile(file: string, date: string, key: string): nu
   const mem = memGptLadderCalls.get(key);
   if (typeof mem === "number") calls = mem;
   try {
-    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+    const raw = JSON.parse(fs.readFileSync(/*turbopackIgnore: true*/ file, "utf8"));
     const fileCalls = raw && raw[key] && raw[key].date === date ? Number(raw[key].calls) : 0;
     if (Number.isFinite(fileCalls) && fileCalls > calls) calls = fileCalls;
   } catch {
@@ -502,7 +502,7 @@ export async function recordGptLadderCall(opts: { file?: string; dateKey?: strin
 
   let all: Record<string, unknown> = {};
   try {
-    all = JSON.parse(fs.readFileSync(file, "utf8"));
+    all = JSON.parse(fs.readFileSync(/*turbopackIgnore: true*/ file, "utf8"));
   } catch {
     // no file yet / unreadable -> start fresh
   }

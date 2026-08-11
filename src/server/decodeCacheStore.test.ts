@@ -2,10 +2,15 @@
 // receipt storage/retrieval, upsert-by-code semantics, corruption tolerance (never throws), and
 // best-effort write failure tolerance. Route-level peek/write-through/forceRetry wiring is proven in
 // src/app/api/ai-lookup/route.test.ts (the consumer of this module).
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
+
+const tursoMocks = vi.hoisted(() => ({ createClient: vi.fn() }));
+vi.mock("@libsql/client", () => ({
+  createClient: (...args: unknown[]) => tursoMocks.createClient(...args),
+}));
 
 import { getPersistedDecode, persistDecode, deletePersistedDecode, __resetForTest, type PersistedDecode } from "@/server/decodeCacheStore";
 
@@ -16,6 +21,7 @@ describe("decodeCacheStore (file-fallback mode; no Turso configured)", () => {
 
   beforeEach(() => {
     __resetForTest();
+    tursoMocks.createClient.mockReset();
     for (const k of keys) saved[k] = process.env[k];
     delete process.env.TURSO_DATABASE_URL;
     delete process.env.TURSO_AUTH_TOKEN;
@@ -136,5 +142,57 @@ describe("decodeCacheStore (file-fallback mode; no Turso configured)", () => {
     const raw = fs.existsSync(tmpFile) ? JSON.parse(fs.readFileSync(tmpFile, "utf8")) : {};
     expect(Object.keys(raw)).not.toContain("  ");
     expect(Object.keys(raw)).not.toContain("");
+  });
+
+  it("never logs Turso URLs, tokens, driver messages, SQL, or row details on any failure path", async () => {
+    const privateUrl = "libsql://private-host.example.invalid/db";
+    const privateToken = "decode-cache-secret-token";
+    const leakedDriverText = `${privateUrl} authToken=${privateToken} SQL SELECT secret-row LEAK_SENTINEL`;
+    process.env.TURSO_DATABASE_URL = privateUrl;
+    process.env.TURSO_AUTH_TOKEN = privateToken;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const assertRedacted = () => {
+      const output = warn.mock.calls.flat().join(" ");
+      expect(output).not.toContain(privateUrl);
+      expect(output).not.toContain(privateToken);
+      expect(output).not.toContain("LEAK_SENTINEL");
+      expect(output).not.toContain("secret-row");
+      warn.mockClear();
+    };
+
+    __resetForTest();
+    tursoMocks.createClient.mockImplementation(() => { throw new Error(leakedDriverText); });
+    await getPersistedDecode("111111111111");
+    assertRedacted();
+
+    const failingClient = (failSql: RegExp) => ({
+      execute: vi.fn(async ({ sql }: { sql: string }) => {
+        if (failSql.test(sql)) throw new Error(leakedDriverText);
+        return { rows: [] };
+      }),
+    });
+
+    __resetForTest();
+    tursoMocks.createClient.mockReset().mockReturnValue(failingClient(/^CREATE /));
+    await getPersistedDecode("222222222222");
+    assertRedacted();
+
+    __resetForTest();
+    tursoMocks.createClient.mockReset().mockReturnValue(failingClient(/^SELECT /));
+    await getPersistedDecode("333333333333");
+    assertRedacted();
+
+    __resetForTest();
+    tursoMocks.createClient.mockReset().mockReturnValue(failingClient(/^INSERT /));
+    await persistDecode({ code: "444444444444", kind: "result", payload: "x", tier: "verified", createdAt: 1 });
+    assertRedacted();
+
+    __resetForTest();
+    tursoMocks.createClient.mockReset().mockReturnValue(failingClient(/^DELETE /));
+    await deletePersistedDecode("555555555555");
+    assertRedacted();
+
+    warn.mockRestore();
   });
 });

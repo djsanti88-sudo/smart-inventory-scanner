@@ -5,6 +5,7 @@ import { defineConfig, devices } from "@playwright/test";
 // spec in e2e/scan.spec.ts to e2e/proof/.
 export default defineConfig({
   testDir: "./e2e",
+  testMatch: "**/*.spec.ts",
   // The Firebase-backed specs live in e2e/firebase-phase2 and run via playwright.firebase.config.ts
   // (real Firebase backend + emulator). Keep them OUT of the mock run so the 11 mock specs stay isolated.
   // household-decode-test.spec.ts hardcodes a live external URL (a real Vercel preview deployment) and

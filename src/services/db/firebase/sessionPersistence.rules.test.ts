@@ -67,6 +67,9 @@ const activeSession: InventorySession = {
   createdBy: UID,
   notes: "",
   syncStatus: "synced",
+  locked: false,
+  lockedAt: null,
+  deviceId: "device-loop3",
 };
 
 describe.skipIf(!ready)("Loop 3 session/count persistence (emulator)", () => {
@@ -113,6 +116,24 @@ describe.skipIf(!ready)("Loop 3 session/count persistence (emulator)", () => {
       operation: "SAVE_SESSION",
       scanEventId: null,
     });
+  });
+
+  it("a Firestore-reloaded device claim replays as alreadyApplied, never an idempotency conflict", async () => {
+    const t = target();
+    const key = `${SID}-adopted-device-loop3`;
+    expect((await t.apply(sessionItem(activeSession, key))).alreadyApplied).toBe(false);
+
+    const db = env.authenticatedContext(UID).firestore() as unknown as Firestore;
+    const restored = (await loadBusinessData(db, BIZ)).sessions.find((session) => session.id === SID)!;
+    expect(restored).toMatchObject({
+      deviceId: "device-loop3",
+      locked: false,
+      lockedAt: null,
+    });
+
+    const replay = await t.apply(sessionItem(restored, key));
+    expect(replay).toMatchObject({ ok: true, alreadyApplied: true });
+    expect(replay.errorCode).toBeUndefined();
   });
 
   it("finishSession (distinct key) updates the SAME session to completed without losing start metadata", async () => {

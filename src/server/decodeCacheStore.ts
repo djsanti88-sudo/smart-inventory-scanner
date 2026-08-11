@@ -61,8 +61,8 @@ async function getTursoClient(): Promise<TursoClient | null> {
     const { createClient } = (await import("@libsql/client")) as unknown as LibsqlClientModule;
     _tursoClient = createClient({ url, authToken: token }) as TursoClient;
     return _tursoClient;
-  } catch (e) {
-    console.warn("[decode-cache-store] Failed to create Turso client:", (e as Error).message);
+  } catch {
+    console.warn("[decode-cache-store] Turso client unavailable.");
     _tursoClient = "unavailable";
     return null;
   }
@@ -74,8 +74,8 @@ async function ensureTursoTable(client: TursoClient): Promise<boolean> {
     await client.execute({ sql: DDL, args: [] });
     _tursoTableReady = true;
     return true;
-  } catch (e) {
-    console.warn("[decode-cache-store] Failed to ensure decode_cache table:", (e as Error).message);
+  } catch {
+    console.warn("[decode-cache-store] Turso table unavailable.");
     return false;
   }
 }
@@ -103,7 +103,7 @@ function isValidEntry(v: unknown): v is PersistedDecode {
 
 function readFileStore(): FileShape {
   try {
-    const raw = JSON.parse(fs.readFileSync(cacheFile(), "utf8"));
+    const raw = JSON.parse(fs.readFileSync(/*turbopackIgnore: true*/ cacheFile(), "utf8"));
     if (raw && typeof raw === "object") return raw as FileShape;
   } catch {
     // no file yet / unreadable / corrupted JSON -> treat as empty, self-heals on next write
@@ -151,8 +151,8 @@ export async function getPersistedDecode(code: string): Promise<PersistedDecode 
     const store = readFileStore();
     const entry = store[key];
     return isValidEntry(entry) ? entry : null;
-  } catch (e) {
-    console.warn("[decode-cache-store] getPersistedDecode failed:", (e as Error).message);
+  } catch {
+    console.warn("[decode-cache-store] Turso read failed.");
     return null;
   }
 }
@@ -178,8 +178,8 @@ export async function persistDecode(entry: PersistedDecode): Promise<void> {
     const store = readFileStore();
     store[key] = normalized;
     writeFileStore(store);
-  } catch (e) {
-    console.warn("[decode-cache-store] persistDecode failed:", (e as Error).message);
+  } catch {
+    console.warn("[decode-cache-store] Turso write failed.");
     // best-effort; never throw - a broken persistent cache must never break a live decode
   }
 }
@@ -209,8 +209,8 @@ export async function deletePersistedDecode(code: string): Promise<void> {
       delete store[key];
       writeFileStore(store);
     }
-  } catch (e) {
-    console.warn("[decode-cache-store] deletePersistedDecode failed:", (e as Error).message);
+  } catch {
+    console.warn("[decode-cache-store] Turso delete failed.");
     // best-effort; never throw - a failed purge must never break the dispute call that triggered it
   }
 }

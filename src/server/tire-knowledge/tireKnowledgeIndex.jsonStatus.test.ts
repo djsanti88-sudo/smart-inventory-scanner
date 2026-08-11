@@ -49,7 +49,9 @@ describe("tireJsonIndexStatus", () => {
 
     beforeEach(() => {
       readFileSyncSpy.mockReset().mockImplementation(() => {
-        throw new Error("ENOENT: no such file or directory, open 'tireKnowledge.generated.json'");
+        throw new Error(
+          "ENOENT: libsql://private-db.turso.io authToken=TOP_SECRET open 'C:\\private\\tireKnowledge.generated.json'",
+        );
       });
     });
 
@@ -58,7 +60,8 @@ describe("tireJsonIndexStatus", () => {
       vi.resetModules();
     });
 
-    it("reports failed with the bound message available for server-side logging, without throwing", async () => {
+    it("reports failure with only a bounded status marker and never logs raw exception text", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       vi.doMock("node:fs", async (importOriginal) => {
         const actual = await importOriginal<typeof import("node:fs")>();
         return { ...actual, readFileSync: readFileSyncSpy };
@@ -73,7 +76,12 @@ describe("tireJsonIndexStatus", () => {
       const s = mod.tireJsonIndexStatus();
       expect(s.state).toBe("failed");
       expect(s.barcodeRows).toBe(0);
-      expect(s.message).toContain("ENOENT");
+      expect(s.message).toBe("load_failed");
+      const output = warn.mock.calls.flat().join(" ");
+      expect(output).not.toContain("private-db.turso.io");
+      expect(output).not.toContain("TOP_SECRET");
+      expect(output).not.toContain("C:\\private");
+      expect(output).not.toContain("ENOENT");
     });
 
     it("never lets the raw exception text reach the public /api/health body", async () => {

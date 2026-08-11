@@ -198,7 +198,7 @@ describe("L2 total ladder deadline (owner-reported 36-70s blocking decodes, AM-1
   });
 
   it("a rung that settles BEFORE the deadline still stops the ladder normally, even with opts passed", async () => {
-    let t = 0;
+    const t = 0;
     const now = () => t;
     const a = rung("a", miss("a miss"));
     const b = rung("b", settled("b hit"));
@@ -231,7 +231,7 @@ describe("wave-3: per-rung budgetMs override (2026-07-20 owner-ratified)", () =>
   afterEach(() => vi.useRealTimers());
 
   it("a rung's own budgetMs overrides opts.perRungTimeoutMs when it is LARGER", async () => {
-    let t = 0;
+    const t = 0;
     const now = () => t;
     const hang: LadderRung = {
       name: "fetchv2",
@@ -257,7 +257,7 @@ describe("wave-3: per-rung budgetMs override (2026-07-20 owner-ratified)", () =>
   });
 
   it("a rung's budgetMs is used INSTEAD of opts.perRungTimeoutMs when no deadlineAt is set (shorter budgetMs still aborts sooner)", async () => {
-    let t = 0;
+    const t = 0;
     const now = () => t;
     const hang: LadderRung = {
       name: "goupc",
@@ -274,7 +274,7 @@ describe("wave-3: per-rung budgetMs override (2026-07-20 owner-ratified)", () =>
   });
 
   it("deadlineAt still caps budgetMs as an outer ceiling (a rung's budgetMs cannot outlive the total deadline)", async () => {
-    let t = 0;
+    const t = 0;
     const now = () => t;
     const hang: LadderRung = {
       name: "gpt",
@@ -292,7 +292,7 @@ describe("wave-3: per-rung budgetMs override (2026-07-20 owner-ratified)", () =>
   });
 
   it("a rung with NO budgetMs behaves byte-identically to before (falls back to opts.perRungTimeoutMs)", async () => {
-    let t = 0;
+    const t = 0;
     const now = () => t;
     const hang: LadderRung = {
       name: "upcitemdb",

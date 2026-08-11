@@ -50,8 +50,12 @@ const DECODE: Record<string, object> = {
 
 async function scan(page: Page, code: string) {
   const input = page.getByTestId("scanner-input");
-  await input.pressSequentially(code, { delay: 2 });
-  await input.press("Enter");
+  await input.click();
+  // A hardware wedge delivers the barcode atomically, then Enter. Delayed per-character typing can
+  // cross the input's no-Enter debounce while the machine is busy and split one physical barcode into
+  // two scans (observed under qa:revision as "0366251" + "12231").
+  await page.keyboard.insertText(code);
+  await page.keyboard.press("Enter");
 }
 
 test("decoded tire fills Size / Brand / Part number with a clean description", async ({ page }) => {

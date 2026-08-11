@@ -32,6 +32,7 @@ test("scan two codes, view them in History, open the session detail page", async
 
   await scan(page, "6419440485331");
   await scan(page, "848983012906");
+  await expect(page.getByText("2 scans", { exact: true })).toBeVisible({ timeout: 15_000 });
 
   // Navigate via the nav link (not a direct goto) to prove the nav wiring.
   await page.getByRole("link", { name: "History" }).click();
