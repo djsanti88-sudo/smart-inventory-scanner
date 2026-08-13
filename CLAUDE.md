@@ -237,3 +237,23 @@ systematic-debugging, brainstorming), subagents and workflows, browser or Playwr
 proof, MCP tools, memory, offline replays - whatever best fits the task. Never default
 to minimal bare-hands work. Local operations need no permission; the risky gates stay:
 deploy, git push, paid/live API calls, real data, publishing.
+
+# Code-Writing Rule (owner order, 2026-08-12) - feature-dev in, code-simplifier out
+
+Whenever code is about to be written or changed in this project:
+
+1. **Start with the feature-dev plugin.** Use `feature-dev:feature-dev` (and its
+   `code-explorer` / `code-architect` agents) to trace the real code surface and design the
+   change against existing patterns BEFORE writing implementation code. No guessing from
+   memory, no inventing a new pattern when one already exists here.
+2. **Finish with the code-simplifier plugin.** After the code works and its tests pass, run
+   `code-simplifier:code-simplifier` (or the `code-simplifier` agent) over the changed code
+   only. It must preserve behavior exactly - simplify for clarity, never alter results.
+3. **Simplest thing that fully works.** No speculative abstraction, no config flags nobody
+   asked for, no new dependency or layer when an existing service/pattern covers it. Smallest
+   safe complete change, matching surrounding style.
+4. **Order of operations stays:** brainstorm/plan (non-trivial) -> feature-dev design -> TDD
+   failing test -> implement -> gates (`npm run proof:local`, `test:ledger` for counting work)
+   -> code-simplifier pass -> re-run gates to prove the simplification broke nothing.
+5. **Size gate:** a one-line typo/copy fix does not need the full loop. Anything touching
+   logic, state, the ledger, decode, or UI behavior does.

@@ -49,9 +49,19 @@ const EXPECTED_BASE_SOURCE_ROW_COUNT = 76208;
 
 // True counts in the actual shipped payload (verified directly against
 // tireKnowledge.generated.json before writing this test).
-const EXPECTED_BARCODE_COUNT = 78437;
-const EXPECTED_PART_NUMBER_COUNT = 27364;
-const EXPECTED_IDENTITY_COUNT = 72321;
+//
+// These are an INDEPENDENT oracle on purpose -- do NOT rewrite them to be derived
+// from the payload at runtime. Deriving them would make the test compute its
+// expectation the same way refreshTireMeta computes its answer, and it would pass
+// vacuously. The intended cost is that a corpus change makes this test fail until a
+// human consciously re-verifies and updates the numbers, which is the point.
+//
+// Updated 2026-08-12 for the 2026-08-10 corpus enrichment (commit 10332fa2,
+// +671 barcodes / +653 part numbers / +635 identities, zero removals). Counts below
+// re-verified directly against src/server/tire-knowledge/tireKnowledge.generated.json.
+const EXPECTED_BARCODE_COUNT = 79108;
+const EXPECTED_PART_NUMBER_COUNT = 28017;
+const EXPECTED_IDENTITY_COUNT = 72956;
 
 function sha256OfFile(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");

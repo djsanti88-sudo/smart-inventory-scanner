@@ -33,6 +33,19 @@ Violating this rule invalidates the entire chunk's work, which will be discarded
 
 1. **Proven dead code** — no references anywhere in `src/`, `scripts/`, or tests.
    Must cite the search that proved it. Distinguish sharply from *suspected* dead.
+
+   **SELF-SKIPPING TEST TRAP (added 2026-08-12 after the pilot produced a false
+   positive on exactly this).** 11 `*.rules.test.ts` files use
+   `describe.skipIf(!ready)` gated on `FIRESTORE_EMULATOR_HOST`. Under
+   `npm run test` / `proof:local` there is no emulator, so they SKIP — they are
+   most of the "105 skipped" in a green baseline. A symbol used only by those
+   files looks dead to a naive search AND deleting it leaves the default suite
+   green while breaking `npm run test:firebase`.
+
+   Therefore: a dead-code claim is INVALID unless its cited search explicitly
+   covers `*.rules.test.ts` and every other conditionally-skipped suite, and the
+   finding states which suites actually executed. "The tests passed" is not
+   evidence when the relevant tests never ran.
 2. **Duplicated logic** — the same decision implemented in two or more places.
 3. **Single-caller abstractions** — a wrapper, helper, or interface with exactly one
    consumer that adds no decision of its own.
@@ -101,6 +114,12 @@ the focused tests for files it touched. A red result is fixed or reverted by tha
 executor; it never reports done on red. This catches a break at the agent that caused
 it instead of at merge time, when attributing a failure across parallel agents is
 expensive.
+
+**`proof:local` green is NOT sufficient on its own.** It runs no emulator, so 11
+`*.rules.test.ts` suites skip. Any executor deleting or altering code under
+`src/services/db/`, `src/server/business/`, or `src/server/share/` MUST additionally
+run `npm run test:firebase` before reporting done, and must state in its report which
+suites ran versus skipped.
 
 That is the self-check. The real gate is still run by the orchestrator on the merged
 chunk:
@@ -171,7 +190,18 @@ the corpus JSON is routinely updated by patch/apply scripts. Six commits now
 without the meta, so the meta's `payload_barcode_count` (78,437) understates the
 real index (79,108) and its `payload_sha256` matches nothing on disk.
 
-This is currently harmless -- no test reads those counts as truth -- but it means
-the metadata cannot be trusted for provenance, which is exactly what it exists
-for. Fix is a decision, not just code: either a small meta-refresher the patch
-scripts call, or drop the payload-count fields that go stale.
+CORRECTION (2026-08-12): the first draft of this note claimed "no test reads those
+counts as truth." That was WRONG. `scripts/refresh-tire-meta.test.mjs` asserts them
+against an independent hardcoded oracle and failed the moment the meta was
+refreshed. It did its job.
+
+The reason the false claim survived: that test is in `vitest.config.ts`'s exclude
+list and runs only under `node --test` via `npm run test:refresh-tire-meta`, so
+`proof:local` reported 4128 passing while it was red. This is the SAME blind-spot
+class as the `*.rules.test.ts` trap in section 3 -- it bit twice in one session.
+
+RESOLVED: `scripts/refresh-tire-meta.mjs` already existed as the correct fix and was
+simply never runnable -- it had a `test:` npm entry but no `run` entry, so nobody
+ran it. Added `npm run refresh:tire-meta`, ran it (meta now reports the true 79,108
+/ 28,017 / 72,956), and updated the test's oracle constants with a comment
+explaining why they must stay hardcoded rather than derived.
