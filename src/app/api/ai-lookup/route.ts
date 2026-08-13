@@ -28,6 +28,7 @@ import { resolveTrustedExactBarcodeDecision } from "@/server/tire-knowledge/Tire
 import { getTireExactIndexFingerprint, hasBossHmacKeyConfigured } from "@/server/tire-knowledge/tireExactIndex";
 import { trustedExactRateLimiter } from "@/services/security/trustedExactRateLimit";
 import { isPlatformOwnerServer } from "@/services/security/roleAccess";
+import { isDecodeChargeMode } from "./decodeMode";
 
 // FAST-FIRST: cheap/fast models do the first pass (+ page-fetch). The slow PRO models are only used
 // to escalate when the fast pass found no product. All overridable via env. (Reported by GET only;
@@ -452,7 +453,7 @@ export async function POST(request: Request) {
     brandPrefixHint: body.brandPrefixHint,
   };
 
-  const isDecodeMode = body.mode === "decode" || body.mode === "decode-deep";
+  const isDecodeMode = isDecodeChargeMode(body.mode);
   const forceRetry = body.forceRetry === true;
 
   // BOSS FOR EVERYONE (owner order 2026-08-07, Option A full): the boss/supplier corpus is main-database

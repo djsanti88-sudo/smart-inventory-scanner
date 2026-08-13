@@ -813,7 +813,8 @@ export interface ScanState {
   breaker: BreakerState;
   aiStatus: AiStatus;
 
-  // shared barcode knowledge (local, offline-first abstraction; cloud later via CatalogProvider)
+  // shared barcode knowledge (local, offline-first abstraction; a cloud-backed store could replace
+  // this later without callers changing, since access always goes through localCatalogProvider.ts)
   catalog: CatalogEntry[]; // GLOBAL verified catalog (sanitized, non-private)
   shopOverrides: ShopOverride[]; // PRIVATE, businessId-scoped; never merged into catalog
   feedbackEvents: FeedbackEvent[]; // PRIVATE local event log (capped ring buffer)
