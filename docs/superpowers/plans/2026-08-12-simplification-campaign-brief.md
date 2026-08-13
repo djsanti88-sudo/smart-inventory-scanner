@@ -95,8 +95,15 @@ Speculative findings are reported, never executed.
 
 ## 7. Verification
 
-Executors run the focused tests for the files they touched. That is a self-check, not
-the gate. The real gate is run by the orchestrator on the merged chunk:
+**Owner ruling 2026-08-12: certainty over speed.** Every executor runs the FULL
+`npm run proof:local` (typecheck + 4124 tests, ~60s) before reporting done, not just
+the focused tests for files it touched. A red result is fixed or reverted by that
+executor; it never reports done on red. This catches a break at the agent that caused
+it instead of at merge time, when attributing a failure across parallel agents is
+expensive.
+
+That is the self-check. The real gate is still run by the orchestrator on the merged
+chunk:
 
 | chunk | gate battery |
 |---|---|
@@ -128,3 +135,43 @@ lists, because subagents cannot reliably spawn subagents.
 3. **A alone, last** — `scanStore.ts` is 8,789 lines and owns the counting law.
    Sub-chunked by section (intake / ledger / review queue / sync-drain / persistence),
    never reviewed as one blob.
+
+---
+
+## Appendix — findings from the pre-campaign tree triage (2026-08-12)
+
+Two defects surfaced while cleaning the tree. Neither is fixed yet; both are
+seeded into the campaign backlog.
+
+### F1 (HIGH) — `build-tire-knowledge.mjs` has no output-sanity guard
+
+`scripts/build-tire-knowledge.mjs` documents itself as failing CLOSED, and it does
+guard its INPUTS: active harvester, absent snapshot, CSV parse error, missing
+columns. It does not guard its OUTPUT.
+
+Snapshot precedence ends at a committed bootstrap seed
+(`src/server/tire-knowledge/seed/tire_corpus_seed.csv`) which currently holds a
+header and **2 tire rows**. On any machine without harvester snapshots -- which
+includes this one, and would include CI -- running the generator parses that seed
+successfully, passes every validation, and atomically overwrites a 79,108-barcode
+/ 72 MB index with 2 records. Fail-closed does not fire because nothing is
+technically invalid.
+
+Fix: refuse to write when the new index is materially smaller than the existing
+one (e.g. < 90% of prior `barcode_index_count`) unless an explicit `--force`
+flag is passed, and record the refusal in the status file. Add a regression test
+that points the generator at the seed with a large prior index present and
+asserts it refuses.
+
+### F2 (MEDIUM) — corpus meta drifts on every patch-style commit
+
+`tireKnowledge.generated.meta.json` is only written by a full generator run, but
+the corpus JSON is routinely updated by patch/apply scripts. Six commits now
+(77e21892, a1899b16, 3f9d2066, b145de2b, 865ea2ee, 10332fa2) have moved the JSON
+without the meta, so the meta's `payload_barcode_count` (78,437) understates the
+real index (79,108) and its `payload_sha256` matches nothing on disk.
+
+This is currently harmless -- no test reads those counts as truth -- but it means
+the metadata cannot be trusted for provenance, which is exactly what it exists
+for. Fix is a decision, not just code: either a small meta-refresher the patch
+scripts call, or drop the payload-count fields that go stale.
