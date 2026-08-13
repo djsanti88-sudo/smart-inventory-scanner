@@ -40,7 +40,6 @@ belong," start here before adding a new file.
 | `RELEASE_TARGETS.md` | What "ready to ship" means per release |
 | `GO_LIVE_CHECKLIST.md` | Pre-launch checklist (see REPO_HEALTH.md tech-debt: currently stale) |
 | `BACKLOG.md` | Open backlog items |
-| `CURRENT_CONTEXT.md` | Point-in-time context snapshot |
 | `HOTFIX_FOLLOWUPS.md` | Tracked follow-ups from hotfixes |
 | `SCHEDULED_QA_BOTS.md` | Scheduled/automated QA bot runs |
 | `WEEKLY_INTEL_SETUP.md` | Weekly intel job setup |
