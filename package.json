@@ -25,6 +25,7 @@
     "test:certify:boss-barcodes:ui-local": "node --test e2e/boss-barcode-corpus/fixtures.test.mjs e2e/boss-barcode-corpus/local-sample.test.mjs e2e/boss-barcode-corpus/local-corpus-ui.contract.test.mjs e2e/boss-barcode-corpus/receipt.test.mjs e2e/boss-barcode-corpus/reporter.test.mjs e2e/boss-barcode-corpus/run.test.mjs e2e/boss-barcode-corpus/production-server.test.mjs",
     "test:certify:boss-barcodes": "node --test scripts/certify-boss-barcodes.node-test.mjs e2e/boss-barcode-corpus/fixtures.test.mjs",
     "test:corpus-drift": "vitest run src/server/tire-knowledge/corpusDrift.test.ts",
+    "refresh:tire-meta": "node scripts/refresh-tire-meta.mjs",
     "test:refresh-tire-meta": "node --test scripts/refresh-tire-meta.test.mjs",
     "test:ledger": "vitest run src/stores/ledgerInvariants.store.test.ts src/stores/unknownEnqueue.store.test.ts src/stores/mergeUnion.store.test.ts src/stores/markWrongTransfer.store.test.ts src/stores/provenanceTier.store.test.ts src/stores/goldenClasses.store.test.ts src/services/inventory.replay.test.ts src/server/upc/ladderTimeout.test.ts",
     "test:e2e": "playwright test",
