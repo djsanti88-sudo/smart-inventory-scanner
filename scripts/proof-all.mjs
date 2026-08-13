@@ -82,7 +82,15 @@ run("vitest (unit + dom)", "npx", ["vitest", "run"]);
 
 const missing = NODE_TEST_SUITES.filter((f) => !existsSync(f));
 const present = NODE_TEST_SUITES.filter((f) => existsSync(f));
-if (present.length) run(`node:test (${present.length} vitest-excluded suites)`, process.execPath, ["--test", ...present]);
+// --test-concurrency=1 is deliberate. `node --test` runs files in PARALLEL by default,
+// and the tire-db-repair suites are heavy SQLite tests (~3 min each standalone). One of
+// them failed inside a parallel proof:all run on 2026-08-12 and then passed 61/61 three
+// times standalone -- the same "flaky under full parallel load only, fine isolated"
+// pattern already recorded for cloudDrainRace.store.test.ts. Root cause is NOT confirmed
+// (each suite makes its own mkdtemp scratch dir, so it is contention, not collision).
+// Running them serially removes the variable. A gate that intermittently lies is worse
+// than a slow one: people learn to re-run red instead of reading it.
+if (present.length) run(`node:test (${present.length} vitest-excluded suites, serial)`, process.execPath, ["--test", "--test-concurrency=1", ...present]);
 run("teach bot suite", process.execPath, ["--test", "e2e/teach/**/*.test.mjs"]);
 
 // ---- report ----
