@@ -7,7 +7,7 @@
 // Output: src/server/retail-knowledge/retailKnowledge.generated.json (~compact, barcode-keyed)
 //         src/server/retail-knowledge/retailKnowledge.generated.meta.json (stats)
 
-import { createReadStream, writeFileSync, mkdirSync, renameSync } from "node:fs";
+import { createReadStream, writeFileSync, mkdirSync, renameSync, readFileSync, existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 
@@ -16,8 +16,30 @@ const INPUT = join(ROOT, "data", "retail-knowledge", "retail_off.jsonl");
 const OUT_DIR = join(ROOT, "src", "server", "retail-knowledge");
 const OUT_JSON = join(OUT_DIR, "retailKnowledge.generated.json");
 const OUT_META = join(OUT_DIR, "retailKnowledge.generated.meta.json");
+// Output-sanity guard (DT-1, 2026-08-13, ported from build-tire-knowledge.mjs's F1 fix,
+// 2026-08-12): refuse a rebuild that retains less than this fraction of the existing
+// index's barcodes. --force overrides, for a deliberate corpus replacement.
+const MIN_RETAINED_FRACTION = 0.9;
+const FORCE = process.argv.includes("--force");
 
 mkdirSync(OUT_DIR, { recursive: true });
+
+/**
+ * Barcode count of the index already on disk, or null when there is none (bootstrap).
+ * Prefers the tiny meta file over parsing the ~259MB index.
+ */
+function priorBarcodeCount() {
+  try {
+    if (existsSync(OUT_META)) {
+      const n = JSON.parse(readFileSync(OUT_META, "utf8")).unique_barcodes;
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  } catch { /* fall through to the index itself */ }
+  try {
+    if (existsSync(OUT_JSON)) return Object.keys(JSON.parse(readFileSync(OUT_JSON, "utf8")).index ?? {}).length;
+  } catch { /* unreadable prior index: treat as absent */ }
+  return null;
+}
 
 // QA HARDENING FIX #5 (2026-07-16, live-proven): the crowdsourced Open Food Facts dump also contains
 // literal GS1 TEXTBOOK EXAMPLE barcodes and demo/test/placeholder rows (contributors testing the
@@ -93,6 +115,21 @@ for await (const line of rl) {
 }
 
 console.log(`\n[build-retail-knowledge] Parsed ${total} rows, ${valid} unique barcodes, ${dupes} dupes merged, ${noCode} no-code, ${noName} no-name, ${skippedExampleOrTest} skipped-example-or-test`);
+
+// OUTPUT-SANITY GUARD (DT-1, 2026-08-13). Everything above validates the INPUT (row
+// shape, example/test blocklist); nothing validated the result. A truncated, partial, or
+// stale retail_off.jsonl (interrupted download, wrong snapshot, disk issue) would parse
+// cleanly, pass every per-row check, and atomically overwrite the real ~4M-barcode index
+// with a near-empty one while reporting success. Refuse to shrink.
+const prior = priorBarcodeCount();
+if (prior !== null && valid < prior * MIN_RETAINED_FRACTION && !FORCE) {
+  console.error(
+    `[build-retail-knowledge] FAIL-CLOSED: refusing to shrink the retail index: existing=${prior} barcodes, ` +
+    `rebuild=${valid} (below ${Math.round(MIN_RETAINED_FRACTION * 100)}% of existing). This usually means ` +
+    `${INPUT} is truncated, partial, or from a stale snapshot. Pass --force only if you intend to replace the corpus.`,
+  );
+  process.exit(1);
+}
 
 // Write atomically
 const generated_at = new Date().toISOString();
