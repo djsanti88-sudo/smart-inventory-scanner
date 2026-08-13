@@ -185,7 +185,8 @@ async function main() {
   const cf = mergeCost({ provider: "decode (Gemini/OpenAI)", detail: ran + " codes, " + calls + " provider calls (estimated)", calls, usd: Math.round(spent * 100) / 100 });
   console.log("\nScored:", result.correct, "correct,", result.wrong, "wrong,", result.needsReview, "needs-review,", result.unscored, "unscored of", ran);
   console.log("  general:", result.byGroup.general.correct + "/" + result.byGroup.general.total, "correct | tire:", result.byGroup.tire.correct + "/" + result.byGroup.tire.total, "correct");
-  console.log("Estimated third-party spend: $" + spent.toFixed(2), "(cap $" + CAP.toFixed(2) + ")");
+  console.log("Estimated third-party spend (FLOOR, from response metadata): $" + spent.toFixed(2), "(cap $" + CAP.toFixed(2) + ")");
+  console.log("This is a computed estimate, not the true billed amount - reconcile against each provider's billing console before quoting a final number (Paid API Cost Truth Rule).");
   console.log("wrote", path.join(OUT, "accuracy.json"), "and merged", cf);
   if (provisional) console.log("WARNING: ground-truth not owner-confirmed -> score is PROVISIONAL and not trustworthy.");
 }

@@ -8,6 +8,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createClient } from "@libsql/client";
+import { evaluateShrinkGuard } from "./retailImportGuard.mjs";
 
 const URL = process.env.TURSO_DATABASE_URL || "libsql://inventory-retail-djsanti88-sudo.aws-us-east-1.turso.io";
 const TOKEN = process.env.TURSO_AUTH_TOKEN;
@@ -15,6 +16,13 @@ if (!TOKEN) { console.error("Set TURSO_AUTH_TOKEN"); process.exit(1); }
 
 const BATCH_SIZE = 200; // Turso batch limit per request
 const JSON_PATH = join(process.cwd(), "src", "server", "retail-knowledge", "retailKnowledge.generated.json");
+// Pre-drop sanity guard (mirrors scripts/build-tire-knowledge.mjs's MIN_RETAINED_FRACTION output-sanity
+// guard, F1 2026-08-12; logic in scripts/retailImportGuard.mjs). --force here DROPs the LIVE Turso retail
+// table (~4.13M rows in production) and reimports from the local JSON. A stale or truncated local file
+// would otherwise silently destroy the production corpus while reporting success. Refuse to drop when
+// the local source would replace the live table with materially fewer rows, unless --force-shrink is
+// ALSO passed for a deliberate replacement.
+const FORCE_SHRINK = process.argv.includes("--force-shrink");
 
 console.log("[turso-import] Reading retail JSON...");
 const t0 = performance.now();
@@ -35,6 +43,19 @@ console.log(`[turso-import] Existing rows in Turso: ${existingCount}`);
 if (existingCount > 3_000_000) {
   console.log("[turso-import] Already imported (>3M rows). Skipping. Use --force to reimport.");
   if (!process.argv.includes("--force")) { client.close(); process.exit(0); }
+
+  // OUTPUT-SANITY GUARD (mirrors build-tire-knowledge.mjs's F1 guard). Compare the local source's row
+  // count against the LIVE table's current count BEFORE dropping anything. A shrink this large usually
+  // means the local retailKnowledge.generated.json is stale, partial, or was produced by a
+  // build-retail-knowledge.mjs run against a truncated input file - refuse to destroy the live corpus
+  // on that basis alone.
+  const guard = evaluateShrinkGuard(entries.length, existingCount, FORCE_SHRINK);
+  if (guard.refuse) {
+    console.error(`[turso-import] REFUSING to drop: ${guard.reason}`);
+    client.close();
+    process.exit(1);
+  }
+
   console.log("[turso-import] --force: dropping and recreating table...");
   await client.execute("DROP TABLE retail");
   await client.execute("CREATE TABLE retail (barcode TEXT PRIMARY KEY, product_name TEXT NOT NULL, brand TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '')");
