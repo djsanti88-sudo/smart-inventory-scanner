@@ -34,8 +34,7 @@ Violating this rule invalidates the entire chunk's work, which will be discarded
 1. **Proven dead code** — no references anywhere in `src/`, `scripts/`, or tests.
    Must cite the search that proved it. Distinguish sharply from *suspected* dead.
 
-   **SELF-SKIPPING TEST TRAP (added 2026-08-12 after the pilot produced a false
-   positive on exactly this).** 11 `*.rules.test.ts` files use
+   **SELF-SKIPPING TEST TRAP (added 2026-08-12).** 11 `*.rules.test.ts` files use
    `describe.skipIf(!ready)` gated on `FIRESTORE_EMULATOR_HOST`. Under
    `npm run test` / `proof:local` there is no emulator, so they SKIP — they are
    most of the "105 skipped" in a green baseline. A symbol used only by those
@@ -46,6 +45,14 @@ Violating this rule invalidates the entire chunk's work, which will be discarded
    covers `*.rules.test.ts` and every other conditionally-skipped suite, and the
    finding states which suites actually executed. "The tests passed" is not
    evidence when the relevant tests never ran.
+
+   ORCHESTRATOR RULE, learned the hard way the same day: judge a finding by its
+   REPORT ROW, never by an agent's prose summary. The Chunk D lead handled this trap
+   correctly in its table -- naming the 9 dead factories, excluding the 2 the rules
+   test uses, and listing `test:firebase` as the blast radius -- while its summary
+   compressed that into "9 functions with zero callers anywhere in src/", which reads
+   as if it covered all 13. The orchestrator accused it of an error it had not made.
+   Summaries lose the qualifiers that make a finding safe. Open the row.
 2. **Duplicated logic** — the same decision implemented in two or more places.
 3. **Single-caller abstractions** — a wrapper, helper, or interface with exactly one
    consumer that adds no decision of its own.
