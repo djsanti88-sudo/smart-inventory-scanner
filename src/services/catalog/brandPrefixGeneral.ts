@@ -18,6 +18,16 @@ export function normalizeBrand(b: string | undefined): string {
     .trim();
 }
 
+/** Lowercase, strip non-alphanumeric, split on whitespace, and keep tokens of length >= 3. Shared by
+ *  the prefix firewall's category-token matching and the reverse UPC-set guard's name-overlap check. */
+export function tokenize(s: string | undefined): string[] {
+  return (s || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(" ")
+    .filter((t) => t.length >= 3);
+}
+
 /**
  * True ONLY when the scanned code's prefix is a KNOWN single-brand prefix AND the decoded brand is
  * clearly NOT that brand (wrong brand for this barcode). Unknown prefixes and empty brands never

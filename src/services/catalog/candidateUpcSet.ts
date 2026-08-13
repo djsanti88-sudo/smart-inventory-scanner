@@ -1,4 +1,4 @@
-import { normalizeBrand } from "@/services/catalog/brandPrefixGeneral";
+import { normalizeBrand, tokenize } from "@/services/catalog/brandPrefixGeneral";
 
 // Reverse known-UPC guard: build an AI-proposed product's known UPC SET from OUR OWN catalog/corpus
 // (no live lookup, deterministic, fast). UPC SETS - never a single UPC - because one product family
@@ -28,14 +28,6 @@ export interface CandidateProduct {
   primarySku?: string;
 }
 
-function tokens(s: string | undefined): string[] {
-  return (s || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .split(" ")
-    .filter((t) => t.length >= 3);
-}
-
 function normSku(s: string | undefined): string {
   return (s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
@@ -55,9 +47,9 @@ function brandMatch(candidate: CandidateProduct, record: UpcRecord): boolean {
 }
 
 function nameOverlap(candidate: CandidateProduct, record: UpcRecord): boolean {
-  const a = new Set(tokens(candidate.name));
+  const a = new Set(tokenize(candidate.name));
   if (a.size === 0) return false;
-  return tokens(record.name).some((t) => a.has(t));
+  return tokenize(record.name).some((t) => a.has(t));
 }
 
 function modelMatch(candidate: CandidateProduct, record: UpcRecord): boolean {

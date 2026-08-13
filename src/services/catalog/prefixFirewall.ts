@@ -1,4 +1,4 @@
-import { normalizeBrand } from "@/services/catalog/brandPrefixGeneral";
+import { normalizeBrand, tokenize } from "@/services/catalog/brandPrefixGeneral";
 import { gtin13, type PrefixEntry } from "@/services/catalog/prefixIndex";
 
 // EVIDENCE-WEIGHTED anti-hallucination firewall. A prefix-owner mismatch is a STRONG CONFLICT SIGNAL,
@@ -30,23 +30,15 @@ export interface FirewallVerdict {
   reason: string; // platformOwner-only diagnostic; never customer-facing
 }
 
-function catTokens(s: string | undefined): string[] {
-  return (s || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .split(" ")
-    .filter((t) => t.length >= 3);
-}
-
 /** true / false / null(unknown) - does the candidate's category overlap the prefix's category mix? */
 function categoryCompatible(category: string | undefined, prefix: PrefixEntry | null): boolean | null {
   if (!prefix) return null;
-  const tokens = catTokens(category);
-  if (tokens.length === 0) return null; // unknown candidate category
+  const catTokens = tokenize(category);
+  if (catTokens.length === 0) return null; // unknown candidate category
   const prefCats = new Set<string>();
-  for (const k of Object.keys(prefix.categoryDist)) for (const t of catTokens(k)) prefCats.add(t);
-  for (const c of prefix.candidates) for (const cc of c.categories ?? []) for (const t of catTokens(cc)) prefCats.add(t);
-  return tokens.some((t) => prefCats.has(t));
+  for (const k of Object.keys(prefix.categoryDist)) for (const t of tokenize(k)) prefCats.add(t);
+  for (const c of prefix.candidates) for (const cc of c.categories ?? []) for (const t of tokenize(cc)) prefCats.add(t);
+  return catTokens.some((t) => prefCats.has(t));
 }
 
 /** Does the candidate's manufacturer/brand match ANY of the prefix's candidate owners (token-tolerant)? */
