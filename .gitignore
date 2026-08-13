@@ -201,3 +201,14 @@ data/tire-knowledge/scripts/tests/task-*-report.md
 data/tire-knowledge/run-log.md
 data/tire-knowledge/exports/**/MANIFEST.md
 .pytest_cache/
+
+# Tree triage (2026-08-12): local scratch that should never be tracked.
+# `db` / `db-wal` are zero-byte SQLite artifacts a script created in the repo root
+# on 2026-08-10 (bad path arg); the real corpus DB is src/server/knowledge.generated.db.
+db
+db-wal
+# One-off barcode fixtures from the CANELO stress campaigns (referenced only by plan docs).
+test-2000-barcodes.txt
+tire-barcodes-1000.txt
+# Local review-tool state.
+.claude/.deep-review-radar.json
