@@ -1,0 +1,15 @@
+{
+  "generatedAt": "2026-08-03T10:51:28.167Z",
+  "dbPath": "C:\\Users\\djsan\\inventory\\src\\server\\knowledge.generated.db",
+  "gzipPath": "C:\\Users\\djsan\\inventory\\src\\server\\knowledge.generated.db.gz",
+  "dbSha256": "e0b950a0e54d2465e996d159d660a045182af001a6d8ca5460793a406e1844ff",
+  "gzipSha256": "79bacff9f0b9794eeb7b30d5b5b5a8a0b96219155250caad4778a0c32d4d3a80",
+  "decompressedGzipDbSha256": "e0b950a0e54d2465e996d159d660a045182af001a6d8ca5460793a406e1844ff",
+  "retailCount": 4046693,
+  "integrityCheck": "ok",
+  "gzipRetailCount": 4046693,
+  "gzipIntegrityCheck": "ok",
+  "stagedIntegrityCheck": "ok",
+  "stagedGzipIntegrityCheck": "ok",
+  "tireInputSha256": "cf61d12208e6e1aa0dcb5bbd2aaa98e775ed7a60110601628bb3ede9dbfe13d6"
+}
