@@ -14,7 +14,17 @@ export default defineConfig({
   // MANUAL_LIVE_TEST.md). Excluded here so `npx playwright test` never depends on network/live-AI state.
   // **/seed.spec.ts is the Playwright test-agents scaffold (created by `playwright init-agents`);
   // it lives in ./e2e for the agents but must never run in this mock proof suite.
-  testIgnore: ["**/firebase-phase2/**", "**/human-bots/**", "**/household-decode-test.spec.ts", "**/seed.spec.ts"],
+  // **/boss-barcode-preview/** certifies a LIVE Vercel Preview deployment: its config.mjs REQUIRES
+  // BOSS_PREVIEW_URL + BOSS_PREVIEW_DEPLOYMENT_URL + BOSS_PREVIEW_DEPLOYMENT_METADATA_JSON and throws
+  // at collection time without them, so every one of its 21 tests FAILED in this mock run. It has its
+  // own config (playwright.boss-preview.config.mts) and belongs only there.
+  testIgnore: [
+    "**/firebase-phase2/**",
+    "**/human-bots/**",
+    "**/boss-barcode-preview/**",
+    "**/household-decode-test.spec.ts",
+    "**/seed.spec.ts",
+  ],
   fullyParallel: false,
   workers: 1,
   reporter: [["list"], ["html", { open: "never" }]],
