@@ -261,8 +261,7 @@ function parseStoredPayload(entry: StoredEntry): SharePayload | null {
   }
 }
 
-export async function mintShareToken(payload: SharePayload, ttlMs: number): Promise<string> {
-  void ttlMs;
+export async function mintShareToken(payload: SharePayload): Promise<string> {
   const token = randomUUID();
   const storedPayload: SharePayload = {
     businessId: payload.businessId,

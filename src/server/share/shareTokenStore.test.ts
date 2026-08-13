@@ -48,7 +48,7 @@ describe("shareTokenStore fallback path", () => {
       expiresAt: now + 60_000,
     };
 
-    const token = await mintShareToken(payload, 60_000);
+    const token = await mintShareToken(payload);
     const resolved = await resolveShareToken(token);
 
     expect(token).toMatch(
@@ -73,7 +73,7 @@ describe("shareTokenStore fallback path", () => {
       expiresAt: Date.now() - 60_000,
     };
 
-    const token = await mintShareToken(payload, -60_000);
+    const token = await mintShareToken(payload);
 
     await expect(resolveShareToken(token)).resolves.toBeNull();
     expect(createClient).not.toHaveBeenCalled();
@@ -104,7 +104,7 @@ describe("shareTokenStore durable-write requirement in production", () => {
       expiresAt: now + 60_000,
     };
 
-    await expect(mintShareToken(payload, 60_000)).rejects.toThrow();
+    await expect(mintShareToken(payload)).rejects.toThrow();
     expect(__getShareTokenStoreBackendForTests()).not.toBe("file");
     expect(__getShareTokenStoreBackendForTests()).not.toBe("memory");
   });
@@ -120,7 +120,7 @@ describe("shareTokenStore durable-write requirement in production", () => {
       expiresAt: now + 60_000,
     };
 
-    const token = await mintShareToken(payload, 60_000);
+    const token = await mintShareToken(payload);
 
     expect(token).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
@@ -166,7 +166,7 @@ describe("shareTokenStore client resilience after a write failure (M1)", () => {
       expiresAt: now + 60_000,
     };
 
-    await mintShareToken(payload, 60_000);
+    await mintShareToken(payload);
     expect(createClient).toHaveBeenCalledTimes(1);
     // Falls back to file/memory since NODE_ENV is not production - proves the call still succeeded.
     expect(__getShareTokenStoreBackendForTests()).toBe("memory");
@@ -178,7 +178,7 @@ describe("shareTokenStore client resilience after a write failure (M1)", () => {
     execute.mockImplementationOnce(async () => ({ rows: [] })); // INSERT
     createClient.mockReturnValueOnce({ execute });
 
-    await mintShareToken(payload, 60_000);
+    await mintShareToken(payload);
     expect(createClient).toHaveBeenCalledTimes(2);
     expect(__getShareTokenStoreBackendForTests()).toBe("turso");
   });
