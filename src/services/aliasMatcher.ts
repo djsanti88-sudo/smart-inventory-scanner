@@ -100,6 +100,21 @@ export function matchAlias(
   return pickTier(norm, "normalized_alias");
 }
 
+/**
+ * The identifier tiers, in priority order, shared by matchProductByIdentifiers and
+ * collectAllIdentifierHits. These were duplicated verbatim in both functions; the two MUST agree,
+ * because a tier present in one and missing from the other makes the two disagree about which
+ * product a code belongs to, and wrong identity is a product failure (see Resolver Trust Rules).
+ * One definition makes that class of drift impossible.
+ */
+const IDENTIFIER_TIERS: Array<{ type: MatchType; pick: (p: Product) => string | undefined }> = [
+  { type: "primary_barcode", pick: (p) => p.primaryBarcode },
+  { type: "primary_sku", pick: (p) => p.primarySku },
+  { type: "gtin", pick: (p) => p.gtin },
+  { type: "upc", pick: (p) => p.upc },
+  { type: "ean", pick: (p) => p.ean },
+];
+
 /** Tier 3-5: match against a product's own identifier fields, labeled by which field hit. */
 export function matchProductByIdentifiers(
   cleaned: CleanedCode,
@@ -112,15 +127,7 @@ export function matchProductByIdentifiers(
   const candidates = uniq([cleaned.cleanCode, ...cleaned.normalizedCandidates]);
   const hit = (field: string | undefined) => candidatesInclude(candidates, field);
 
-  const tiers: Array<{ type: MatchType; pick: (p: Product) => string | undefined }> = [
-    { type: "primary_barcode", pick: (p) => p.primaryBarcode },
-    { type: "primary_sku", pick: (p) => p.primarySku },
-    { type: "gtin", pick: (p) => p.gtin },
-    { type: "upc", pick: (p) => p.upc },
-    { type: "ean", pick: (p) => p.ean },
-  ];
-
-  for (const tier of tiers) {
+  for (const tier of IDENTIFIER_TIERS) {
     const hits = scoped
       .filter((p) => hit(tier.pick(p)))
       .map((p) => ({ productId: p.id, matchedOn: tier.pick(p) as string }));
@@ -154,16 +161,8 @@ function collectAllIdentifierHits(
   const candidates = uniq([cleaned.cleanCode, ...cleaned.normalizedCandidates]);
   const hit = (field: string | undefined) => candidatesInclude(candidates, field);
 
-  const tiers: Array<{ type: MatchType; pick: (p: Product) => string | undefined }> = [
-    { type: "primary_barcode", pick: (p) => p.primaryBarcode },
-    { type: "primary_sku", pick: (p) => p.primarySku },
-    { type: "gtin", pick: (p) => p.gtin },
-    { type: "upc", pick: (p) => p.upc },
-    { type: "ean", pick: (p) => p.ean },
-  ];
-
   const out: Array<{ productId: string; matchType: MatchType; matchedOn: string }> = [];
-  for (const tier of tiers) {
+  for (const tier of IDENTIFIER_TIERS) {
     for (const p of scoped) {
       const field = tier.pick(p);
       if (hit(field)) out.push({ productId: p.id, matchType: tier.type, matchedOn: field as string });
