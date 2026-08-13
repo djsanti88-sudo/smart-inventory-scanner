@@ -1,0 +1,1099 @@
+{
+  "generated_at": "2026-08-03T08:57:52.616Z",
+  "database": {
+    "path": "src/server/knowledge.generated.db",
+    "bytes": 359112704,
+    "integrity_check": "ok",
+    "schema": [
+      {
+        "type": "index",
+        "name": "idx_retail_barcode",
+        "tbl_name": "retail",
+        "sql": "CREATE INDEX idx_retail_barcode ON retail(barcode)"
+      },
+      {
+        "type": "table",
+        "name": "retail",
+        "tbl_name": "retail",
+        "sql": "CREATE TABLE retail (\n      barcode TEXT NOT NULL,\n      product_name TEXT NOT NULL DEFAULT '',\n      brand TEXT NOT NULL DEFAULT '',\n      category TEXT NOT NULL DEFAULT ''\n    )"
+      }
+    ]
+  },
+  "table": {
+    "rows": 4047273,
+    "distinct_barcodes": 4047273,
+    "missing_barcode": 0,
+    "missing_product_name": 0,
+    "missing_brand": 1263769,
+    "missing_category": 2337160,
+    "rows_with_brand_and_category": 1433348,
+    "rows_missing_brand_and_category": 987004,
+    "category_nonblank_sentinel_rows": 36278
+  },
+  "fields": {
+    "product_name": {
+      "distinct_exact": 2552874,
+      "null_rows": 0,
+      "blank_rows": 0,
+      "outer_whitespace_rows": 0,
+      "repeated_space_rows": 17963,
+      "control_whitespace_rows": 0,
+      "replacement_character_rows": 29,
+      "html_entity_rows": 4902,
+      "sentinel_rows": 55,
+      "min_length": 3,
+      "max_length": 1138,
+      "avg_length": 21.2186069484317
+    },
+    "brand": {
+      "distinct_exact": 478631,
+      "null_rows": 0,
+      "blank_rows": 1263769,
+      "outer_whitespace_rows": 0,
+      "repeated_space_rows": 47031,
+      "control_whitespace_rows": 0,
+      "replacement_character_rows": 1,
+      "html_entity_rows": 843,
+      "sentinel_rows": 1026,
+      "min_length": 0,
+      "max_length": 1561,
+      "avg_length": 7.444242827207357
+    },
+    "category": {
+      "distinct_exact": 70666,
+      "null_rows": 0,
+      "blank_rows": 2337160,
+      "outer_whitespace_rows": 0,
+      "repeated_space_rows": 0,
+      "control_whitespace_rows": 0,
+      "replacement_character_rows": 20,
+      "html_entity_rows": 0,
+      "sentinel_rows": 36278,
+      "min_length": 0,
+      "max_length": 305,
+      "avg_length": 5.839144283076531
+    }
+  },
+  "barcode": {
+    "length_distribution": {
+      "8": 163109,
+      "13": 3881494,
+      "14": 2670
+    },
+    "digit_rows": 4047273,
+    "non_digit_rows": 0,
+    "accepted_gtin_length_rows": 4047273,
+    "checksum_valid_rows": 4047273,
+    "checksum_invalid_rows": 0,
+    "repeated_digit_rows": 0,
+    "leading_zero_rows": 1095556,
+    "example_blocklist_rows": 5
+  },
+  "text_quality": {
+    "name_equals_brand_normalized_rows": 21162,
+    "name_equals_category_normalized_rows": 27795,
+    "numeric_only_product_name_rows": 3776,
+    "short_product_name_rows": 0,
+    "very_long_product_name_rows": 30,
+    "lowercase_product_name_rows": 185104,
+    "uppercase_product_name_rows": 65362,
+    "multi_brand_delimiter_rows": 217518,
+    "test_marker_rows": 535,
+    "three_character_product_name_rows": 10056
+  },
+  "mojibake_samples": [
+    {
+      "barcode": "0088183120371",
+      "field": "brand",
+      "value": "Mì Vi Trú’ng Thâ’n Tài"
+    },
+    {
+      "barcode": "3250391530434",
+      "field": "product_name",
+      "value": "Foie gras de canard entier mi cuit aromatisÃ© au JuranÃ§on"
+    },
+    {
+      "barcode": "3700256703928",
+      "field": "product_name",
+      "value": "Palais Des ThÃ©s Pure Indulgence Icy Mint Green Tea, 20 Tea Bags"
+    },
+    {
+      "barcode": "3700256704116",
+      "field": "product_name",
+      "value": "Palais Des ThÃ©s Pear Green Tea, 3.5oz Metal Tin"
+    },
+    {
+      "barcode": "3700256704826",
+      "field": "product_name",
+      "value": "Palais Des ThÃ©s Flavored Teas Indulgence Tea Set W / Te Tea"
+    },
+    {
+      "barcode": "3700286529826",
+      "field": "product_name",
+      "value": "Madeleine Green Tea HÃ©ritage Gourmand"
+    },
+    {
+      "barcode": "3700286548391",
+      "field": "product_name",
+      "value": "Mariage Freres - OpÃ©ra Blue - Box 30 Muslin Tea Sachets / Bags"
+    },
+    {
+      "barcode": "4901005100879",
+      "field": "product_name",
+      "value": "Glico Japan Tomato Pretz 60G Ã 10 Pieces"
+    },
+    {
+      "barcode": "6181002001289",
+      "field": "product_name",
+      "value": "Maggi Cube Seasoning CÃ´te D Ivoire 100 Cubes Free Shipping"
+    },
+    {
+      "barcode": "7898357410008",
+      "field": "product_name",
+      "value": "Adelmo CasÃ©"
+    },
+    {
+      "barcode": "8690710140039",
+      "field": "product_name",
+      "value": "Koska Rose Gul GÃ£¼l Turkish Delight Lokum Diabetic 160G X 4 Box 640G Sugar Free"
+    },
+    {
+      "barcode": "9782848018416",
+      "field": "product_name",
+      "value": "AdÃ¨le 06"
+    }
+  ],
+  "suspected_test_rows": [
+    {
+      "barcode": "17611275",
+      "product_name": "Test",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "25360233",
+      "product_name": "Test",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "37237035",
+      "product_name": "test",
+      "brand": "test",
+      "category": "Tests"
+    },
+    {
+      "barcode": "39822628",
+      "product_name": "Test 1",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "44795313",
+      "product_name": "Test MDD UHT FL",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "85951051",
+      "product_name": "Fakeer lemon",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "85951068",
+      "product_name": "Fakeer",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "85957732",
+      "product_name": "Fakeer",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "85958036",
+      "product_name": "Fakeer cola",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "00007078",
+      "product_name": "Test",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "00007122",
+      "product_name": "Test",
+      "brand": "Datofit",
+      "category": "Uncategorized"
+    },
+    {
+      "barcode": "0005544729011",
+      "product_name": "Fakewine",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "0006666666666",
+      "product_name": "Tes Product",
+      "brand": "BrandTest",
+      "category": ""
+    },
+    {
+      "barcode": "0009786756453",
+      "product_name": "test",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "0012345670121",
+      "product_name": "Teriyaki Chicken Thighs Healthyholics",
+      "brand": "Healthyholics",
+      "category": ""
+    },
+    {
+      "barcode": "0012345674020",
+      "product_name": "Turkey Chili With Rice Healthyholics",
+      "brand": "Healthyholics",
+      "category": ""
+    },
+    {
+      "barcode": "0012345674037",
+      "product_name": "Turkey Chili Sweet Potatoe Healthyholics",
+      "brand": "Healthyholics",
+      "category": ""
+    },
+    {
+      "barcode": "0028400243377",
+      "product_name": "Test Flavor: 855",
+      "brand": "Doritos",
+      "category": "Snacks"
+    },
+    {
+      "barcode": "0036800334496",
+      "product_name": "Test broc",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "0038657062560",
+      "product_name": "Influenza+COVID Test",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "0039442030320",
+      "product_name": "Test",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "0043635735633",
+      "product_name": "Test nouveau Grany",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "0048107249618",
+      "product_name": "Advanced Testosterone Test Booster",
+      "brand": "GNC",
+      "category": ""
+    },
+    {
+      "barcode": "0051497236427",
+      "product_name": "The fresh test",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "0051497279233",
+      "product_name": "The Fresh test",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "0055742577846",
+      "product_name": "test",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "0055789050777",
+      "product_name": "Café de céréales Biologique",
+      "brand": "Caf-Lib,Agrobio test",
+      "category": "fr:tests"
+    },
+    {
+      "barcode": "0064450006753",
+      "product_name": "Fromage Cottage",
+      "brand": "Seal test",
+      "category": ""
+    },
+    {
+      "barcode": "0071537001358",
+      "product_name": "test",
+      "brand": "Polar",
+      "category": "Waters"
+    },
+    {
+      "barcode": "0087694875411",
+      "product_name": "Test Kitchen - Korean BBQ",
+      "brand": "People's Choice",
+      "category": ""
+    },
+    {
+      "barcode": "0096543210143",
+      "product_name": "Test tomate Katia",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "0111007021346",
+      "product_name": "Jerky.com Test Kitchen: Taco Beef Jerky",
+      "brand": "Jerky.com",
+      "category": ""
+    },
+    {
+      "barcode": "0111007021353",
+      "product_name": "Jerky.com Test Kitchen: Chicken Taco Jerky",
+      "brand": "Jerky.com",
+      "category": ""
+    },
+    {
+      "barcode": "0111007021537",
+      "product_name": "Jerky.com Test Kitchen: Ranch",
+      "brand": "Jerky.com",
+      "category": ""
+    },
+    {
+      "barcode": "0123486789105",
+      "product_name": "Hakao test",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "0123546789014",
+      "product_name": "Test carrefour bio",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "0154515410011",
+      "product_name": "Test",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "01555844",
+      "product_name": "test",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "0164647436223",
+      "product_name": "Test Product 2",
+      "brand": "Testing",
+      "category": ""
+    },
+    {
+      "barcode": "0202015337779",
+      "product_name": "Training Supplier Test Item",
+      "brand": "Training Supplier Company",
+      "category": "Tests"
+    },
+    {
+      "barcode": "0311917171074",
+      "product_name": "Test jamon f",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "0312200116123",
+      "product_name": "YUKA TEST",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "0349597001473",
+      "product_name": "Patented Creatine HCI + Test",
+      "brand": "Con-Cret",
+      "category": ""
+    },
+    {
+      "barcode": "05101788",
+      "product_name": "V8, 100% vegetable juice, original",
+      "brand": "Test Marketing Group",
+      "category": "Plant-based beverages"
+    },
+    {
+      "barcode": "0512200116127",
+      "product_name": "YUKA TEST",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "05695010",
+      "product_name": "TEST Fleury Michon roti de porc",
+      "brand": "Fleury Michon",
+      "category": "Pork roasts"
+    },
+    {
+      "barcode": "0631656606768",
+      "product_name": "Alpha Test",
+      "brand": "MuscleTech",
+      "category": "Dietary supplements"
+    },
+    {
+      "barcode": "0647264829147",
+      "product_name": "Test",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "0652810119337",
+      "product_name": "YUKA TEST CF",
+      "brand": "",
+      "category": ""
+    },
+    {
+      "barcode": "0666493942700",
+      "product_name": "Prodotto Test",
+      "brand": "Test",
+      "category": ""
+    }
+  ],
+  "distributions": {
+    "top_brands": [
+      {
+        "value": "",
+        "rows": 1263769
+      },
+      {
+        "value": "Carrefour",
+        "rows": 22917
+      },
+      {
+        "value": "Auchan",
+        "rows": 17595
+      },
+      {
+        "value": "Coop",
+        "rows": 13428
+      },
+      {
+        "value": "Lidl",
+        "rows": 12868
+      },
+      {
+        "value": "Aldi",
+        "rows": 11036
+      },
+      {
+        "value": "Hacendado",
+        "rows": 9682
+      },
+      {
+        "value": "Tesco",
+        "rows": 9610
+      },
+      {
+        "value": "Delhaize",
+        "rows": 9386
+      },
+      {
+        "value": "U",
+        "rows": 8442
+      },
+      {
+        "value": "Jumbo",
+        "rows": 8176
+      },
+      {
+        "value": "Nestlé",
+        "rows": 8081
+      },
+      {
+        "value": "Migros",
+        "rows": 6852
+      },
+      {
+        "value": "Great Value",
+        "rows": 6703
+      },
+      {
+        "value": "Wegmans",
+        "rows": 5684
+      },
+      {
+        "value": "Leader Price",
+        "rows": 5597
+      },
+      {
+        "value": "Kroger",
+        "rows": 5567
+      },
+      {
+        "value": "Spar",
+        "rows": 5517
+      },
+      {
+        "value": "Albert Heijn",
+        "rows": 5423
+      },
+      {
+        "value": "Trader Joe's",
+        "rows": 5289
+      },
+      {
+        "value": "Casino",
+        "rows": 5125
+      },
+      {
+        "value": "Morrisons",
+        "rows": 5087
+      },
+      {
+        "value": "Asda",
+        "rows": 4974
+      },
+      {
+        "value": "Knorr",
+        "rows": 4636
+      },
+      {
+        "value": "Waitrose",
+        "rows": 4628
+      },
+      {
+        "value": "Boni",
+        "rows": 4489
+      },
+      {
+        "value": "Cora",
+        "rows": 4361
+      },
+      {
+        "value": "Woolworths",
+        "rows": 4133
+      },
+      {
+        "value": "Marks & Spencer",
+        "rows": 4059
+      },
+      {
+        "value": "Meijer",
+        "rows": 4011
+      }
+    ],
+    "top_categories": [
+      {
+        "value": "",
+        "rows": 2337160
+      },
+      {
+        "value": "Groceries",
+        "rows": 62306
+      },
+      {
+        "value": "Undefined",
+        "rows": 35020
+      },
+      {
+        "value": "Snacks",
+        "rows": 33986
+      },
+      {
+        "value": "Beverages",
+        "rows": 25419
+      },
+      {
+        "value": "Biscuits",
+        "rows": 23273
+      },
+      {
+        "value": "Cheeses",
+        "rows": 19812
+      },
+      {
+        "value": "Confectioneries",
+        "rows": 18636
+      },
+      {
+        "value": "Breads",
+        "rows": 14985
+      },
+      {
+        "value": "Yogurts",
+        "rows": 12495
+      },
+      {
+        "value": "Candies",
+        "rows": 12242
+      },
+      {
+        "value": "Sweetened beverages",
+        "rows": 11584
+      },
+      {
+        "value": "Frozen desserts",
+        "rows": 10661
+      },
+      {
+        "value": "Honeys",
+        "rows": 9838
+      },
+      {
+        "value": "Frozen foods",
+        "rows": 8854
+      },
+      {
+        "value": "Cakes",
+        "rows": 8851
+      },
+      {
+        "value": "Virgin olive oils",
+        "rows": 8807
+      },
+      {
+        "value": "Dietary supplements",
+        "rows": 8557
+      },
+      {
+        "value": "Pastas",
+        "rows": 8396
+      },
+      {
+        "value": "Cereals and their products",
+        "rows": 8211
+      },
+      {
+        "value": "Sodas",
+        "rows": 7472
+      },
+      {
+        "value": "Chocolate candies",
+        "rows": 7186
+      },
+      {
+        "value": "Plant-based foods",
+        "rows": 6704
+      },
+      {
+        "value": "Sausages",
+        "rows": 6369
+      },
+      {
+        "value": "Plant-based beverages",
+        "rows": 6183
+      },
+      {
+        "value": "Dark chocolates",
+        "rows": 6109
+      },
+      {
+        "value": "Teas",
+        "rows": 6071
+      },
+      {
+        "value": "Chicken breasts",
+        "rows": 6065
+      },
+      {
+        "value": "Salted-snacks",
+        "rows": 6032
+      },
+      {
+        "value": "Protein powders",
+        "rows": 5994
+      }
+    ],
+    "top_product_names": [
+      {
+        "value": "Miel",
+        "rows": 1965
+      },
+      {
+        "value": "Aceite de oliva virgen extra",
+        "rows": 1682
+      },
+      {
+        "value": "Spaghetti",
+        "rows": 1599
+      },
+      {
+        "value": "Filet de poulet",
+        "rows": 1544
+      },
+      {
+        "value": "Mozzarella",
+        "rows": 1501
+      },
+      {
+        "value": "Chocolat",
+        "rows": 1346
+      },
+      {
+        "value": "Comté",
+        "rows": 1290
+      },
+      {
+        "value": "Poulet",
+        "rows": 1200
+      },
+      {
+        "value": "Mayonnaise",
+        "rows": 1124
+      },
+      {
+        "value": "Extra Virgin Olive Oil",
+        "rows": 1118
+      },
+      {
+        "value": "Ketchup",
+        "rows": 1111
+      },
+      {
+        "value": "Panettone",
+        "rows": 1030
+      },
+      {
+        "value": "Chicken Breast",
+        "rows": 974
+      },
+      {
+        "value": "Filets de poulet",
+        "rows": 948
+      },
+      {
+        "value": "Vino",
+        "rows": 942
+      },
+      {
+        "value": "Emmental",
+        "rows": 917
+      },
+      {
+        "value": "Yogurt",
+        "rows": 914
+      },
+      {
+        "value": "Escalope de dinde",
+        "rows": 913
+      },
+      {
+        "value": "Chorizo",
+        "rows": 898
+      },
+      {
+        "value": "Popcorn",
+        "rows": 886
+      },
+      {
+        "value": "Honey",
+        "rows": 872
+      },
+      {
+        "value": "Kombucha",
+        "rows": 851
+      },
+      {
+        "value": "Parmigiano Reggiano",
+        "rows": 829
+      },
+      {
+        "value": "Milk",
+        "rows": 811
+      },
+      {
+        "value": "Jus de pomme",
+        "rows": 810
+      },
+      {
+        "value": "Vin",
+        "rows": 809
+      },
+      {
+        "value": "Granola",
+        "rows": 799
+      },
+      {
+        "value": "Cookies",
+        "rows": 795
+      },
+      {
+        "value": "Ice cream",
+        "rows": 766
+      },
+      {
+        "value": "Chocolate",
+        "rows": 753
+      }
+    ],
+    "category_sentinels": [
+      {
+        "value": "undefined",
+        "rows": 35020
+      },
+      {
+        "value": "null",
+        "rows": 1199
+      },
+      {
+        "value": "unknown",
+        "rows": 56
+      },
+      {
+        "value": "none",
+        "rows": 2
+      },
+      {
+        "value": "na",
+        "rows": 1
+      },
+      {
+        "value": "uncategorized",
+        "rows": 1
+      }
+    ],
+    "top_exact_identities": [
+      {
+        "product_name": "Miel",
+        "brand": "",
+        "category": "Honeys",
+        "rows": 1012
+      },
+      {
+        "product_name": "Chocolat",
+        "brand": "",
+        "category": "",
+        "rows": 655
+      },
+      {
+        "product_name": "Aceite de oliva virgen extra",
+        "brand": "",
+        "category": "Virgin olive oils",
+        "rows": 638
+      },
+      {
+        "product_name": "Vino",
+        "brand": "",
+        "category": "",
+        "rows": 592
+      },
+      {
+        "product_name": "Poulet",
+        "brand": "",
+        "category": "",
+        "rows": 588
+      },
+      {
+        "product_name": "Vin",
+        "brand": "",
+        "category": "",
+        "rows": 528
+      },
+      {
+        "product_name": "Queso",
+        "brand": "",
+        "category": "",
+        "rows": 412
+      },
+      {
+        "product_name": "Jambon",
+        "brand": "",
+        "category": "",
+        "rows": 403
+      },
+      {
+        "product_name": "Miel",
+        "brand": "",
+        "category": "",
+        "rows": 400
+      },
+      {
+        "product_name": "Kombucha",
+        "brand": "",
+        "category": "Kombuchas",
+        "rows": 364
+      },
+      {
+        "product_name": "Pain",
+        "brand": "",
+        "category": "",
+        "rows": 359
+      },
+      {
+        "product_name": "Filet de poulet",
+        "brand": "",
+        "category": "Chicken breasts",
+        "rows": 349
+      },
+      {
+        "product_name": "Pollo",
+        "brand": "",
+        "category": "",
+        "rows": 330
+      },
+      {
+        "product_name": "Saucisson",
+        "brand": "",
+        "category": "",
+        "rows": 330
+      },
+      {
+        "product_name": "Milk",
+        "brand": "",
+        "category": "",
+        "rows": 319
+      },
+      {
+        "product_name": "Jus de pomme",
+        "brand": "",
+        "category": "",
+        "rows": 315
+      },
+      {
+        "product_name": "Fromage",
+        "brand": "",
+        "category": "",
+        "rows": 308
+      },
+      {
+        "product_name": "Chorizo",
+        "brand": "",
+        "category": "",
+        "rows": 307
+      },
+      {
+        "product_name": "Honey",
+        "brand": "",
+        "category": "Honeys",
+        "rows": 299
+      },
+      {
+        "product_name": "Eier",
+        "brand": "",
+        "category": "",
+        "rows": 288
+      },
+      {
+        "product_name": "Café",
+        "brand": "",
+        "category": "",
+        "rows": 286
+      },
+      {
+        "product_name": "Filets de poulet",
+        "brand": "",
+        "category": "Chicken breasts",
+        "rows": 285
+      },
+      {
+        "product_name": "Merguez",
+        "brand": "",
+        "category": "",
+        "rows": 283
+      },
+      {
+        "product_name": "Pollo asado",
+        "brand": "",
+        "category": "",
+        "rows": 275
+      },
+      {
+        "product_name": "Banane",
+        "brand": "",
+        "category": "",
+        "rows": 269
+      },
+      {
+        "product_name": "Confiture",
+        "brand": "",
+        "category": "",
+        "rows": 262
+      },
+      {
+        "product_name": "Pain complet",
+        "brand": "",
+        "category": "Wholemeal breads",
+        "rows": 261
+      },
+      {
+        "product_name": "Comté",
+        "brand": "",
+        "category": "Comté",
+        "rows": 257
+      },
+      {
+        "product_name": "Desiccated Coconut (with Sulfite)",
+        "brand": "Franklin Baker",
+        "category": "",
+        "rows": 255
+      },
+      {
+        "product_name": "Parmigiano reggiano",
+        "brand": "",
+        "category": "",
+        "rows": 254
+      }
+    ]
+  },
+  "duplicate_shapes": {
+    "same_exact_identity": {
+      "duplicate_groups": 199318,
+      "rows_in_groups": 736961,
+      "largest_group": 1012
+    },
+    "zero_stripped_barcode": {
+      "collision_groups": 0,
+      "rows_in_groups": 0,
+      "largest_group": 0
+    },
+    "zero_stripped_conflicting_identity": {
+      "conflicting_groups": 0,
+      "rows_in_groups": 0
+    },
+    "brand_name_spans_categories": {
+      "groups": 128294,
+      "rows_in_groups": 671992,
+      "max_categories": 38
+    }
+  },
+  "timings_seconds": {
+    "integrity_check": 1.445,
+    "schema": 0,
+    "table_summary": 4.377,
+    "field_product_name": 14.574,
+    "field_brand": 5.258,
+    "field_category": 4.758,
+    "stream_all_rows": 11.433,
+    "top_brands": 1.616,
+    "top_categories": 1.387,
+    "top_product_names": 2.641,
+    "category_sentinels": 0.8,
+    "top_exact_identities": 3.482,
+    "same_exact_identity": 3.188,
+    "zero_stripped_barcode": 1.601,
+    "zero_stripped_conflicting_identity": 3.3,
+    "brand_name_spans_categories": 4.313
+  },
+  "stream_field_quality": {
+    "product_name": {
+      "c0_control_rows": 0,
+      "mojibake_sequence_rows": 11
+    },
+    "brand": {
+      "c0_control_rows": 0,
+      "mojibake_sequence_rows": 1
+    },
+    "category": {
+      "c0_control_rows": 0,
+      "mojibake_sequence_rows": 0
+    }
+  },
+  "finished_at": "2026-08-03T08:58:56.792Z",
+  "elapsed_seconds": 64.176
+}
