@@ -1,6 +1,7 @@
 import "server-only";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
+import { createHash } from "node:crypto";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -16,8 +17,10 @@ import { tmpdir } from "node:os";
 
 const DB_FILENAME = "knowledge.generated.db";
 const GZ_FILENAME = "knowledge.generated.db.gz";
+const MANIFEST_FILENAME = "knowledge.generated.manifest.json";
 const DB_PATH = join(process.cwd(), "src", "server", DB_FILENAME);
 const GZ_PATH = join(process.cwd(), "src", "server", GZ_FILENAME);
+const MANIFEST_PATH = join(process.cwd(), "src", "server", MANIFEST_FILENAME);
 const TMP_DB_PATH = join(tmpdir(), DB_FILENAME);
 
 // Build-prevention item 4 ("Never Again" package, fail-loud provisioning): a fresh git worktree
@@ -95,18 +98,94 @@ export function __resolveDbPathForTests(paths: ResolveDbPathPaths): string | nul
   return resolveDbPath(paths);
 }
 
+// Generation-mismatch detection (DT2-1, 2026-08-13): scripts/build-knowledge-db.mjs writes its
+// two paired outputs (.db and .db.gz) with two independent renameSync calls. A crash between them
+// (OOM during gzip, killed CI job, power loss) can leave the .db and .db.gz describing DIFFERENT
+// corpus generations -- resolveDbPath above prefers the uncompressed .db locally while Vercel
+// production ships only the .gz, so without this check, local dev and production would silently
+// serve different data indefinitely. The generator also writes a small manifest
+// (knowledge.generated.manifest.json) recording a sha256 fingerprint (db_sha256) of the finalized,
+// uncompressed DB content; decompressed .gz bytes are identical to the .db bytes at generation
+// time, so the SAME field verifies whichever path resolveDbPath actually picked.
+type KnowledgeDbVerifyPaths = ResolveDbPathPaths & { manifestPath: string };
+type ResolveAndVerifyResult = { status: "ok"; path: string } | { status: "mismatch" } | { status: "missing" };
+
+function sha256File(path: string): string | null {
+  try {
+    return createHash("sha256").update(readFileSync(path)).digest("hex");
+  } catch {
+    return null;
+  }
+}
+
+function readManifestDbSha256(manifestPath: string): string | null {
+  try {
+    if (!existsSync(manifestPath)) return null;
+    const parsed = JSON.parse(readFileSync(manifestPath, "utf8"));
+    return typeof parsed?.db_sha256 === "string" && parsed.db_sha256 ? parsed.db_sha256 : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the DB path (see resolveDbPath) and, when a manifest is present, verify the resolved
+ * file's content actually matches the manifest's recorded generation fingerprint before it is
+ * trusted. A totally absent corpus (no db, no gz) stays the normal "missing" case -- never an
+ * error. A manifest that is simply absent (older build, or before this feature existed) also does
+ * NOT block opening the DB -- there is nothing to verify against, so the file is trusted as before.
+ * Only an ACTUAL fingerprint mismatch is treated as an error, and even then this never throws: the
+ * caller degrades to "missing" (corpus disabled for this process) so a broken generation pair can
+ * never silently serve wrong data, but also never blocks scanning (TOP-LEVEL LAW: decode/corpus
+ * failures only ever skip a rung with an honest reason, never crash the app).
+ */
+function resolveAndVerifyDbPath(paths: KnowledgeDbVerifyPaths): ResolveAndVerifyResult {
+  const resolved = resolveDbPath(paths);
+  if (!resolved) return { status: "missing" };
+
+  const expected = readManifestDbSha256(paths.manifestPath);
+  if (!expected) return { status: "ok", path: resolved }; // no manifest to verify against
+
+  const actual = sha256File(resolved);
+  if (!actual) return { status: "ok", path: resolved }; // couldn't hash (fs hiccup): don't block on it
+
+  if (actual !== expected) {
+    console.error(
+      `[knowledge-db] MISMATCH DETECTED: ${resolved} does not match the generation fingerprint recorded in ` +
+        `${paths.manifestPath}. This usually means a crashed/interrupted "npm run build:knowledge-db" left the ` +
+        `.db and .db.gz pair out of sync (see DT2-1). Disabling the knowledge corpus for this process rather ` +
+        `than silently serving a mismatched generation. Fix: rerun npm run build:knowledge-db. This never blocks ` +
+        `scanning -- the decode ladder simply skips this rung with an honest reason.`,
+    );
+    return { status: "mismatch" };
+  }
+  return { status: "ok", path: resolved };
+}
+
+/** Test-only hook: exercise resolveAndVerifyDbPath with injected paths, isolated from module singletons. */
+export function __resolveAndVerifyDbPathForTests(paths: KnowledgeDbVerifyPaths): ResolveAndVerifyResult {
+  _warnedStaleTempOnce = false;
+  return resolveAndVerifyDbPath(paths);
+}
+
 /** Get the shared read-only SQLite connection, or null if no DB is available. */
 export function getKnowledgeDb(): BetterSqlite3Database | null {
   if (_db === "missing") return null;
   if (_db) return _db;
 
-  const dbPath = resolveDbPath();
-  if (!dbPath) {
+  const verified = resolveAndVerifyDbPath({ dbPath: DB_PATH, gzPath: GZ_PATH, tmpDbPath: TMP_DB_PATH, manifestPath: MANIFEST_PATH });
+  if (verified.status === "missing") {
     console.warn("[knowledge-db] No SQLite DB found (checked .db, /tmp, .db.gz). Run: npm run build:knowledge-db");
     _db = "missing";
     return null;
   }
+  if (verified.status === "mismatch") {
+    // Already logged loudly inside resolveAndVerifyDbPath. Degrade to "missing" -- never crash.
+    _db = "missing";
+    return null;
+  }
 
+  const dbPath = verified.path;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const Database = require("better-sqlite3");

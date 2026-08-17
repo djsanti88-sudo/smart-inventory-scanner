@@ -5,6 +5,13 @@ name: Playwright E2E
 # mock-only, so CI never calls a live AI provider (see CLAUDE.md + playwright.config.ts).
 # Firebase, human-bot, and live suites are intentionally NOT run here - they need emulators /
 # real backends / owner-gated live keys and stay local. This job is the fast correctness gate.
+#
+# The second E2E step (test:e2e:no-bypass) runs e2e/scan-sync-visibility.spec.ts under its own dev
+# server (playwright.no-bypass.config.ts, port 3101) with NEXT_PUBLIC_E2E_AUTH_BYPASS left OFF - every
+# other webServer here forces that flag on, which also happens to gate whether the scan page's
+# secondary panel starts expanded, so no spec running under the main webServer could ever exercise the
+# real (collapsed) state a production user sees. Still mock-only and IS_E2E=1 (no live AI, no cloud
+# Firebase, Turso pinned empty) - safe to run on every push/PR like the main suite.
 
 on:
   push:
@@ -59,6 +66,9 @@ jobs:
 
       - name: Run Playwright E2E (mock backend)
         run: npm run test:e2e
+
+      - name: Run Playwright E2E (real/non-bypass sync-visibility regression)
+        run: npm run test:e2e:no-bypass
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}

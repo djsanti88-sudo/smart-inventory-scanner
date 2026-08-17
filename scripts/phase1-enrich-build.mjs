@@ -4,10 +4,20 @@
 // HARD STOP at $3 (target <$2). Prints running spend. Local only. No commit/deploy. Curated seed stays in
 // prefixIndex.ts and is NOT overwritten here. Thin prefixes are NOT enriched (Phase 0.5 showed 0%).
 //
-//   node --max-old-space-size=4096 scripts/phase1-enrich-build.mjs [--dry]
+// LANE SEPARATION (owner doctrine, CLAUDE.md "Delegation Model Policy"): this is Lane 1 DEV TOOLING.
+// It never reads .env.local's GEMINI_API_KEY (Lane 2's key, the app runtime's decode ladder,
+// exclusively) - it reads PHASE1_GEMINI_KEY, a separately-named dev-tooling var the owner must set
+// deliberately, via scripts/lib/paidScriptGuard.mjs.
+//
+//   node --max-old-space-size=4096 scripts/phase1-enrich-build.mjs
+//
+// Default is a DRY RUN: prints the plan + a worst-case cost FLOOR, makes ZERO API calls, writes no
+// map, $0 spent. Only spends (and writes the map) with BOTH --live and --yes-i-accept-cost, and only
+// after PHASE1_GEMINI_KEY is set.
 
 import fs from "node:fs";
 import readline from "node:readline";
+import { requireLiveApproval, requireDevToolingKey } from "./lib/paidScriptGuard.mjs";
 
 const INPUT = "data/retail-knowledge/retail_off.jsonl";
 const OUT_MAP = "src/services/catalog/derivedPrefixMap.json";
@@ -16,11 +26,6 @@ const MODEL = "gemini-flash-lite-latest";
 const PREFIX_LEN = 7, BRAND_CAP = 60, CAT_CAP = 30, BATCH = 20, CONCURRENCY = 8;
 const HARD_STOP_USD = 3, TARGET_USD = 2;
 const PRICE_IN = 0.10 / 1e6, PRICE_OUT = 0.40 / 1e6;
-const DRY = process.argv.includes("--dry");
-
-function loadKey() {
-  try { const m = fs.readFileSync(".env.local", "utf8").match(/^GEMINI_API_KEY\s*=\s*(.+)$/m); return m ? m[1].trim().replace(/^["']|["']$/g, "") : ""; } catch { return ""; }
-}
 function norm13(d) { return d.length === 12 ? "0" + d : d.length === 14 ? d.slice(1) : d; }
 function firstCat(r) { const m = (r.main_category_en || "").trim(); if (m) return m.toLowerCase(); const c = (r.categories_en || "").trim(); return c ? c.split(",")[0].trim().toLowerCase() : ""; }
 function brandOf(r) { return ((r.brands || "").split(",")[0].trim() || (r.brand_owner || "").trim()).toLowerCase(); }
@@ -56,11 +61,16 @@ const strong = [], moderate = [], ambiguous = [];
 for (const [pre, e] of agg) { const c = classify(e); if (c === "strong") strong.push(pre); else if (c === "moderate") moderate.push(pre); else if (c === "ambiguous") ambiguous.push(pre); }
 console.log(`[phase1] strong=${strong.length} moderate=${moderate.length} ambiguous=${ambiguous.length} (enriching ambiguous only)`);
 const projOut = ambiguous.length * 130, projIn = Math.ceil(ambiguous.length / BATCH) * 400 + ambiguous.length * 200;
-console.log(`[phase1] projected enrichment cost ~ $${(projIn * PRICE_IN + projOut * PRICE_OUT).toFixed(3)} | hardStop=$${HARD_STOP_USD}`);
-if (DRY) { console.log("[phase1] DRY - no API calls, no map written. $0."); process.exit(0); }
+const projCost = projIn * PRICE_IN + projOut * PRICE_OUT;
+console.log(`[phase1] hardStop=$${HARD_STOP_USD}`);
 
-const KEY = loadKey();
-if (!KEY) { console.error("[phase1] No GEMINI_API_KEY in .env.local. $0 spent."); process.exit(1); }
+const approval = requireLiveApproval({
+  worstCaseFloorUsd: projCost,
+  describe: () => `[phase1] Would enrich ${ambiguous.length} ambiguous prefixes via Gemini Flash-Lite (${MODEL}), then write ${OUT_MAP}. Projected cost ~$${projCost.toFixed(3)}.`,
+});
+if (!approval.live) process.exit(0); // requireLiveApproval already printed the dry-run report and exits 0
+
+const KEY = requireDevToolingKey("PHASE1_GEMINI_KEY");
 
 const SYS = `You are a STRICT data-cleaning function for barcode-prefix groups from OUR OWN product database.
 For EACH prefix do ONLY this, using ONLY the strings provided (no outside/world knowledge, no GS1 ownership guessing, do not invent companies, do not merge clearly different companies):

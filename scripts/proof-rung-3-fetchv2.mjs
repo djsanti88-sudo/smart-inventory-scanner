@@ -18,18 +18,29 @@
 // Integrity rule: --live hits the REAL POST /api/ai-lookup route (mode: "decode") on a local dev
 // server with real .env.local keys -- never imports fetchV2()/rung functions directly.
 //
+// GATED (owner incident 2026-08-13, TL2-1 re-verification): --live alone used to be enough to spend
+// real Firecrawl credits. scripts/lib/paidScriptGuard.mjs now also requires --yes-i-accept-cost,
+// matching every other Lane 1 paid script, so a --live-only invocation from muscle memory can no
+// longer accidentally spend. Reading .env.local here is legitimate (launching the actual app).
+//
 // Usage:
-//   node scripts/proof-rung-3-fetchv2.mjs --dry-run                validates inputs, $0, no network
-//   node scripts/proof-rung-3-fetchv2.mjs --live --sample=20 --port=3107   SPENDS Firecrawl credits (owner-gated)
+//   node scripts/proof-rung-3-fetchv2.mjs --dry-run                                             validates inputs, $0, no network
+//   node scripts/proof-rung-3-fetchv2.mjs --live --yes-i-accept-cost --sample=20 --port=3107     SPENDS Firecrawl credits (owner-gated)
 import { readFileSync, writeFileSync, appendFileSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { requireLiveApproval } from "./lib/paidScriptGuard.mjs";
 
 const DRY_RUN = process.argv.includes("--dry-run");
-const LIVE = process.argv.includes("--live");
+const LIVE_REQUESTED = process.argv.includes("--live");
 const SAMPLE_N = Number(process.argv.find((a) => a.startsWith("--sample="))?.slice(9) ?? 20);
 const PORT = Number(process.argv.find((a) => a.startsWith("--port="))?.slice(7) ?? 3107);
 const EXTERNAL_BASE = process.argv.find((a) => a.startsWith("--base-url="))?.slice(11) ?? null;
 const BASE_URL = EXTERNAL_BASE ?? `http://localhost:${PORT}`;
+// --dry-run already gives a full $0 harness-validation path; only gate the ACTUAL --live spend path.
+const LIVE = LIVE_REQUESTED && requireLiveApproval({
+  worstCaseFloorUsd: SAMPLE_N * 5 * 0.01, // FIRECRAWL_WORST_CASE_PER_CODE(5) x $0.01/credit placeholder, matches full-ladder's reservation shape
+  describe: () => `Would spawn a real "next dev" server with REAL .env.local keys and run up to ${SAMPLE_N} hard-tail codes through the live Fetch V2 rung, spending real Firecrawl credits.`,
+}).live;
 
 const BASELINE_RESOLVED = 13;
 const BASELINE_TOTAL = 74;

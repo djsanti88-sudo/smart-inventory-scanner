@@ -3,12 +3,19 @@
 // truth, invent companies, guess the official GS1 owner, or use web/grounding. Thinking OFF. Batched.
 // HARD budget guard stops before $10 (target < $2). Local only. No commit/deploy. No runtime code touched.
 //
-//   node --max-old-space-size=4096 scripts/phase05-prefix-cleanup.mjs [--sample 500] [--dry]
+// LANE SEPARATION (owner doctrine, CLAUDE.md "Delegation Model Policy"): this is Lane 1 DEV TOOLING.
+// It never reads .env.local's GEMINI_API_KEY (Lane 2's key, the app runtime's decode ladder,
+// exclusively) - it reads PHASE05_GEMINI_KEY, a separately-named dev-tooling var the owner must set
+// deliberately, via scripts/lib/paidScriptGuard.mjs.
 //
-// --dry prints the plan + PROJECTED cost and makes ZERO API calls.
+//   node --max-old-space-size=4096 scripts/phase05-prefix-cleanup.mjs [--sample 500]
+//
+// Default is a DRY RUN: prints the plan + a worst-case cost FLOOR and makes ZERO API calls, $0 spent.
+// Only spends with BOTH --live and --yes-i-accept-cost, and only after PHASE05_GEMINI_KEY is set.
 
 import fs from "node:fs";
 import readline from "node:readline";
+import { requireLiveApproval, requireDevToolingKey } from "./lib/paidScriptGuard.mjs";
 
 const INPUT = "data/retail-knowledge/retail_off.jsonl";
 const OUT = "reports/product-intel/prefix-phase05-cleanup.json";
@@ -19,15 +26,6 @@ const PRICE_IN = 0.10 / 1e6, PRICE_OUT = 0.40 / 1e6; // Flash-Lite per-token
 const args = process.argv.slice(2);
 const arg = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
 const SAMPLE = Number(arg("sample", "500"));
-const DRY = args.includes("--dry");
-
-function loadKey() {
-  try {
-    const env = fs.readFileSync(".env.local", "utf8");
-    const m = env.match(/^GEMINI_API_KEY\s*=\s*(.+)$/m);
-    return m ? m[1].trim().replace(/^["']|["']$/g, "") : "";
-  } catch { return ""; }
-}
 function norm13(d) { return d.length === 12 ? "0" + d : d.length === 14 ? d.slice(1) : d; }
 function firstCat(r) {
   const m = (r.main_category_en || "").trim(); if (m) return m.toLowerCase();
@@ -84,11 +82,15 @@ const batches = Math.ceil(payload.length / BATCH);
 const projTokIn = batches * 400 + payload.length * 180, projTokOut = payload.length * 130;
 const projCost = projTokIn * PRICE_IN + projTokOut * PRICE_OUT;
 console.log(`[phase0.5] ambiguous=${ambiguous.length} thin(>=3)=${thin.length} | sampling ${payload.length} (${pick(ambiguous, nAmb).length} amb + ${pick(thin, nThin).length} thin)`);
-console.log(`[phase0.5] batches=${batches} projectedCost=$${projCost.toFixed(4)} (Flash-Lite, model=${MODEL}) hardCap=$${HARD_CAP_USD}`);
-if (DRY) { console.log("[phase0.5] DRY RUN - no API calls made. $0 spent."); process.exit(0); }
+console.log(`[phase0.5] batches=${batches} hardCap=$${HARD_CAP_USD}`);
 
-const KEY = loadKey();
-if (!KEY) { console.error("[phase0.5] No GEMINI_API_KEY in .env.local - cannot run. $0 spent."); process.exit(1); }
+const approval = requireLiveApproval({
+  worstCaseFloorUsd: projCost,
+  describe: () => `[phase0.5] Would run ${batches} Gemini Flash-Lite batches (${payload.length} prefixes) against ${MODEL}. Projected cost ~$${projCost.toFixed(4)}.`,
+});
+if (!approval.live) process.exit(0); // requireLiveApproval already printed the dry-run report and exits 0
+
+const KEY = requireDevToolingKey("PHASE05_GEMINI_KEY");
 
 const SYS = `You are a STRICT data-cleaning function for barcode-prefix groups from OUR OWN product database.
 For EACH prefix do ONLY this, using ONLY the strings provided (no outside/world knowledge, no GS1 ownership guessing, do not invent companies, do not merge clearly different companies):

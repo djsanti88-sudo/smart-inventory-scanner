@@ -107,6 +107,9 @@ reports/**/playwright-report/
 src/server/knowledge.generated.db
 src/server/knowledge.generated.db-wal
 src/server/knowledge.generated.db-shm
+# Generation manifest (DT2-1, 2026-08-13): sha256 fingerprints of the paired .db/.db.gz outputs,
+# regenerated on every build alongside them -- never committed, same as the DB itself.
+src/server/knowledge.generated.manifest.json
 
 # Agent/session scratch (Playwright MCP snapshots + superpowers tooling state)
 .playwright-mcp/
