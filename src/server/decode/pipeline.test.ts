@@ -127,6 +127,7 @@ const realSpendGuard = vi.hoisted(() => ({
   recordGptLadderCall: undefined as unknown as typeof import("@/services/security/aiSpendGuard").recordGptLadderCall,
   chargeDailySlotForAccount: undefined as unknown as typeof import("@/services/security/aiSpendGuard").chargeDailySlotForAccount,
   chargeDailySlotForAccountConditional: undefined as unknown as typeof import("@/services/security/aiSpendGuard").chargeDailySlotForAccountConditional,
+  chargeDailySlotConditional: undefined as unknown as typeof import("@/services/security/aiSpendGuard").chargeDailySlotConditional,
 }));
 vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
@@ -134,6 +135,7 @@ vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
   realSpendGuard.recordGptLadderCall = actual.recordGptLadderCall;
   realSpendGuard.chargeDailySlotForAccount = actual.chargeDailySlotForAccount;
   realSpendGuard.chargeDailySlotForAccountConditional = actual.chargeDailySlotForAccountConditional;
+  realSpendGuard.chargeDailySlotConditional = actual.chargeDailySlotConditional;
   return {
     ...actual,
     recordGptLadderSpend: vi.fn(actual.recordGptLadderSpend),
@@ -144,12 +146,17 @@ vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
     // one is spied too - it now carries the S4 fail-open path for tenants.
     chargeDailySlotForAccount: vi.fn(actual.chargeDailySlotForAccount),
     chargeDailySlotForAccountConditional: vi.fn(actual.chargeDailySlotForAccountConditional),
+    // DC money-leak repro (2026-08-13): spied so one test can make the GLOBAL charge itself reject with
+    // a NON-cap (e.g. simulated storage/network) error - the case settlePaidCharge does NOT S4 fail-open
+    // for (only the per-account half above gets that treatment; see settlePaidCharge's doc comment in
+    // pipeline.ts). Real implementation passes through by default.
+    chargeDailySlotConditional: vi.fn(actual.chargeDailySlotConditional),
   };
 });
 
 import { runDecodePipeline, DailyCapExceededError, classifySourceTier, classifyGptFailureDetail } from "@/server/decode/pipeline";
 import { detectCodeType } from "@/services/codeTypeDetector";
-import { __resetForTest, readDailyUsed, readDailyUsedForAccount, recordGptLadderSpend, recordGptLadderCall, chargeDailySlotForAccount, chargeDailySlotForAccountConditional, chargeDailySlot } from "@/services/security/aiSpendGuard";
+import { __resetForTest, readDailyUsed, readDailyUsedForAccount, recordGptLadderSpend, recordGptLadderCall, chargeDailySlotForAccount, chargeDailySlotForAccountConditional, chargeDailySlotConditional, chargeDailySlot } from "@/services/security/aiSpendGuard";
 import { ladderStorage } from "@/server/upc/storage";
 import * as decodeCacheModule from "@/services/ai/decodeCache";
 import { clearDecodeCache } from "@/services/ai/decodeCache";
@@ -220,6 +227,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     vi.mocked(recordGptLadderCall).mockReset().mockImplementation(realSpendGuard.recordGptLadderCall);
     vi.mocked(chargeDailySlotForAccount).mockReset().mockImplementation(realSpendGuard.chargeDailySlotForAccount);
     vi.mocked(chargeDailySlotForAccountConditional).mockReset().mockImplementation(realSpendGuard.chargeDailySlotForAccountConditional);
+    vi.mocked(chargeDailySlotConditional).mockReset().mockImplementation(realSpendGuard.chargeDailySlotConditional);
     // Sync Truth Task 4: default every test to a safe instant miss; the dedicated describe block below
     // overrides with mockResolvedValueOnce for a verified/suggestion hit.
     vi.mocked(lookupMasterCatalog).mockReset().mockResolvedValue({ kind: "miss" });
@@ -244,7 +252,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     process.env.DECODE_CACHE_FILE = decodeCacheTestFile();
     process.env.LEARNED_PRODUCTS_FILE = learnedProductsTestFile();
     // Any stray outbound fetch resolves to a benign 404 - proves no live provider is required.
-    fetchSpy = vi.fn(async () => new Response("not found", { status: 404 }));
+    fetchSpy = vi.fn(async () => new Response(JSON.stringify({ error: "not found" }), { status: 404 }));
     vi.stubGlobal("fetch", fetchSpy);
   });
 
@@ -587,7 +595,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       if (url.includes(OFF_HOST)) {
         return new Response(JSON.stringify({ status: 0 }), { status: 200 }); // genuine miss
       }
-      return new Response("not found", { status: 404 });
+      return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
     });
     vi.stubGlobal("fetch", fetchSpy);
   }
@@ -798,7 +806,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             { status: 200 }
           );
         }
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
     }
@@ -806,8 +814,8 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     function stubGoUpcGenuineMiss() {
       fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes(GOUPC_HOST)) return new Response("not found", { status: 404 }); // genuine miss
-        return new Response("not found", { status: 404 });
+        if (url.includes(GOUPC_HOST)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 }); // genuine miss
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
     }
@@ -867,7 +875,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             { status: 200 },
           );
         }
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
     }
@@ -904,7 +912,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       const secondFetchSpy = vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.includes("go-upc.com/api")) throw new Error("go-upc must NOT be re-invoked on a repeat scan of a cached code");
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", secondFetchSpy);
 
@@ -953,9 +961,9 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
               { status: 200 }
             );
           }
-          return new Response("not found", { status: 404 }); // Go-UPC genuine miss
+          return new Response(JSON.stringify({ error: "not found" }), { status: 404 }); // Go-UPC genuine miss
         }
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
     }
@@ -1056,7 +1064,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         const url = String(input);
         if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
         if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
 
@@ -1715,7 +1723,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       const goUpcSpy = fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.includes("go-upc.com")) throw new Error("goupc must never be called for a retail-rung settle");
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", goUpcSpy);
 
@@ -1763,8 +1771,8 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       mockRetailHit({ productName: "Search For:10000007", brand: "" });
       const fetchStub = vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("go-upc.com")) return new Response("not found", { status: 404 }); // reached, genuine miss
-        return new Response("not found", { status: 404 });
+        if (url.includes("go-upc.com")) return new Response(JSON.stringify({ error: "not found" }), { status: 404 }); // reached, genuine miss
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchStub);
 
@@ -2246,7 +2254,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         }
         if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
         if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
 
@@ -2298,7 +2306,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         if (url.includes(OFF_HOST)) {
           return new Response(JSON.stringify({ status: 1, product: { product_name: "Fabricated Example Product", brands: "FabricatedBrand" } }), { status: 200 });
         }
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
     }
@@ -2366,7 +2374,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             { status: 200 },
           );
         }
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
 
@@ -2393,8 +2401,8 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         const url = String(input);
         if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
         if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-        if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 }); // genuine miss, but the CALL happened
-        return new Response("not found", { status: 404 });
+        if (url.includes(GOUPC_API)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 }); // genuine miss, but the CALL happened
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
 
@@ -2422,7 +2430,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         const url = String(input);
         if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
         if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-        if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 });
+        if (url.includes(GOUPC_API)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
         if (url.includes("api.openai.com/v1/responses")) {
           const body = {
             output: [{
@@ -2440,7 +2448,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
           };
           return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
         }
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
     }
@@ -2532,8 +2540,8 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         const url = String(input);
         if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
         if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-        if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 });
-        return new Response("not found", { status: 404 });
+        if (url.includes(GOUPC_API)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
 
@@ -2561,11 +2569,11 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             );
           }
           if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-          if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 }); // goupc genuine miss (never wins)
+          if (url.includes(GOUPC_API)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 }); // goupc genuine miss (never wins)
           if (opts.fetchv2Confidence && opts.fetchv2Confidence !== "none" && url.includes("brocade")) {
             // brocade structured door is exercised via the fetchV2 module mock below instead.
           }
-          return new Response("not found", { status: 404 });
+          return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
         });
         vi.stubGlobal("fetch", fetchSpy);
       }
@@ -2631,7 +2639,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             );
           }
           if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-          if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 });
+          if (url.includes(GOUPC_API)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
           if (url.includes("api.openai.com/v1/responses")) {
             const body = {
               output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({
@@ -2642,7 +2650,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             };
             return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
           }
-          return new Response("not found", { status: 404 });
+          return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
         });
         vi.stubGlobal("fetch", fetchSpy);
 
@@ -2692,7 +2700,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             );
           }
           if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-          if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 });
+          if (url.includes(GOUPC_API)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
           if (url.includes("api.openai.com/v1/responses")) {
             const body = {
               output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({
@@ -2703,7 +2711,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             };
             return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
           }
-          return new Response("not found", { status: 404 });
+          return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
         });
         vi.stubGlobal("fetch", fetchSpy);
 
@@ -2815,6 +2823,37 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
           expect(await readDailyUsed(store)).toBe(1);
           expect(await readDailyUsedForAccount(store, "tenant-s4")).toBe(0);
         });
+
+        // DC-2 money-leak claim (Codex xhigh review, 2026-08-13): chargeOnEgress() consumes
+        // `paidChargeArmed` BEFORE awaiting settlePaidCharge() (so a re-entrant egress can never double-
+        // charge), but pre-fix only a DailyCapExceededError was made sticky (`capDenialInArm`) for the
+        // rest of the arm. A NON-cap settlePaidCharge() rejection - e.g. the GLOBAL chargeDailySlotConditional
+        // write itself throwing (a Turso/storage hiccup; unlike the per-account half, this call has no S4
+        // fail-open wrapper - see settlePaidCharge's doc comment) - left the arm silently "spent" with
+        // ZERO successful charge behind it. In the SHARED full-ladder arm (goupc -> fetchv2 -> gpt all
+        // arm together, pipeline.ts ~1901-1903, reached here because both free rungs miss on the default
+        // 404 stub), a LATER rung's own chargeOnEgress() then saw `!paidChargeArmed` and silently no-op'd
+        // instead of denying - letting it proceed straight to REAL PAID EGRESS with nothing charged.
+        it("(e) a non-cap GLOBAL charge failure is STICKY for the rest of the shared full-ladder arm - fetchv2 must NOT egress unmetered after goupc's failed charge attempt", async () => {
+          process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+          process.env.GO_UPC_API_KEY = "test-key";
+          process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // makes fetchV2CanPay true (genuine paid rung)
+          try { fs.unlinkSync(missCacheFile()); } catch {}
+          // Default fetchSpy (set in the outer beforeEach) 404s everything, so both free rungs
+          // (upcitemdb/openfoodfacts) genuinely miss -> this reaches the TOTAL-FREE-MISS branch, where
+          // ONE charge arm is shared across goupc -> fetchv2 -> gpt (the only branch this bug can bite).
+          vi.mocked(chargeDailySlotConditional).mockRejectedValueOnce(new Error("simulated Turso write failure"));
+
+          await runDecodePipeline(makeReq(VALID_GTIN));
+
+          // THE MONEY ASSERTION: fetchV2 (the paid engine, module-mocked) must never be invoked once the
+          // shared arm's charge attempt already failed for a non-cap reason - proving the sticky block
+          // now covers every failure reason, not just a cap denial.
+          expect(fetchV2).not.toHaveBeenCalled();
+          // And genuinely zero slots were charged for this request - the failed attempt never counted,
+          // and nothing downstream snuck in an unmetered, charge-free egress either.
+          expect(await readDailyUsed(await ladderStorage())).toBe(0);
+        });
       });
     });
 
@@ -2826,14 +2865,14 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         const url = String(input);
         if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
         if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-        if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 });
+        if (url.includes(GOUPC_API)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
         if (url.includes("api.openai.com/v1/responses")) {
           openAiSignal = init?.signal ?? undefined;
           // Never resolves on its own - only the ladder's own abort (or the test's manual check below)
           // ends this promise. Proves the OpenAI call genuinely received a signal it can act on.
           return new Promise<Response>(() => {});
         }
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
 
@@ -2881,9 +2920,9 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         const url = String(input);
         if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
         if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-        if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 });
+        if (url.includes(GOUPC_API)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
         if (url.includes("api.openai.com/v1/responses")) return openAiHandler();
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
     }

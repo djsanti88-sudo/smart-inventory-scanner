@@ -609,6 +609,29 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // run completes - so a swallowed per-rung denial can never let a DOWNSTREAM paid rung run unmetered,
   // and the request settles as an honest cap_blocked instead of a needs-review that hid the spend.
   let capDenialInArm: DailyCapExceededError | null = null;
+  // GENERALIZED STICKY FAILURE (DC-2 fix, 2026-08-13, money-leak remediation, Codex xhigh review):
+  // `paidChargeArmed` is consumed BEFORE awaiting settlePaidCharge() (see chargeOnEgress below), so a
+  // re-entrant egress can never double-charge -- but until this fix ONLY a DailyCapExceededError made
+  // the arm sticky (capDenialInArm above). settlePaidCharge() can also reject for a NON-cap reason: the
+  // GLOBAL chargeDailySlot/chargeDailySlotConditional write itself is NOT wrapped in the S4 fail-open
+  // try/catch that only the PER-ACCOUNT half gets (see settlePaidCharge's doc comment) -- a genuine
+  // Turso/storage hiccup on that call throws a plain Error straight out of settlePaidCharge. Pre-fix,
+  // that left the arm silently "spent" with ZERO successful charge behind it: in the SHARED full-ladder
+  // arm (goupc -> fetchv2 -> gpt all arm together, see withPaidChargeArmed(runFullPaidLadder) below), a
+  // LATER rung's own chargeOnEgress() saw `!paidChargeArmed`, silently no-op'd, and proceeded straight to
+  // REAL PAID EGRESS with nothing charged. `chargeFailureInArm` makes every later chargeOnEgress() call
+  // in this arm throw too (mirrors capDenialInArm's stickiness, generalized to any settlement failure),
+  // so a later rung in the same arm always DECLINES egress instead of running unmetered.
+  //
+  // Deliberately NOT re-thrown by withPaidChargeArmed's `finally` (unlike capDenialInArm): a non-cap
+  // storage hiccup fails only the paid rungs it actually blocked (each already catches chargeOnEgress()
+  // locally and records an honest skip/miss reason -- see maybeGptLadder, runFetchV2, and runLadder's own
+  // catch around runGoUpc's uncaught client() throw), so the request still settles as an honest
+  // needs_review rather than an uncaught 500 that would blow past the DailyCapExceededError-only catch
+  // in the outer computeDecode try/catch below. Unmetered spend is worse than a missed decode (owner
+  // doctrine); refusing every later egress in this arm is the fail-closed choice, at the cost of this one
+  // request's paid ladder for a single storage blip.
+  let chargeFailureInArm: Error | null = null;
 
   const assertPaidCapAvailable = async (): Promise<void> => {
     if (e2eMode()) return;
@@ -725,12 +748,20 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // Sticky: a prior denial in this arm makes every later egress deny too, so the rung's own egress
     // catch skips it BEFORE its provider call (no unmetered spend down the shared full-ladder arm).
     if (capDenialInArm) throw capDenialInArm;
+    // DC-2: a prior NON-cap settlement failure is equally sticky - see chargeFailureInArm's doc comment
+    // above. Without this, a later rung in the same arm would see `!paidChargeArmed` and no-op straight
+    // into unmetered egress instead of declining.
+    if (chargeFailureInArm) throw chargeFailureInArm;
     if (!paidChargeArmed) return;
     paidChargeArmed = false; // consume BEFORE awaiting, so a re-entrant egress can never double-charge
     try {
       await settlePaidCharge();
     } catch (e) {
-      if (e instanceof DailyCapExceededError) capDenialInArm = e;
+      if (e instanceof DailyCapExceededError) {
+        capDenialInArm = e;
+      } else {
+        chargeFailureInArm = e instanceof Error ? e : new Error(String(e));
+      }
       throw e;
     }
   };
@@ -740,6 +771,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     await assertPaidCapAvailable();
     paidChargeArmed = true;
     capDenialInArm = null;
+    chargeFailureInArm = null;
     try {
       return await run();
     } finally {
@@ -748,6 +780,10 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // runLadder's per-rung catch - fail the WHOLE arm with it so the outer handler returns an honest
       // cap_blocked, never a needs-review that concealed an unmetered downstream rung.
       if (capDenialInArm) throw capDenialInArm;
+      // DC-2: a non-cap chargeFailureInArm is deliberately NOT rethrown here (unlike capDenialInArm) -
+      // see chargeFailureInArm's doc comment above for why: every rung it blocked already recorded its
+      // own honest skip/miss reason, so the request still settles as a normal (if disappointing)
+      // needs_review instead of an uncaught throw the outer catch doesn't special-case.
     }
   };
 
@@ -1410,7 +1446,13 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     };
 
     // ---- Rung 1: Go-UPC (GTIN codes only; gated in buildLadderRungs) --------------------------------
-    const runGoUpc = async (): Promise<RungOutcome> => {
+    // DC-1 fix (2026-08-13, money-leak remediation): accepts the ladder's optional RunLadderContext,
+    // same widened signature as runGpt, so `ctx.signal` threads into the shared GoUpcGate. Without this,
+    // a call still queued behind the module-level, process-wide throttle when the ladder gave up on this
+    // rung would fire unaborted once the throttle finally released it - charging nothing (the arm was
+    // already disarmed) but still performing the real billed fetch. See goUpcThrottle.ts's `run()` doc
+    // comment for the drop mechanism.
+    const runGoUpc = async (ctx?: RunLadderContext): Promise<RungOutcome> => {
       // E2E MOCK MODE: live rungs are bypassed exactly like the legacy [mockProvider] path - E2E
       // resolves only via the GPT rung's zero-network mockGptLadder fixture (or falls to Needs Review).
       if (e2eMode()) return { settled: false, reason: "Go-UPC skipped (E2E mock mode)" };
@@ -1422,11 +1464,16 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         // a billed request is about to leave. Charging here instead of before the rung is what makes a
         // negative-cache hit or a capped month cost ZERO daily slots. If the charge itself fails, the
         // lookup never happens (runLadder records the rung error) - fail closed, no unmetered spend.
+        // DC-1: `deps.gate.run` (via goUpcRung's own `deps.signal` threading) drops this call BEFORE it
+        // ever reaches here when ctx.signal is already aborted, so chargeOnEgress can never fire for an
+        // abandoned rung's stale queued turn - and a call that DOES reach here is a genuine compute that
+        // must still be charged in full, exactly as before.
         client: async (c, d) => {
           await chargeOnEgress();
-          return goUpcLookup(c, d);
+          return goUpcLookup(c, { ...d, signal: ctx?.signal });
         },
         gate: goUpcGate,
+        signal: ctx?.signal,
         // GOD ACCOUNT: unlimited Go-UPC monthly cap for the platform owner (record() still fires inside
         // the rung, so subscription usage is still tracked - only the cap gate is lifted).
         usage: god ? goUpcUsage(ladderStore, { limit: Infinity }) : goUpcUsage(ladderStore),

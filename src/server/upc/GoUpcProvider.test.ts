@@ -208,6 +208,35 @@ describe("goUpcRung", () => {
     expect(storage.missWrites[0].key).toBe("00848983006257"); // canonicalGtin(FALKEN)
   });
 
+  it("DC2-2: an UNCONFIRMED miss (404 with ambiguous body) is NOT negative-cached, still records usage, falls through", async () => {
+    const storage = memStorage();
+    const usage = usageGate();
+    const deps = baseDeps({
+      storage,
+      usage,
+      client: vi.fn(async () => ({ kind: "miss", confident: false }) as GoUpcOutcome),
+    });
+    const r = await goUpcRung(FALKEN, deps);
+    expect(r.path).toBe("goupc_miss");
+    // The load-bearing assertion: an ambiguous/possibly-transient 404 must NOT poison the code for 30
+    // days the way a confident miss does.
+    expect(storage.missWrites).toHaveLength(0);
+    // The provider WAS called (a real egress happened) - it must still be metered.
+    expect(usage.records).toBe(1);
+  });
+
+  it("DC2-2: a CONFIDENT miss (404 with a well-formed body) IS negative-cached (unchanged happy path)", async () => {
+    const storage = memStorage();
+    const deps = baseDeps({
+      storage,
+      client: vi.fn(async () => ({ kind: "miss", confident: true }) as GoUpcOutcome),
+    });
+    const r = await goUpcRung(FALKEN, deps);
+    expect(r.path).toBe("goupc_miss");
+    expect(storage.missWrites).toHaveLength(1);
+    expect(storage.missWrites[0].entry.ttlDays).toBe(30);
+  });
+
   it("second call on a cached miss does NOT invoke the client within TTL", async () => {
     const canonical = "00848983006257";
     const storage = memStorage({
@@ -285,6 +314,77 @@ describe("goUpcRung", () => {
     expect(r.path).toBe("goupc_miss");
     expect(r.reason).toBe("not a GTIN / failed check digit");
     expect(client).not.toHaveBeenCalled();
+  });
+
+  it("DC2-1: a 200 response with NO usable identity fields (empty product) is a MISS, not a confident hit - usage still metered, never negative-cached", async () => {
+    const storage = memStorage();
+    const usage = usageGate();
+    const emptyHit: GoUpcOutcome = {
+      kind: "hit",
+      inferred: false,
+      product: {
+        name: "",
+        brand: "",
+        description: "",
+        imageUrl: "",
+        category: "",
+        specs: [],
+      },
+      raw: {},
+    };
+    const deps = baseDeps({ storage, usage, client: vi.fn(async () => emptyHit) });
+    const r = await goUpcRung(FALKEN, deps);
+    expect(r.path).toBe("goupc_miss");
+    expect(r.path).not.toBe("goupc_exact");
+    expect(r.decision).toBeUndefined();
+    // A real egress DID happen - the provider was called and answered 200 - so it must still be metered.
+    expect(usage.records).toBe(1);
+    // This is a provider-payload ambiguity, not a confirmed not-in-DB answer: never negative-cache it.
+    expect(storage.missWrites).toHaveLength(0);
+    expect(storage.archives).toHaveLength(0);
+  });
+
+  it("DC2-1: an INFERRED hit with no usable identity fields is ALSO a miss (not a needs_review suggestion)", async () => {
+    const emptyInferred: GoUpcOutcome = {
+      kind: "hit",
+      inferred: true,
+      product: { name: "", brand: "", description: "", imageUrl: "", category: "", specs: [] },
+      raw: {},
+    };
+    const deps = baseDeps({ client: vi.fn(async () => emptyInferred) });
+    const r = await goUpcRung(FALKEN, deps);
+    expect(r.path).toBe("goupc_miss");
+  });
+
+  it("DC2-1: does NOT over-correct - a legitimately terse but real name still counts as a usable hit", async () => {
+    const terseHit: GoUpcOutcome = {
+      kind: "hit",
+      inferred: false,
+      product: { name: "Go", brand: "", description: "", imageUrl: "", category: "", specs: [] },
+      raw: {},
+    };
+    const deps = baseDeps({ client: vi.fn(async () => terseHit) });
+    const r = await goUpcRung(FALKEN, deps);
+    expect(r.path).toBe("goupc_exact");
+  });
+
+  it("DC2-1: does NOT over-correct - a hit with brand/specs but no name still counts as usable (real identity fields present)", async () => {
+    const noNameHit: GoUpcOutcome = {
+      kind: "hit",
+      inferred: false,
+      product: {
+        name: "",
+        brand: "Falken",
+        description: "",
+        imageUrl: "",
+        category: "",
+        specs: [["Size", "265/70R17"]],
+      },
+      raw: {},
+    };
+    const deps = baseDeps({ client: vi.fn(async () => noNameHit) });
+    const r = await goUpcRung(FALKEN, deps);
+    expect(r.path).toBe("goupc_exact");
   });
 
   it("archive every N: with archiveEvery=200 a single hit is NOT archived", async () => {

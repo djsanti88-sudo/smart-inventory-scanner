@@ -120,4 +120,144 @@ describe("GoUpcGate", () => {
     await expect(p3).resolves.toBe("recovered");
     expect(ok).toHaveBeenCalledTimes(1);
   });
+
+  // DC-1 (2026-08-13 money-leak remediation): a caller can pass an AbortSignal so a call still waiting
+  // its turn in the shared queue when its owner gives up (e.g. the decode ladder's per-rung timeout)
+  // never fires `fn` - closing the "queued call fires unmetered after abandonment" leak.
+  describe("DC-1: abort-aware queued calls", () => {
+    it("never invokes fn when the signal is already aborted by the time this call's turn arrives", async () => {
+      const clock = makeClock();
+      const gate = new GoUpcGate({ minGapMs: 500, now: clock.now });
+      const controller = new AbortController();
+
+      const fn = vi.fn(async () => "should-never-run");
+      const p = gate.run("code-a", fn, controller.signal);
+      const expectation = expect(p).rejects.toThrow(/aborted|dropped/i);
+
+      // Abort before this call's slot is ever released.
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(0);
+
+      await expectation;
+      expect(fn).not.toHaveBeenCalled();
+    });
+
+    it("still invokes fn normally when the signal never aborts", async () => {
+      const clock = makeClock();
+      const gate = new GoUpcGate({ minGapMs: 0, now: clock.now });
+      const controller = new AbortController();
+
+      const fn = vi.fn(async () => "ran");
+      const p = gate.run("code-b", fn, controller.signal);
+      await vi.advanceTimersByTimeAsync(0);
+
+      await expect(p).resolves.toBe("ran");
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
+
+    it("preserves minGapMs spacing for a later caller even when an earlier queued call is dropped by abort", async () => {
+      const clock = makeClock();
+      const gate = new GoUpcGate({ minGapMs: 500, now: clock.now });
+      const controller = new AbortController();
+      controller.abort(); // already aborted before either call is queued
+
+      const dropped = vi.fn(async () => "dropped");
+      const second = vi.fn(async () => "second");
+      const startTimes: number[] = [];
+
+      const p1 = gate.run("code-c", dropped, controller.signal).catch(() => {});
+      const p2 = gate.run("code-d", async () => {
+        startTimes.push(clock.now());
+        return second();
+      });
+
+      async function tick(ms: number) {
+        clock.advance(ms);
+        await vi.advanceTimersByTimeAsync(ms);
+      }
+
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      await tick(500);
+
+      await Promise.all([p1, p2]);
+
+      expect(dropped).not.toHaveBeenCalled();
+      // The second call still had to wait its own spacing slot behind the (dropped) first slot -
+      // dropping fn does not collapse or skip the queue's timing for callers behind it.
+      expect(startTimes[0]).toBeGreaterThanOrEqual(500);
+    });
+  });
+
+  // DC-2 (2026-08-13, clean-room review follow-up): the dedup early-return used to hand every
+  // concurrent caller the literal SAME promise, which closed over only the FIRST caller's abort
+  // signal. If caller A aborted while queued, the shared promise rejected for EVERYONE, including
+  // caller B whose own signal never aborted - forcing B to fall through to the more expensive
+  // fetchv2/GPT rungs even though the cheap Go-UPC call it wanted was still perfectly viable.
+  describe("DC-2: one caller's abort must never poison a different caller's shared result", () => {
+    it("still resolves a second caller whose signal never aborts, even though the first caller aborted while queued", async () => {
+      const clock = makeClock();
+      const gate = new GoUpcGate({ minGapMs: 0, now: clock.now });
+      const controllerA = new AbortController();
+      const controllerB = new AbortController();
+
+      const fn = vi.fn(async () => "shared-result");
+      const pA = gate.run("same-key", fn, controllerA.signal);
+      const pB = gate.run("same-key", fn, controllerB.signal);
+      // Attach A's rejection expectation synchronously (before triggering the abort) so the rejection
+      // is never momentarily unhandled when the microtask queue flushes - same pattern the existing
+      // "rejects both waiters" test above uses.
+      const eA = expect(pA).rejects.toThrow(/aborted|abandoned/i);
+
+      // A gives up before its queued turn arrives; B never aborts.
+      controllerA.abort();
+
+      await vi.advanceTimersByTimeAsync(0);
+
+      await expect(pB).resolves.toBe("shared-result");
+      expect(fn).toHaveBeenCalledTimes(1);
+      // A's own abort still rejects A specifically - it just must not take B down with it.
+      await eA;
+    });
+
+    it("drops fn entirely only when EVERY registered caller for the key has aborted", async () => {
+      const clock = makeClock();
+      const gate = new GoUpcGate({ minGapMs: 0, now: clock.now });
+      const controllerA = new AbortController();
+      const controllerB = new AbortController();
+
+      const fn = vi.fn(async () => "should-never-run");
+      const pA = gate.run("both-abort", fn, controllerA.signal);
+      const pB = gate.run("both-abort", fn, controllerB.signal);
+      const eA = expect(pA).rejects.toThrow(/aborted|dropped|abandoned/i);
+      const eB = expect(pB).rejects.toThrow(/aborted|dropped|abandoned/i);
+
+      controllerA.abort();
+      controllerB.abort();
+
+      await vi.advanceTimersByTimeAsync(0);
+
+      await eA;
+      await eB;
+      expect(fn).not.toHaveBeenCalled();
+    });
+
+    it("a caller with no signal at all keeps the shared call alive even if every signaled caller aborts", async () => {
+      const clock = makeClock();
+      const gate = new GoUpcGate({ minGapMs: 0, now: clock.now });
+      const controllerA = new AbortController();
+
+      const fn = vi.fn(async () => "kept-alive");
+      const pA = gate.run("mixed", fn, controllerA.signal).catch(() => {}); // A's own abort is expected; not under test here
+      const pB = gate.run("mixed", fn); // no signal - never voluntarily gives up
+      void pA;
+
+      controllerA.abort();
+
+      await vi.advanceTimersByTimeAsync(0);
+
+      await expect(pB).resolves.toBe("kept-alive");
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
+  });
 });
