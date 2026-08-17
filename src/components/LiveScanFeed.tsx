@@ -486,7 +486,16 @@ export function LiveScanFeed() {
                     <td className="px-4 py-3 font-mono text-sm" data-testid={`feed-part-number-${e.id}`}>
                       {displaySku}
                     </td>
-                    <td className="px-4 py-3 tabular-nums">{e.status === "known" ? e.quantityAfterScan : "-"}</td>
+                    {/* UI-1 FIX (2026-08-13, loop1-ui.md): a resolved row (identity settled via Needs
+                        Review) has ALREADY counted - ensureProvisionalCount counted it synchronously at
+                        scan time, per the TOP-LEVEL LAW - and resolveUnknown keeps quantityAfterScan in
+                        sync with the finalCounts ledger through resolution (including orphan merges into
+                        an existing product). Gating the display on status === "known" alone hid that real,
+                        ledger-correct quantity behind a blank "-" the moment a code moved to "resolved",
+                        which reads as "this didn't count" to a shop owner even though it did. */}
+                    <td className="px-4 py-3 tabular-nums" data-testid={`feed-qty-${e.id}`}>
+                      {e.status === "known" || e.status === "resolved" ? e.quantityAfterScan : "-"}
+                    </td>
                     <td className="px-4 py-3">
                       {e.decodeStatus && e.decodeStatus !== "none" ? (
                         <DecodeStatusBadge status={e.decodeStatus} provenance={e.provenance} />

@@ -245,6 +245,29 @@ describe("LiveScanFeed - suggested identity over provisional placeholder (Task 3
   });
 });
 
+// UI-1 FIX (2026-08-13, docs/superpowers/reports/2026-08-13-loop1-ui.md): resolveUnknown flips a
+// scanned-unknown code's feed row to status "resolved" once it is settled via Needs Review. The row
+// already counted (TOP-LEVEL LAW: ensureProvisionalCount counts synchronously at scan time), so its
+// "Qty on hand" cell must keep showing the real, ledger-correct quantity - never regress to "-", which
+// falsely reads as "this scan didn't count" even though FinalCountTable/session totals are correct.
+describe("LiveScanFeed - Qty on hand for resolved rows (UI-1)", () => {
+  it("shows the real quantity for a resolved row instead of a blank dash", () => {
+    const code = "0866990000789";
+    const product = { ...provisionalProduct("prodResolved", code), provisional: false, verified: true, name: "Michelin Defender LTX M/S 275/60R20" } as unknown as Product;
+    const event = {
+      ...baseEvent(code, "prodResolved"),
+      status: "resolved",
+      resolverStatus: "resolved",
+      quantityAfterScan: 3,
+    } as unknown as ScanEvent;
+    useScanStore.setState({ scanFeed: [event], needsReviewQueue: [], products: [product], finalCounts: [] });
+
+    render(<LiveScanFeed />);
+
+    expect(screen.getByTestId("feed-qty-ev1").textContent?.trim()).toBe("3");
+  });
+});
+
 // Owner order 2026-07-10: a scanned tire's BRAND must be visible on the feed, matching the counts
 // table's prettifyBrand treatment. Real product brand wins; a still-provisional row falls back to the
 // decode suggestion's brand.
