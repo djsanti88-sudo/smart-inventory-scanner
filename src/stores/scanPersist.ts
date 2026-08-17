@@ -60,9 +60,20 @@ export function persistAccessLevel(userId: string | null): AccessLevel {
 const SYNCED_SCAN_ID_CAP = 1000;
 const FEEDBACK_EVENT_PERSIST_CAP = 500;
 
-/** Keep only the last `cap` entries of an append-only array (newest retained). Pure. */
+/** Keep only the last `cap` entries of an append-only array (newest retained). Pure.
+ *  Defensive (2026-08-16, TOP-LEVEL LAW class fix): `partialize` runs on EVERY set(), including one
+ *  that happens to run before scanStore's own shape sanitizer has had a chance to repair a corrupted
+ *  live field (e.g. a raw test/defect path that force-writes a wrong-shape value directly into the
+ *  store). A non-array input must never throw out of persistence - it degrades to [] instead. */
 function capTail<T>(arr: T[], cap: number): T[] {
+  if (!Array.isArray(arr)) return [];
   return arr.length > cap ? arr.slice(arr.length - cap) : arr;
+}
+
+/** Same defensive contract as capTail, for array fields that are not capped. A non-array input
+ *  degrades to [] instead of throwing out of `.map()`/`.filter()` below. */
+function safeArray<T>(arr: T[]): T[] {
+  return Array.isArray(arr) ? arr : [];
 }
 
 /**
@@ -85,48 +96,48 @@ export function buildPersistedScanState(
     sessionId: s.sessionId,
     currentSession: s.currentSession,
     location: s.location,
-    recentLocations: s.recentLocations,
+    recentLocations: safeArray(s.recentLocations),
     settings: s.settings,
-    pendingSyncQueue: s.pendingSyncQueue,
+    pendingSyncQueue: safeArray(s.pendingSyncQueue),
     // #16: bounded diagnostic dedup ledger (not customer data - see cap note above).
     syncedScanEventIds: capTail(s.syncedScanEventIds, SYNCED_SCAN_ID_CAP),
     simulateSyncFailure: s.simulateSyncFailure,
     // Task 3.5: snapshot lines are already the product-facing shape (productId, name, qty - no raw
     // codes), the same fields a customer already sees in finalCounts, so this is safe for every role.
-    countSnapshots: s.countSnapshots,
+    countSnapshots: safeArray(s.countSnapshots),
     // P6 C2: a single ISO timestamp, no codes/identities - safe for every role (drives the /scan
     // first-run banner across reloads).
     firstScanAt: s.firstScanAt,
     // Owner feature (2026-07-22): session history is the shop's own scan history (a shop's scans are
     // their data, so it persists at BOTH access levels). Rows carry only { time, code, productName,
     // quantityDelta } - no cost/price/margin fields exist on this shape, so it is safe at every level.
-    sessionHistory: s.sessionHistory,
+    sessionHistory: safeArray(s.sessionHistory),
   };
   if (level === "platform") {
     return {
       ...base,
-      products: s.products,
-      aliases: s.aliases,
-      scanFeed: s.scanFeed,
-      finalCounts: s.finalCounts,
-      needsReviewQueue: s.needsReviewQueue,
+      products: safeArray(s.products),
+      aliases: safeArray(s.aliases),
+      scanFeed: safeArray(s.scanFeed),
+      finalCounts: safeArray(s.finalCounts),
+      needsReviewQueue: safeArray(s.needsReviewQueue),
       lastCleanupBackup: s.lastCleanupBackup,
-      catalog: s.catalog,
-      shopOverrides: s.shopOverrides,
+      catalog: safeArray(s.catalog),
+      shopOverrides: safeArray(s.shopOverrides),
       // #16: bounded diagnostic event log (private, local; not customer inventory data).
       feedbackEvents: capTail(s.feedbackEvents as unknown[], FEEDBACK_EVENT_PERSIST_CAP),
     };
   }
   return {
     ...base,
-    products: s.products.map((p) => sanitizeProduct(p, "business")),
-    finalCounts: s.finalCounts.map((c) => ({ ...c, aliasesSeen: [] })),
+    products: safeArray(s.products).map((p) => sanitizeProduct(p, "business")),
+    finalCounts: safeArray(s.finalCounts).map((c) => ({ ...c, aliasesSeen: [] })),
     // P1 (2026-06-22): a customer MUST keep their own pending Needs-Review items + scan feed across a
     // reload (otherwise their unfinished work is lost and can never be approved/counted). Persist a
     // SANITIZED copy: only act-on-it fields + the user's own cleanCode; every provider/decode internal and
     // every OTHER reusable code is stripped (sanitizeReview/sanitizeScanEvent), so no reusable alias/catalog
     // data reaches disk.
-    needsReviewQueue: (s.needsReviewQueue as Array<Record<string, unknown>>).map((r) => sanitizeReview(r, "business")),
-    scanFeed: (s.scanFeed as Array<Record<string, unknown>>).map((e) => sanitizeScanEvent(e, "business")),
+    needsReviewQueue: safeArray(s.needsReviewQueue as Array<Record<string, unknown>>).map((r) => sanitizeReview(r, "business")),
+    scanFeed: safeArray(s.scanFeed as Array<Record<string, unknown>>).map((e) => sanitizeScanEvent(e, "business")),
   };
 }
