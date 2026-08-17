@@ -14,7 +14,11 @@
 
 export type GoUpcOutcome =
   | { kind: "hit"; inferred: boolean; product: GoUpcProduct; raw: unknown }
-  | { kind: "miss" } // 404: genuine not-in-DB
+  // 404. `confident` distinguishes a genuine provider answer (well-formed JSON body) from an
+  // ambiguous one (empty/non-JSON body, indistinguishable from an outage/error page) - DC2-2
+  // (2026-08-13): a bare 404 alone is not proof the code is really not in the provider's DB.
+  // Omitted/undefined is treated as confident (legacy callers/tests that never set it).
+  | { kind: "miss"; confident?: boolean } // 404: not-in-DB (confident) or ambiguous (not confident)
   | { kind: "bad_format" } // 400
   | { kind: "auth_failed" } // 401
   | { kind: "quota" } // 429
@@ -68,18 +72,25 @@ function toProduct(raw: unknown): GoUpcProduct {
 
 export async function goUpcLookup(
   code: string,
-  deps: { apiKey: string; fetchImpl?: typeof fetch; timeoutMs?: number },
+  deps: { apiKey: string; fetchImpl?: typeof fetch; timeoutMs?: number; signal?: AbortSignal },
 ): Promise<GoUpcOutcome> {
   const doFetch = deps.fetchImpl ?? fetch;
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const url = `${GO_UPC_BASE}/${encodeURIComponent(code)}`;
+  // DC-1 fix (2026-08-13): thread the ladder rung's externally-passed abort signal (when given) in
+  // ALONGSIDE this function's own internal timeoutMs cap - same AbortSignal.any combinator pattern
+  // gptFromScratch.ts/pageFetch.ts already use. By the time this actually fires, GoUpcGate.run has
+  // already decided NOT to drop the call (see goUpcThrottle.ts), so a charge has already happened at
+  // the caller; this only cancels the in-flight HTTP request itself if the ladder gives up mid-flight.
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const fetchSignal = deps.signal ? AbortSignal.any([deps.signal, timeoutSignal]) : timeoutSignal;
 
   let res: Response;
   try {
     res = await doFetch(url, {
       method: "GET",
       headers: { Authorization: `Bearer ${deps.apiKey}` },
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: fetchSignal,
     });
   } catch (err) {
     const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
@@ -87,8 +98,19 @@ export async function goUpcLookup(
   }
 
   switch (res.status) {
-    case 404:
-      return { kind: "miss" };
+    case 404: {
+      // DC2-2 (2026-08-13): read the body to tell a genuine "not found" answer from an ambiguous
+      // one (empty body, non-JSON, unexpected shape - e.g. an outage page or a load-balancer error
+      // fronting the real API). Only a body that actually parses as JSON counts as confident; the
+      // parsed value itself is not otherwise inspected (Go-UPC's 404 error shape is not contractually
+      // specified, so we don't guess at required fields - "it is JSON, not garbage" is the bar).
+      try {
+        await res.json();
+        return { kind: "miss", confident: true };
+      } catch {
+        return { kind: "miss", confident: false };
+      }
+    }
     case 400:
       return { kind: "bad_format" };
     case 401:

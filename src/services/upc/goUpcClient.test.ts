@@ -87,6 +87,26 @@ describe("goUpcLookup", () => {
     expect(out.kind).toBe("miss");
   });
 
+  // DC2-2 (2026-08-13): a bare 404 is indistinguishable from provider flakiness unless we look at the
+  // body. A well-formed JSON error body reads as a genuine provider answer -> confident negative.
+  it("404 with a well-formed JSON body -> miss, confident: true (genuine provider answer)", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(404, { error: "not found" }, false));
+    const out = await goUpcLookup(CODE, { apiKey: KEY, fetchImpl });
+    expect(out.kind).toBe("miss");
+    if (out.kind !== "miss") throw new Error("expected miss");
+    expect(out.confident).toBe(true);
+  });
+
+  // A 404 with an empty/non-JSON body (outage page, load balancer error page, truncated response) is
+  // NOT distinguishable from a genuine "not in DB" answer -> must NOT be trusted as a confident negative.
+  it("404 with an empty/non-JSON body -> miss, confident: false (possibly transient, not a genuine answer)", async () => {
+    const fetchImpl = vi.fn(async () => textOnlyResponse(404, ""));
+    const out = await goUpcLookup(CODE, { apiKey: KEY, fetchImpl });
+    expect(out.kind).toBe("miss");
+    if (out.kind !== "miss") throw new Error("expected miss");
+    expect(out.confident).toBe(false);
+  });
+
   it("400 -> bad_format", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse(400, { error: "bad" }, false));
     const out = await goUpcLookup(CODE, { apiKey: KEY, fetchImpl });
