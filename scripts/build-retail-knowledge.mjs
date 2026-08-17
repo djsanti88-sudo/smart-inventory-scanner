@@ -7,7 +7,7 @@
 // Output: src/server/retail-knowledge/retailKnowledge.generated.json (~compact, barcode-keyed)
 //         src/server/retail-knowledge/retailKnowledge.generated.meta.json (stats)
 
-import { createReadStream, writeFileSync, mkdirSync, renameSync, readFileSync, existsSync } from "node:fs";
+import { createReadStream, writeFileSync, mkdirSync, renameSync, readFileSync, existsSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 
@@ -25,14 +25,40 @@ const FORCE = process.argv.includes("--force");
 mkdirSync(OUT_DIR, { recursive: true });
 
 /**
+ * Does the meta file's recorded state actually describe the index file currently on disk?
+ * (DT2-2, 2026-08-13.) The two-file write (index renamed, then meta renamed -- see the atomic
+ * write at the bottom of this file) means an interrupted run between those two renames leaves a
+ * STALE meta paired with a NEWER index: the meta's `index_size_bytes` no longer matches the
+ * index's actual current byte size, and -- since meta is always written strictly AFTER the index
+ * finishes in a healthy run -- the index's mtime ends up NEWER than the meta's mtime, an inverted
+ * ordering that never happens in a normal completed run. Either signal alone is enough to call the
+ * meta stale; trusting a rotted meta as the shrink guard's baseline would silently weaken the very
+ * guard DT-1b exists to provide.
+ */
+function metaDescribesCurrentIndex(meta) {
+  if (!existsSync(OUT_JSON)) return false;
+  try {
+    const indexStat = statSync(OUT_JSON);
+    if (typeof meta.index_size_bytes === "number" && meta.index_size_bytes !== indexStat.size) return false;
+    if (existsSync(OUT_META) && indexStat.mtimeMs > statSync(OUT_META).mtimeMs) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Barcode count of the index already on disk, or null when there is none (bootstrap).
- * Prefers the tiny meta file over parsing the ~259MB index.
+ * Prefers the tiny meta file over parsing the ~259MB index, but only when the meta actually
+ * describes the index that is currently on disk (DT2-2) -- otherwise falls back to counting the
+ * real index directly rather than trusting a baseline that may have silently rotted.
  */
 function priorBarcodeCount() {
   try {
     if (existsSync(OUT_META)) {
-      const n = JSON.parse(readFileSync(OUT_META, "utf8")).unique_barcodes;
-      if (Number.isFinite(n) && n > 0) return n;
+      const meta = JSON.parse(readFileSync(OUT_META, "utf8"));
+      const n = meta.unique_barcodes;
+      if (Number.isFinite(n) && n > 0 && metaDescribesCurrentIndex(meta)) return n;
     }
   } catch { /* fall through to the index itself */ }
   try {
@@ -162,12 +188,19 @@ const meta = {
   skipped_example_or_test: skippedExampleOrTest,
   conflicts,
   index_file: "retailKnowledge.generated.json",
+  // DT2-2 (2026-08-13): the byte size of the index this meta describes, so a future run's shrink
+  // guard can detect a meta left stale by an interrupted rename pair (see metaDescribesCurrentIndex
+  // above) instead of silently trusting a rotted baseline.
+  index_size_bytes: statSync(tmpJson).size,
 };
 writeFileSync(tmpMeta, JSON.stringify(meta, null, 2) + "\n");
 
+// Back-to-back, nothing else running between them (DT2-1 pattern applied here too): the index is
+// renamed first (it is what the app actually reads at runtime), then the meta. A crash in this gap
+// leaves an old meta paired with a new index -- detected on the NEXT run by
+// metaDescribesCurrentIndex() above, not trusted silently.
 renameSync(tmpJson, OUT_JSON);
 renameSync(tmpMeta, OUT_META);
 
-import { statSync as statSyncFs } from "node:fs";
-const sizeBytes = statSyncFs(OUT_JSON).size;
+const sizeBytes = statSync(OUT_JSON).size;
 console.log(`[build-retail-knowledge] OK ${valid} products, index ${(sizeBytes / 1e6).toFixed(1)}MB`);

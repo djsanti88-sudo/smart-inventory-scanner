@@ -15,9 +15,12 @@ import { braveProvider, firecrawlSearchProvider, type MinimalFetch } from "../sr
 import { firecrawlKeysFromEnv } from "../src/services/ai/firecrawlProvider";
 import { isSafePublicUrl } from "../src/services/ai/urlSafety";
 import { selectBarcodeUrls } from "../src/services/ai/barcodeSources";
+import { requireLiveApproval } from "./lib/paidScriptGuard.mjs";
 
-const LIVE = process.argv.includes("--live");
-if (!LIVE) { console.error("web benchmark makes live FREE web calls; pass --live to confirm"); process.exit(1); }
+requireLiveApproval({
+  worstCaseFloorUsd: 200 * 0.015, // MAX_FC_CREDITS default (200) x rough $/credit placeholder for the dry-run description only
+  describe: () => "Would run the Fetch V2 web-only benchmark (Brave discovery + capped Firecrawl fallback) over the 150-code fixture.",
+});
 const LIMIT = Number(process.argv.find((a) => a.startsWith("--limit="))?.slice(8) ?? 0) || Infinity;
 const RUN2 = process.argv.includes("--run2"); // stratified 50-code re-test after the guard fixes
 const CODES = process.argv.find((a) => a.startsWith("--codes="))?.slice(8).split(",").map((s) => s.trim()).filter(Boolean);

@@ -16,11 +16,20 @@
 //
 // Integrity rule (task brief): hits the real route via fetch(), never rung functions directly.
 //
-// Usage: node scripts/proof-rung-goupc.mjs [--port=3106] [--base-url=http://localhost:3106]
+// GATED (owner incident 2026-08-13, TL2-1 re-verification): this script spawns a REAL `next dev`
+// server using REAL .env.local keys and spends real Go-UPC quota (plus possibly GPT). A bare
+// `node scripts/proof-rung-goupc.mjs` used to do this immediately with no flag at all - unlike its
+// siblings (proof-rung-3-fetchv2.mjs, proof-rung-4-gpt.mjs) it had no --live gate whatsoever.
+// Reading .env.local here is legitimate (launching the actual app, the only thing allowed to use
+// its own Lane 2 keys) - the missing piece was the gate itself, via scripts/lib/paidScriptGuard.mjs.
+//
+// Usage: node scripts/proof-rung-goupc.mjs --live --yes-i-accept-cost [--port=3106] [--base-url=http://localhost:3106]
+// Bare invocation (no --live) prints this run's worst-case cost floor and exits 0, $0 spent.
 import { readFileSync, writeFileSync, appendFileSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { requireLiveApproval } from "./lib/paidScriptGuard.mjs";
 
 const require = createRequire(import.meta.url);
 
@@ -120,6 +129,11 @@ async function readGoUpcUsageCounter(envLocal) {
 }
 
 async function main() {
+  requireLiveApproval({
+    worstCaseFloorUsd: 1.5, // 10 Go-UPC lookups (near-$0 metered) + GPT actuals reserve, same order as sibling rungs
+    describe: () => "Would spawn a real \"next dev\" server with REAL .env.local keys and run 15 codes (10 known-good GTIN + 5 non-GTIN) through the live decode ladder, spending real Go-UPC quota and possibly GPT.",
+  });
+
   const envLocal = loadEnvLocal();
   if (!envLocal.GO_UPC_API_KEY) {
     console.error("GO_UPC_API_KEY missing from .env.local -- cannot run rung 2 (needs real keys).");

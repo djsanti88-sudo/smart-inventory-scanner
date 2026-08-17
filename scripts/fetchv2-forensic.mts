@@ -1,6 +1,8 @@
 // FORENSIC single-code tracer: runs the EXACT benchmark deps but logs every pipeline stage -
 // candidates per provider, snippet findings, junk verdicts, page evidence, final decision.
-// Usage: npx tsx scripts/fetchv2-forensic.mts CODE1,CODE2,...
+// GATED (owner incident 2026-08-13, TL2-1 re-verification): this script had NO flag at all - a bare
+// `npx tsx scripts/fetchv2-forensic.mts CODE` immediately spent real Brave/Firecrawl credits.
+// Usage: npx tsx scripts/fetchv2-forensic.mts --live --yes-i-accept-cost CODE1,CODE2,...
 import { readFileSync } from "node:fs";
 import { braveProvider, firecrawlSearchProvider, type MinimalFetch, type DiscoveryCandidate } from "../src/services/fetchV2/sources/discovery";
 import { snippetFindings } from "../src/services/fetchV2/pageEvidence/snippetEvidence";
@@ -9,6 +11,12 @@ import { classifyIdentifier } from "../src/services/fetchV2/classify";
 import { normalizeVariants } from "../src/services/fetchV2/normalize";
 import { fetchV2, type FetchV2Deps } from "../src/services/fetchV2/index";
 import { firecrawlKeysFromEnv } from "../src/services/ai/firecrawlProvider";
+import { requireLiveApproval } from "./lib/paidScriptGuard.mjs";
+
+requireLiveApproval({
+  worstCaseFloorUsd: 1.0,
+  describe: () => `Would trace ${(process.argv[2] ?? "").split(",").filter(Boolean).length || "the given"} code(s) through Fetch V2 (Brave + Firecrawl), spending real discovery credits.`,
+});
 
 const env = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
 for (const line of env.split(/\r?\n/)) {

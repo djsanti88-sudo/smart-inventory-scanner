@@ -7,10 +7,13 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { gptFromScratch, GPT_LADDER_WORST_CASE_USD, type GptFromScratchResult } from "../src/services/ai/gptFromScratch";
 import { shouldRunGptRung } from "../src/services/ai/gptLadderRung";
 import { detectCodeType } from "../src/services/codeTypeDetector";
+import { requireLiveApproval } from "./lib/paidScriptGuard.mjs";
 
-const LIVE = process.argv.includes("--live");
-if (!LIVE) { console.error("live GPT-5.5 spend; pass --live to confirm"); process.exit(1); }
 const HARD_CAP_USD = 7.0;
+requireLiveApproval({
+  worstCaseFloorUsd: HARD_CAP_USD,
+  describe: () => `Would run the live GPT-5.5 ladder proof (canaries + 53-code fetchV2 residue), hard-capped at $${HARD_CAP_USD}.`,
+});
 const OUT = new URL("./gpt-ladder-live-results.json", import.meta.url);
 
 // .env.local -> process.env (values never logged)

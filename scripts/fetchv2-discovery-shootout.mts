@@ -14,8 +14,15 @@ import { isJunkSourceUrl, classifySource, TIER_RANK, hostOf } from "../src/servi
 import { urlPreferenceScore, firecrawlKeysFromEnv, type FcFetch } from "../src/services/ai/firecrawlProvider";
 import { isSafePublicUrl } from "../src/services/ai/urlSafety";
 import { detectCodeType } from "../src/services/codeTypeDetector";
+import { requireLiveApproval } from "./lib/paidScriptGuard.mjs";
 
-const LIVE = process.argv.includes("--live");
+const LIVE_REQUESTED = process.argv.includes("--live");
+// Bare invocation stays MOCK mode ($0, zero network) as before; only the ACTUAL --live spend path
+// additionally requires --yes-i-accept-cost.
+const LIVE = LIVE_REQUESTED && requireLiveApproval({
+  worstCaseFloorUsd: 3, // MAX_EST_CREDITS/MAX_BRAVE_QUERIES-bounded; rough placeholder for the dry-run description only
+  describe: () => "Would run the Fetch V2 discovery-provider shootout (Brave/Firecrawl) LIVE against configured providers.",
+}).live;
 const SKIP_FC = process.argv.includes("--skip-firecrawl"); // Brave-only validation: $0, no credits
 const OUT_DIR = new URL("../reports/discovery-shootout/2026-07-04/", import.meta.url);
 const OUT_JSON = new URL(LIVE ? (SKIP_FC ? "results-brave.json" : "results.json") : "results-mock.json", OUT_DIR);

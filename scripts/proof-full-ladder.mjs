@@ -34,14 +34,23 @@
 // Integrity rule (same as rungs 1-4): hits the REAL route via fetch(), never rung functions
 // directly. Politeness: fully sequential, no retry-spam -- a provider error is an outcome.
 //
+// GATED (owner incident 2026-08-13, TL2-1): this script spawns a REAL `next dev` server using REAL
+// .env.local keys and drives it through 60 codes that can spend real Go-UPC/Firecrawl/GPT money.
+// A bare `node scripts/proof-full-ladder.mjs` used to do this immediately with no flag at all.
+// Reading .env.local here is legitimate (the script is launching the actual app, which is the ONLY
+// thing allowed to use its own Lane 2 keys) - the missing piece was the --live/--yes-i-accept-cost
+// GATE itself, via scripts/lib/paidScriptGuard.mjs.
+//
 // Usage:
-//   node scripts/proof-full-ladder.mjs                  fresh run
-//   node scripts/proof-full-ladder.mjs --resume          continue an interrupted run
-//   node scripts/proof-full-ladder.mjs --port=3110       custom port
+//   node scripts/proof-full-ladder.mjs --live --yes-i-accept-cost                  fresh run
+//   node scripts/proof-full-ladder.mjs --live --yes-i-accept-cost --resume         continue an interrupted run
+//   node scripts/proof-full-ladder.mjs --live --yes-i-accept-cost --port=3110      custom port
+// Bare invocation (no --live) prints this run's worst-case cost floor and exits 0, $0 spent.
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { requireLiveApproval } from "./lib/paidScriptGuard.mjs";
 
 const require = createRequire(import.meta.url);
 
@@ -267,7 +276,16 @@ function gradeVsTruth(productName, truth, expected) {
   return "MISMATCH_CANDIDATE";
 }
 
+const WORST_CASE_FLOOR_USD = GOUPC_CAP_REMAINING * 0 /* Go-UPC lookups are not per-token billed here */
+  + FIRECRAWL_CREDIT_CAP * 0.005 /* rough $/credit placeholder for the dry-run description only */
+  + GPT_DAILY_CAP_USD;
+
 async function main() {
+  requireLiveApproval({
+    worstCaseFloorUsd: WORST_CASE_FLOOR_USD,
+    describe: () => `Would spawn a real "next dev" server with REAL .env.local keys and run 60 codes (Group A/B/C) through the live decode ladder. Caps: Go-UPC <= ${GOUPC_CAP_REMAINING} lookups, Firecrawl <= ${FIRECRAWL_CREDIT_CAP} credits worst-case, GPT-5.5 <= $${GPT_DAILY_CAP_USD}/day guard.`,
+  });
+
   const dbPath = path.join(process.cwd(), "src", "server", "knowledge.generated.db");
   if (!existsSync(dbPath)) { console.error(`knowledge DB not found at ${dbPath}`); process.exit(1); }
 
