@@ -24,6 +24,10 @@ export default defineConfig({
     "**/boss-barcode-preview/**",
     "**/household-decode-test.spec.ts",
     "**/seed.spec.ts",
+    // Requires NEXT_PUBLIC_E2E_AUTH_BYPASS to be OFF (a real, non-bypass /scan load) to prove anything -
+    // this config's webServer always sets it to "1", which would make the spec's RED-proof assertions
+    // fail here for the wrong reason (bypass on, not the defect). Run via playwright.no-bypass.config.ts.
+    "**/scan-sync-visibility.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,
