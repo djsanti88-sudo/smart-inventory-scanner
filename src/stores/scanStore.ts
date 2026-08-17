@@ -12,6 +12,7 @@ import type {
   PendingSyncItem,
   Product,
   ProvenanceTier,
+  ResolverResult,
   ScanEvent,
   Settings,
   SyncOperation,
@@ -929,11 +930,20 @@ export interface ScanState {
    *  code is counted under: the already-counted product on the idempotent-hit path, else the freshly
    *  minted provisional's id. markWrong depends on this return to target the CORRECT provisional when
    *  the marked-wrong product is itself a provisional sharing the same primaryBarcode (Task 9 finding:
-   *  an unordered products.find could pick the OLD provisional and inflate the total). */
+   *  an unordered products.find could pick the OLD provisional and inflate the total).
+   *  `opts.verifyEventId` (FINDING 2, Codex clean-room review, 2026-08-16): the "already counted for
+   *  this code" idempotent shortcut is normally correct - repeat scans/enrichment calls for a code that
+   *  is already counted must be a no-op. But the Layer C recovery fallback (processScan's outer catch)
+   *  calls this AFTER an unexpected throw, when it cannot trust that ANY existing count for this code
+   *  actually includes THIS physical scan's own event - the ledger entry that made the shortcut fire
+   *  could be exactly the corrupted/stale record that caused the throw in the first place. When
+   *  `verifyEventId` is set, the shortcut only fires if that id is actually present in the matched
+   *  product's ledger row; otherwise this call force-counts the scan against the SAME product (never
+   *  minting a duplicate product row for a code that already has one). */
   ensureProvisionalCount: (
     code: string,
     reason: string,
-    opts?: { freshTransferKeys?: boolean; countIfFeedMissing?: boolean },
+    opts?: { freshTransferKeys?: boolean; countIfFeedMissing?: boolean; verifyEventId?: string },
   ) => string;
   /** F5 bundle-surgery (wave 2, 2026-07-20): fire-and-forget enrichment for a provisional row's bare
    *  "Unidentified item (...)" label. Called AFTER the row already appears + counts (never before -
@@ -1675,6 +1685,30 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       trustedExactProbes.clear();
       trustedExactProbeIdsByCode.clear();
       trustedExactConfigGapReviewIds.clear();
+    };
+
+    // LAYER B (persist-corruption defect, 2026-08-13): defense in depth for processScan, see its call
+    // site. Reuses the same field list + coercion rule as sanitizePersistedScanShape (LAYER A, the
+    // persist `merge` sanitizer) but operates on the LIVE store state via get()/set(), so a wrong-shape
+    // value that reached state through any path other than rehydration (test setup, a future bug) is
+    // still repaired in place before it can throw inside resolveScan/ensureProvisionalCount/etc.
+    // Idempotent and cheap when the state is already well-shaped (the overwhelmingly common case): no
+    // fields differ, so no set() call happens at all. Returns the names of any field that had to be
+    // fixed, for the caller's own log message.
+    const sanitizeLiveScanStateShape = (): string[] => {
+      const current = get();
+      const sanitized = sanitizePersistedScanShape(current as unknown as Record<string, unknown>);
+      // Every field the shared shape table knows about (array container, array member, object, or
+      // nullable-object) - not just the array-shaped ones - so a wrong-shape `settings`/`currentSession`/
+      // `lastCleanupBackup` is repaired here too, not only wrong-shape collections.
+      const candidateFields = Object.keys(PERSISTED_FIELD_SHAPES);
+      const fixed = candidateFields.filter(
+        (field) => (current as unknown as Record<string, unknown>)[field] !== sanitized[field],
+      );
+      if (fixed.length > 0) {
+        set(Object.fromEntries(fixed.map((field) => [field, sanitized[field]])) as Partial<ScanState>);
+      }
+      return fixed;
     };
 
     const enqueueAndSync = (items: PendingSyncItem[]) => {
@@ -3175,6 +3209,22 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       processScan: (rawInput) => {
+        // LAYER C / OUTER SAFETY NET (third-review hardening, 2026-08-16; widened FOURTH-review,
+        // 2026-08-16): LAYER A (persist merge) and LAYER B (sanitizeLiveScanStateShape, just below)
+        // close every KNOWN wrong-shape variant found so far. But a reviewer has now found this class
+        // of bug FOUR times - the only way to guarantee the TOP-LEVEL LAW against a still-unknown
+        // variant is to make processScan itself structurally incapable of letting a throw escape
+        // without first committing a safe row. FINDING 1 (independent Codex clean-room review,
+        // 2026-08-16): the try used to start AFTER session initialization (ensureAutoSession, which
+        // calls getOrCreateDeviceId -> raw localStorage.getItem/setItem) - a throw there (Safari private
+        // mode, blocked cookies, full quota) escaped processScan entirely with no Layer C log, no
+        // fallback row, no count. The try now starts at the very top of this action so NOTHING in its
+        // synchronous body - including session init - sits outside the safety net. `cleanedCaught` and
+        // `scanEventIdCaught` are hoisted `let`s (assigned inside the try, never re-declared) purely so
+        // the catch can still identify which physical scan needs recovering.
+        let cleanedCaught: ReturnType<typeof cleanScanCode> | undefined;
+        let scanEventIdCaught: string | undefined;
+        try {
         // TOP-LEVEL LAW / Phase 3 defect F1: a scanned code must ALWAYS appear on the feed and count,
         // even when the current session is locked (owner PIN) or completed (Finish). Those guards
         // decide the session's own frozen/read-only status; they must never make a physical scan
@@ -3190,12 +3240,54 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const scanLocation = get().location;
         const scanDeviceId = get().deviceId;
         const cleaned = cleanScanCode(rawInput);
+        cleanedCaught = cleaned;
         if (!cleaned.cleanCode) return null;
 
+        // LAYER B (persist-corruption defect, 2026-08-13): defense in depth alongside LAYER A's persist
+        // `merge` sanitizer above. `ensureProvisionalCount`'s ordering already enforces the TOP-LEVEL
+        // LAW that every scan appears + counts - but that guarantee only holds if nothing BEFORE (or
+        // called FROM) it can throw. `products`/`aliases` are filtered/mapped/found across the resolver,
+        // the alias matcher, AND ensureProvisionalCount itself (all reading live store state via get()),
+        // so a wrong-shape value reaching this far - from any future path, not just the persist boundary
+        // LAYER A already closes - would throw somewhere in that chain and silently drop the scan.
+        // Sanitize the STORE STATE itself (not just a local copy) so every subsequent get() in this
+        // call, including nested action calls like ensureProvisionalCount, sees well-shaped data too.
+        // Loudly logged, never silently swallowed.
+        const stateShapeIssues = sanitizeLiveScanStateShape();
+        if (stateShapeIssues.length > 0) {
+          console.error(
+            `[scanStore] processScan: store state had wrong-shape field(s) (${stateShapeIssues.join(", ")}); ` +
+              `reset to [] so this scan still appears and counts (TOP-LEVEL LAW).`,
+          );
+        }
         const { products, aliases, businessId, sessionId } = get();
         // Deterministic resolver only. AI is never consulted here. Known requires verified/approved.
-        const resolution = resolveScan(cleaned, products, aliases, businessId);
+        // Wrapped: any unexpected throw inside resolution degrades this scan to "unidentified" (still
+        // appears + counts via the needs_review path below) instead of propagating out of processScan
+        // and silently dropping the row.
+        let resolution: ResolverResult;
+        try {
+          resolution = resolveScan(cleaned, products, aliases, businessId);
+        } catch (err) {
+          console.error(
+            `[scanStore] resolveScan threw for code '${cleaned.cleanCode}'; degrading to unidentified ` +
+              `so the scan still appears and counts (TOP-LEVEL LAW).`,
+            err,
+          );
+          resolution = {
+            rawCode: cleaned.rawCode,
+            cleanCode: cleaned.cleanCode,
+            normalizedCandidates: cleaned.normalizedCandidates,
+            codeType: "messy",
+            resolverStatus: "needs_review",
+            matchType: "unknown",
+            productId: null,
+            confidence: 0,
+            reason: "Internal error while resolving this code; it was routed to Needs Review as unidentified.",
+          };
+        }
         const scanEventId = idFactory();
+        scanEventIdCaught = scanEventId;
         const createdAt = now();
         const keyFor = (op: SyncOperation) =>
           buildIdempotencyKey(businessId, sessionId, scanEventId, op);
@@ -3781,6 +3873,79 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           }
         }
         return event;
+        } catch (outerErr) {
+          // LAYER C catch: log loudly (never silently swallowed) and guarantee the row still appears
+          // and counts. ensureProvisionalCount is idempotent - if a scanFeed row for this code was
+          // already committed by an earlier branch before the throw, it repoints THAT row instead of
+          // minting a duplicate; if none exists yet, it mints both the safe placeholder product and a
+          // synthetic backing scanFeed row so the physical scan is never lost.
+          //
+          // FINDING 1 continued: `cleanedCaught` may still be unset (the throw happened before it was
+          // ever assigned, e.g. inside ensureAutoSession/getOrCreateDeviceId before the fail-soft fix,
+          // or some still-unknown FIFTH variant). cleanScanCode is pure and cheap - recompute it here,
+          // defensively, so this recovery path still has a code to recover even in that case.
+          let recoveredCleanCode: string;
+          try {
+            recoveredCleanCode = cleanedCaught ? cleanedCaught.cleanCode : cleanScanCode(rawInput).cleanCode;
+          } catch (cleanErr) {
+            console.error(
+              `[scanStore] processScan: even recomputing the clean code failed for raw input; the scan ` +
+                `cannot be recovered. This is the true last resort.`,
+              cleanErr,
+            );
+            recoveredCleanCode = "";
+          }
+          console.error(
+            `[scanStore] processScan: unexpected error while processing code '${recoveredCleanCode}'; ` +
+              `routing to Needs Review as unidentified so the scan still appears and counts (TOP-LEVEL LAW).`,
+            outerErr,
+          );
+          if (!recoveredCleanCode) {
+            return get().scanFeed[0] ?? null;
+          }
+          try {
+            get().ensureProvisionalCount(
+              recoveredCleanCode,
+              "Internal error while processing this scan; it was routed to Needs Review as unidentified.",
+              // FINDING 2 FIX: pass THIS scan's own event id so ensureProvisionalCount's idempotent
+              // shortcut cannot be fooled by an unrelated/stale existing count for the same code - see
+              // its doc comment. Only meaningful when scanEventId was actually minted before the throw.
+              scanEventIdCaught ? { verifyEventId: scanEventIdCaught } : undefined,
+            );
+          } catch (fallbackErr) {
+            // True last resort: even the safe fallback path itself threw. Still never rethrow out of
+            // processScan (that would be the original silent-drop defect all over again) - log and
+            // return whatever the feed already shows for this code, if anything.
+            console.error(
+              `[scanStore] processScan: fallback ensureProvisionalCount ALSO threw for code ` +
+                `'${recoveredCleanCode}'; the scan may not have counted. This is the true last resort.`,
+              fallbackErr,
+            );
+          }
+          // FINDING 3 (recovery must prove itself, not just claim success): assert a committed feed row
+          // AND ledger application actually exist for THIS scan before calling the recovery successful.
+          // A caller (or a human reading the log) must be able to tell "recovered" apart from "lost" -
+          // returning an older same-code row as if it were proof of success is exactly how the original
+          // loss stayed invisible.
+          const recoveredState = get();
+          const ownRecoveredRow = scanEventIdCaught
+            ? recoveredState.scanFeed.find((e) => e.id === scanEventIdCaught)
+            : recoveredState.scanFeed.find((e) => e.cleanCode === recoveredCleanCode);
+          const ledgerHasOwnEvent =
+            !!ownRecoveredRow &&
+            recoveredState.finalCounts.some(
+              (c) => c.productId === ownRecoveredRow!.matchedProductId && Array.isArray(c.scanEventIds) && c.scanEventIds.includes(ownRecoveredRow!.id),
+            );
+          if (!ownRecoveredRow || !ledgerHasOwnEvent) {
+            console.error(
+              `[scanStore] processScan: LAYER C RECOVERY FAILED for code '${recoveredCleanCode}' ` +
+                `(scanEventId=${scanEventIdCaught ?? "unminted"}) - no feed row and/or ledger entry for THIS ` +
+                `scan exists after the fallback ran. This scan may not have counted. Do not treat the ` +
+                `return value of this call as proof of success.`,
+            );
+          }
+          return ownRecoveredRow ?? recoveredState.scanFeed.find((e) => e.cleanCode === recoveredCleanCode) ?? null;
+        }
       },
 
       syncPending: (force = false) => {
@@ -5512,7 +5677,85 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             p.status !== "archived" &&
             [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).includes(code),
         );
-        if (existing) return existing.id;
+        if (existing) {
+          if (!opts?.verifyEventId) return existing.id;
+          // FINDING 2 FIX (Codex clean-room review, 2026-08-16): do not trust "a count already exists
+          // for this code" as proof THIS physical scan's own event was ever applied - the caller (the
+          // Layer C recovery fallback) only reaches this opt-in path after an unexpected throw, and the
+          // existing ledger row may be exactly the stale/corrupted record that caused it. Verify the
+          // event id is actually present before treating this as a genuine idempotent no-op.
+          const ledgerRow = st0.finalCounts.find(
+            (c) => c.productId === existing.id && c.sessionId === st0.sessionId,
+          );
+          const alreadyLanded =
+            Array.isArray(ledgerRow?.scanEventIds) && ledgerRow.scanEventIds.includes(opts.verifyEventId);
+          if (alreadyLanded) return existing.id;
+          // Not landed: force-count THIS scan against the SAME existing product now - never mint a
+          // duplicate product row for a code that already has one, and never silently drop the scan
+          // just because an (unrelated or stale) count for the same code happened to already exist.
+          const forceReason = reason || "Recovered count (existing ledger entry for this code did not include this scan).";
+          const forcedEvent: ScanEvent = {
+            id: opts.verifyEventId,
+            businessId: st0.businessId,
+            sessionId: st0.sessionId,
+            rawCode: code,
+            cleanCode: code,
+            normalizedCandidates: [],
+            matchedProductId: existing.id,
+            matchType: "unknown",
+            status: "known",
+            resolverStatus: "needs_review",
+            codeType: detectCodeType(code),
+            reason: forceReason,
+            quantityDelta: 1,
+            quantityAfterScan: 0,
+            createdAt: now(),
+            source: "scan",
+            notes: forceReason,
+            syncStatus: "pending",
+            syncError: null,
+            idempotencyKey: buildIdempotencyKey(st0.businessId, st0.sessionId, opts.verifyEventId, "INCREMENT_COUNT"),
+          };
+          const forced = incrementInventoryCount(st0.finalCounts, forcedEvent, idFactory);
+          forcedEvent.quantityAfterScan = forced.count.quantity;
+          set((st) => ({
+            finalCounts: forced.counts,
+            scanFeed: st.scanFeed.some((e) => e.id === forcedEvent.id)
+              ? st.scanFeed.map((e) =>
+                  e.id === forcedEvent.id
+                    ? { ...e, matchedProductId: existing.id, status: "known" as const, quantityAfterScan: forcedEvent.quantityAfterScan, quantityDelta: 1 }
+                    : e,
+                )
+              : [forcedEvent, ...st.scanFeed],
+          }));
+          // P6 C2: written AFTER the count above is applied - never before (TOP-LEVEL LAW).
+          markFirstScanIfNeeded();
+          const forcedIncPayload: IncrementPayload = {
+            businessId: st0.businessId,
+            sessionId: st0.sessionId,
+            productId: existing.id,
+            scanEventId: forcedEvent.id,
+            quantityDelta: 1,
+            idempotencyKey: forcedEvent.idempotencyKey,
+          };
+          enqueueAndSync([
+            makeQueueItem({
+              idFactory, now, businessId: st0.businessId, sessionId: st0.sessionId,
+              entityType: "ScanEvent", entityId: forcedEvent.id, operation: "SAVE_SCAN_EVENT",
+              payload: forcedEvent,
+              idempotencyKey: buildIdempotencyKey(st0.businessId, st0.sessionId, forcedEvent.id, "SAVE_SCAN_EVENT"),
+              scanEventId: forcedEvent.id,
+            }),
+            makeQueueItem({
+              idFactory, now, businessId: st0.businessId, sessionId: st0.sessionId,
+              entityType: "InventoryCount", entityId: forced.count.id, operation: "INCREMENT_COUNT",
+              payload: forcedIncPayload,
+              idempotencyKey: forcedEvent.idempotencyKey,
+              scanEventId: forcedEvent.id,
+            }),
+          ]);
+          return existing.id;
+        }
         // Code-type aware label: a SAFE "Unidentified item" + the scanned code. NEVER fabricate manufacturer
         // anatomy here (no decode response). PREFIX FLOOR (Plan C Task 3): unless the GS1 prefix maps to a
         // known brand, in which case the row states the brand with confidence and flags the product
@@ -6735,6 +6978,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             : r,
         );
 
+        // UI-1 FIX (2026-08-13, docs/superpowers/reports/2026-08-13-loop1-ui.md): quantityAfterScan on
+        // these rows is a snapshot of the PROVISIONAL PLACEHOLDER's own running count at scan time - only
+        // still correct when this resolution reuses that same placeholder id (create_new / dedup-reuse of
+        // the SAME product). When removeOrphanId is set, the placeholder is being MERGED into a DIFFERENT,
+        // already-counted product (transferOrphanCount below adds the placeholder's quantity onto that
+        // product's own pre-merge quantity) - carrying the stale snapshot forward unchanged would make the
+        // feed display a number that no longer matches the finalCounts ledger. mergeBaselineQty is that
+        // target product's own pre-merge quantity (session-scoped, mirroring transferOrphanCount's own
+        // scoping); adding it to each row's already-recorded running value reproduces exactly what
+        // finalCounts becomes after the merge, so the feed never shows a stale or wrong quantity.
+        const mergeBaselineQty = removeOrphanId
+          ? (get().finalCounts.find((c) => c.productId === productId && c.sessionId === state.sessionId)?.quantity ?? 0)
+          : 0;
+
         // Mark any earlier "unknown" feed rows for this code as resolved, so the feed reflects the
         // learned mapping instead of staying red.
         const resolvedScanEvents: ScanEvent[] = [];
@@ -6748,6 +7005,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               status: "resolved" as const,
               resolverStatus: "resolved" as const,
               matchedProductId: productId,
+              quantityAfterScan: mergeBaselineQty + (e.quantityAfterScan ?? 0),
             };
             resolvedScanEvents.push(resolved);
             return resolved;
@@ -8683,6 +8941,189 @@ const appDeps: ScanStoreDeps = {
 // needed - the field is undefined-safe on every existing persisted review, and the v8 rule (never
 // inject an absent needsReviewQueue/products/etc. key into a partial blob) already holds unchanged.
 //
+// TOP-LEVEL LAW guard, LAYER A (persist-corruption defect, 2026-08-13): a wrong-SHAPE (but still
+// parseable) persisted value - e.g. `products: "not-an-array"` written by a corrupted IndexedDB/
+// localStorage record - previously flowed straight through zustand's persist rehydrate into the live
+// store whenever the persisted `version` matched the CURRENT persist version (14): zustand only calls
+// `migrate` when the stored version DIFFERS from `version` (node_modules/zustand/esm/middleware.mjs),
+// but its `merge` step runs UNCONDITIONALLY on every hydrate (migrated or not). A bare-string
+// `products` then reached `collectAllIdentifierHits` (aliasMatcher.ts), whose `products.filter(...)`
+// threw, and that throw propagated out of `processScan` - silently dropping the scan (feed "0 scans",
+// count 0), a direct TOP-LEVEL LAW violation.
+//
+// This is the single shared sanitizer for every field whose LIVE-CODE dereferences would throw on a
+// wrong shape: it is wired into the persist `merge` option below (which runs on EVERY hydrate,
+// migrated or not - so it closes exactly the version-matches-current gap that `migrate` cannot see)
+// and is also reused, defensively, at the top of `processScan` (LAYER B). A field of the wrong shape
+// is coerced to a safe default with a loud `console.warn` (never silently dropped) rather than left
+// to poison every downstream `.filter`/`.map`/`.find`/property-read call across the store and
+// services layer.
+//
+// THIRD-REVIEW HARDENING (2026-08-16): an independent clean-room review found the guard above only
+// closed ONE variant of the root cause - "shape validation that only checks the top level" - and
+// missed two siblings:
+//   (a) OBJECT-shaped fields (e.g. `settings: null`) were never checked at all, so
+//       `get().settings.scanContext` at processScan's identity-conflict check threw BEFORE
+//       ensureProvisionalCount ever ran, silently dropping the scan a second way.
+//   (b) A field that IS a valid array can still carry MALFORMED MEMBERS (`[null]`, `["x"]`) that the
+//       old top-level-only `Array.isArray` check waved through; a `null`/non-object member then threw
+//       on the very first `.status`/`.provisional`/`.primaryBarcode` read (scanStore.ts ~3272-3283,
+//       ~3474-3484, ~3546-3548, ~3620-3622) - none of which sit inside the old resolveScan try/catch.
+// This table now validates BOTH the container shape and (for array fields) every member's shape, so
+// the class - not just the reported instance - is closed. Fields are still opt-in-by-name on purpose:
+// an unknown/future persisted field just passes through untouched, exactly like before.
+// FINDING 2 HARDENING (Codex clean-room review, 2026-08-16, CRITICAL): the guard above validated the
+// container shape and each MEMBER's shape (is it a plain object?), but never the shape of a member's
+// own NESTED array fields. A `finalCounts` member that IS a well-formed plain object can still carry
+// `scanEventIds: null` (or `aliasesSeen`/`appliedIdempotencyKeys`) - `applyScanEventOnce`
+// (services/inventory.ts) then calls `count.scanEventIds.includes(...)` and throws. That throw landed
+// INSIDE the Layer C try, so it was caught - but the catch's `ensureProvisionalCount` fallback then
+// found this SAME corrupted-but-present count already registered for the code and treated that as
+// proof the physical scan had already landed, silently no-op'ing (see the `verifyEventId` fix on
+// `ensureProvisionalCount` below for the second half of the closure). `nestedArrayFields` lets a field
+// declare which of its members' OWN array properties must also be array-shaped; a corrupted one is
+// normalized to [] (never dropped - the surrounding count/event is real data, only the busted nested
+// list is unsafe to keep) so the ledger self-heals before any live-code dereference can throw.
+type PersistedFieldShape =
+  | { kind: "array-of-objects"; default: unknown[]; nestedArrayFields?: string[] }
+  | { kind: "array-of-strings"; default: string[] }
+  | { kind: "object"; default: object }
+  | { kind: "nullable-object"; default: null };
+
+const PERSISTED_FIELD_SHAPES: Record<string, PersistedFieldShape> = {
+  products: { kind: "array-of-objects", default: [], nestedArrayFields: ["vendorCodes", "aliases"] },
+  aliases: { kind: "array-of-objects", default: [] },
+  scanFeed: { kind: "array-of-objects", default: [], nestedArrayFields: ["normalizedCandidates"] },
+  // The count ledger's own dedupe/audit trails - the exact fields Finding 2 found silently corrupted.
+  finalCounts: {
+    kind: "array-of-objects",
+    default: [],
+    nestedArrayFields: ["scanEventIds", "aliasesSeen", "appliedIdempotencyKeys"],
+  },
+  needsReviewQueue: {
+    kind: "array-of-objects",
+    default: [],
+    nestedArrayFields: ["normalizedCandidates", "suggestedAliases", "sourceUrls", "verifiedFacts", "guesses"],
+  },
+  pendingSyncQueue: { kind: "array-of-objects", default: [] },
+  catalog: { kind: "array-of-objects", default: [] },
+  shopOverrides: { kind: "array-of-objects", default: [] },
+  feedbackEvents: { kind: "array-of-objects", default: [] },
+  countSnapshots: { kind: "array-of-objects", default: [] },
+  sessionHistory: { kind: "array-of-objects", default: [] },
+  syncedScanEventIds: { kind: "array-of-strings", default: [] },
+  recentLocations: { kind: "array-of-strings", default: [] },
+  // settings is dereferenced unguarded (`get().settings.scanContext`, `.aiLookupEnabled`, etc.) all
+  // over processScan and elsewhere - a wrong-shape value must never reach the live store.
+  settings: { kind: "object", default: DEFAULT_SETTINGS },
+  // currentSession / lastCleanupBackup are legitimately nullable (`InventorySession | null`,
+  // `CleanupBackup | null`); most reads already use `?.`, but a non-null WRONG-shape value (a string,
+  // a number, an array) is still coerced back to the one value every read site treats as "absent".
+  currentSession: { kind: "nullable-object", default: null },
+  lastCleanupBackup: { kind: "nullable-object", default: null },
+};
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Exported for direct unit testing (scanStore.persistShapeGuard.test.ts) and reused by the persist
+ *  `merge` option. Pure, never throws: a non-object input becomes `{}`. Only touches keys that are
+ *  actually present on the input (never injects a key a partial blob didn't carry - required by the
+ *  v5..v9 migrate contract documented above: an absent key must stay absent, not become an injected
+ *  empty default that clobbers a real value merged in from elsewhere). */
+export function sanitizePersistedScanShape(persisted: unknown): Record<string, unknown> {
+  if (persisted === null || typeof persisted !== "object") return {};
+  const out: Record<string, unknown> = { ...(persisted as Record<string, unknown>) };
+
+  for (const [field, shape] of Object.entries(PERSISTED_FIELD_SHAPES)) {
+    const value = out[field];
+    if (value === undefined) continue; // never inject a key the input didn't carry
+
+    if (shape.kind === "array-of-objects" || shape.kind === "array-of-strings") {
+      if (!Array.isArray(value)) {
+        console.warn(
+          `[scanStore] Persisted '${field}' had the wrong shape (expected an array, got ${typeof value}); ` +
+            `resetting it to [] so hydration cannot brick the store or drop a scan. (TOP-LEVEL LAW guard)`,
+          value,
+        );
+        out[field] = [];
+        continue;
+      }
+      const isUsableMember = shape.kind === "array-of-objects" ? isPlainObject : (m: unknown) => typeof m === "string";
+      const droppedCount = value.reduce((n, m) => (isUsableMember(m) ? n : n + 1), 0);
+      let nextArray: unknown[] = value;
+      if (droppedCount > 0) {
+        console.warn(
+          `[scanStore] Persisted '${field}' contained ${droppedCount} malformed ` +
+            `${droppedCount === 1 ? "entry" : "entries"} (expected ` +
+            `${shape.kind === "array-of-objects" ? "objects" : "strings"}); dropping ` +
+            `${droppedCount === 1 ? "it" : "them"} so a corrupt member cannot brick the store or drop a scan. ` +
+            `(TOP-LEVEL LAW guard)`,
+          value,
+        );
+        nextArray = value.filter(isUsableMember);
+      }
+      // FINDING 2: nested array-shaped fields inside an otherwise well-formed member (e.g.
+      // finalCounts[i].scanEventIds: null) - normalize IN PLACE (never drop the whole member; the
+      // surrounding count/event is real data) so a downstream `.includes(...)`/`.map(...)` on that
+      // nested field can never throw and silently take the scan-drop path.
+      if (shape.kind === "array-of-objects" && shape.nestedArrayFields && shape.nestedArrayFields.length > 0) {
+        let nestedFixed = 0;
+        nextArray = nextArray.map((member) => {
+          if (!isPlainObject(member)) return member;
+          let patched: Record<string, unknown> | null = null;
+          for (const nestedField of shape.nestedArrayFields!) {
+            const nestedValue = member[nestedField];
+            if (nestedValue !== undefined && !Array.isArray(nestedValue)) {
+              patched = patched ?? { ...member };
+              patched[nestedField] = [];
+              nestedFixed++;
+            }
+          }
+          return patched ?? member;
+        });
+        if (nestedFixed > 0) {
+          console.warn(
+            `[scanStore] Persisted '${field}' contained ${nestedFixed} malformed nested array ` +
+              `field(s) (e.g. scanEventIds/aliasesSeen expected to be arrays); normalizing ` +
+              `${nestedFixed === 1 ? "it" : "them"} to [] so a corrupted ledger entry cannot brick the ` +
+              `store or drop a scan. (TOP-LEVEL LAW guard)`,
+            value,
+          );
+        }
+      }
+      if (nextArray !== value) out[field] = nextArray;
+      continue;
+    }
+
+    if (shape.kind === "object") {
+      if (!isPlainObject(value)) {
+        console.warn(
+          `[scanStore] Persisted '${field}' had the wrong shape (expected an object, got ` +
+            `${Array.isArray(value) ? "array" : typeof value}); resetting it to defaults so hydration cannot ` +
+            `brick the store or drop a scan. (TOP-LEVEL LAW guard)`,
+          value,
+        );
+        out[field] = { ...shape.default };
+      }
+      continue;
+    }
+
+    // nullable-object: null is the valid "absent" value; anything else must be an object.
+    if (value !== null && !isPlainObject(value)) {
+      console.warn(
+        `[scanStore] Persisted '${field}' had the wrong shape (expected an object or null, got ` +
+          `${Array.isArray(value) ? "array" : typeof value}); resetting it to null so hydration cannot brick ` +
+          `the store or drop a scan. (TOP-LEVEL LAW guard)`,
+        value,
+      );
+      out[field] = null;
+    }
+  }
+  return out;
+}
+
 // Exported (Task 4 polish-review fix) so a unit test can call this directly with a v5 persisted-state
 // fixture and assert every field survives the migration untouched, without spinning up the full
 // zustand persist/localStorage machinery.
@@ -8875,6 +9316,15 @@ export const useScanStore = create<ScanState>()(
     storage: scanPersistBackingStorage,
     skipHydration: true,
     migrate: scanStoreMigrate,
+    // LAYER A (persist-corruption defect, 2026-08-13): zustand's `merge` runs on EVERY hydrate,
+    // whether or not `migrate` ran (migrate is skipped entirely when the stored version already
+    // equals `version` above - exactly the case a wrong-SHAPE-but-current-version blob hits). Route
+    // the migrated/raw persisted state through sanitizePersistedScanShape here so a non-array
+    // collection field can never reach the live store, regardless of which hydrate path it took.
+    merge: (persistedState, currentState) => ({
+      ...currentState,
+      ...sanitizePersistedScanShape(persistedState),
+    }),
     // Sec-4: split persisted state by access level. A customer browser must NEVER persist the reusable
     // code database (aliases / global catalog / shop overrides / barcodes / raw+clean+normalized codes /
     // decode traces). The level is computed from the signed-in uid (same source of truth as the UI), and
