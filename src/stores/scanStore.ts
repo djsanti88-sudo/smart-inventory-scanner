@@ -31,12 +31,12 @@ import { fetchWithBackoff } from "@/services/net/fetchWithBackoff";
 import { hashPin, verifyPin, isValidPinFormat } from "@/services/security/pinLock";
 import { isPlatformOwnerClient } from "@/services/security/roleAccess";
 import { isCloudBackendEnabled } from "@/services/config/backend";
+import type { DatabaseService } from "@/services/db/databaseService";
 import { resolveScanToProductTiered } from "@/services/aliasMatcher";
 import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/services/productDedup";
 import { incrementInventoryCount } from "@/services/inventory";
 import { buildIdempotencyKey } from "@/services/idempotency";
 import { MockDb, getMockDb, type IncrementPayload, type SyncResult } from "@/services/mockDb";
-import type { SyncTarget } from "@/services/db/syncTarget";
 import { FirebaseSyncTarget } from "@/services/db/firebase/firebaseSyncTarget";
 import { loadBusinessData } from "@/services/db/firebase/businessDataLoader";
 import { auditRepository, catalogRepository } from "@/services/db/firebase/repositories";
@@ -86,7 +86,7 @@ import {
   appendSessionHistory,
   type SessionHistoryEntry,
 } from "@/services/sessions/sessionHistory";
-import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
+import { toAuditEvent } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
@@ -687,37 +687,18 @@ function provisionalPlaceholderName(code: string): string {
 // waits on a server round-trip. Sync to the (mock) backend happens AFTER the user sees feedback,
 // using idempotency keys so a retry can never double-count.
 
-export interface ScanStoreDeps {
-  db: SyncTarget; // MockDb (local, sync) or FirebaseSyncTarget (cloud/emulator, async)
+// The storage half of these dependencies (db, cloudBackend, trustedExactProbeEnabled,
+// loadBusinessData, audit, lookupGlobalCatalog) now lives in @/services/db/databaseService as the
+// DatabaseService port, so "what would a replacement backend have to provide?" is answerable without
+// reading this file. Extending it means the two cannot drift: a new storage capability added here
+// without declaring it there is a type error.
+//
+// What remains below is what is genuinely NOT storage - an id factory, a clock, and a persistence key
+// - kept injectable so tests can make both deterministic.
+export interface ScanStoreDeps extends DatabaseService {
   idFactory: () => string;
   now: () => string;
   persistName: string | null; // null disables persistence (used by tests)
-  // When true (Firebase backend), syncPending uses the async drain and REQUIRES a real business context
-  // (businessId + userId) before any write. Default/mock path is unchanged (sync, no context required).
-  cloudBackend?: boolean;
-  // Authenticated cloud stores probe the server-only trusted-exact corpus even when paid AI is off.
-  // Injectable so focused tests can exercise the authenticated response contract without Firebase.
-  trustedExactProbeEnabled?: boolean;
-  // Cloud backend only: loads a business's products/aliases/sessions/counts from Firestore when its
-  // context is set, so the deterministic resolver works and the active session + finalCounts are
-  // reconstructed after a refresh / on a fresh device. Injectable for tests.
-  loadBusinessData?: (
-    businessId: string,
-    userId: string,
-  ) => Promise<{
-    products: Product[];
-    aliases: Alias[];
-    sessions: InventorySession[];
-    counts: InventoryCount[];
-    scanEvents?: ScanEvent[];
-  }>;
-  // Fire-and-forget audit sink (cloud -> auditRepository.append). Optional: when absent (mock/default)
-  // audit is a no-op. It must never throw into the scanner path; the store also guards every call.
-  audit?: (event: AuditEventInput) => void;
-  // Cloud global catalog lookup (Option 1 wiring). Given a list of candidate codes, returns the first
-  // verified CatalogEntry from the global Firestore catalog, or null on a miss. Optional: when absent
-  // (tests / mock path) the cloud step is skipped and the scan falls through to AI / Needs Review.
-  lookupGlobalCatalog?: (codes: string[]) => Promise<CatalogEntry | null>;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
