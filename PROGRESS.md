@@ -2,7 +2,7 @@
 
 > Live status checkpoint. Update after every phase so a fresh session continues without guessing.
 > The full 2026-06 phase log is archived verbatim in `docs/archive/PROGRESS_HISTORY_2026-06.md`.
-> Last updated: 2026-08-07.
+> Last updated: 2026-08-18.
 
 ## Standing hazards
 
@@ -11,6 +11,59 @@
   `docs/CURRENT_CONTEXT.md`; see `docs/archive/CURRENT_CONTEXT-2026-07-12.md`.)
 
 Current status = the checkpoints below (newest first) + `REPO_HEALTH.md` for repo/branch sync truth.
+
+## Checkpoint 2026-08-18: pre-AWS cleanup - provider seams named, nothing migrated
+
+Branch `refactor/pre-aws-cleanup` (off `96995da7`, NOT merged, NOT pushed). Owner brief: make the
+codebase provider-neutral and stable BEFORE any infrastructure migration; do not implement AWS, do
+not replace Firebase/Vercel/Turso yet.
+
+**Baseline recorded first, and it was RED.** `npm run proof:all` before any edit: typecheck ok,
+vitest 4309 passed / 105 skipped, node:test 241 passed / **1 FAILED**
+(`scripts/refresh-tire-meta.test.mjs`, 79389 != 79108). Traced without touching the working tree:
+`git show HEAD:...tireKnowledge.generated.json` counts 79108/28017/72956, exactly matching the meta
+and the test's oracle, while the WORKING COPY holds 79389/28275/73202. The failure is caused by an
+**uncommitted corpus regeneration sitting in the working tree** (+281 barcodes), whose meta was never
+refreshed. Pre-existing, not introduced here, and left alone - it is the owner's data, and the test
+is doing exactly the job F2 designed it for.
+
+**What was built (8 commits, +820/-272 across 38 files):**
+- `server/db/tursoClient.ts` - one seam for the libsql driver; five modules had each declared their
+  own client type, env read and dynamic import.
+- `services/config/backend.ts` - `isCloudBackendEnabled()`; the literal `NEXT_PUBLIC_FIREBASE_BACKEND
+  === "1"` had been compared in six files. Strictness and call-time reads now pinned by tests.
+- `services/auth/authService.ts` - `AuthUser` (the five members this app actually uses of Firebase's
+  ~30-member `User`), `AuthService`, `WorkspaceService`. Auth previously had NO abstraction; three
+  components imported `type { User } from "firebase/auth"` directly.
+- `services/db/repositories.ts` + `databaseService.ts` - `InventoryRepository`, `BarcodeRepository`,
+  `CatalogRepository`, `AuditRepository`, `ScanSessionRepository`, and `DatabaseService` EXTRACTED
+  from `ScanStoreDeps` (already a working DI seam, but buried in a 9,222-line file). `ScanStoreDeps`
+  now extends it, so the two cannot drift.
+- All ports are TYPES ONLY. Enforcement is `tsc` via two contract tests, both verified to genuinely
+  fail when an implementation drifts (deliberate break -> TS2344 -> reverted).
+- Removed: `src/services/decode/` (dead barrel documenting a SUPERSEDED architecture, zero importers)
+  and five unreferenced create-next-app `public/*.svg`.
+- `docs/ARCHITECTURE_LAYERS.md` (new), TESTING.md critical-behavior map, stale anchors corrected in
+  ARCHITECTURE.md/CLAUDE.md/AGENTS.md (scanStore was documented as ~6,500 lines; it is 9,222).
+
+**Headline finding:** `src/services/` imports no React, no `next/*`, no `@/server`, no `@/app` -
+verified by directional grep. The counting ledger, resolver, alias matcher and CSV export are pure.
+**A provider migration does not touch the crown jewels.**
+
+**NOT done, deliberately, each with evidence in `docs/ARCHITECTURE_LAYERS.md`:** two divergent
+`ScanEvent` types; `hostOf()` implemented five times with different fallbacks feeding trust scoring;
+nine ungated paid scripts (already Critical/unfixed in the repo's own loop-2 report); three
+`src/server` modules missing `server-only`; scanStore's size. Also NOT removed:
+`scripts/archive-tmp-2026-07/`, which a high-confidence audit flagged for deletion - tracing found it
+named in `paidScriptGuard.enforcement.test.mjs:23`'s exclusion list.
+
+**origin/master is 3 commits ahead and NOT merged in.** A merge was attempted first and aborted: it
+conflicts in 10 places in `server/decode/pipeline.ts` (the PR #35 atomic daily-cap money path).
+Resolving money-path conflicts is an integration task needing its own proof run, not something to
+bury inside a refactor diff. Do that separately.
+
+**Next step:** owner review. Then the migration order in `docs/ARCHITECTURE_LAYERS.md` - decide the
+corpus/`/tmp` story first, since the Turso split exists because of it.
 
 ## Checkpoint 2026-08-10: PR #33 merged; tier-3 followups item 1 (atomic daily-cap increment) DONE
 

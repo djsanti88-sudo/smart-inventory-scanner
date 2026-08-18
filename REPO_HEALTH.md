@@ -1,6 +1,6 @@
 # Repo Health — sync truth
 
-Regenerate, don't hand-drift. Last updated: 2026-08-09
+Regenerate, don't hand-drift. Last updated: 2026-08-18
 
 ## CRITICAL callouts
 
@@ -15,7 +15,24 @@ Regenerate, don't hand-drift. Last updated: 2026-08-09
    commits behind master and 6 ahead; merging it would delete ~152k lines including
    the poison guard, per standing owner order. Leave it exactly as is.
 
-## Current branch truth (2026-08-09)
+## Current branch truth (2026-08-18)
+
+**`refactor/pre-aws-cleanup`** - the pre-migration cleanup branch. Based on
+`chore/tree-triage-2026-08-12` (`96995da7`), 8 commits ahead. **NOT merged, NOT pushed.**
+
+**It does NOT contain `origin/master`.** A merge was attempted as the first action and
+deliberately aborted: `origin/master` is 3 commits ahead (PR #35 atomic daily-cap charge, plus two
+docs PRs) and conflicts in 10 places inside `src/server/decode/pipeline.ts` and its test - the paid
+money path. Resolving those is an integration task that needs its own proof run; folding it into a
+refactor diff would make a mis-resolved money conflict invisible. **Integrate master separately,
+before or after this branch, but not inside it.**
+
+Working tree carries pre-existing uncommitted changes that this branch did not create and did not
+touch: a regenerated `src/server/tire-knowledge/tireKnowledge.generated.json` (+281 barcodes over
+HEAD, meta not refreshed - this is why `proof:all` is RED at baseline on this machine) and six
+`testing/app-knowledge/*` teach-bot files.
+
+## Previous branch truth (2026-08-09)
 
 `feat/tier3-hardening` (the 2026-08-07 tier-3 trio — IndexedDB #27 persist migration, F-08
 restore drill closure + weekly backup schedule, auth hardening trio) shipped via **PR #32,
