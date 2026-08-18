@@ -68,6 +68,39 @@ Known gaps (stated plainly, not invented coverage):
   silently skips the `node --test` subset (see `vitest.config.ts` exclude list) - this is intentional
   but easy to misread as full coverage.
 
+## Critical-behavior map (verified 2026-08-18, `refactor/pre-aws-cleanup`)
+
+The coverage map above is organized by AREA. This one is organized by BEHAVIOR: for each thing that
+must not break, the specific assertion that would catch the break. It exists because a
+provider/infrastructure migration is coming, and "which tests protect me while I move the storage
+layer?" is a different question from "what does this directory test?".
+
+Every row was verified by opening the named file, not inferred from a filename.
+
+| Critical behavior | The assertion that pins it | Gate |
+|---|---|---|
+| Scanner input works and keeps focus | `src/components/scanFocus.test.tsx` - "auto-focuses the scan input on page load"; `LiveScanFeedSuggestion.test.tsx` - approve/decline both assert focus RETURNS to the scan input | `npx vitest run src/components` |
+| One physical scan = one inventory count | `src/stores/countAlways.store.test.ts` - "counts an unresolved code exactly once even if invoked twice", plus the 174-code burst acceptance block | `npm run test:ledger` |
+| A scan counts even when everything else fails | `countAlways.store.test.ts` - AI OFF / OFFLINE / breaker OPEN each counted; `ledgerInvariants.store.test.ts` walks 12 paths incl. MISREAD, EXAMPLE, CAP-BLOCKED, BREAKER-OPEN, DECODE-IN-FLIGHT | `npm run test:ledger` |
+| Duplicate scans increment quantity, never duplicate the product | `countAlways.store.test.ts` - "re-scanning the same unknown code increments the SAME row (count 2, one product)"; `ledgerInvariants` - "path: UNKNOWN-repeat (same code twice, one product)" | `npm run test:ledger` |
+| Retries never double-count | `idempotencyKeyRetryStability.store.test.ts` - byte-identical id + idempotencyKey replayed across BOTH the automatic retry and the explicit `retrySync()` path | `npm run test:ledger` |
+| Barcode aliases resolve correctly | `src/services/aliasMatcher.test.ts`, `resolver.test.ts` - `known` only from an approved alias or verified identifier | `npx vitest run src/services/resolver.test.ts src/services/aliasMatcher.test.ts` |
+| UPC/EAN resolution is correct and lossless | `src/services/upc/gtin.test.ts` - UPC-A and its zero-padded EAN-13 canonicalize to the SAME key, and a case-pack GTIN-14 is NEVER collapsed into the unit GTIN | `npx vitest run src/services/upc` |
+| Unresolved items stay reviewable | `unknownEnqueue.store.test.ts` - an unknown scan enqueues SAVE_PRODUCT/SAVE_SCAN_EVENT/INCREMENT_COUNT; `reviewNeverLingersAfterResolve.store.test.ts` - a no-op or conflicting resolve leaves the row OPEN with no fabricated auto-resolved stamp | `npm run test:ledger` |
+| Fixing a wrong scan MOVES the count | `markWrongTransfer.store.test.ts`; `ledgerInvariants` - "path: POST-DELETE (quantity transferred to an Unidentified provisional, never lost)" | `npm run test:ledger` |
+| Scan sessions are preserved across refresh | `sessionPersistence.store.test.ts` - "setBusinessContext reconstructs the ACTIVE session + its finalCounts (survive-refresh)" | `npm run test:firebase` (emulator) |
+| Shops/locations preserve their inventories | `scanLocation.store.test.ts` - location rides on both ScanEvent and InventoryCount, updates mid-session, defaults to the session's | `npm run test:ledger` |
+| Users/tenants stay isolated | `src/services/db/firebase/tenantIsolation.rules.test.ts`; `app/api/account/delete/route.test.ts` - "never queries or deletes another tenant's paths"; `account/export/route.test.ts` - "returns only the member's own business docs" | `npm run test:firebase` + `npx vitest run src/app/api` |
+| Role permissions hold | `rolePermissions.rules.test.ts`; `account/delete/route.test.ts` - "rejects a viewer role with 403 and deletes nothing"; `FinalCountTable.test.tsx` - alias DB stays platformOwner-only | `npm run test:firebase` |
+| Offline loses no scans | `countAlways.store.test.ts` OFFLINE case; `useOnlineStatusSync.test.tsx` - store flips offline on a REAL browser offline event; `SyncStatusIndicator.test.tsx` - honest offline signal | `npm run test:ledger` + `npx vitest run src/components` |
+| API behavior stays compatible | 20 route suites under `src/app/api/**/*.test.ts` (ai-lookup x12, account delete/export, businesses, catalog-review, catalog-dispute, share, health, telemetry, reconcile, prefix-floor, import-mapping) | `npx vitest run src/app/api` |
+| Product/barcode data stays intact | `src/eval/goldenBaseline.test.ts` (owner-loved 100/100 slice); `src/server/tire-knowledge/corpusDrift.test.ts`, `corpusIntegrity.test.ts`; `scripts/refresh-tire-meta.test.mjs` asserts corpus counts against an INDEPENDENT hardcoded oracle | `npm run test:golden`, `npm run test:corpus-drift` |
+| Provider seams have not drifted | `src/lib/auth.contract.test.ts`, `src/services/db/repositories.contract.test.ts` - type-level conformance, enforced by `tsc --noEmit`, both verified to genuinely fail when an implementation drifts | `npm run proof:all` (typecheck leg) |
+
+**The honest gate is `npm run proof:all`, not `proof:local`.** `proof:local` cannot see the 28
+vitest-excluded `node --test` suites, and 11 `*.rules.test.ts` files self-skip without a Firestore
+emulator (they are most of the "105 skipped" in a green run). Green in `proof:local` is not green.
+
 ## Historical sections below (dated, not re-verified as current)
 
 ## Current state (2026-07-12)
