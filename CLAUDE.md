@@ -78,7 +78,7 @@ is a plain local `node:test` suite (runs today, not gated); only live-app-drivin
 - Real decode orchestrator: `src/server/decode/pipeline.ts` (`runDecodePipeline`), fronted by
   `app/api/ai-lookup/route.ts`. `services/ai/decodeOrchestrator.ts` is DEPRECATED (types only).
 - Ledger core is pure math in `services/inventory.ts`; `markWrong` is a quantity TRANSFER (repointed
-  ScanEvents onto a fresh provisional), never a delete. `stores/scanStore.ts` is a ~6,500-line monolith:
+  ScanEvents onto a fresh provisional), never a delete. `stores/scanStore.ts` is a ~9,200-line monolith:
   grep for symbols, don't browse.
 - Two DB layers on purpose: better-sqlite3 (knowledge corpus) + Turso/libsql (decode cache + ladder
   usage). `server/upc/*` is server-only (import-boundary test); `services/upc/*` is client-safe.
@@ -201,6 +201,7 @@ data-protection fix works unless a browser bot proved it through the real UI wit
 | Doc | Purpose |
 |---|---|
 | `docs/ARCHITECTURE.md` | Full verified architecture map + the 14 traps |
+| `docs/ARCHITECTURE_LAYERS.md` | Business logic vs. infrastructure: seams, leak points, platform lock-in, migration order |
 | `docs/COMMANDS.md` | Every script, port, env var name, PAID/LIVE warnings |
 | `docs/PLAN_EXECUTION.md` | How plans are created, attacked, executed, and proven done |
 | `tools/fable5/README.md` | Fable 5 commands, gates, verdicts, reports, hooks, and cost safety |

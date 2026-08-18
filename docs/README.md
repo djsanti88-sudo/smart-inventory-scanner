@@ -28,6 +28,7 @@ belong," start here before adding a new file.
 | File | Purpose |
 |---|---|
 | `ARCHITECTURE.md` | Full verified architecture map + the known traps |
+| `ARCHITECTURE_LAYERS.md` | Business logic vs. provider/infrastructure logic: the seams, the leak points, and what a provider migration would touch |
 | `COMMANDS.md` | Every script, port, env var name, PAID/LIVE warnings |
 | `DEPLOY_TRUTH.md` | Canonical deploy mechanics: Git integration, PR previews, prod gate |
 | `DECODER_ARCHITECTURE.md` | Canonical decode-pipeline doc (`runDecodePipeline`) |

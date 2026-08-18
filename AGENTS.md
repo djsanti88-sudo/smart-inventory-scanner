@@ -63,7 +63,7 @@ warnings: `docs/COMMANDS.md`. Plan workflow: `docs/PLAN_EXECUTION.md`.
 
 ## Pitfalls that waste time
 
-- `scanStore.ts` is ~6,500 lines; search symbols instead of browsing top-to-bottom.
+- `scanStore.ts` is ~9,200 lines; search symbols instead of browsing top-to-bottom.
 - "Every scan counts" is enforced by call ordering (`ensureProvisionalCount` before awaits/network), not by a single guard function.
 - `markWrong` transfers quantity by repointing scan events to a provisional product; never zero/delete counted physical quantity.
 - `createdAt` on `ScanEvent` is physical event time. Server write time belongs in separate fields like `syncedAt`/`updatedAt`; do not overwrite event chronology with `serverTimestamp()`.

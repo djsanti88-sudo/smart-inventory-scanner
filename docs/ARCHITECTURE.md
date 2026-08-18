@@ -63,7 +63,7 @@ src/
    normalized candidates (AIM prefix, hyphens/spaces). Raw value is always preserved.
 3. **Resolve (deterministic, never AI)** - `src/services/resolver.ts` + `aliasMatcher.ts` +
    `codeTypeDetector.ts`. `known` ONLY from an approved alias or a verified product identifier.
-4. **Count (synchronous, before any network)** - `src/stores/scanStore.ts` `processScan` (~line 1340):
+4. **Count (synchronous, before any network)** - `src/stores/scanStore.ts` `processScan` (~line 3181):
    - Known and countable: `services/inventory.ts` `incrementInventoryCount` delegates to
      `applyScanEventOnce`; `InventoryCount.scanEventIds` dedupes so re-applying an event id is a
      no-op. `quantityDelta` (1, or 0 for non-countable rows) drives the delta.
@@ -79,7 +79,7 @@ src/
    module-level queue (max 2 concurrent, deduped by reviewId) -> `runLiveDecodeOnce` -> gate check
    (`stores/scanGates.ts`) -> `POST /api/ai-lookup` with an AbortController budget.
 7. **Approval loop** - `resolveUnknown` / `approveSuggestion` teach a permanent alias and flip
-   provisional -> verified. `markWrong` (~line 4535) is a quantity TRANSFER: it deactivates the bad
+   provisional -> verified. `markWrong` (~line 7792) is a quantity TRANSFER: it deactivates the bad
    aliases, un-verifies the product, and repoints the feed events onto a fresh "Unidentified item"
    provisional through `incrementInventoryCount` again. Total physical quantity is invariant across
    an identity correction. It uses the id RETURNED by `ensureProvisionalCount`, never a re-lookup by
@@ -135,7 +135,7 @@ config booleans + `geminiUsedForDecode: false` and never leaks secrets.
 
 | Store | File | localStorage | Notes |
 |---|---|---|---|
-| scanStore | `src/stores/scanStore.ts` (~6,500 lines) | key `sis-scan-v1`, version 7 | Role-aware partialize via `scanPersist.ts` |
+| scanStore | `src/stores/scanStore.ts` (~9,200 lines) | key `sis-scan-v1`, version 7 | Role-aware partialize via `scanPersist.ts` |
 | reconcileStore | `src/stores/reconcileStore.ts` | own key, version 1 | Strips raw CSV field before persist |
 
 - Migration (`scanStoreMigrate`): version < 5 hard-resets learned data to seed; >= 5 is additive only
@@ -201,7 +201,7 @@ config booleans + `geminiUsedForDecode: false` and never leaks secrets.
    touches the cap. Do not add `checkAndIncrementDaily` callers.
 4. The count ledger is not in any file named "ledger": pure math in `services/inventory.ts`, stateful
    wiring in scanStore `processScan`/`markWrong`, proofs in `stores/ledgerInvariants.store.test.ts`.
-5. `scanStore.ts` is a ~6,500-line monolith. Grep for symbols; do not expect file-per-concern.
+5. `scanStore.ts` is a ~9,200-line monolith. Grep for symbols; do not expect file-per-concern.
 6. "Every scan counts" is enforced by ORDERING (`ensureProvisionalCount` before any network), not by
    a named guard. Moving that call below an await is a law violation that no grep will catch.
 7. Gemini is wired but dead for decode; status responses can look like it participates. It does not.
