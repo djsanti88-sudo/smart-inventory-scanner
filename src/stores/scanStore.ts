@@ -30,6 +30,7 @@ import { clampDecodeBudgetMs, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/dec
 import { fetchWithBackoff } from "@/services/net/fetchWithBackoff";
 import { hashPin, verifyPin, isValidPinFormat } from "@/services/security/pinLock";
 import { isPlatformOwnerClient } from "@/services/security/roleAccess";
+import { isCloudBackendEnabled } from "@/services/config/backend";
 import { resolveScanToProductTiered } from "@/services/aliasMatcher";
 import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/services/productDedup";
 import { incrementInventoryCount } from "@/services/inventory";
@@ -8694,7 +8695,7 @@ function deleteProductsInternal(
 // Backend selection: Firebase (cloud/emulator) when NEXT_PUBLIC_FIREBASE_BACKEND=1, else the local mock
 // (default + legacy E2E -> existing behavior unchanged). The Firebase target is constructed ONLY in that
 // branch, so the mock/test path never initializes Firebase.
-const useFirebaseBackend = process.env.NEXT_PUBLIC_FIREBASE_BACKEND === "1";
+const useFirebaseBackend = isCloudBackendEnabled();
 const appDeps: ScanStoreDeps = {
   db: useFirebaseBackend
     ? new FirebaseSyncTarget(getDb(), { emulator: process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATOR === "1" })

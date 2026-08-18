@@ -3,6 +3,8 @@
 // is read from env: server-side PLATFORM_OWNER_EMAILS / PLATFORM_OWNER_UIDS (authoritative), and a
 // client-visible NEXT_PUBLIC_PLATFORM_OWNER_EMAILS used ONLY to gate UI (server/serializers enforce truth).
 
+import { isCloudBackendEnabled } from "@/services/config/backend";
+
 export type BusinessRole = "owner" | "admin" | "counter" | "viewer";
 export type AccessLevel = "platform" | "business";
 
@@ -69,7 +71,7 @@ export function accessLevelClient(identity: Identity): AccessLevel {
  */
 export function isLocalRuntime(): boolean {
   // Cloud backend configured -> a real (possibly signed-in customer) tenant; NOT local mode.
-  if (process.env.NEXT_PUBLIC_FIREBASE_BACKEND === "1") return false;
+  if (isCloudBackendEnabled()) return false;
   // The human-bot E2E suite runs the mock backend but sets NEXT_PUBLIC_E2E_AUTH_BYPASS=1 to SIMULATE a
   // signed-in CUSTOMER on purpose, so it can prove the customer ("business") persist strip + role gating.
   // Honor that: an explicit simulated-customer session is NOT the open-access owner runtime.

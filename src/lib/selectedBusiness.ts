@@ -33,7 +33,7 @@ export function clearSelectedBusinessId(): void {
   }
 }
 
-/** Whether the app is running against the Firebase backend (vs the local mock). */
-export function isFirebaseBackend(): boolean {
-  return process.env.NEXT_PUBLIC_FIREBASE_BACKEND === "1";
-}
+/** Whether the app is running against the cloud backend (vs the local mock).
+ *  Legacy name, kept because BusinessContextGate and its five suites mock this module by this
+ *  export; the implementation lives once in @/services/config/backend. */
+export { isCloudBackendEnabled as isFirebaseBackend } from "@/services/config/backend";
