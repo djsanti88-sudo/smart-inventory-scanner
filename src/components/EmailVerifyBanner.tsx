@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
-import type { User } from "firebase/auth";
+import type { AuthUser } from "@/services/auth/authService";
 import { resendVerificationEmail } from "@/lib/auth";
 
 const DISMISS_KEY = "sis-verify-banner-dismissed";
@@ -35,7 +35,7 @@ function writeDismissed(): void {
 /** Non-blocking email-verification nudge. Shows ONLY for password-provider users whose email is
  *  unverified. Never gates any route or the scan flow (TOP-LEVEL LAW). Dumb component: the caller
  *  passes the current user from the app's existing auth state source. */
-export function EmailVerifyBanner({ user }: { user: User | null }) {
+export function EmailVerifyBanner({ user }: { user: AuthUser | null }) {
   const dismissed = useSyncExternalStore(subscribeDismiss, readDismissed, () => false);
   const [sent, setSent] = useState(false);
   const [sendError, setSendError] = useState(false);
