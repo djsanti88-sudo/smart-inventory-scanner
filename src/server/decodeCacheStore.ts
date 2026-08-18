@@ -15,6 +15,7 @@
 // read / a swallowed write - it NEVER throws and never crashes the decode route.
 import fs from "node:fs";
 import path from "node:path";
+import { createTursoClient, tursoCredentialsFromEnv, type TursoClient } from "@/server/db/tursoClient";
 
 export interface PersistedDecode {
   code: string;
@@ -42,10 +43,6 @@ export interface PersistedDecode {
 // ---------------------------------------------------------------------------
 // Turso/libsql (production)
 // ---------------------------------------------------------------------------
-type TursoClient = { execute: (stmt: { sql: string; args: unknown[] }) => Promise<{ rows: Record<string, unknown>[] }> };
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type LibsqlClientModule = { createClient: (config: { url: string; authToken: string }) => any };
-
 let _tursoClient: TursoClient | null | "unavailable" = null;
 let _tursoTableReady = false;
 
@@ -54,12 +51,10 @@ const DDL = "CREATE TABLE IF NOT EXISTS decode_cache (code TEXT PRIMARY KEY, kin
 async function getTursoClient(): Promise<TursoClient | null> {
   if (_tursoClient === "unavailable") return null;
   if (_tursoClient) return _tursoClient;
-  const url = process.env.TURSO_DATABASE_URL;
-  const token = process.env.TURSO_AUTH_TOKEN;
-  if (!url || !token) { _tursoClient = "unavailable"; return null; }
+  const creds = tursoCredentialsFromEnv();
+  if (!creds) { _tursoClient = "unavailable"; return null; }
   try {
-    const { createClient } = (await import("@libsql/client")) as unknown as LibsqlClientModule;
-    _tursoClient = createClient({ url, authToken: token }) as TursoClient;
+    _tursoClient = await createTursoClient(creds);
     return _tursoClient;
   } catch (e) {
     console.warn("[decode-cache-store] Failed to create Turso client:", (e as Error).message);

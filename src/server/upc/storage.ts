@@ -7,6 +7,7 @@ import {
   mkdirSync,
 } from "node:fs";
 import { join } from "node:path";
+import { createTursoClient, tursoCredentialsFromEnv, type TursoClient } from "@/server/db/tursoClient";
 
 // Ladder storage seam. SERVER-SIDE ONLY.
 //
@@ -277,10 +278,10 @@ export function fileLadderStorage(dir: string): LadderStorage {
 // per client instance so a fresh Turso DB self-provisions without a separate migration step.
 // ---------------------------------------------------------------------------
 
-/** Minimal shape of the `@libsql/client` client actually used here (same seam as retailKnowledgeIndex's TursoClient). */
-export type TursoClientLike = {
-  execute: (stmt: { sql: string; args: unknown[] }) => Promise<{ rows: Record<string, unknown>[] }>;
-};
+/** Minimal shape of the `@libsql/client` client actually used here. Kept as a local alias because
+ *  tests and the Turso adapter's signature reference it by this name; the shape itself is now
+ *  owned once by @/server/db/tursoClient. */
+export type TursoClientLike = TursoClient;
 
 const TABLE_USAGE = "goupc_usage";
 const TABLE_MISS_CACHE = "goupc_miss_cache";
@@ -540,26 +541,21 @@ export function tursoLadderStorage(client: TursoClientLike): LadderStorage {
 // same fail-open posture as the retail knowledge index.
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type LibsqlClientModule = { createClient: (config: { url: string; authToken: string }) => any };
-
 let _cachedTursoStorage: LadderStorage | null = null;
 let _cachedTursoUnavailable = false;
 
 async function getTursoLadderStorage(): Promise<LadderStorage | null> {
   if (_cachedTursoUnavailable) return null;
   if (_cachedTursoStorage) return _cachedTursoStorage;
-  const url = process.env.TURSO_DATABASE_URL;
-  const token = process.env.TURSO_AUTH_TOKEN;
-  if (!url || !token) {
+  const creds = tursoCredentialsFromEnv();
+  if (!creds) {
     _cachedTursoUnavailable = true;
     return null;
   }
   try {
-    const { createClient } = (await import("@libsql/client")) as unknown as LibsqlClientModule;
-    const client = createClient({ url, authToken: token }) as TursoClientLike;
+    const client = await createTursoClient(creds);
     _cachedTursoStorage = tursoLadderStorage(client);
-    console.log("[ladderStorage] Turso client connected:", url);
+    console.log("[ladderStorage] Turso client connected:", creds.url);
     return _cachedTursoStorage;
   } catch (e) {
     console.warn("[ladderStorage] Failed to create Turso client, falling back to file storage:", (e as Error).message);

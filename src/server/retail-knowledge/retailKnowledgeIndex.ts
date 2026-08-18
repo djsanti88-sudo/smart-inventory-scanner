@@ -7,6 +7,7 @@
 // Both return the same RetailLookupResult shape. If neither is available, returns null.
 
 import { getKnowledgeDb } from "@/server/knowledgeDb";
+import { createTursoClient, tursoCredentialsFromEnv, type TursoClient } from "@/server/db/tursoClient";
 import { isExampleOrTestRow } from "@/services/ai/decode";
 
 /** Generate zero-padded barcode variants (UPC-12, EAN-13, GTIN-14) for lookup normalization. */
@@ -65,7 +66,7 @@ function lookupSqlite(code: string): RetailLookupResult | null {
 // ---------------------------------------------------------------------------
 // Path 2: Turso remote DB (production on Vercel)
 // ---------------------------------------------------------------------------
-export type TursoClient = { execute: (stmt: { sql: string; args: unknown[] }) => Promise<{ rows: Record<string, unknown>[] }> };
+export type { TursoClient };
 let _tursoClient: TursoClient | null | "unavailable" = null;
 
 /** Outcome of the most recent lookupRetailBarcodeAsync call, for observability. Distinguishes a
@@ -80,24 +81,21 @@ export function getLastRetailLookupStatus(): RetailLookupStatus {
   return _lastStatus;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type LibsqlClientModule = { createClient: (config: { url: string; authToken: string }) => any };
-
 // Exported so other server-side knowledge indexes (e.g. tire-knowledge) reuse the SAME Turso
 // connection-caching + env-detection pattern instead of a second divergent implementation.
 // NOTE: the module-level cache below is shared with retail's own lookups; tire-knowledge calls
 // this from a different module scope, so it gets its own independent cache slot (fine — both
 // point at the same Turso DB/creds, and each caller wants its own tiny cache lifecycle for tests).
+// Driver construction + credential reading live in @/server/db/tursoClient; the cache cell, the
+// "unavailable" latch and the log lines stay here where their lifecycle is owned.
 export async function getTursoClient(): Promise<TursoClient | null> {
   if (_tursoClient === "unavailable") return null;
   if (_tursoClient) return _tursoClient;
-  const url = process.env.TURSO_DATABASE_URL;
-  const token = process.env.TURSO_AUTH_TOKEN;
-  if (!url || !token) { _tursoClient = "unavailable"; return null; }
+  const creds = tursoCredentialsFromEnv();
+  if (!creds) { _tursoClient = "unavailable"; return null; }
   try {
-    const { createClient } = (await import("@libsql/client")) as unknown as LibsqlClientModule;
-    _tursoClient = createClient({ url, authToken: token }) as TursoClient;
-    console.log("[retail-knowledge] Turso client connected:", url);
+    _tursoClient = await createTursoClient(creds);
+    console.log("[retail-knowledge] Turso client connected:", creds.url);
     return _tursoClient;
   } catch (e) {
     console.warn("[retail-knowledge] Failed to create Turso client:", (e as Error).message);

@@ -18,6 +18,7 @@ import { canonicalGtin } from "@/services/upc/gtin";
 import { isTrustedProductHost } from "@/services/ai/trustedProductHosts";
 import { normalizeBrand } from "@/services/catalog/brandPrefixGeneral";
 import { lookupPrefixFull as lookupPrefix } from "@/server/catalog/prefixIndexServer";
+import { createTursoClient, tursoCredentialsFromEnv, type TursoClient } from "@/server/db/tursoClient";
 import { isBrandInPrefixFamily } from "@/services/tire/tirePrefixLookup";
 import { hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
 
@@ -131,10 +132,6 @@ function canonicalKey(code: string): string {
 }
 
 // --- Turso/libsql (production) ---------------------------------------------------------------------
-type TursoClient = { execute: (stmt: { sql: string; args: unknown[] }) => Promise<{ rows: Record<string, unknown>[] }> };
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type LibsqlClientModule = { createClient: (config: { url: string; authToken: string }) => any };
-
 let _tursoClient: TursoClient | null | "unavailable" = null;
 let _tursoTableReady = false;
 
@@ -146,12 +143,10 @@ const DDL =
 async function getTursoClient(): Promise<TursoClient | null> {
   if (_tursoClient === "unavailable") return null;
   if (_tursoClient) return _tursoClient;
-  const url = process.env.TURSO_DATABASE_URL;
-  const token = process.env.TURSO_AUTH_TOKEN;
-  if (!url || !token) { _tursoClient = "unavailable"; return null; }
+  const creds = tursoCredentialsFromEnv();
+  if (!creds) { _tursoClient = "unavailable"; return null; }
   try {
-    const { createClient } = (await import("@libsql/client")) as unknown as LibsqlClientModule;
-    _tursoClient = createClient({ url, authToken: token }) as TursoClient;
+    _tursoClient = await createTursoClient(creds);
     return _tursoClient;
   } catch (e) {
     console.warn("[learned-products] Failed to create Turso client:", (e as Error).message);

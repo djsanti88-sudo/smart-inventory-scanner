@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { BossReportData } from "@/services/reports/bossReport";
+import { createTursoClient, tursoCredentialsFromEnv, type TursoClient } from "@/server/db/tursoClient";
 
 // A share token always points to the immutable, Boss Report safe snapshot captured when it was
 // minted. The resolver never needs tenant database access.
@@ -15,15 +16,6 @@ export interface SharePayload {
   expiresAt: number;
 }
 
-type TursoClient = {
-  execute: (statement: {
-    sql: string;
-    args: unknown[];
-  }) => Promise<{ rows: Record<string, unknown>[] }>;
-};
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type LibsqlClientModule = { createClient: (config: { url: string; authToken: string }) => any };
 type StoredEntry = { payload: string; expiresAt: number };
 type FileShape = Record<string, StoredEntry>;
 type StoreBackend = "unresolved" | "turso" | "file" | "memory";
@@ -127,16 +119,14 @@ async function getTursoClient(): Promise<TursoClient | null> {
   if (tursoClient === "unavailable") return null;
   if (tursoClient) return tursoClient;
 
-  const url = process.env.TURSO_DATABASE_URL?.trim();
-  const authToken = process.env.TURSO_AUTH_TOKEN?.trim();
-  if (!url || !authToken) {
+  const creds = tursoCredentialsFromEnv();
+  if (!creds) {
     tursoClient = "unavailable";
     return null;
   }
 
   try {
-    const { createClient } = (await import("@libsql/client")) as unknown as LibsqlClientModule;
-    tursoClient = createClient({ url, authToken }) as TursoClient;
+    tursoClient = await createTursoClient(creds);
     return tursoClient;
   } catch (error) {
     console.warn(
