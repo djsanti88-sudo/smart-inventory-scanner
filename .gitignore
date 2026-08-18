@@ -103,8 +103,15 @@ data/**/*.lock
 # Nested auto-generated Playwright HTML report (root /playwright-report already ignored above)
 reports/**/playwright-report/
 
-# Generated SQLite knowledge DB (uncompressed is gitignored; .gz is committed via LFS)
+# Generated SQLite knowledge DB. NEITHER the .db NOR the .gz is committed.
+# The comment here used to claim the .gz was "committed via LFS" - that was true only briefly.
+# `dae61ed8 perf: commit pre-built SQLite .gz via LFS` was undone by
+# `decc1ace revert: remove .gz from git (too large for Hobby function bundle)`, and `git ls-files`
+# confirms zero tracked. Consequence worth knowing before reasoning about production: because the
+# .gz does not ship in the function bundle, getKnowledgeDb() returns null on Vercel and every
+# corpus lookup falls through to Turso. Both files are built locally by `npm run build:knowledge-db`.
 src/server/knowledge.generated.db
+knowledge.generated.db.gz
 src/server/knowledge.generated.db-wal
 src/server/knowledge.generated.db-shm
 # Generation manifest (DT2-1, 2026-08-13): sha256 fingerprints of the paired .db/.db.gz outputs,
@@ -114,7 +121,6 @@ src/server/knowledge.generated.manifest.json
 # Agent/session scratch (Playwright MCP snapshots + superpowers tooling state)
 .playwright-mcp/
 .superpowers/
-knowledge.generated.db.gz
 scripts/barcode-harvester/output/*.csv
 
 # --- Phase 4 candidate hygiene: generated bot/QA reports, proof screenshots, tool scratch ---
