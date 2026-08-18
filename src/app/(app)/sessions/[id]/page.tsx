@@ -19,6 +19,7 @@ import { BusinessContextGate } from "@/components/BusinessContextGate";
 import { ArchivedSessionScans } from "@/components/ArchivedSessionScans";
 import { SessionCountsTable, type SessionCountRow } from "@/components/SessionCountsTable";
 import { countsFromTimeline } from "@/services/sessions/countsFromTimeline";
+import { isCloudBackendEnabled } from "@/services/config/backend";
 import type { SessionHistoryEntry } from "@/services/sessions/sessionHistory";
 import type { ScanEvent } from "@/types";
 
@@ -41,7 +42,7 @@ function normalizeEventCreatedAt(event: ScanEvent): ScanEvent {
 }
 
 function getTimelineTarget(): SyncTarget {
-  if (process.env.NEXT_PUBLIC_FIREBASE_BACKEND === "1") {
+  if (isCloudBackendEnabled()) {
     return new FirebaseSyncTarget(getDb(), {
       emulator: process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATOR === "1",
     });
@@ -111,7 +112,7 @@ export default function SessionDetailPage() {
 
   useEffect(() => {
     let cancelled = false;
-    const firebaseBackend = process.env.NEXT_PUBLIC_FIREBASE_BACKEND === "1";
+    const firebaseBackend = isCloudBackendEnabled();
 
     if (firebaseBackend && !businessId) {
       return () => {

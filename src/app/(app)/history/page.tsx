@@ -8,6 +8,7 @@ import { exportSessionCounts } from "@/services/csvExport";
 import { downloadCsv } from "@/services/exportFormats";
 import { useAccessLevel } from "@/services/security/useAccessLevel";
 import { isLiveAuth } from "@/services/auth/authMode";
+import { isCloudBackendEnabled } from "@/services/config/backend";
 import { aggregateSessionCounts, aggregateHistoryRows, type SessionCountRow, type SessionAggregate } from "@/services/sessions/history";
 import type { SessionHistoryEntry } from "@/services/sessions/sessionHistory";
 import { BusinessContextGate } from "@/components/BusinessContextGate";
@@ -40,7 +41,7 @@ export default function HistoryPage() {
   // Guard: mocked/legacy states may lack the field; the real store always defines it.
   const sessionHistory = useScanStore((s) => s.sessionHistory) ?? EMPTY_HISTORY;
   const accessLevel = useAccessLevel();
-  const cloudBackend = process.env.NEXT_PUBLIC_FIREBASE_BACKEND === "1";
+  const cloudBackend = isCloudBackendEnabled();
 
   const refreshFromCloud = useScanStore((s) => s.refreshFromCloud);
 
