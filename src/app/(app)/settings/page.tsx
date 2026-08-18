@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { User } from "firebase/auth";
+import type { AuthUser } from "@/services/auth/authService";
 import { useScanStore } from "@/stores/scanStore";
 import { useReconcileStore } from "@/stores/reconcileStore";
 import { DECODE_BUDGET_MIN_MS, DECODE_BUDGET_MAX_MS, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
@@ -46,7 +46,7 @@ export default function SettingsPage() {
   const verifiedCatalogCount = catalog.filter((e) => e.verificationStatus === "verified").length;
   const pendingCatalogCount = catalog.filter((e) => e.verificationStatus === "pending").length;
 
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   useEffect(() => {
     let active = true;
     getSession().then((s) => {
