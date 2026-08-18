@@ -49,10 +49,23 @@ describe("auth port conformance", () => {
     expect(true).toBe(true);
   });
 
-  it("documents the five members of the user object this app actually consumes", () => {
-    // Guards against the port quietly re-growing toward the vendor's ~30-member User. If a sixth
-    // member is genuinely needed, add it here on purpose.
-    const consumed: (keyof AuthUser)[] = ["uid", "email", "emailVerified", "providerData", "getIdToken"];
-    expect(consumed).toHaveLength(5);
+  it("pins the exact member set of AuthUser, so the port cannot quietly re-grow", () => {
+    // `Record<keyof AuthUser, true>` is the load-bearing part: it requires EVERY key of AuthUser to
+    // be present, so adding a sixth member to the port without adding it here is a TYPE ERROR.
+    //
+    // The obvious version of this test - `const consumed: (keyof AuthUser)[] = [...]` - looks
+    // equivalent and is not. That type only constrains each listed string to be *a* valid key; it
+    // never requires *all* of them, so a sixth member would slip past silently. (Caught in review of
+    // this very file, which had the weaker form.)
+    const CONSUMED: Record<keyof AuthUser, true> = {
+      uid: true,
+      email: true,
+      emailVerified: true,
+      providerData: true,
+      getIdToken: true,
+    };
+    // The count then guards the other direction: a member REMOVED from AuthUser while still listed
+    // here is an excess-property type error, and this keeps the intended size explicit.
+    expect(Object.keys(CONSUMED)).toHaveLength(5);
   });
 });

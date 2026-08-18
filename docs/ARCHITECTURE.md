@@ -195,7 +195,9 @@ config booleans + `geminiUsedForDecode: false` and never leaks secrets.
 
 1. `services/ai/decodeOrchestrator.ts` is `@deprecated` with no live runtime callers (types only).
    The live orchestrator is `server/decode/pipeline.ts`. Do not extend the deprecated one.
-2. `services/decode/README.md` describes the deprecated flow, not the pipeline. The folder is a barrel.
+2. `services/decode/` no longer exists (deleted 2026-08-18). It was a zero-importer barrel whose
+   README described the superseded concurrent flow as current. Canonical decode doc:
+   `docs/DECODER_ARCHITECTURE.md`.
 3. `checkAndIncrementDaily()` is the LEGACY file-only cap used by lookup mode. The real decode cap is
    `readDailyUsed`/`chargeDailySlot`, charged lazily right before the paid rungs. A free hit never
    touches the cap. Do not add `checkAndIncrementDaily` callers.

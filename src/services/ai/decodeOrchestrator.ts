@@ -5,10 +5,12 @@ import { verifyEvidence } from "@/services/ai/evidenceVerifier";
 /**
  * @deprecated Legacy concurrent orchestrator - superseded by the decode ladder
  * (src/server/upc/ladder.ts) + route computeDecode. Only type exports remain in use
- * (src/app/api/ai-lookup/route.ts, src/services/decode/index.ts, src/services/ai/decodeFallback.ts,
- * src/services/benchmark/benchmarkAnalysis.ts import types only). `decode/index.ts` also re-exports
- * the `runDecode` runtime symbol via its barrel, but no live (non-test) code calls it - do not add
- * new callers. Kept for its own unit tests and historical reference; do not extend.
+ * (src/app/api/ai-lookup/route.ts, src/services/ai/decodeFallback.ts,
+ * src/services/benchmark/benchmarkAnalysis.ts import types only). The `src/services/decode/` barrel
+ * that also re-exported the `runDecode` runtime symbol was DELETED 2026-08-18 (zero importers, and
+ * its README documented this superseded concurrent flow as if it were current). No live (non-test)
+ * code calls `runDecode` - do not add new callers. Kept for its own unit tests and historical
+ * reference; do not extend.
  */
 
 // Decode orchestration with a HARD time budget + full concurrency. Owner rule: if the budget fires
