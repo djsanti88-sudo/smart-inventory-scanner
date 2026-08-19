@@ -39,8 +39,8 @@ whether merged). Batch A modules shipped: `e2e/teach/{knowledge,ladder,manifest,
 
 | Script | What it does | Status |
 |---|---|---|
-| `npm run teach` | Runs `e2e/teach/teach.mjs` (the harness entry point) | `e2e/teach/teach.mjs` does not exist yet on this branch as of 2026-07-22 - package.json script currently points at a file not yet built |
-| `npm run teach:cleanup` | Runs `e2e/teach/cleanup.mjs` | Same gap - file not yet present |
+| `npm run teach` | Runs `e2e/teach/teach.mjs` (the harness entry point) | Exists; LIVE-app-driving (owner-gated like every live run) |
+| `npm run teach:cleanup` | Runs `e2e/teach/cleanup.mjs` | Exists; cleans the live teach fixtures (owner-gated) |
 | `npm run teach:test` | `node --test "e2e/teach/**/*.test.mjs"` - the Batch A node:test suite (knowledge/ladder/manifest/sheets/triage) | Exists, runs today |
 | `npm run teach:regression` | `playwright test --config=playwright.teach.config.ts` - runs `testing/tests/permanent` against `TEACH_TARGET_URL` (defaults to the real production deployment, no local webServer) | Config exists; this is a LIVE-app-driving config, not mock E2E - treat as owner-gated like other live/production-facing runs |
 
@@ -85,7 +85,7 @@ First time on a machine: `npx playwright install chromium`.
 
 | Script | Config / port | What it does |
 |---|---|---|
-| `npm run test:e2e` | `playwright.config.ts` / 3100 | The mock E2E suite (~33 specs; excludes firebase-phase2, human-bots). webServer env pins `IS_E2E=1` (AI route forced mock - the guarantee that E2E can never spend money), auth bypass, mock backend. Proof screenshots: `e2e/proof/`. |
+| `npm run test:e2e` | `playwright.config.ts` / 3100 | The mock E2E suite: every `e2e/*.spec.ts` except the `testIgnore` list in `playwright.config.ts` (firebase-phase2, human-bots, live-preview specs). Count it with `npx playwright test --list`; docs do not pin a number. webServer env pins `IS_E2E=1` (AI route forced mock - the guarantee that E2E can never spend money), auth bypass, mock backend. Proof screenshots: `e2e/proof/`. |
 | `npx playwright test e2e/scan.spec.ts` | same | One spec. `-g "title"` for one test. |
 | `npm run test:e2e:firebase` | `playwright.firebase.config.ts` / 3200 | Emulator-backed E2E with REAL login UI (no bypass). Run only via this script (it wraps emulators:exec). |
 | `npm run qa:bots` | `playwright.bots.config.ts` / 3300 | All human-like QA bots, mock backend, screenshot every step. Reports: `reports/human-bots/`. |

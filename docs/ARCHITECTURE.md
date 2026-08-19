@@ -2,7 +2,7 @@
 
 > Verified against the code on `feat/decode-ladder-goupc`, 2026-07-19; spot-checked (file paths +
 > scanStore line count) against `feat/teach-bot` on 2026-07-22, corrections applied inline. This is
-> the deep companion to the "Architecture at a Glance" section in `CLAUDE.md`. If this doc and the
+> the deep companion to the "Layout and boundaries" section in `AGENTS.md`. If this doc and the
 > code disagree, the code wins; fix this doc in the same commit.
 
 ## 1. Directory map (`src/`, top 2 levels)

@@ -52,7 +52,7 @@ Before marking any feature / hotfix / PR ready, run:
 2. `npx tsc --noEmit` — typecheck
 3. `npx eslint src e2e` — lint
 4. `npx next build` — build
-5. `npx playwright test` — mock E2E (11 specs)
+5. `npx playwright test` — mock E2E (the `playwright.config.ts` suite; `--list` to count)
 6. `npm run test:firebase` (+ `npm run test:e2e:firebase` when auth/Firestore changes)
 7. **`npm run qa:bots`** — human-bot scenario(s) for the changed area
 8. Run **SecurityLeakBot** if the change touches product data, barcodes, exports, roles, auth, catalog,

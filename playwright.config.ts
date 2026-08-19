@@ -6,7 +6,7 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   // The Firebase-backed specs live in e2e/firebase-phase2 and run via playwright.firebase.config.ts
-  // (real Firebase backend + emulator). Keep them OUT of the mock run so the 11 mock specs stay isolated.
+  // (real Firebase backend + emulator). Keep them OUT of the mock run so the mock specs stay isolated.
   // household-decode-test.spec.ts hardcodes a live external URL (a real Vercel preview deployment) and
   // waits on real AI decode latency - it never uses this config's localhost/IS_E2E mock webServer at
   // all. It is a manual live-probe script, not part of the automated mocked suite (TEST SAFETY:
@@ -50,7 +50,7 @@ export default defineConfig({
     // Pin the LOCAL/mock backend explicitly so this suite is independent of whatever .env.local holds
     // (e.g. a real-cloud god-account config). Otherwise the scan page renders the Firebase
     // business-context gate instead of the scanner input.
-    // NEXT_PUBLIC_E2E_PLATFORM_OWNER=1: the legacy 11 mock specs exercise the FULL platformOwner view
+    // NEXT_PUBLIC_E2E_PLATFORM_OWNER=1: the mock specs exercise the FULL platformOwner view
     // (raw codes, AI status, all exports). The human-bot suite does NOT set this, so it runs as a customer.
     env: {
       ...process.env,

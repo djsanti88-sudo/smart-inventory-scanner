@@ -144,7 +144,7 @@ describe("disputeCatalogEntry", () => {
   // sourced solely from the locked moderation subcollection doc (modData.disputedBy) - never from
   // whatever the public parent doc happens to carry, including a STALE/legacy disputedBy field left
   // over from before commit f416404e split the two apart (or not yet purged by the masterAppend.ts
-  // migration / scripts/backfill-catalog-moderation.mjs). If the dedup ever fell back to reading the
+  // migration / the retired scripts/backfill-catalog-moderation.mjs, removed 2026-08-19). If the dedup ever fell back to reading the
   // parent's own disputedBy, a business already recorded in moderation but "missing" from a stale/
   // empty parent field could be double-counted toward the threshold on a second dispute.
   it("distinct-business dedup is sourced ONLY from the moderation subcollection - a business already recorded there counts once even when the parent doc's own (stale) disputedBy field disagrees", async () => {
