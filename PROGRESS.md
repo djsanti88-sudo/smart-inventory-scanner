@@ -2,7 +2,17 @@
 
 > Live status checkpoint. Update after every phase so a fresh session continues without guessing.
 > The full 2026-06 phase log is archived verbatim in `docs/archive/PROGRESS_HISTORY_2026-06.md`.
-> Last updated: 2026-08-07.
+> Last updated: 2026-08-19.
+
+## Current phase and active plan
+
+- Branch: `feat/best-guess-identity-cache` (off `origin/master` 9f50440b; worktree `C:/tmp/wt-bestguess`).
+- Work: best-guess identity display + row Approve/Edit/Reassign + honest shared decode cache
+  (negative-cache cooldown + knowledge version, pay-once escalation marker, free re-evaluation).
+  Decision record: `DECISIONS.md` "Identity philosophy ... (owner, 2026-08-19)". Plan lives in the
+  owner conversation (not a file); tasks: 1 decision record, 2 cache, 3 row controls, 4 browser
+  proof, 5 docs describe shipped behavior.
+- Keep this block current; `AGENTS.md` points here for "what are we doing now."
 
 ## Standing hazards
 
