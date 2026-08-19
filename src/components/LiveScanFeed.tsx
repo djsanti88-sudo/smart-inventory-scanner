@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { DecodeStatusBadge, MatchBadge, StatusBadge, SyncBadge } from "@/components/badges";
@@ -38,6 +38,13 @@ const rowButtonProps = {
   tabIndex: -1,
   onMouseDown: (me: React.MouseEvent) => me.preventDefault(),
 };
+
+// Reassign is PRODUCT-scoped (markWrong moves EVERY counted unit of the product and deactivates every
+// approved alias mapped to it), so a single stray click on a dense feed can move a whole session's count
+// for that product. It is therefore a TWO-TAP control: the first tap only arms a confirm that STATES the
+// blast radius ("Move 3 units?"), the second fires it. The armed state disarms itself on Escape, on a
+// click anywhere else, and after this timeout, so it can never sit armed waiting for an accidental tap.
+const REASSIGN_CONFIRM_MS = 5000;
 
 /** Prefill value for the confirm sheet: a best guess only. A placeholder label ("Unidentified item
  *  (barcode ...)") is not an identity - prefilling it would make the operator delete it first. */
@@ -130,10 +137,31 @@ export function LiveScanFeed() {
   const confirmRowIdentity = useScanStore((s) => s.confirmRowIdentity);
   const correctProduct = useScanStore((s) => s.correctProduct);
   const markWrong = useScanStore((s) => s.markWrong);
+  const finalCounts = useScanStore((s) => s.finalCounts);
   const isPlatform = useIsPlatformOwner();
   const [renderWindow, setRenderWindow] = useState(FEED_RENDER_WINDOW);
   // At most one row sheet is open at a time (identity confirm, or product metadata edit).
   const [sheet, setSheet] = useState<{ eventId: string; mode: "confirm" | "edit" } | null>(null);
+  // At most one Reassign is armed at a time (the row's event id).
+  const [armedReassign, setArmedReassign] = useState<string | null>(null);
+
+  // Disarm on Escape, on a click anywhere else, or after REASSIGN_CONFIRM_MS. The confirm button itself
+  // stops its own mousedown from reaching this listener, so tapping it confirms instead of disarming.
+  useEffect(() => {
+    if (!armedReassign) return;
+    const disarm = () => setArmedReassign(null);
+    const onKeyDown = (ke: KeyboardEvent) => {
+      if (ke.key === "Escape") disarm();
+    };
+    const timer = window.setTimeout(disarm, REASSIGN_CONFIRM_MS);
+    document.addEventListener("mousedown", disarm);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("mousedown", disarm);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [armedReassign]);
 
   // PERF FIX (defect #37, live-reproduced 2026-08-05/06): the store's getProduct(id) does a linear
   // `products.find()`. Calling it once per rendered scanFeed row made this O(scanFeed.length *
@@ -163,6 +191,14 @@ export function LiveScanFeed() {
   // Display-only window: scanFeed is already newest-first, so slicing from the front keeps the newest
   // rows visible exactly as before. Clamp against the current feed length so a shrunken feed (e.g.
   // "Clear session") never leaves a stale negative hidden count.
+  // Counted quantity per product, built once per finalCounts change (same O(1)-per-row shape as the
+  // productsById index above). It is what Reassign's confirm copy names, and what decides whether the
+  // control renders at all - a product with nothing counted has no quantity to move.
+  const countedQtyByProduct = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of finalCounts) m.set(c.productId, (m.get(c.productId) ?? 0) + c.quantity);
+    return m;
+  }, [finalCounts]);
   const visibleFeed = useMemo(() => scanFeed.slice(0, renderWindow), [scanFeed, renderWindow]);
   const hiddenCount = Math.max(0, scanFeed.length - visibleFeed.length);
 
@@ -257,7 +293,8 @@ export function LiveScanFeed() {
                 const hasCandidate = pendingInline || bestGuessPrefill(suggestion?.suggestedProductName) !== "";
                 const verifiedRow = e.decodeStatus === "verified" || Boolean(product?.verified);
                 const canEditMetadata = verifiedRow && Boolean(product);
-                const canReassign = Boolean(product) && e.status === "known";
+                const reassignQty = product ? (countedQtyByProduct.get(product.id) ?? 0) : 0;
+                const canReassign = Boolean(product) && e.status === "known" && reassignQty > 0;
                 // Same display priority as the name: real product brand wins, then the decode
                 // suggestion's brand, then whatever the provisional placeholder carries.
                 const displayBrand = prettifyBrand(
@@ -365,16 +402,43 @@ export function LiveScanFeed() {
                           </button>
                         ) : null}
                         {canReassign && product ? (
-                          <button
-                            {...rowButtonProps}
-                            onClick={() => void markWrong(product.id, { reason: "reassigned from the scan feed" })}
-                            aria-label="Reassign to a different product"
-                            title="This is a different product - move the count"
-                            data-testid={`reassign-${e.id}`}
-                            className="rounded border border-zinc-300 px-1.5 py-0.5 text-zinc-700 hover:bg-zinc-100"
-                          >
-                            Reassign
-                          </button>
+                          armedReassign === e.id ? (
+                            <button
+                              {...rowButtonProps}
+                              // stopPropagation so this tap does not reach the document-level disarm
+                              // listener before its own click lands. preventDefault (from rowButtonProps)
+                              // still holds, so the scanner keeps focus.
+                              onMouseDown={(me) => {
+                                me.preventDefault();
+                                me.stopPropagation();
+                              }}
+                              onClick={() => {
+                                setArmedReassign(null);
+                                void markWrong(product.id, { reason: "reassigned from the scan feed" });
+                              }}
+                              aria-label={`Confirm reassign: move ${reassignQty} counted ${reassignQty === 1 ? "unit" : "units"} of ${displayName}`}
+                              title="Every counted unit of this product moves to a new unidentified row"
+                              data-testid={`reassign-confirm-${e.id}`}
+                              className="rounded border border-amber-400 bg-amber-50 px-1.5 py-0.5 font-medium text-amber-800 hover:bg-amber-100"
+                            >
+                              Move {reassignQty} {reassignQty === 1 ? "unit" : "units"}?
+                            </button>
+                          ) : (
+                            <button
+                              {...rowButtonProps}
+                              onMouseDown={(me) => {
+                                me.preventDefault();
+                                me.stopPropagation();
+                              }}
+                              onClick={() => setArmedReassign(e.id)}
+                              aria-label="Reassign to a different product"
+                              title="This is a different product - move the count"
+                              data-testid={`reassign-${e.id}`}
+                              className="rounded border border-zinc-300 px-1.5 py-0.5 text-zinc-700 hover:bg-zinc-100"
+                            >
+                              Reassign
+                            </button>
+                          )
                         ) : null}
                       </span>
                       {sheet?.eventId === e.id ? (

@@ -74,7 +74,9 @@ describe("CatalogReviewTable rows + empty state", () => {
     expect(row.textContent).toContain("0123456789012");
     expect(row.textContent).toContain("Widget");
     expect(row.textContent).toContain("Acme");
-    expect(row.textContent).toContain("90%");
+    // Owner decision 2026-08-19: an app-derived band word, never a raw provider percentage.
+    expect(row.textContent).toContain("Medium");
+    expect(row.textContent).not.toContain("%");
     expect(row.textContent).toContain("Two agreeing sources");
   });
 

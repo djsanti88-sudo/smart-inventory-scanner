@@ -79,6 +79,14 @@ describe("UniversalImportPanel", () => {
     fireEvent.change(screen.getByLabelText("Quantity column"), { target: { value: "4" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm and preview" }));
     expect(await screen.findByTestId("import-headline")).toHaveTextContent("Matched 1 of 1 automatically");
+    // Owner decision 2026-08-19: the row's confidence reads as an app-derived band word, never a raw
+    // provider percentage.
+    const previewText = screen.getByTestId("import-preview").textContent ?? "";
+    // A deterministic exact match reads "Exact"; only fuzzy matcher scores get the band word
+    // (and "High" is reserved for an identity the APP verified itself, see getIdentityConfidenceBand).
+    expect(previewText).toContain("(Exact)");
+    expect(previewText).not.toContain("(Medium)");
+    expect(previewText).not.toContain("%");
     expect(handlers.onApply).not.toHaveBeenCalled();
     expect(handlers.saveMapping).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Apply 1 rows" }));

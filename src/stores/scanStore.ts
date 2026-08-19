@@ -66,7 +66,7 @@ import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/services/
 import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
 import { prefixFloorName, type PrefixFloorResult } from "@/services/catalog/prefixFloor";
-import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel, brandIsOnlyFloorGuess } from "@/services/catalog/prefixFloorEnrich";
+import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel, brandIsOnlyFloorGuess, isFloorGuessOnlyLabel } from "@/services/catalog/prefixFloorEnrich";
 import { detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable, toMasterAwareStoreEntry } from "@/services/catalog/sanitizeCatalog";
 import { findIdentityMerge } from "@/services/catalog/identityMerge";
@@ -5334,12 +5334,18 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // usable name carries that best guess on the counted row too, banded and correctable, instead
             // of showing the operator nothing. Every trust exclusion above is unchanged - only the
             // status clause widened, and nothing here creates an alias or marks anything verified.
+            // FLOOR-GUESS EXCLUSION (F5): the prefix-floor naming aid ("<Brand> / product unconfirmed")
+            // passes isUsableProductName and carries a brand, but it names NO product - it is a GS1
+            // prefix statistic, not a candidate identity. Putting a one-tap Approve on it would teach an
+            // approved alias for a product nobody ever identified, which is exactly the trust line the
+            // best-guess decision kept strict. Such a row keeps the honest floor text with Edit/Identify.
             const suggestionInline =
               autoAddOn &&
               !autoSuggestApplied &&
               !multiVariantIdentity &&
               (decision?.status === "suggested" || decision?.status === "needs_review") &&
               isUsableProductName(best?.productName ?? "") &&
+              !isFloorGuessOnlyLabel(suggestionFields.suggestedProductName) &&
               !contextConflict &&
               !(tireScan && !fastWasVerified);
             if (suggestionInline) {
@@ -7182,6 +7188,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // existing path so the resolution below runs on a real review record, never on a synthetic one.
           if (!code) return;
           const createdId = get().reopenNeedsReview(code, "Identity typed by the operator");
+          // NO-DOUBLE-COUNT (F6): reopenNeedsReview mints a review with NO provisionalProductId, and
+          // resolveUnknown's legacy fallbacks for finding the already-counted provisional (identifier
+          // fields, reconstructed placeholder name) are exactly what a customer persist strips and what
+          // the prefix-floor rename overwrites. Without the row's OWN provisional the resolution mints a
+          // fresh product and re-counts the scan - one physical scan, two units. Stamp the row's
+          // provisional onto the review so the existing approve-the-provisional path is taken instead.
+          if (createdId && ev.matchedProductId) {
+            set((s2) => ({
+              needsReviewQueue: s2.needsReviewQueue.map((r) =>
+                r.id === createdId && !r.provisionalProductId ? { ...r, provisionalProductId: ev.matchedProductId } : r,
+              ),
+            }));
+          }
           review = createdId ? get().needsReviewQueue.find((r) => r.id === createdId) : undefined;
           if (!review) return;
         }
@@ -7249,8 +7268,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   : p,
               )
             : s2.products,
+          // The repeat-scan attach puts the SAME pending suggestion on every row of this code, so a
+          // decline settles them ALL (the same shape confirmRowIdentity uses). Settling only the clicked
+          // row would leave live Approve controls on an identity the operator just rejected.
           scanFeed: s2.scanFeed.map((e) =>
-            e.id === scanEventId && e.suggestion
+            e.suggestion?.status === "pending" && (e.id === scanEventId || (code !== "" && e.cleanCode === code))
               ? { ...e, suggestion: { ...e.suggestion, status: "declined" as const }, reason: declineReason }
               : e,
           ),

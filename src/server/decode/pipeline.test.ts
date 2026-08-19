@@ -203,7 +203,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
   // wave-3: DECODE_LADDER_TOTAL_MS added so a test that overrides it (the wave-3 preflight/budget
   // suite) never leaks into a later test in the same file (test-isolation fix, found live while
   // writing the wave-3 non_public_code_type test below).
-  const keys = ["IS_E2E", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "GO_UPC_API_KEY", "BRAVE_SEARCH_API_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DECODE_CACHE_FILE", "LEARNED_PRODUCTS_FILE", "DECODE_LADDER_TOTAL_MS", "DECODE_NEGATIVE_TTL_MS"];
+  const keys = ["IS_E2E", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "GO_UPC_API_KEY", "BRAVE_SEARCH_API_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DECODE_CACHE_FILE", "LEARNED_PRODUCTS_FILE", "DECODE_LADDER_TOTAL_MS", "DECODE_NEGATIVE_TTL_MS", "DECODE_MISS_TTL_MS"];
   let fetchSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -2995,7 +2995,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       };
     }
 
-    function suggestionRow(code: string, opts: { version?: string | null; status?: string; name?: string; brand?: string } = {}): PersistedDecode {
+    function suggestionRow(code: string, opts: { version?: string | null; status?: string; name?: string; brand?: string; sourceTier?: "paid_rung" | null; ageMs?: number } = {}): PersistedDecode {
       const name = opts.name ?? "Falken Wildpeak A/T3W 265/70R17";
       const brand = opts.brand ?? "Falken";
       const status = opts.status ?? "needs_review";
@@ -3008,7 +3008,9 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       return {
         code, kind: "result",
         payload: stamped(body, opts.version === undefined ? getDecodeKnowledgeVersion() : opts.version),
-        tier: status, sourceTier: "paid_rung", createdAt: Date.now() - 3600_000,
+        tier: status,
+        sourceTier: opts.sourceTier === undefined ? "paid_rung" : (opts.sourceTier ?? undefined),
+        createdAt: Date.now() - (opts.ageMs ?? 3600_000),
       };
     }
 
@@ -3023,22 +3025,28 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       vi.stubGlobal("fetch", fetchSpy);
     };
 
-    // Any call to the PAID Go-UPC API throws, so a test that must not re-pay fails loudly.
-    const stubNoPaidCalls = (opts: { upcItemDbHit?: boolean } = {}) => {
+    // A free-only pass may ONLY ever touch the two free structured DBs. Anything else - the paid Go-UPC
+    // API, Firecrawl search/scrape, Brave, OpenAI, or an arbitrary product page fetched for
+    // verification - THROWS, so a test that must not spend fails loudly on the exact URL that leaked
+    // (the old version only guarded Go-UPC, which let Plan D's paid arms pass silently).
+    const FREE_HOSTS = [UPCITEMDB_HOST, OFF_HOST];
+    const stubNoPaidCalls = (opts: { upcItemDbHit?: boolean; upcItemDbTitle?: string; upcItemDbBrand?: string } = {}) => {
       const spy = vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes(GOUPC_API)) throw new Error("paid Go-UPC must NOT be called on this pass");
+        if (!FREE_HOSTS.some((h) => url.includes(h))) throw new Error(`no outbound call allowed on a free-only pass: ${url}`);
         if (url.includes(UPCITEMDB_HOST)) {
           return opts.upcItemDbHit
-            ? new Response(JSON.stringify({ code: "OK", items: [{ title: "Falken Wildpeak A/T3W 265/70R17", brand: "Falken", category: "Tire" }] }), { status: 200 })
+            ? new Response(JSON.stringify({ code: "OK", items: [{ title: opts.upcItemDbTitle ?? "Falken Wildpeak A/T3W 265/70R17", brand: opts.upcItemDbBrand ?? "Falken", category: "Tire" }] }), { status: 200 })
             : new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
         }
-        if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ status: 0 }), { status: 200 }); // OFF miss
       });
       vi.stubGlobal("fetch", spy);
       return spy;
     };
+    // Every URL the spy was asked for that is NOT one of the two free DBs (a leak on a free-only pass).
+    const nonFreeCalls = (spy: ReturnType<typeof vi.fn>) =>
+      spy.mock.calls.map(([u]) => String(u)).filter((u) => !FREE_HOSTS.some((h) => u.includes(h)));
 
     it("a FRESH receipt (current version, inside the cooldown) still replays with zero provider work", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "100";
@@ -3070,11 +3078,14 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect((await runDecodePipeline(makeReq("900000000324"))).kind).toBe("computed");
     }, 30000);
 
+    // The receipt is COOLED DOWN here (not merely version-stale): only the cooldown lapsing buys the
+    // paid rungs a new try, so this is the setup in which a paid candidate can overwrite the receipt.
     it("a recompute that finds a candidate OVERWRITES the stale receipt with a result row", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.DECODE_NEGATIVE_TTL_MS = "1000";
       process.env.GO_UPC_API_KEY = "test-key";
       stubGoUpcHit("Continental TrueContact Tour 235/60R18", "Continental");
-      vi.mocked(getPersistedDecode).mockResolvedValueOnce(receiptRow("00900000000331", { version: "stale-version" }));
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(receiptRow("00900000000331", { ageMs: 60_000 }));
 
       const out = await runDecodePipeline(makeReq("900000000331"));
       expect(out.kind).toBe("computed");
@@ -3132,6 +3143,129 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       const row = await getPersistedDecode("00900000000355");
       const payload = JSON.parse(row!.payload) as { debug: { cache?: { knowledgeVersion?: string } } };
       expect(payload.debug.cache?.knowledgeVersion).toBe(getDecodeKnowledgeVersion()); // stamp refreshed
+    }, 30000);
+
+    // F4: the refreshed row keeps its ORIGINAL createdAt. Stamping it "now" on every free re-evaluation
+    // would restart the cooldown each time the knowledge version moved, so a code whose corpus rebuilds
+    // are more frequent than the TTL would NEVER earn its one honest paid retry.
+    it("the refreshed stale row keeps its ORIGINAL createdAt, so the cooldown still lapses on schedule", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      stubNoPaidCalls();
+      const original = suggestionRow("00900000000409", { version: "stale-version" });
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(original);
+
+      expect((await runDecodePipeline(makeReq("900000000409"))).kind).toBe("persisted");
+
+      const row = await getPersistedDecode("00900000000409");
+      expect(row?.createdAt).toBe(original.createdAt);
+    }, 30000);
+
+    // F2 (money): the free-only switch used to empty the PAID LADDER only - Plan D still ran with its
+    // paid arms wired (Firecrawl search + scrape, page verification), so a re-evaluation that exists to
+    // re-read FREE knowledge could still spend, and outside the daily cap. Plan D must still run (the
+    // free corpus re-check is the whole point) but with its paid arms unwired.
+    it("a free-only re-evaluation runs Plan D with FREE arms only: no Firecrawl/Brave/paid call even with keys present", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      process.env.FIRECRAWL_API_KEY = "test-firecrawl-key"; // Plan D's paid arms are ARMED
+      process.env.BRAVE_SEARCH_API_KEY = "test-brave-key";
+      const spy = stubNoPaidCalls();
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(suggestionRow("00900000000416", { version: "stale-version" }));
+
+      const out = await runDecodePipeline(makeReq("900000000416"));
+
+      expect(out.kind).toBe("persisted");
+      expect(nonFreeCalls(spy)).toEqual([]); // not one outbound call beyond the two free DBs
+    }, 30000);
+
+    // F3 (money): a version bump means the FREE knowledge moved, so a stale receipt earns a FREE
+    // recompute - only the COOLDOWN buys paid rungs. The receipt is re-stamped but keeps its original
+    // createdAt so that cooldown still arrives on time.
+    it("a VERSION-stale receipt recomputes FREE-only and is re-persisted with the new version and its ORIGINAL createdAt", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      process.env.FIRECRAWL_API_KEY = "test-firecrawl-key";
+      const spy = stubNoPaidCalls();
+      const original = receiptRow("00900000000423", { version: "stale-version" });
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(original);
+
+      const out = await runDecodePipeline(makeReq("900000000423"));
+
+      expect(out.kind).toBe("computed"); // the honest unidentified payload, not a replay
+      expect(nonFreeCalls(spy)).toEqual([]);
+
+      const row = await getPersistedDecode("00900000000423");
+      expect(row?.kind).toBe("no_result_receipt");
+      expect(row?.createdAt).toBe(original.createdAt);
+      const payload = JSON.parse(row!.payload) as { debug: { cache?: { knowledgeVersion?: string } } };
+      expect(payload.debug.cache?.knowledgeVersion).toBe(getDecodeKnowledgeVersion());
+    }, 30000);
+
+    // F7: a fresh FREE title is not automatically better than the stored answer. It replaces the stale
+    // row only when it is verified, when it is itself paid work, or when the stored row was never paid
+    // for - otherwise a bare UPCitemdb title would silently overwrite a paid identity.
+    it("a PAID stale suggestion is KEPT when the free pass only produces an unverified free title", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      stubNoPaidCalls({ upcItemDbHit: true, upcItemDbTitle: "Generic Radial Tire 265/70R17", upcItemDbBrand: "Generic" });
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(suggestionRow("00900000000430", { version: "stale-version" }));
+
+      const out = await runDecodePipeline(makeReq("900000000430"));
+
+      expect(out.kind).toBe("persisted"); // the paid guess still stands
+      if (out.kind !== "persisted") throw new Error("unreachable");
+      expect(JSON.stringify(out.body.results)).toMatch(/Falken/);
+
+      const row = await getPersistedDecode("00900000000430");
+      expect(row!.payload).toMatch(/Falken/);
+      expect(row!.payload).not.toMatch(/Generic Radial/);
+      expect(row!.sourceTier).toBe("paid_rung"); // the paid provenance is not dropped
+    }, 30000);
+
+    it("a FREE stale suggestion IS replaced by the free pass's fresh title", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      stubNoPaidCalls({ upcItemDbHit: true, upcItemDbTitle: "Continental TrueContact Tour 235/60R18", upcItemDbBrand: "Continental" });
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(suggestionRow("00900000000447", { version: "stale-version", sourceTier: null }));
+
+      const out = await runDecodePipeline(makeReq("900000000447"));
+
+      // The fresh free answer wins the response (contrast the paid-stale case above, which replays the
+      // stored guess), and the old free guess is not re-persisted over it.
+      expect(out.kind).toBe("computed");
+      if (out.kind !== "computed") throw new Error("unreachable");
+      expect(JSON.stringify(out.payload.results)).toMatch(/Continental/);
+      const row = await getPersistedDecode("00900000000447");
+      expect(row?.payload ?? "").not.toMatch(/Falken/);
+    }, 30000);
+
+    // F8: the cap catch returned "cap_blocked" BEFORE the stale-row fallback could run, so a guess the
+    // shop had already been shown regressed to Unidentified the moment the daily cap ran out.
+    it("a cap-blocked full re-evaluation still replays the old guess instead of regressing to cap_blocked", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // cap exhausted: the paid half throws
+      process.env.DECODE_NEGATIVE_TTL_MS = "1000"; // the 1h-old row is COOLED DOWN: a full pass is due
+      process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // paid work is genuinely possible -> real cap block
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(suggestionRow("00900000000454"));
+
+      const out = await runDecodePipeline(makeReq("900000000454"));
+
+      expect(out.kind).toBe("persisted");
+      if (out.kind !== "persisted") throw new Error("unreachable");
+      expect(JSON.stringify(out.body.results)).toMatch(/Falken/);
+      expect((out.body.debug as { cacheReevaluated?: string }).cacheReevaluated).toBe("cap_blocked");
+    }, 30000);
+
+    // F11: the fallback's L1 write was indefinite, so a long-lived process would replay the old guess
+    // forever and never re-evaluate it again. It gets the ordinary MISS TTL instead.
+    it("the stale-row fallback writes L1 with the miss TTL, so a long-lived process re-evaluates later", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.DECODE_MISS_TTL_MS = "1"; // expires immediately
+      stubNoPaidCalls();
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(suggestionRow("00900000000461", { version: "stale-version" }));
+
+      expect((await runDecodePipeline(makeReq("900000000461"))).kind).toBe("persisted");
+
+      await new Promise((r) => setTimeout(r, 5));
+      expect(decodeCacheModule.getDecodeCache("00900000000461")).toBeUndefined();
     }, 30000);
 
     it("a COOLED-DOWN suggestion whose full re-evaluation finds a NEW usable answer keeps the NEW one (never overwritten by the old guess)", async () => {

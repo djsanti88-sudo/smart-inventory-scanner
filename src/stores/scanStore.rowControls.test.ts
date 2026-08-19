@@ -146,4 +146,89 @@ describe("feed row identity controls (best-guess display)", () => {
       restore();
     }
   });
+
+  // F5 (trust): the prefix floor's "<Brand> / product unconfirmed" is a NAMING AID derived from the GS1
+  // company prefix, never an identity claim - it names no product at all. Widening the inline suggestion
+  // to weak "needs_review" decodes must never put a one-tap Approve on one, because approving it would
+  // teach an approved alias for a product nobody ever identified.
+  it("a floor-only name ('<Brand> / product unconfirmed') never becomes a pending inline suggestion, and the scan still counts", async () => {
+    const store = aggressiveStore();
+    const floorOnly = {
+      ...WEAK_NEEDS_REVIEW,
+      results: [{ ...WEAK_NEEDS_REVIEW.results[0], productName: "Acme / product unconfirmed", brand: "Acme" }],
+    };
+    const { restore } = stub(floorOnly);
+    try {
+      store.getState().processScan(CODE);
+      await vi.waitFor(() => expect(store.getState().needsReviewQueue.some((r) => r.cleanCode === CODE)).toBe(true));
+      await vi.waitFor(() =>
+        expect(store.getState().needsReviewQueue.find((r) => r.cleanCode === CODE)?.hasSuggestion).toBe(true),
+      );
+
+      expect(store.getState().scanFeed.some((e) => e.suggestion?.status === "pending"), "no Approve on a floor guess").toBe(false);
+      // TOP-LEVEL LAW: the scan appears and counts regardless.
+      expect(store.getState().finalCounts.reduce((n, c) => n + c.quantity, 0)).toBe(1);
+      // The floor text itself is still available to the row (it is honest, just not approvable).
+      expect(store.getState().needsReviewQueue.find((r) => r.cleanCode === CODE)?.suggestedProductName)
+        .toBe("Acme / product unconfirmed");
+    } finally {
+      restore();
+    }
+  });
+
+  // F6: a counted row whose review record is gone (already settled, or stripped by a persist) must still
+  // confirm through the approve-the-provisional path. Without the row's own provisionalProductId on the
+  // reopened review, resolveUnknown cannot find the provisional it already counted and re-counts the scan.
+  it("confirmRowIdentity on a counted row with NO review record never counts the physical scan twice", async () => {
+    const store = aggressiveStore();
+    store.getState().updateSettings({ aiLookupEnabled: false });
+    store.getState().processScan(CODE);
+    const row = store.getState().scanFeed.find((e) => e.cleanCode === CODE)!;
+    expect(store.getState().finalCounts.reduce((n, c) => n + c.quantity, 0)).toBe(1);
+    // Drop the review entirely, and shape the counted provisional the way a CUSTOMER PERSIST rehydrates
+    // it: the customer-safe persist strips a product's `provisional` flag and its identifier fields, and
+    // the prefix-floor naming aid replaces the code-specific placeholder name. That defeats every legacy
+    // fallback resolveUnknown has for finding the row's own provisional - only the row's
+    // provisionalProductId can, and reopenNeedsReview mints a review without one.
+    store.setState({
+      needsReviewQueue: [],
+      products: store.getState().products.map((p) =>
+        p.id === row.matchedProductId
+          ? { ...p, name: "Acme / product unconfirmed", provisional: undefined, primaryBarcode: "", gtin: "", upc: "", ean: "", primarySku: "" }
+          : p,
+      ),
+    });
+    const feedLength = store.getState().scanFeed.length;
+
+    store.getState().confirmRowIdentity(row.id, { name: "Buffalo Wing Sauce 12oz", brand: "Anchor Bar" });
+
+    const st = store.getState();
+    expect(st.finalCounts.reduce((n, c) => n + c.quantity, 0), "one physical scan, one unit").toBe(1);
+    expect(st.aliases.find((a) => a.cleanCode === CODE)?.approved).toBe(true);
+    expect(st.scanFeed.length, "confirming never replays the scan").toBe(feedLength);
+  });
+
+  // F9: the repeat-scan attach puts the SAME pending suggestion on every row of that code, so declining
+  // one identity must settle them all - otherwise live Approve controls stay on an identity the operator
+  // just rejected.
+  it("declining one row settles the pending suggestion on every row of that code", async () => {
+    const store = aggressiveStore();
+    const { restore } = stub(WEAK_NEEDS_REVIEW);
+    try {
+      store.getState().processScan(CODE);
+      await vi.waitFor(() => expect(pendingRow(store)).toBeTruthy());
+      store.getState().processScan(CODE);
+      await vi.waitFor(() =>
+        expect(store.getState().scanFeed.filter((e) => e.suggestion?.status === "pending")).toHaveLength(2),
+      );
+
+      store.getState().declineSuggestion(store.getState().scanFeed[0].id);
+
+      expect(store.getState().scanFeed.filter((e) => e.suggestion?.status === "pending")).toHaveLength(0);
+      // Both physical scans still count (TOP-LEVEL LAW).
+      expect(store.getState().finalCounts.reduce((n, c) => n + c.quantity, 0)).toBe(2);
+    } finally {
+      restore();
+    }
+  });
 });

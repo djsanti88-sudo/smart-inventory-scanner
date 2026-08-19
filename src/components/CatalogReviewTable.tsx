@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getSession } from "@/lib/auth";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
+import { getIdentityConfidenceBand, identityBandWord } from "@/services/ai/identityConfidenceBand";
 
 // Task 3 (owner step 3): platform-owner-only review queue for pending catalogEntries (the shared,
 // cross-tenant master catalog). Approve marks an entry human_verified; Reject marks it rejected. Both
@@ -35,9 +36,12 @@ async function authHeaders(): Promise<HeadersInit> {
   return { Authorization: `Bearer ${idToken}` };
 }
 
+// Owner decision 2026-08-19: confidence is shown as the app-derived band ("High" / "Medium" / "Low")
+// from the single shared function, never a raw provider percentage - an uncalibrated provider number
+// reads as precision the app cannot back. The raw score stays in the data.
 function formatConfidence(confidence: number | undefined): string {
   if (typeof confidence !== "number" || Number.isNaN(confidence)) return "-";
-  return `${Math.round(confidence * 100)}%`;
+  return identityBandWord(getIdentityConfidenceBand({ confidence }));
 }
 
 function formatDate(value: string | undefined): string {

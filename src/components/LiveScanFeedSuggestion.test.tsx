@@ -339,22 +339,72 @@ describe("LiveScanFeed - row identity controls by state", () => {
     }
   });
 
-  it("Reassign from the feed row runs the count-transfer path: the quantity moves and the scan event is retained", async () => {
+  it("Reassign is a two-tap confirm that names the blast radius: the first tap moves nothing, the second moves every counted unit of the product", async () => {
     const user = userEvent.setup();
-    const event = seedRow({ decodeStatus: "verified" }, { verified: true, provisional: false, primaryBarcode: "078742051451" });
+    // markWrong is PRODUCT-scoped: it moves EVERY counted unit of the product, not just this row's.
+    // Seed 3 units across 2 feed rows of the same product so the confirm copy has to say so.
+    const rowA = {
+      id: "rowA", rawCode: "078742051451", cleanCode: "078742051451", matchedProductId: "p1", matchType: "barcode",
+      status: "known", quantityAfterScan: 2, decodeStatus: "verified", reason: "", syncStatus: "synced", createdAt: Date.now(),
+    } as unknown as ScanEvent;
+    const rowB = { ...rowA, id: "rowB", quantityAfterScan: 3 } as ScanEvent;
     useScanStore.setState({
-      finalCounts: [{ id: "c1", businessId: "b", sessionId: "s", productId: "p1", quantity: 1, scanEventIds: [event.id], aliasesSeen: [event.cleanCode] } as never],
+      scanFeed: [rowB, rowA],
+      needsReviewQueue: [],
+      products: [{ id: "p1", name: "Purified Water 500ml", brand: "Member's Mark", primarySku: "", verified: true, provisional: false, primaryBarcode: "078742051451" } as unknown as Product],
+      finalCounts: [{ id: "c1", businessId: "b", sessionId: "s", productId: "p1", quantity: 3, scanEventIds: [rowA.id, rowB.id], aliasesSeen: [rowA.cleanCode] } as never],
     });
     render(<LiveScanFeed />);
 
-    await user.click(screen.getByTestId(`reassign-${event.id}`));
+    const arm = screen.getByTestId(`reassign-${rowA.id}`);
+    expect(arm.getAttribute("tabindex"), "scanner safety").toBe("-1");
+    await user.click(arm);
 
+    // FIRST TAP MOVES NOTHING - it only arms a confirm that states the real blast radius.
+    expect(useScanStore.getState().finalCounts.find((c) => c.productId === "p1")?.quantity).toBe(3);
+    const confirm = screen.getByTestId(`reassign-confirm-${rowA.id}`);
+    expect(confirm.textContent).toContain("Move 3 units?");
+    expect(confirm.getAttribute("tabindex"), "scanner safety").toBe("-1");
+
+    await user.click(confirm);
     await vi.waitFor(() => {
       expect(useScanStore.getState().finalCounts.some((c) => c.productId === "p1")).toBe(false);
     });
     const st = useScanStore.getState();
-    // The physical quantity moved, it was never deleted, and the scan event survives.
-    expect(st.finalCounts.reduce((n, c) => n + c.quantity, 0)).toBe(1);
-    expect(st.scanFeed.some((e) => e.id === event.id)).toBe(true);
+    // All 3 units moved (the documented product-scoped semantic), none were deleted, and both scan
+    // events survive.
+    expect(st.finalCounts.reduce((n, c) => n + c.quantity, 0)).toBe(3);
+    expect(st.scanFeed.some((e) => e.id === rowA.id)).toBe(true);
+    expect(st.scanFeed.some((e) => e.id === rowB.id)).toBe(true);
+  });
+
+  it("the armed Reassign confirm is cancelled by Escape, and never steals the scanner's focus", async () => {
+    useScanStore.getState().clearLocalCache();
+    const user = userEvent.setup();
+    try {
+      render(<ScanPage />);
+      const input = screen.getByTestId("scanner-input") as HTMLInputElement;
+      // AI off: the scan counts one unit onto its own provisional row.
+      await user.type(input, `${CODE9B}{Enter}`);
+      const row = useScanStore.getState().scanFeed.find((e) => e.cleanCode === CODE9B)!;
+
+      expect(input).toHaveFocus();
+      await user.click(screen.getByTestId(`reassign-${row.id}`));
+      expect(input, "arming never moves focus off the scanner").toHaveFocus();
+      expect(screen.getByTestId(`reassign-confirm-${row.id}`).textContent).toContain("Move 1 unit?");
+
+      await user.keyboard("{Escape}");
+      expect(screen.queryByTestId(`reassign-confirm-${row.id}`), "Escape disarms").toBeNull();
+      expect(useScanStore.getState().finalCounts.reduce((n, c) => n + c.quantity, 0)).toBe(1);
+    } finally {
+      useScanStore.getState().clearLocalCache();
+    }
+  });
+
+  it("a counted-nothing row offers no Reassign at all (there is no quantity to move)", () => {
+    const event = seedRow({ decodeStatus: "verified" }, { verified: true, provisional: false });
+    useScanStore.setState({ finalCounts: [] });
+    render(<LiveScanFeed />);
+    expect(screen.queryByTestId(`reassign-${event.id}`)).toBeNull();
   });
 });
