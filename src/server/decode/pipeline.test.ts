@@ -1108,6 +1108,23 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect(await readDailyUsed(await ladderStorage())).toBe(0);
     });
 
+    it("ENABLE_LIVE_AI_LOOKUP=false also stubs Plan D's PAID arms: zero Firecrawl/Brave calls even with keys configured (deep-review 2026-08-19 finding 1)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.FIRECRAWL_API_KEY = "test-firecrawl-key";
+      process.env.BRAVE_SEARCH_API_KEY = "test-brave-key";
+      process.env.ENABLE_LIVE_AI_LOOKUP = "false";
+      // Free rungs produce a lone suggestion (no consensus), which is exactly when Plan D would
+      // reach for its paid Firecrawl /search tiebreaker.
+      stubUpcSuggestionThenGoupc({ goupcVerified: false });
+
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(out.kind).toBe("computed");
+      const paidHosts = ["firecrawl", "search.brave.com"];
+      expect(fetchSpy.mock.calls.some(([u]) => paidHosts.some((h) => String(u).includes(h)))).toBe(false);
+      expect(await readDailyUsed(await ladderStorage())).toBe(0);
+    });
+
     it("ENABLE_LIVE_AI_LOOKUP=false: no paid rung is built or charged (free suggestion stands, zero Go-UPC calls, zero slots)", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "100";
       process.env.GO_UPC_API_KEY = "test-key";
@@ -3202,6 +3219,33 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect(payload.debug.cache?.knowledgeVersion).toBe(getDecodeKnowledgeVersion());
     }, 30000);
 
+    it("PAY-ONCE MARKER is NOT minted when the cap denied part of the escalation (deep-review 2026-08-19 finding 2)", async () => {
+      // Go-UPC key + Brave key configured, but the cap allows only ONE slot: Go-UPC genuinely runs
+      // (and misses), then the Fetch V2 step is cap-denied. "Exhausted" would be a lie - Fetch V2/GPT
+      // never ran - so the persisted suggestion must NOT carry the marker.
+      process.env.AI_LOOKUP_DAILY_LIMIT = "1";
+      process.env.GO_UPC_API_KEY = "test-key";
+      process.env.BRAVE_SEARCH_API_KEY = "test-brave-key";
+      fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [{ title: "Falken Wildpeak A/T3W 265/70R17", brand: "Falken", category: "Tire" }] }), { status: 200 });
+        if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+
+      const out = await runDecodePipeline(makeReq("900000000362"));
+      expect(out.kind).toBe("computed");
+      expect(fetchSpy.mock.calls.some(([u]) => String(u).includes(GOUPC_API))).toBe(true); // slot 1 spent on Go-UPC
+      if (out.kind !== "computed") throw new Error("unreachable");
+      const reasons = out.payload.debug.ladderReasons as Array<{ rung: string; reason: string }>;
+      expect(reasons.some((r) => r.rung === "fetchv2" && /daily cap/i.test(r.reason))).toBe(true);
+
+      const row = await getPersistedDecode("00900000000362");
+      const payload = row ? (JSON.parse(row.payload) as { debug: { cache?: { paidEscalationExhausted?: boolean } } }) : null;
+      expect(payload?.debug.cache?.paidEscalationExhausted ?? false).toBe(false);
+    }, 30000);
+
     it("PAY-ONCE MARKER: a free suggestion that paid rungs failed to beat is persisted, and the next scan replays it with ZERO paid calls", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "100";
       process.env.GO_UPC_API_KEY = "test-key";
@@ -3346,6 +3390,21 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
 
     // F8: the cap catch returned "cap_blocked" BEFORE the stale-row fallback could run, so a guess the
     // shop had already been shown regressed to Unidentified the moment the daily cap ran out.
+    it("a FREE-ONLY pass with the cap exhausted is never stamped cap_blocked - zero paid rungs means no arm, no cap check (deep-review 2026-08-19 finding 3)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // cap exhausted - must be irrelevant to a $0 pass
+      process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // keys configured, but the pass is free-only
+      // Version moved, cooldown NOT lapsed -> freeOnlyPass. Free re-evaluation misses everywhere.
+      stubNoPaidCalls();
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(suggestionRow("00900000000416", { version: "stale-version" }));
+
+      const out = await runDecodePipeline(makeReq("900000000416"));
+
+      expect(out.kind).toBe("persisted");
+      if (out.kind !== "persisted") throw new Error("unreachable");
+      expect((out.body.debug as { cacheReevaluated?: string }).cacheReevaluated).toBe("free_rungs_only");
+      expect(await readDailyUsed(await ladderStorage())).toBe(0);
+    }, 30000);
+
     it("a cap-blocked full re-evaluation still replays the old guess instead of regressing to cap_blocked", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // cap exhausted: the paid half throws
       process.env.DECODE_NEGATIVE_TTL_MS = "1000"; // the 1h-old row is COOLED DOWN: a full pass is due

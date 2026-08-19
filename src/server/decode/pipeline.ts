@@ -1746,7 +1746,10 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // supplied. Its paid arms (Firecrawl /search, the Firecrawl scrape, page verification) spend real
       // money outside the daily cap, so on this pass they are simply not wired: the optional arms are
       // omitted and the required scrape arm is a no-op miss, which resolveUnknownFast already handles.
-      const paidArms: Pick<ParallelResolveDeps, "firecrawlScrapeCheap" | "searchIdentify" | "verifyCodeOnPage"> = freeOnlyPass
+      // ENABLE_LIVE_AI_LOOKUP=false gates Plan D's PAID arms exactly like a free-only pass (deep-review
+      // 2026-08-19 finding 1: the flag turned off the paid LADDER rungs but Plan D's Firecrawl /search,
+      // cheap scrape and page-verify arms still spent real money outside the daily cap).
+      const paidArms: Pick<ParallelResolveDeps, "firecrawlScrapeCheap" | "searchIdentify" | "verifyCodeOnPage"> = freeOnlyPass || !liveAiLookupEnabled()
         ? { firecrawlScrapeCheap: async () => null }
         : {
             verifyCodeOnPage: (urls, c) => verifyCodeOnPage(urls, c),
@@ -2028,7 +2031,9 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // PAY-ONCE MARKER: paid rungs ran on top of this free suggestion and the stash still stands.
       // The write-through records that on the row so another instance replays the suggestion instead
       // of re-buying the same misses (until the cooldown or a knowledge-version change reopens it).
-      paidEscalationExhausted = paidRungRan && winningOutcome === freeRun.outcome;
+      // Deep-review 2026-08-19 finding 2: a cap denial mid-escalation must NOT mint the marker - the
+      // denied rungs never ran, so "exhausted" would be a lie that blocks the paid retry after reset.
+      paidEscalationExhausted = paidRungRan && !capDenied && winningOutcome === freeRun.outcome;
 
       ladderRun = { settledBy: winningSettledBy, outcome: winningOutcome, reasons: reasonsAcc };
     } else if (!freeRun.outcome) {
@@ -2049,7 +2054,10 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // keyless/negative-cached/budget-declined run down this branch now bills zero instead of one.
       let paidRun: LadderResult;
       try {
-        paidRun = paidWorkPossible(code)
+        // preGated.rungs.length guard (deep-review 2026-08-19 finding 3): a free-only pass builds ZERO
+        // paid rungs, and arming for an empty ladder can never charge but CAN throw the cap error -
+        // turning a $0 re-evaluation into a cap_blocked replay. No rungs, no arm.
+        paidRun = paidWorkPossible(code) && preGated.rungs.length > 0
           ? await withPaidChargeArmed(runFullPaidLadder)
           : await runFullPaidLadder();
       } catch (e) {
