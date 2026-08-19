@@ -57,11 +57,14 @@ const EXPECTED_BASE_SOURCE_ROW_COUNT = 76208;
 // human consciously re-verifies and updates the numbers, which is the point.
 //
 // Updated 2026-08-12 for the 2026-08-10 corpus enrichment (commit 10332fa2,
-// +671 barcodes / +653 part numbers / +635 identities, zero removals). Counts below
-// re-verified directly against src/server/tire-knowledge/tireKnowledge.generated.json.
-const EXPECTED_BARCODE_COUNT = 79108;
-const EXPECTED_PART_NUMBER_COUNT = 28017;
-const EXPECTED_IDENTITY_COUNT = 72956;
+// +671 barcodes / +653 part numbers / +635 identities, zero removals), and again
+// 2026-08-19 for the 2026-08-17 regeneration restored from the pre-aws WIP stash
+// (+281 barcodes / +258 part numbers / +246 identities). Counts below re-verified
+// directly against src/server/tire-knowledge/tireKnowledge.generated.json
+// (Object.keys of barcodeIndex / partNumberIndex / identityIndex).
+const EXPECTED_BARCODE_COUNT = 79389;
+const EXPECTED_PART_NUMBER_COUNT = 28275;
+const EXPECTED_IDENTITY_COUNT = 73202;
 
 function sha256OfFile(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
