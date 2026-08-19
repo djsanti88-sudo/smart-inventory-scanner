@@ -331,7 +331,7 @@ Gate run (2026-06-14): vitest 313/313, tsc clean, eslint clean, next build succe
 ## Launch MVP Phase 1: Supabase foundation (2026-06-14) - ARCHIVED
 
 > ⚠ review: the Supabase foundation was replaced by Firebase and archived to
-> `archive/supabase-foundation/`. The integration test files below no longer exist in `src/`;
+> git history (the `archive/supabase-foundation/` tree was removed from the working tree on 2026-08-19). The integration test files below no longer exist in `src/`;
 > this section is kept as the historical record of that proof run.
 
 Unit (run in `npm test`, no Docker needed):

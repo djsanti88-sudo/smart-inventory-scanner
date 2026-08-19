@@ -87,8 +87,8 @@ the expensive path a one-time cost per code. Proven: 2nd live call returned in 7
 its access permissions." That is NOT a port-in-use error - Windows WinNAT/Hyper-V reserves port ranges
 (`netsh interface ipv4 show excludedportrange protocol=tcp`), and the default Supabase 542xx ports fell
 inside them. Fix: remap all ports in `supabase/config.toml` to 553xx (above every excluded range). Check
-the excluded ranges first rather than guessing. (The Supabase stack now lives in
-`archive/supabase-foundation/`; the WinNAT lesson applies to ANY local service ports.)
+the excluded ranges first rather than guessing. (The Supabase stack was retired and removed from the
+working tree on 2026-08-19, history only; the WinNAT lesson applies to ANY local service ports.)
 
 ## L7 - This CLI gates `gen types` behind a token even for local (2026-06-14)
 
