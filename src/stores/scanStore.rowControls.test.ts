@@ -123,6 +123,51 @@ describe("feed row identity controls (best-guess display)", () => {
     }
   });
 
+  // AUTO-APPLIED (>= 0.8) path, e.g. a retail-corpus exact hit at 0.85: the identity is applied onto the
+  // provisional row and the review auto-closes, so there is NO pending inline suggestion. The row's
+  // one-tap Approve must still confirm through the same human-approval core, and it must do so on the
+  // ORIGINAL review record - never by reopening a blank one that wipes the decode's confidence and
+  // evidence fields (the audit trail of what the app actually saw) and falsely stamps reopenedFromWrong.
+  it("confirmRowIdentity on an AUTO-APPLIED (0.85, review auto-resolved) row teaches the alias on the original review, keeping its decode fields", async () => {
+    const store = aggressiveStore();
+    const { restore } = stub({
+      ...WEAK_NEEDS_REVIEW,
+      providerNames: ["retail-corpus"],
+      results: [{ ...WEAK_NEEDS_REVIEW.results[0], productName: "Chandelle Sabor Chocolate", brand: "Nestle", confidence: 0.85 }],
+      decision: { ...WEAK_NEEDS_REVIEW.decision, status: "suggested", confidence: 0.85, evidenceStrength: "none" },
+    });
+    try {
+      store.getState().processScan(CODE);
+      await vi.waitFor(() =>
+        expect(store.getState().needsReviewQueue.find((r) => r.cleanCode === CODE)?.status).toBe("resolved"),
+      );
+      const review = store.getState().needsReviewQueue.find((r) => r.cleanCode === CODE)!;
+      expect(review.resolvedBy).toBe("auto");
+      const row = store.getState().scanFeed.find((e) => e.cleanCode === CODE)!;
+      expect(row.suggestion, "auto-applied rows carry no pending inline suggestion").toBeUndefined();
+      const product = store.getState().products.find((p) => p.id === review.provisionalProductId)!;
+      expect(product.verified, "auto-apply never verifies").toBe(false);
+
+      store.getState().confirmRowIdentity(row.id, { name: review.suggestedProductName, brand: review.suggestedBrand });
+
+      expect(store.getState().aliases.find((a) => a.cleanCode === CODE)?.approved).toBe(true);
+      const confirmed = store.getState().products.find((p) => p.id === product.id)!;
+      expect(confirmed.verified).toBe(true);
+      expect(confirmed.name).toBe("Chandelle Sabor Chocolate");
+      expect(store.getState().finalCounts.reduce((n, c) => n + c.quantity, 0)).toBe(1);
+      // Same review record, human-resolved, decode audit fields intact.
+      const after = store.getState().needsReviewQueue.filter((r) => r.cleanCode === CODE);
+      expect(after).toHaveLength(1);
+      expect(after[0].id).toBe(review.id);
+      expect(after[0].resolvedBy).toBe("human");
+      expect(after[0].confidence).toBeCloseTo(0.85);
+      expect(after[0].decodeStatus).toBe("suggested");
+      expect(after[0].reopenedFromWrong).not.toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
   it("a second scan of a code that already shows a pending suggestion re-uses it and never pays for decode again", async () => {
     const store = aggressiveStore();
     const { spy, restore } = stub(WEAK_NEEDS_REVIEW);

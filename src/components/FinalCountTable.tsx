@@ -5,6 +5,7 @@ import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { customerDisplayName } from "@/services/displayName";
 import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
+import { getIdentityConfidenceBand, identityBandLabel } from "@/services/ai/identityConfidenceBand";
 import { DecodeStatusBadge, SyncBadge } from "@/components/badges";
 import { matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
@@ -308,9 +309,17 @@ function CountRow({
       : product;
   const displayName = prettifyProductName(hasAppliedIdentity ? product.name : displayProduct.name);
   const displayBrand = resolvedBrand(displayProduct);
-  // Trust rule (same as the feed): confidence >= 0.8 -> neutral "unconfirmed"; < 0.8 -> amber
-  // "(suggested)". No tag when no suggestion/review is findable for a provisional row.
-  const suggestionTag = suggestion ? (suggestion.confidence >= 0.8 ? "unconfirmed" : "(suggested)") : null;
+  // Trust rule (same as the feed): an unverified identity carries the app-derived band, never a raw
+  // percentage. No tag when no suggestion/review is findable for a provisional row.
+  const suggestionLabel = suggestion
+    ? identityBandLabel(
+        getIdentityConfidenceBand({
+          confidence: suggestion.confidence,
+          evidenceStrength: suggestion.evidenceStrength,
+          exactCodeEvidenceVerifiedByApp: suggestion.exactCodeEvidenceVerifiedByApp,
+        }),
+      )
+    : null;
   const statusBadge = product.verified ? (
     <DecodeStatusBadge status="verified" />
   ) : product.provisional && (suggestion || hasAppliedIdentity) ? (
@@ -330,17 +339,12 @@ function CountRow({
         {isPlatform ? displayName : prettifyProductName(customerDisplayName(displayName))}
         {/* COSMETIC FIX (2026-08-04, cocacola-bug-report.md): adjacent {text}{element} JSX renders with
             no whitespace text node between them - the ml-1 margin alone (4px) reads as a concatenated
-            word ("Delinte D7unconfirmed") in a screenshot. Add a literal space, matching the codebase's
+            word ("Delinte D7Suggested") in a screenshot. Add a literal space, matching the codebase's
             own {" "} convention elsewhere (e.g. CleanupRecommendations.tsx). */}
-        {suggestionTag === "unconfirmed" ? (
+        {suggestionLabel ? (
           <>
             {" "}
-            <span className="ml-1 rounded px-1 text-xs text-zinc-600">unconfirmed</span>
-          </>
-        ) : suggestionTag === "(suggested)" ? (
-          <>
-            {" "}
-            <span className="ml-1 text-xs text-amber-700">(suggested)</span>
+            <span className="ml-1 text-xs text-amber-700">({suggestionLabel})</span>
           </>
         ) : null}
       </td>

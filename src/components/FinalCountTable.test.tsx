@@ -292,7 +292,7 @@ describe("FinalCountTable Status column + suggested-identity display (owner orde
     expect(row.querySelector('[data-testid="decode-row-status"]')?.textContent).toBe("Verified match");
   });
 
-  it("provisional product with an open low-confidence suggestion shows the suggested name, (suggested) tag, brand, and Suggested badge", () => {
+  it("provisional product with an open low-confidence suggestion shows the suggested name, the low band tag, brand, and Suggested badge", () => {
     const prov = provisionalProduct("pProv1");
     const provCount: InventoryCount = { ...count, id: "cProv1", productId: "pProv1" };
     const review = suggestionReview({
@@ -306,12 +306,12 @@ describe("FinalCountTable Status column + suggested-identity display (owner orde
 
     const row = screen.getByTestId("count-row-pProv1");
     expect(row.textContent).toMatch(/Michelin Defender LTX/);
-    expect(row.textContent).toMatch(/\(suggested\)/);
+    expect(row.textContent).toMatch(/\(Suggested - low confidence\)/);
     expect(screen.getByTestId("brand-pProv1").textContent).toBe("Michelin");
     expect(row.querySelector('[data-testid="decode-row-status"]')?.textContent).toBe("Suggested");
   });
 
-  it("provisional product whose identity was auto-applied shows its own name/brand, the unconfirmed tag, and a Suggested badge", () => {
+  it("provisional product whose identity was auto-applied shows its own name/brand, the medium band tag, and a Suggested badge", () => {
     const prov: Product = {
       ...product,
       id: "pProv2",
@@ -337,18 +337,18 @@ describe("FinalCountTable Status column + suggested-identity display (owner orde
 
     const row = screen.getByTestId("count-row-pProv2");
     expect(row.textContent).toMatch(/Michelin Defender LTX/);
-    expect(row.textContent).toMatch(/unconfirmed/);
-    expect(row.textContent).not.toMatch(/\(suggested\)/);
+    expect(row.textContent).toMatch(/\(Suggested - medium confidence\)/);
+    expect(row.textContent).not.toMatch(/unconfirmed|%/);
     expect(screen.getByTestId("brand-pProv2").textContent).toBe("Michelin");
     expect(row.querySelector('[data-testid="decode-row-status"]')?.textContent).toBe("Suggested");
 
-    // COSMETIC FIX (2026-08-04, cocacola-bug-report.md): the product name and the "unconfirmed" tag
-    // must be separated by an actual space character, not just a CSS margin - otherwise the two
+    // COSMETIC FIX (2026-08-04, cocacola-bug-report.md): the product name and the band tag must be
+    // separated by an actual space character, not just a CSS margin - otherwise the two
     // differently-styled adjacent text runs can read as one concatenated word (e.g. "Delinte
-    // D7unconfirmed") in a screenshot. Assert on the raw name cell's textContent directly.
+    // D7Suggested") in a screenshot. Assert on the raw name cell's textContent directly.
     const nameCell = row.querySelectorAll("td")[1]!;
-    expect(nameCell.textContent).toMatch(/\S\s+unconfirmed$/);
-    expect(nameCell.textContent).not.toMatch(/\Sunconfirmed$/);
+    expect(nameCell.textContent).toMatch(/\S\s+\(Suggested - medium confidence\)$/);
+    expect(nameCell.textContent).not.toMatch(/\S\(Suggested/);
   });
 
   it("provisional product with no suggestion anywhere shows the needs_review badge and keeps the placeholder name", () => {

@@ -7178,11 +7178,22 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (ev.suggestion && ev.suggestion.status !== "pending") return;
         const code = ev.cleanCode || "";
         if (code && st.aliases.some((a) => a.cleanCode === code && a.approved)) return;
-        let review = st.needsReviewQueue.find(
-          (r) =>
-            (r.status === "open" || r.status === "suggested") &&
-            ((code && r.cleanCode === code) || (ev.matchedProductId && r.provisionalProductId === ev.matchedProductId)),
-        );
+        const ownsRow = (r: UnknownCodeReview) =>
+          (code !== "" && r.cleanCode === code) || (!!ev.matchedProductId && r.provisionalProductId === ev.matchedProductId);
+        let review = st.needsReviewQueue.find((r) => (r.status === "open" || r.status === "suggested") && ownsRow(r));
+        if (!review) {
+          // AUTO-APPLIED row (>= 0.8 suggestion applied onto the provisional, review auto-closed, product
+          // still unverified): the human's Approve/Edit confirms THAT review, not a blank reopened one, so
+          // the decode's confidence/evidence fields stay on the record. Reactivate it in place as
+          // "suggested" so resolveUnknown's awaiting-status guard accepts it.
+          const autoApplied = st.needsReviewQueue.find((r) => r.status === "resolved" && r.resolvedBy === "auto" && ownsRow(r));
+          if (autoApplied && !st.products.find((p) => p.id === autoApplied.provisionalProductId)?.verified) {
+            set((s2) => ({
+              needsReviewQueue: s2.needsReviewQueue.map((r) => (r.id === autoApplied.id ? { ...r, status: "suggested" as const } : r)),
+            }));
+            review = get().needsReviewQueue.find((r) => r.id === autoApplied.id);
+          }
+        }
         if (!review) {
           // No awaiting review (e.g. an old row whose review was already settled): open one through the
           // existing path so the resolution below runs on a real review record, never on a synthetic one.

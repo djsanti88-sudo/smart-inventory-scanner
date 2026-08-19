@@ -8,7 +8,7 @@ import type { Alias, ScanEvent, UnknownCodeReview, Product } from "@/types";
 
 // PHASE 1 (Suggested display, no count): a weak-source non-public scan (e.g. X004DY7YUT) that did NOT count
 // must show its decoded suggested product name on the scan FEED row instead of "Product: -", tagged
-// "(suggested)", while still NOT being counted. Read-only UI; no alias, no verified product, no count.
+// with the app-derived band ("Suggested - low confidence"), while still NOT being counted. Read-only UI; no alias, no verified product, no count.
 
 afterEach(() => {
   cleanup();
@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 describe("LiveScanFeed - Suggested display (Phase 1)", () => {
-  it("shows the decoded suggestion name on a non-counted Suggested row, tagged '(suggested)', not '-'", () => {
+  it("shows the decoded suggestion name on a non-counted Suggested row, tagged with the low band, not '-'", () => {
     const event = {
       id: "ev1", rawCode: "X004DY7YUT", cleanCode: "X004DY7YUT", matchedProductId: null, matchType: "unknown",
       status: "needs_review", quantityAfterScan: 0, decodeStatus: "suggested", reason: "Suggested, not trusted.",
@@ -31,12 +31,12 @@ describe("LiveScanFeed - Suggested display (Phase 1)", () => {
     render(<LiveScanFeed />);
 
     expect(screen.getByText("NatureBell Magnesium Glycinate 500mg"), "suggested name shown on the row").toBeTruthy();
-    expect(screen.getByText("(suggested)"), "row marked as a suggestion").toBeTruthy();
+    expect(screen.getByText("(Suggested - low confidence)"), "row marked as a suggestion").toBeTruthy();
     // PHASE 1 guarantee: it is NOT counted.
     expect(useScanStore.getState().finalCounts, "Phase 1 shows but does not count").toHaveLength(0);
   });
 
-  it("the underlying suggested product name string never contains the literal '(suggested)' tag itself (UI-only badge, not baked into stored/displayed name)", () => {
+  it("the underlying suggested product name string never contains the band tag itself (UI-only badge, not baked into stored/displayed name)", () => {
     const event = {
       id: "ev1b", rawCode: "X004DY7YUT", cleanCode: "X004DY7YUT", matchedProductId: null, matchType: "unknown",
       status: "needs_review", quantityAfterScan: 0, decodeStatus: "suggested", reason: "Suggested, not trusted.",
@@ -50,17 +50,17 @@ describe("LiveScanFeed - Suggested display (Phase 1)", () => {
 
     render(<LiveScanFeed />);
 
-    // The stored suggestion name itself is clean - "(suggested)" is rendered as a SEPARATE sibling
+    // The stored suggestion name itself is clean - the band tag is rendered as a SEPARATE sibling
     // span (the status badge), never concatenated into the name string.
-    expect(review.suggestedProductName).not.toContain("(suggested)");
+    expect(review.suggestedProductName).not.toContain("Suggested -");
     const nameCell = screen.getByTestId(`feed-product-${event.id}`);
     expect(nameCell.textContent).toContain("NatureBell Magnesium Glycinate 500mg");
-    expect(nameCell.textContent).toContain("(suggested)");
-    // The name and the "(suggested)" tag are rendered as separate DOM nodes (a text node + a
-    // sibling <span>), never one concatenated name string - the tag element's OWN text is exactly
-    // "(suggested)", not the product name plus the tag.
-    const tagSpan = screen.getByText("(suggested)");
-    expect(tagSpan.textContent).toBe("(suggested)");
+    expect(nameCell.textContent).toContain("(Suggested - low confidence)");
+    // The name and the band tag are rendered as separate DOM nodes (a text node + a sibling
+    // <span>), never one concatenated name string - the tag element's OWN text is exactly the
+    // band, not the product name plus the tag.
+    const tagSpan = screen.getByText("(Suggested - low confidence)");
+    expect(tagSpan.textContent).toBe("(Suggested - low confidence)");
     expect(tagSpan.textContent).not.toContain("NatureBell");
   });
 
@@ -77,7 +77,7 @@ describe("LiveScanFeed - Suggested display (Phase 1)", () => {
     render(<LiveScanFeed />);
 
     expect(screen.getByText("Member's Mark Purified Water 500ml")).toBeTruthy();
-    expect(screen.queryByText("(suggested)"), "a real counted product is not tagged suggested").toBeNull();
+    expect(screen.queryByText(/Suggested -/), "a real counted product is not tagged suggested").toBeNull();
   });
 });
 

@@ -404,5 +404,11 @@ Why each choice was made. Newest decisions at the bottom of each section.
   suggestion. Decide after measuring the correction rate.
 - **OPEN (b):** should tenant approvals ever promote to the platform learned tier? Current = never.
   Recommendation: only with app-verified evidence or multiple independent tenant confirmations.
-- **Status:** plan approved 2026-08-19; code lands on `feat/best-guess-identity-cache`. Until the
-  tasks ship, docs describe TARGET behavior where marked, not shipped behavior.
+- **Status:** shipped 2026-08-19 (PR #38). Follow-up the same day: the auto-applied (>= 0.8) row
+  now carries the same band + one-tap Approve as the inline path (production-found gap); the 0.8
+  line, the retail-corpus 0.85 constant, the ladder, and the trust model are unchanged.
+- **FUTURE (not built, owner 2026-08-19):** record Approve / Edit / Reassign / Not-this-product
+  outcomes per source tier (tire corpus, retail corpus, master catalog, learned, paid fetched, AI
+  guess) so the hard-coded confidence constants (0.85, x0.6 discount, 0.8 line) can be replaced by
+  measured accuracy, and so OPEN (a) is decided from data. Cheap: the approve/decline/markWrong
+  audit events already exist; what is missing is the source tier on the event and a report.

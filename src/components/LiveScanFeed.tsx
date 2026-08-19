@@ -269,16 +269,25 @@ export function LiveScanFeed() {
                 // "(suggested, NN%)" + pointer-only approve/decline controls) takes precedence over the
                 // legacy review-derived tag so a row never shows two suggestion tags at once.
                 const inline = e.suggestion;
-                // Trust rule: an unconfirmed identity must stay visually distinct from a Verified match.
-                // confidence >= 0.8 -> neutral gray "unconfirmed"; confidence < 0.8 -> amber "(suggested)".
-                // Never render a suggestion with no tag at all.
-                const suggestionTag = inline
-                  ? null
-                  : suggestion
-                    ? suggestion.confidence >= 0.8
-                      ? "unconfirmed"
-                      : "(suggested)"
+                // Trust rule: an unconfirmed identity must stay visually distinct from a Verified match and
+                // is never rendered without a tag. A review-derived suggestion (no inline guess on the row)
+                // gets the SAME app-derived band as the inline path, computed from the decode fields the
+                // review kept - never a raw percentage.
+                const reviewBand =
+                  !inline && suggestion
+                    ? getIdentityConfidenceBand({
+                        confidence: suggestion.confidence,
+                        evidenceStrength: suggestion.evidenceStrength,
+                        exactCodeEvidenceVerifiedByApp: suggestion.exactCodeEvidenceVerifiedByApp,
+                      })
                     : null;
+                // AUTO-APPLIED (>= 0.8) row: the guess was applied onto the still-unverified provisional and
+                // its review auto-closed, so it never carried a pending inline guess. It gets the one-tap
+                // Approve too, through the same human-approval core the confirm sheet uses. A deliberately
+                // held OPEN review (context conflict, deep-verify pending) is not auto-applied and keeps
+                // Edit/Identify only, so the hold is never bypassed from the feed.
+                const autoApplied =
+                  reviewBand !== null && suggestion?.status === "resolved" && suggestion.resolvedBy === "auto";
                 // ROW STATE -> CONTROLS (owner decision 2026-08-19). Three distinct operations, never one
                 // umbrella "edit": a verified row offers metadata Edit only (no Approve - it is already
                 // trusted); a row carrying a pending guess offers Approve / Edit (confirm the identity) /
@@ -357,17 +366,31 @@ export function LiveScanFeed() {
                         ) : null}
                         {/* COSMETIC FIX (2026-08-04, cocacola-bug-report.md): adjacent {text}{element} JSX
                             renders with no whitespace text node between them - the ml-1 margin alone (4px)
-                            reads as a concatenated word ("Delinte D7unconfirmed") in a screenshot. Add a
+                            reads as a concatenated word ("Delinte D7Suggested") in a screenshot. Add a
                             literal space, matching the codebase's own {" "} convention elsewhere. */}
-                        {suggestionTag === "unconfirmed" ? (
+                        {reviewBand && !verifiedRow ? (
                           <>
                             {" "}
-                            <span className="ml-1 rounded px-1 text-xs text-zinc-600">unconfirmed</span>
-                          </>
-                        ) : suggestionTag === "(suggested)" ? (
-                          <>
-                            {" "}
-                            <span className="ml-1 text-xs text-amber-700">(suggested)</span>
+                            <span
+                              className="ml-1 inline-flex items-center gap-1 whitespace-nowrap align-middle text-xs text-amber-700"
+                              data-testid={`feed-review-suggestion-${e.id}`}
+                            >
+                              ({identityBandLabel(reviewBand)})
+                              {autoApplied && suggestion ? (
+                                <button
+                                  {...rowButtonProps}
+                                  onClick={() =>
+                                    confirmRowIdentity(e.id, { name: suggestion.suggestedProductName, brand: suggestion.suggestedBrand })
+                                  }
+                                  aria-label={`Approve ${suggestion.suggestedProductName}`}
+                                  title={`Approve ${suggestion.suggestedProductName}`}
+                                  data-testid={`approve-applied-${e.id}`}
+                                  className="inline-flex h-6 w-6 items-center justify-center rounded border border-emerald-300 bg-emerald-50 font-semibold text-emerald-700 hover:bg-emerald-100"
+                                >
+                                  ✓
+                                </button>
+                              ) : null}
+                            </span>
                           </>
                         ) : null}
                         {/* Task 9: an app-verified decode that counted despite being off the business scan
