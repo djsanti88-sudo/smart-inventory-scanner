@@ -100,11 +100,15 @@ test("phase 1 representative proof: fast / fallback / catalog-cache / needs-revi
   await page.goto("/review");
   await expect(page.getByTestId(`review-row-${NEEDS_REVIEW}`).getByTestId("review-reason")).toContainText("rate-limited");
 
-  // Truly unlisted: only after searching does it say no product matched.
+  // Truly unlisted: only after searching does it say no product matched. The row first shows the
+  // deterministic pre-decode reason ("No approved alias or verified product matches this code yet.")
+  // and flips once the mocked decode settles; on a slow CI runner that flip can take longer than the
+  // default 5s expect timeout (flaked once on PR #40), so this assertion waits longer - it still
+  // requires the decode-settled reason, never the weaker interim one.
   await page.goto("/scan");
   await scan(page, NOT_FOUND);
   await page.goto("/review");
-  await expect(page.getByTestId(`review-row-${NOT_FOUND}`).getByTestId("review-reason")).toContainText("no product matched");
+  await expect(page.getByTestId(`review-row-${NOT_FOUND}`).getByTestId("review-reason")).toContainText("no product matched", { timeout: 20000 });
 
   await page.screenshot({ path: `${PROOF}/phase1-100-code-benchmark.png`, fullPage: true });
 });
