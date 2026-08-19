@@ -6341,11 +6341,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // B2 FIX (owner-reported, 268-row review, 2026-07-20): raw string equality here missed a
           // leading-zero GTIN variant of an already-counted identity (848983027580 vs 00848983027580),
           // minting a duplicate product row instead of aggregating the quantity onto the existing one.
-          // Compare via the SAME canonical-GTIN key universal import already uses (aggKeyFor,
-          // ~scanStore.ts:5282) - canonicalGtin strips leading zeros then re-pads to 14 digits for any
+          // Compare via the SAME canonical-GTIN key universal import already uses (aggKeyFor, below in
+          // this file) - canonicalGtin strips leading zeros then re-pads to 14 digits for any
           // GTIN-shaped code; a non-GTIN-shaped code (e.g. a part number) falls through unchanged, so a
           // part number's leading zeros still carry meaning and are never canonicalized away.
-          const canon = (c: string): string => c; // TEMP: verify RED
+          const canon = (c: string): string => canonicalGtin(c) ?? c;
           const identityCodesCanonical = identityCodes.map(canon);
           const countedProductIds = new Set(state.finalCounts.map((c) => c.productId));
           for (const p of state.products) {

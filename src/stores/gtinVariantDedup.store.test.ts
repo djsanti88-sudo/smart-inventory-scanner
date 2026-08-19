@@ -106,4 +106,40 @@ describe("scanStore - canonical-GTIN dedup across leading-zero variants", () => 
     expect(countedRows[0].id).toBe(p1.id);
     expect(qtyFor(store, p1.id), "quantity aggregates (1 + 1 = 2)").toBe(2);
   });
+
+  it("resolveUnknown orphaned-count dedup: with NO alias left (customer-safe persist shape), the zero-padded GTIN variant still reuses the counted provisional row", () => {
+    // The previous test is green through the alias tier: the first create_new mints an approved
+    // multi-code alias for the GTIN, so resolveScanToProductTiered merges the rows before the
+    // orphaned-count comparison is ever consulted. This test removes that rescue to pin the block the
+    // B2 fix actually describes: a counted provisional product whose approved aliases AND verified
+    // flag were stripped by the customer-safe persist, carrying the 14-digit GTIN, then a decode of
+    // the 12-digit encoding. Provisional rows are excluded from the verified-identifier tier and from
+    // findIdentityMerge, so ONLY the orphaned-count block can prevent a duplicate mint, and it can
+    // only do so if it compares canonical GTINs rather than raw strings.
+    const store = createTestScanStore({ db: new MockDb() });
+
+    store.getState().processScan("VENDORCODEAAA1");
+    const p1 = store.getState().products.find((p) => qtyFor(store, p.id) > 0)!;
+    expect(qtyFor(store, p1.id)).toBe(1);
+
+    store.setState((s) => ({
+      products: s.products.map((p) =>
+        p.id === p1.id ? { ...p, gtin: "00848983027580", verified: false, provisional: true } : p,
+      ),
+      aliases: [],
+    }));
+
+    store.getState().processScan("VENDORCODEBBB2");
+    const review2 = store.getState().needsReviewQueue.find((r) => r.cleanCode === "VENDORCODEBBB2" && r.status === "open")!;
+    store.getState().resolveUnknown(review2.id, "create_new", {
+      applyToCount: true,
+      origin: "ai",
+      newProduct: { name: "Fortune ClimaFlex 4S FSR402", gtin: "848983027580" },
+    });
+
+    const countedRows = store.getState().products.filter((p) => qtyFor(store, p.id) > 0);
+    expect(countedRows.length, "12-digit decode of a counted 14-digit GTIN reuses the row, no duplicate").toBe(1);
+    expect(countedRows[0].id).toBe(p1.id);
+    expect(qtyFor(store, p1.id), "quantity aggregates (1 + 1 = 2)").toBe(2);
+  });
 });
