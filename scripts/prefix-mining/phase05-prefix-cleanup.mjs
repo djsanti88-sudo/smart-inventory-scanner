@@ -15,7 +15,7 @@
 
 import fs from "node:fs";
 import readline from "node:readline";
-import { requireLiveApproval, requireDevToolingKey } from "./lib/paidScriptGuard.mjs";
+import { requireLiveApproval, requireDevToolingKey } from "../lib/paidScriptGuard.mjs";
 
 const INPUT = "data/retail-knowledge/retail_off.jsonl";
 const OUT = "reports/product-intel/prefix-phase05-cleanup.json";

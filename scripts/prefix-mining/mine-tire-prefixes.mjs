@@ -3,10 +3,10 @@
 // (NEW; never touches tire_prefixes_FINAL.csv) + data/tire-knowledge/mine-report.md.
 // Usage: node scripts/mine-tire-prefixes.mjs
 import fs from "node:fs";
-import { deriveBrandPrefixes, normalizeToGtin13 } from "./lib/prefix-miner.mjs";
+import { deriveBrandPrefixes, normalizeToGtin13 } from "../lib/prefix-miner.mjs";
 
 const CORPUS = "data/tire-knowledge/tire_corpus_flat.csv";
-const ADDITIONS = "tire_prefixes_ADDITIONS.csv";
+const ADDITIONS = "data/tire-knowledge/prefixes/tire_prefixes_ADDITIONS.csv";
 const REPORT = "data/tire-knowledge/mine-report.md";
 const MAX_BRANDS_PER_PREFIX = 6; // wider => likely a country/region block, not a company prefix -> skip
 
@@ -36,7 +36,7 @@ const brandNorm = (b) => String(b || "").toLowerCase().replace(/\([^)]*\)/g, "")
 // Only ADD prefixes for barcodes FINAL does NOT already cover. This guarantees no mined prefix can be a
 // longer form of an existing FINAL prefix (which would shadow FINAL's curated family via longest-wins).
 // FINAL stays authoritative; we extend coverage to genuinely-new GS1 blocks only.
-const finalRows = parseCSV(fs.readFileSync("tire_prefixes_FINAL.csv", "utf8"));
+const finalRows = parseCSV(fs.readFileSync("data/tire-knowledge/prefixes/tire_prefixes_FINAL.csv", "utf8"));
 const fhdr = finalRows[0].map((h) => h.trim());
 const fpi = fhdr.indexOf("prefix"), fbi2 = fhdr.indexOf("brand"), fti2 = fhdr.indexOf("ingest_tier");
 const finalPrefixes = finalRows.slice(1).map((r) => (r[fpi] || "").trim()).filter((p) => /^\d+$/.test(p));

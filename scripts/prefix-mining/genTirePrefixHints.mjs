@@ -5,9 +5,9 @@
 // exists via its other (ingested) brands. Shared prefix -> brand FAMILY.
 import fs from "node:fs";
 
-const CSV = "tire_prefixes_FINAL.csv";
+const CSV = "data/tire-knowledge/prefixes/tire_prefixes_FINAL.csv";
 // Extra curated/mined files (same columns) merged on top of FINAL; strong-beats-weak dedupe handles overlaps.
-const EXTRA = ["tire_prefixes_ADDITIONS.csv", "tire_prefixes_SIBLINGS.csv", "tire_prefixes_PROMOTED.csv"];
+const EXTRA = ["data/tire-knowledge/prefixes/tire_prefixes_ADDITIONS.csv", "data/tire-knowledge/prefixes/tire_prefixes_SIBLINGS.csv", "data/tire-knowledge/prefixes/tire_prefixes_PROMOTED.csv"];
 const OUT = "src/services/tire/tirePrefixHints.ts";
 
 function parseCSV(text) {

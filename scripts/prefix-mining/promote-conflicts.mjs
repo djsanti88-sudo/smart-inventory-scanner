@@ -1,12 +1,13 @@
-// Independent Gemini Flash check of the prefix CONFLICTS before promoting them. For each held-back brand
-// the corpus confirms (>= 5 rows), decode one real example barcode through the LIVE pipeline (Gemini Flash
-// + page fetch; the conflict brands are NOT in the prefix table, so the brand comes from Gemini/web, not the
-// prefix). If Gemini independently names the same brand, the corpus + AI agree -> safe to promote.
-// Usage: node scripts/check-conflicts-gemini.mjs [--base=http://localhost:3200]
+// Write the owner-APPROVED conflict promotions to tire_prefixes_PROMOTED.csv (ingested as hint_strong by
+// genTirePrefixHints.mjs). These are brands FINAL had held back (weak / review_before_use) that BOTH the
+// corpus (>= 5 rows) AND an independent Gemini Flash decode confirmed (see check-conflicts-gemini.mjs).
+// This file is a deliberate, owner-approved record - FINAL is never modified. Re-running regenerates it
+// from the SAME corpus evidence; new/un-approved conflicts the miners surface are NOT added until approved.
+// Usage: node scripts/promote-conflicts.mjs
 import fs from "node:fs";
-import { deriveBrandPrefixes, normalizeToGtin13 } from "./lib/prefix-miner.mjs";
+import { deriveBrandPrefixes, normalizeToGtin13 } from "../lib/prefix-miner.mjs";
 
-const BASE = (process.argv.find((a) => a.startsWith("--base=")) || "--base=http://localhost:3200").split("=")[1];
+const OUT = "data/tire-knowledge/prefixes/tire_prefixes_PROMOTED.csv";
 
 function parseCSV(text) {
   const rows = []; let i = 0, field = "", row = [], inQ = false;
@@ -25,8 +26,7 @@ function parseCSV(text) {
 const brandNorm = (b) => String(b || "").toLowerCase().replace(/\([^)]*\)/g, "").replace(/[^a-z0-9]/g, "");
 const titleCase = (s) => String(s || "").trim().split(/\s+/).map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(" ");
 
-// FINAL tiers + prefixes
-const finalRows = parseCSV(fs.readFileSync("tire_prefixes_FINAL.csv", "utf8"));
+const finalRows = parseCSV(fs.readFileSync("data/tire-knowledge/prefixes/tire_prefixes_FINAL.csv", "utf8"));
 const fh = finalRows[0].map((h) => h.trim());
 const fbi = fh.indexOf("brand"), fpi = fh.indexOf("prefix"), fti = fh.indexOf("ingest_tier");
 const finalEntries = finalRows.slice(1).filter((r) => /^\d+$/.test((r[fpi] || "").trim()));
@@ -37,51 +37,34 @@ const heldOutBrands = new Set(finalRows.slice(1).filter((r) => ["review_before_u
 function lookupFinalPrefix(code) { const g = normalizeToGtin13(code); if (!g) return null; let best = null; for (const p of finalPrefixes) if ((g.startsWith(p) || g.startsWith("0" + p)) && (!best || p.length > best.length)) best = p; return best; }
 function finalCovers(code) { const g = normalizeToGtin13(code); if (!g) return false; return finalPrefixes.some((p) => g.startsWith(p) || g.startsWith("0" + p)); }
 
-// corpus brand -> Set(barcodes)
 const crows = parseCSV(fs.readFileSync("data/tire-knowledge/tire_corpus_flat.csv", "utf8"));
 const ch = crows[0].map((h) => h.trim());
 const bi = ch.indexOf("brand"), ci = ch.indexOf("barcode");
 const byBrand = new Map();
 for (const r of crows.slice(1)) { if (r.length <= Math.max(bi, ci)) continue; const brand = titleCase((r[bi] || "").trim()), code = (r[ci] || "").trim(); if (!brand || !code) continue; if (!byBrand.has(brand)) byBrand.set(brand, new Set()); byBrand.get(brand).add(code); }
 
-// Recompute the conflicts (same logic as the miners) WITH an example barcode each.
 const MIN_CONFIRM = 5, MIN_SHARE = 0.1;
-const conflicts = [];
+const rows = [];
 for (const [brand, codes] of byBrand) {
   const total = codes.size;
-  // sibling-style: brand lands on an existing FINAL prefix that held this brand back
   const onPrefix = new Map();
   for (const code of codes) { const p = lookupFinalPrefix(code); if (!p) continue; (onPrefix.get(p) || onPrefix.set(p, new Set()).get(p)).add(code); }
   for (const [p, set] of onPrefix) {
     if (set.size < MIN_CONFIRM || set.size < MIN_SHARE * total) continue;
     const tier = finalTierByPrefix[p] ? finalTierByPrefix[p][brandNorm(brand)] : undefined;
-    if (tier && tier !== "hint_strong") conflicts.push({ brand, prefix: p, tier, count: set.size, example: [...set][0] });
+    if (tier && tier !== "hint_strong") rows.push({ brand, prefix: p, count: set.size, example: [...set][0], was: tier });
   }
-  // new-prefix style: a held-out brand forming a brand-new prefix block
   if (heldOutBrands.has(brandNorm(brand))) {
     for (const pp of deriveBrandPrefixes([...codes], { minConfirm: MIN_CONFIRM })) {
       if (pp.count < MIN_SHARE * total || finalCovers(pp.examples[0])) continue;
-      conflicts.push({ brand, prefix: pp.prefix, tier: "held_out(new prefix)", count: pp.count, example: pp.examples[0] });
+      rows.push({ brand, prefix: pp.prefix, count: pp.count, example: pp.examples[0], was: "review_before_use(new prefix)" });
     }
   }
 }
 
-(async () => {
-  try { const s = await (await fetch(BASE + "/api/ai-lookup")).json(); if (s.e2e) { console.error("server is e2e mock-only"); process.exit(1); } }
-  catch { console.error(`cannot reach ${BASE}`); process.exit(1); }
-  console.log(`Independent Gemini check of ${conflicts.length} conflicts via ${BASE} (conflict brands are NOT in the prefix table)\n`);
-  let agree = 0;
-  for (const c of conflicts.sort((a, b) => b.count - a.count)) {
-    const codeType = c.example.length === 13 ? "ean_13" : "upc_a";
-    const body = JSON.stringify({ mode: "decode-deep", scanContext: "tire", rawCode: c.example, cleanCode: c.example, codeType, confidenceThreshold: 0.85 });
-    try {
-      const r = await fetch(BASE + "/api/ai-lookup", { method: "POST", headers: { "Content-Type": "application/json" }, body });
-      const data = await r.json();
-      const txt = `${data?.results?.[0]?.productName || ""} ${data?.results?.[0]?.brand || ""}`.toLowerCase();
-      const ok = txt.includes(brandNorm(c.brand)) || txt.replace(/[^a-z0-9]/g, "").includes(brandNorm(c.brand));
-      if (ok) agree++;
-      console.log(`  ${ok ? "AGREE " : "DIFFER"}  ${c.brand.padEnd(14)} ${c.prefix.padEnd(9)} corpus=${String(c.count).padStart(4)}  gemini="${(data?.results?.[0]?.productName || "").slice(0, 44)}"`);
-    } catch (e) { console.log(`  ERROR   ${c.brand} ${e}`); }
-  }
-  console.log(`\nGemini agreed with the corpus on ${agree}/${conflicts.length} conflicts.`);
-})();
+const head = "brand,prefix,prefix_length,region,verification_status,ingest_tier,example_barcode,source_url,mapping_flag,notes";
+const csv = rows.sort((a, b) => b.count - a.count).map((r) =>
+  [r.brand, r.prefix, r.prefix.length, "promoted", "barcode_checked_crossconfirmed", "hint_strong", r.example, "", "OK", `owner-approved promotion (was ${r.was}): ${r.count} corpus rows + Gemini confirmed`].join(","));
+fs.writeFileSync(OUT, head + "\n" + csv.join("\n") + "\n");
+console.log(`promoted ${rows.length} conflicts -> ${OUT}`);
+for (const r of rows.sort((a, b) => b.count - a.count)) console.log(`  ${r.brand} on ${r.prefix} (was ${r.was}, ${r.count} rows)`);

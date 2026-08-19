@@ -5,10 +5,10 @@
 // Reads the corpus (read-only) + tire_prefixes_FINAL.csv (read-only). Writes tire_prefixes_SIBLINGS.csv.
 // Usage: node scripts/mine-tire-siblings.mjs
 import fs from "node:fs";
-import { normalizeToGtin13 } from "./lib/prefix-miner.mjs";
+import { normalizeToGtin13 } from "../lib/prefix-miner.mjs";
 
 const CORPUS = "data/tire-knowledge/tire_corpus_flat.csv";
-const OUT = "tire_prefixes_SIBLINGS.csv";
+const OUT = "data/tire-knowledge/prefixes/tire_prefixes_SIBLINGS.csv";
 const REPORT = "data/tire-knowledge/siblings-report.md";
 const MIN_CONFIRM = 5;   // owner rule: >= 5 corpus rows from the legitimate tire library == 100% strong proof.
 const MIN_SHARE = 0.1;   // and >= 10% of the brand's barcodes (drops mislabel contamination)
@@ -32,7 +32,7 @@ const titleCase = (s) => String(s || "").trim().split(/\s+/).map((w) => (w ? w[0
 const brandNorm = (b) => String(b || "").toLowerCase().replace(/\([^)]*\)/g, "").replace(/[^a-z0-9]/g, "");
 
 // FINAL: prefix list + the STRONG brand family already on each prefix.
-const finalRows = parseCSV(fs.readFileSync("tire_prefixes_FINAL.csv", "utf8"));
+const finalRows = parseCSV(fs.readFileSync("data/tire-knowledge/prefixes/tire_prefixes_FINAL.csv", "utf8"));
 const fh = finalRows[0].map((h) => h.trim());
 const fbi = fh.indexOf("brand"), fpi = fh.indexOf("prefix"), fti = fh.indexOf("ingest_tier");
 const finalEntries = finalRows.slice(1).filter((r) => /^\d+$/.test((r[fpi] || "").trim()));
