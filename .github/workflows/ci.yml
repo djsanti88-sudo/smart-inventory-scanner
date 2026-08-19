@@ -77,8 +77,10 @@ jobs:
 
       # NO browser here (owner 2026-08-19: the PR gate checks only what is necessary, fast). The one
       # test that launches a real Chromium (scripts/__tests__/render-report-pdf.test.mjs) runs in the
-      # Playwright E2E workflow, which already installs the browser; excluded below so a Chromium CDN
-      # stall can never block the unit gate again (it cost a 20-minute timeout on PR #38).
+      # Playwright E2E workflow, which already installs the browser, and self-skips here when no
+      # Chromium binary exists, so a Chromium CDN stall can never block the unit gate again (it cost
+      # a 20-minute timeout on PR #38). Note: vitest CLI --exclude does not reach per-project
+      # includes, which is why the skip lives in the test itself.
       # See the corpus-DB and stress-fixtures notes at the top of this file: the real
       # knowledge.generated.db is not built in CI, and .superpowers/stress/fixtures/ is gitignored
       # local-only scratch data with no CI-reachable generator.
@@ -87,7 +89,6 @@ jobs:
           npx vitest run
           --exclude "src/server/tire-knowledge/dtHarvestIntegration.test.ts"
           --exclude "src/components/UniversalImportPanel.fixtures.test.tsx"
-          --exclude "scripts/__tests__/render-report-pdf.test.mjs"
 
       - name: Verify tire metadata refresh preserves the generated payload
         run: npm run test:refresh-tire-meta
