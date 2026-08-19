@@ -82,7 +82,7 @@ export default function ScanPage() {
     ensureAutoSession();
   }, [businessContextReady, businessDataLoaded, ensureAutoSession]);
 
-  const hasKey = aiStatus.geminiConfigured || aiStatus.openaiConfigured;
+  const hasKey = aiStatus.openaiConfigured;
   const isPlatform = useIsPlatformOwner(); // AI/provider status is platformOwner-only on the scan page
   // P4: keep the scan box the single hero - collapse the secondary controls by default for real users.
   // Stay expanded under E2E (the auth-bypass flag is set only in the Playwright webServers, never in prod)

@@ -131,7 +131,7 @@ describe("D2: markWrong transfers quantity instead of destroying it", () => {
   it("EXAMPLE-GATE REGRESSION LOCK: an example barcode marked wrong never dispatches a paid decode and never settles verified", async () => {
     const store = createTestScanStore({ db: new MockDb() });
     // AI ON so a paid decode WOULD dispatch if the example-gate ever regressed.
-    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     store.getState().updateSettings({ aiLookupEnabled: true });
     // Spy on fetch: a paid decode POST to /api/ai-lookup would flow through here.
     const original = globalThis.fetch;

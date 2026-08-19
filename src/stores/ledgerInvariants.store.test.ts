@@ -130,7 +130,7 @@ describe("Ledger invariant suite (books balance on every path)", () => {
 
   it("path: CAP-BLOCKED (daily cap genuinely reached today, AI on)", async () => {
     const store = createTestScanStore({ db: new MockDb() });
-    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     // createTestScanStore pins now() to 2026-06-12 (scanStore.ts:5160). processScan resets dailyCount
     // to 0 unless lastResetDate === today's date on THAT clock - so this is the genuine cap-hit-after-
     // usage branch, not the silently-reset default (lastResetDate "1970-01-01" would count as 0 used).
@@ -142,7 +142,7 @@ describe("Ledger invariant suite (books balance on every path)", () => {
 
   it("path: OFFLINE", async () => {
     const store = createTestScanStore({ db: new MockDb() });
-    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     store.getState().updateSettings({ aiLookupEnabled: true });
     store.getState().setOnline(false);
     store.getState().processScan("878106003504");
@@ -152,7 +152,7 @@ describe("Ledger invariant suite (books balance on every path)", () => {
 
   it("path: BREAKER-OPEN (emergency stop)", async () => {
     const store = createTestScanStore({ db: new MockDb() });
-    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, emergencyStop: true });
+    store.getState().setAiStatus({ openaiConfigured: true, emergencyStop: true });
     store.getState().updateSettings({ aiLookupEnabled: true });
     store.getState().processScan("878106003504");
     assertBooksBalance(store);
@@ -161,7 +161,7 @@ describe("Ledger invariant suite (books balance on every path)", () => {
 
   it("path: DECODE-IN-FLIGHT then failed (network throws)", async () => {
     const store = createTestScanStore({ db: new MockDb() });
-    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     store.getState().updateSettings({ aiLookupEnabled: true });
     const original = globalThis.fetch;
     globalThis.fetch = vi.fn(async () => { throw new Error("network down"); }) as unknown as typeof fetch;

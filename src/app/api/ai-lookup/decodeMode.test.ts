@@ -13,29 +13,27 @@ describe("isDecodeChargeMode (shared daily-cap charge-mode predicate)", () => {
     expect(isDecodeChargeMode("decode-deep")).toBe(true);
   });
 
-  it("treats lookup, undefined, and unrecognized strings as NOT decode-charge modes", () => {
+  it("treats the deleted legacy 'lookup' mode, undefined, and unrecognized strings as NOT decode-charge modes", () => {
     expect(isDecodeChargeMode("lookup")).toBe(false);
     expect(isDecodeChargeMode(undefined)).toBe(false);
     expect(isDecodeChargeMode("garbage")).toBe(false);
     expect(isDecodeChargeMode("")).toBe(false);
   });
 
-  it("route.ts derives isDecodeMode from the shared predicate exactly once, with no second inline " +
-     "body.mode comparison anywhere else in the file (the L12 drift shape)", () => {
+  it("route.ts decides 'is this a decode request' ONLY through the shared predicate, exactly once, " +
+     "with no inline body.mode comparison anywhere in the file (the L12 drift shape)", () => {
     const routeSrc = fs.readFileSync(path.join(__dirname, "route.ts"), "utf8");
 
-    // Exactly one computation of isDecodeMode, and it must call the shared predicate - not re-derive the
-    // comparison inline. If a future change adds a second independent `body.mode === "decode"`-style
-    // check anywhere in route.ts (instead of reusing isDecodeChargeMode/isDecodeMode), this fails.
+    // No route-local re-derivation of the comparison. If a future change adds an independent
+    // `body.mode === "decode"`-style check instead of reusing isDecodeChargeMode, this fails.
     const inlineModeComparisons = routeSrc.match(/body\.mode\s*===\s*["']decode/g) ?? [];
     expect(inlineModeComparisons.length).toBe(0);
 
-    const assignments = routeSrc.match(/const isDecodeMode = [^\n]+/g) ?? [];
-    expect(assignments.length).toBe(1);
-    expect(assignments[0]).toMatch(/^const isDecodeMode = isDecodeChargeMode\(body\.mode\);$/);
-
-    // Both charge-relevant call sites still gate on that single shared boolean.
-    expect(routeSrc).toMatch(/!e2eMode\(\) && !isDecodeMode/); // skip the legacy lookup-mode charge
-    expect(routeSrc).toMatch(/if \(isDecodeMode\) \{/); // dispatch to the decode pipeline's own charge
+    // Exactly one call site: the admission gate that 400s every non-decode request before any auth,
+    // counter read, or storage touch. Nothing downstream re-checks the mode.
+    const predicateCalls = routeSrc.match(/isDecodeChargeMode\(body\.mode\)/g) ?? [];
+    expect(predicateCalls.length).toBe(1);
+    expect(routeSrc).toMatch(/if \(!isDecodeChargeMode\(body\.mode\)\) \{/);
+    expect(routeSrc).toMatch(/reasonCode: "unsupported_mode"/);
   });
 });

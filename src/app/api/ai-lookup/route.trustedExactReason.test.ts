@@ -1,16 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { __resetTrustedExactMembershipCacheForTest } from "@/services/security/trustedExactMembershipCache";
-import { __resetTrustedExactAuthorizationCacheForTest } from "@/services/security/trustedExactAuthorizationCache";
 
 // Mirror the route harness: mock every external seam before importing the route so the POST
 // handler is exercised in isolation.
 const runDecodePipeline = vi.fn();
-const tryTrustedExactDecode = vi.fn();
-const deriveTrustedExactAccessForVerifiedRoute = vi.fn();
 vi.mock("@/server/decode/pipeline", () => ({
   runDecodePipeline: (...args: unknown[]) => runDecodePipeline(...args),
-  tryTrustedExactDecode: (...args: unknown[]) => tryTrustedExactDecode(...args),
-  deriveTrustedExactAccessForVerifiedRoute: (...args: unknown[]) => deriveTrustedExactAccessForVerifiedRoute(...args),
   e2eMode: () => false,
 }));
 
@@ -60,8 +54,6 @@ vi.mock("@/lib/firebaseAdmin", () => ({
 const ORIG = { ...process.env };
 
 beforeEach(() => {
-  __resetTrustedExactMembershipCacheForTest();
-  __resetTrustedExactAuthorizationCacheForTest();
   process.env.NEXT_PUBLIC_AUTH_MODE = "mock";
   delete process.env.NEXT_PUBLIC_REQUIRE_LOGIN;
   delete process.env.IS_E2E;
@@ -79,8 +71,6 @@ beforeEach(() => {
     cached: false,
     paidComputeCharged: false,
   });
-  tryTrustedExactDecode.mockReset().mockResolvedValue(null);
-  deriveTrustedExactAccessForVerifiedRoute.mockReset().mockReturnValue(undefined);
   trustedExactCheck.mockReset().mockReturnValue({ allowed: true, retryAfterMs: 0 });
 });
 

@@ -35,7 +35,6 @@ vi.mock("@/components/ExportMenu", () => ({ ExportMenu: () => null }));
 vi.mock("@/components/CleanupRecommendations", () => ({ CleanupRecommendations: () => null }));
 vi.mock("@/components/OwnerPinSettings", () => ({ OwnerPinSettings: () => null }));
 vi.mock("@/components/GptLadderPanel", () => ({ GptLadderPanel: () => null }));
-vi.mock("@/components/GeminiStatusRow", () => ({ GeminiStatusRow: () => null }));
 
 const getSession = vi.fn();
 const signOut = vi.fn();

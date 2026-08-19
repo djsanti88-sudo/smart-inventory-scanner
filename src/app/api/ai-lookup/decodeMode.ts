@@ -12,15 +12,16 @@
 // named, unit-testable function removes that risk: there is now exactly one place that decides what a
 // "decode-mode" (paid-ladder) request looks like.
 //
-// NO BEHAVIOR CHANGE: this is byte-identical to the inline expression it replaces.
-export type AiLookupRequestMode = "lookup" | "decode" | "decode-deep";
+// CONSOLIDATION A1 (2026-08-19): the legacy 'lookup' mode is DELETED, so this predicate is now also
+// the route's ADMISSION gate - a request whose mode it rejects is answered 400 unsupported_mode before
+// any auth, counter read, or storage touch. Keeping one named predicate still matters for the same L12
+// reason: nothing else in route.ts may re-derive "is this a decode request" inline.
+export type AiLookupRequestMode = "decode" | "decode-deep";
 
 /**
- * True when the request's `mode` selects the decode pipeline (and therefore the decode pipeline's own
- * internal charge, not the legacy lookup-mode charge at the route level). Used to gate BOTH:
- *   - skipping the legacy 'lookup' daily-cap charge, and
- *   - dispatching to `runDecodePipeline` (which owns the single charge for this path).
- * Those two decisions must always move together; this function is the one place that decides them.
+ * True when the request's `mode` selects the decode pipeline (which owns the single daily-cap charge
+ * for this path). The only accepted modes are "decode" and its "decode-deep" alias; anything else,
+ * including a missing mode, is an unsupported request.
  */
 export function isDecodeChargeMode(mode: AiLookupRequestMode | string | undefined): boolean {
   return mode === "decode" || mode === "decode-deep";

@@ -26,7 +26,7 @@ function makeStoreWithOpenReviews(n: number): { store: ReturnType<typeof createT
     store.getState().processScan(`BULKPACER-CODE-${i}`);
     ids.push(store.getState().needsReviewQueue.at(-1)!.id);
   }
-  store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+  store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
   // Raise the daily cap well above n: this test isolates the RATE pacer, not the (separately tested)
   // daily-cap gate - a default 200/day limit would otherwise block most of a 1000-code burst outright.
   store.getState().updateSettings({ aiLookupEnabled: true, dailyLookupLimit: n + 500, dailyLookupCount: 0 });

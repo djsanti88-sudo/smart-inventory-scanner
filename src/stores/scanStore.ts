@@ -243,15 +243,10 @@ export class DecodeAbortedError extends Error {
 const DEFAULT_AI_STATUS: AiStatus = {
   liveEnabled: true,
   autoDecodeOnScan: true,
-  geminiEnabled: true,
-  openaiEnabled: true,
-  geminiConfigured: false,
   openaiConfigured: false,
   freeDecodeAvailable: false,
-  premiumFallback: false,
-  mode: "aggressive",
   dailyLimit: 100,
-  missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"],
+  missingKeys: ["OPENAI_API_KEY"],
   emergencyStop: false,
   lastAttemptAt: null,
   lastProvider: "",
@@ -295,8 +290,8 @@ function evaluateAutoDecode(p: {
   // client-block solely on paid-provider keys or a spent cap: the server will answer $0 hits before
   // applying paid-rung gates. Older/mocked status payloads omit this flag, so they keep the legacy
   // key/cap client gate and existing tests do not accidentally start real/network decode attempts.
-  if (!freeDecodeAvailable && !p.status.geminiConfigured && !p.status.openaiConfigured) {
-    const missing = p.status.missingKeys.join(", ") || "GEMINI_API_KEY, OPENAI_API_KEY";
+  if (!freeDecodeAvailable && !p.status.openaiConfigured) {
+    const missing = p.status.missingKeys.join(", ") || "OPENAI_API_KEY";
     return { allowed: false, reason: `No API keys configured (missing: ${missing}). Set them server-side, then retry live decode.` };
   }
   if (!isGodClient && !freeDecodeAvailable && isDailyCapReached(p.dailyCount, p.dailyLimit))
@@ -319,7 +314,7 @@ function isPlatformOwnerForGateBypass(userId: string | null): boolean {
 
 /**
  * GOD CLIENT (owner-approved 2026-08-07): shared override for every `evaluateAiGate` re-check on a
- * decode-execution path (`runLiveDecodeOnce`, `lookupUnknown` manual retry, `backgroundVerifyDeep`
+ * decode-execution path (`runLiveDecodeOnce`, `backgroundVerifyDeep`
  * follow-up). `evaluateAutoDecode` already bypasses the SAME cap/breaker/emergency-stop pre-block at
  * enqueue time; `evaluateAiGate` is a separate, lower-level re-check each of those paths runs again
  * just before actually firing (defense-in-depth against state drifting between enqueue and execution).
@@ -709,10 +704,6 @@ export const DEFAULT_SETTINGS: Settings = {
   // Internal lookup is ALWAYS-ON by default: unknown codes auto-attempt the internal decode pipeline
   // (when configured server-side) before going to Needs Review. The toggle remains platformOwner-only.
   aiLookupEnabled: true,
-  // Gemini Flash is the primary decode provider; OpenAI (gpt-5-mini) is the fallback. In mock/E2E mode the
-  // server forces the mock provider regardless, so this only affects real-cloud lookups (keys server-side).
-  primaryProvider: "gemini",
-  fallbackProvider: "openai",
   dailyLookupLimit: 200, // fallback if the server cap (AI_LOOKUP_DAILY_LIMIT) is unreachable
   dailyLookupCount: 0,
   lastResetDate: "1970-01-01",
@@ -893,7 +884,6 @@ export interface ScanState {
   setOnline: (online: boolean) => void;
   setSimulateSyncFailure: (on: boolean) => void;
   updateSettings: (partial: Partial<Settings>) => void;
-  lookupUnknown: (reviewId: string) => Promise<void>;
   /** Public entry point: ENQUEUES the decode (see the module-level bounded decode queue) and resolves
    *  once it actually runs. Never call `runLiveDecodeOnce` directly outside this queue - that would
    *  bypass the MAX_CONCURRENT_DECODES bound a rapid scan burst relies on. */
@@ -1033,7 +1023,7 @@ export interface ScanState {
     fields: Partial<Pick<Product, "name" | "brand" | "category" | "specsShort" | "specsFull" | "primarySku" | "imageUrl" | "location" | "unitCost">>,
   ) => void;
   /** Phase 6: mark a counted product wrong - deactivate its scanned-code aliases, remove the session count,
-   *  reopen Needs Review for the code, and request a Gemini Pro correction recheck. Returns the reopened review id. */
+   *  reopen Needs Review for the code, and request a correction recheck. Returns the reopened review id. */
   markWrong: (productId: string, opts?: { reason?: string }) => Promise<string | null>;
   /** Phase 6: reopen (or create) an OPEN Needs Review item for a clean code; clears stale suggestions.
    *  Phase 4: an optional importContext carries the import row's quantity + suggestion so an import-origin
@@ -1046,7 +1036,7 @@ export interface ScanState {
    *  carrying the TOTAL quantity (C5). The only write path for a universal import - preview/mapping/match
    *  stay read-only until this is called. */
   applyUniversalImport: (rows: ImportPreviewRow[]) => UniversalImportApplySummary;
-  /** Phase 6: correction-only Gemini Pro recheck. Cost-guarded (one per code unless retry). Never auto-saves. */
+  /** Phase 6: correction-only decode recheck. Cost-guarded (one per code unless retry). Never auto-saves. */
   correctionRecheck: (reviewId: string, opts?: { retry?: boolean; reason?: string }) => Promise<void>;
   /** Append a private feedback/event-log entry (the "smarter over time" substrate). */
   recordFeedback: (
@@ -3845,7 +3835,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // disabled or keys are missing, the scan goes to Needs Review without a provisional count
             // (the user chose not to decode — do not fabricate a product).
             const s = get();
-            const aiIntended = s.settings.aiLookupEnabled && (s.aiStatus.geminiConfigured || s.aiStatus.openaiConfigured);
+            const aiIntended = s.settings.aiLookupEnabled && s.aiStatus.openaiConfigured;
             if (aiIntended) {
               get().applyDecodeFallback(
                 review.id,
@@ -4017,25 +4007,18 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           }
           const d = await res.json();
           set((s) => {
-            const keyConfigured = Boolean(d.geminiConfigured) || Boolean(d.openaiConfigured);
+            const keyConfigured = Boolean(d.openaiConfigured);
             return {
               aiStatus: {
                 ...s.aiStatus,
                 liveEnabled: Boolean(d.liveEnabled),
                 autoDecodeOnScan: Boolean(d.autoDecodeOnScan),
-                geminiEnabled: Boolean(d.geminiEnabled),
-                openaiEnabled: Boolean(d.openaiEnabled),
-                geminiConfigured: Boolean(d.geminiConfigured),
                 openaiConfigured: Boolean(d.openaiConfigured),
-                premiumFallback: Boolean(d.premiumFallback),
-                mode: typeof d.mode === "string" ? d.mode : s.aiStatus.mode,
                 dailyLimit: typeof d.dailyLimit === "number" ? d.dailyLimit : s.aiStatus.dailyLimit,
                 missingKeys: Array.isArray(d.missingKeys) ? d.missingKeys : s.aiStatus.missingKeys,
-                // Task 8: honest decode-ladder fields. Gemini stays in geminiConfigured/geminiEnabled
-                // above (still read by the autoDecode gate below); these two only describe the real
-                // ladder order and confirm Gemini is never called during decode.
+                // Task 8: the real ladder order. Gemini is permanently out of decode and the server no
+                // longer reports any Gemini flag, model, or key.
                 decodeLadder: Array.isArray(d.decodeLadder) ? d.decodeLadder : s.aiStatus.decodeLadder,
-                geminiUsedForDecode: Boolean(d.geminiUsedForDecode),
                 // Spec 2 (M1): server-authoritative, same as every other flag in this block - a stale
                 // client value must never mask a live server kill switch, and an omitted field (older/
                 // mocked GET response) correctly defaults to false (not on).
@@ -4053,14 +4036,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     : s.aiStatus.gptLadder,
               },
               // Live AI config is SERVER-AUTHORITATIVE so a stale persisted client value can't disable lookup
-              // or pin an old daily cap. When the server confirms a provider key, force lookup ON (always-on),
-              // adopt the server daily cap (AI_LOOKUP_DAILY_LIMIT), and set Gemini-first -> OpenAI fallback.
+              // or pin an old daily cap. When the server confirms a provider key, force lookup ON (always-on)
+              // and adopt the server daily cap (AI_LOOKUP_DAILY_LIMIT).
               settings: {
                 ...s.settings,
                 aiLookupEnabled: keyConfigured ? true : s.settings.aiLookupEnabled,
                 dailyLookupLimit: typeof d.dailyLimit === "number" ? d.dailyLimit : s.settings.dailyLookupLimit,
-                primaryProvider: d.geminiConfigured ? "gemini" : d.openaiConfigured ? "openai" : s.settings.primaryProvider,
-                fallbackProvider: d.openaiConfigured ? "openai" : s.settings.fallbackProvider,
               },
             };
           });
@@ -4073,142 +4054,6 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       updateSettings: (partial) => set((s) => ({ settings: { ...s.settings, ...partial } })),
-
-      lookupUnknown: async (reviewId) => {
-        const state = get();
-        const review = state.needsReviewQueue.find((r) => r.id === reviewId);
-        if (!review || review.status !== "open") return;
-
-        const s = state.settings;
-        const nowIso = now();
-        const today = nowIso.slice(0, 10);
-        const nowMs = new Date(nowIso).getTime();
-        const dailyCount = s.lastResetDate === today ? s.dailyLookupCount : 0;
-
-        const log = (
-          status: AiLookupLog["status"],
-          providerName: string,
-          confidence: number,
-          breakerState: BreakerState,
-        ): AiLookupLog => ({
-          id: idFactory(),
-          businessId: state.businessId,
-          rawCode: review.rawCode,
-          cleanCode: review.cleanCode,
-          providerName,
-          status,
-          confidence,
-          estimatedInputTokens: 0,
-          estimatedOutputTokens: 0,
-          estimatedCost: 0,
-          cacheHit: false,
-          circuitBreakerState: breakerState.state,
-          createdAt: nowIso,
-        });
-
-        // GOD CLIENT (owner-approved 2026-08-07): manual "Retry live decode" must not silently re-block
-        // the platform owner on cap/breaker while every other decode path already lets the owner
-        // through - see `applyGodGateOverride`.
-        const gate = applyGodGateOverride(
-          evaluateAiGate({
-            enabled: s.aiLookupEnabled,
-            online: state.online,
-            dailyCount,
-            dailyLimit: s.dailyLookupLimit,
-            breaker: state.breaker,
-            now: nowMs,
-          }),
-          isPlatformOwnerForGateBypass(state.userId),
-        );
-
-        if (!gate.allowed) {
-          // Never fail silently: log the block and leave the code in Needs Review.
-          const blockStatus: Record<AiGateReason, AiLookupLog["status"]> = {
-            ok: "success",
-            disabled: "blocked_cap",
-            offline: "blocked_offline",
-            daily_cap: "blocked_cap",
-            circuit_open: "blocked_cap",
-          };
-          set((st) => ({
-            aiLookupLogs: [log(blockStatus[gate.reason], s.primaryProvider, 0, gate.breaker), ...st.aiLookupLogs],
-            breaker: gate.breaker,
-            settings: { ...st.settings, dailyLookupCount: dailyCount, lastResetDate: today },
-          }));
-          return;
-        }
-
-        // Sanitize before the AI ever sees the data (defense in depth; the server re-sanitizes too).
-        const rawCodeSanitized = sanitizeForAiLookup(review.rawCode).clean;
-        const cleanCodeSanitized = sanitizeForAiLookup(review.cleanCode).clean;
-
-        try {
-          // D4-follow-up: live-auth mode requires idToken + businessId on every POST (route.ts:294-324)
-          // or this 401s "unauthenticated" - mock mode resolves {} and is unaffected.
-          // P4 (#28): shared backoff helper - a human-initiated single action, not part of the bulk-
-          // paste storm, but gets the same honest-Retry-After/jitter resilience for consistency.
-          const res = await fetchWithBackoff("/api/ai-lookup", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              ...(await aiRequestAuth(state.businessId)),
-              rawCode: rawCodeSanitized,
-              cleanCode: cleanCodeSanitized,
-              provider: s.primaryProvider,
-              allowImageSuggestions: s.allowImageSuggestions,
-            }),
-          });
-          if (!res.ok) throw new Error(`lookup failed ${res.status}`);
-          const data = (await res.json()) as { providerName: string; result: AiLookupResult };
-          const result = data.result;
-
-          set((st) => ({
-            needsReviewQueue: st.needsReviewQueue.map((r) =>
-              r.id === reviewId
-                ? {
-                    ...r,
-                    suggestedProductName: result.productName,
-                    suggestedBrand: result.brand,
-                    suggestedCategory: result.category,
-                    suggestedSpecsShort: result.specsShort,
-                    suggestedSpecsFull: result.specsFull,
-                    suggestedPrimarySku: result.primarySku,
-                    suggestedPrimaryBarcode: scrubSuggestedBarcode(result.primaryBarcode, result.primarySku),
-                    suggestedGtin: scrubSuggestedBarcode(result.gtin, result.primarySku),
-                    suggestedUpc: scrubSuggestedBarcode(result.upc, result.primarySku),
-                    suggestedEan: scrubSuggestedBarcode(result.ean, result.primarySku),
-                    suggestedImageUrl: result.imageUrl,
-                    suggestedProductUrl: result.productUrl,
-                    suggestedAliases: result.aliases,
-                    sourceUrls: result.sourceUrls,
-                    verifiedFacts: result.verifiedFacts,
-                    guesses: result.guesses,
-                    reason: result.needsHumanReview
-                      ? "AI suggestion (low confidence). Confirm the real product before saving."
-                      : "AI suggestion. Review the facts and approve to save the alias.",
-                    providerName: data.providerName,
-                    confidence: result.confidence,
-                    hasSuggestion: true,
-                  }
-                : r,
-            ),
-            aiLookupLogs: [log("success", data.providerName, result.confidence, recordSuccess()), ...st.aiLookupLogs],
-            breaker: recordSuccess(),
-            settings: { ...st.settings, dailyLookupCount: dailyCount + 1, lastResetDate: today },
-          }));
-
-          // TRUST BOUNDARY: an AI result is only ever a SUGGESTION attached to the review item.
-          // It is NEVER auto-saved as an alias and NEVER counted. A human must approve it via the
-          // Needs Review actions. This is the fix for the wrong-product bug.
-        } catch {
-          const nextBreaker = recordFailure(gate.breaker, nowMs);
-          set((st) => ({
-            aiLookupLogs: [log("error", s.primaryProvider, 0, nextBreaker), ...st.aiLookupLogs],
-            breaker: nextBreaker,
-            settings: { ...st.settings, dailyLookupCount: dailyCount, lastResetDate: today },
-          }));
-        }
-      },
 
       cloudCatalogResolve: async (reviewId, codes) => {
         if (!deps.lookupGlobalCatalog) return;
@@ -4440,7 +4285,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           };
           const blockedReason = gateReasonText[gate.reason];
           set((st) => ({
-            aiLookupLogs: [mkLog(blockStatus, s.primaryProvider, 0, gate.breaker), ...st.aiLookupLogs],
+            aiLookupLogs: [mkLog(blockStatus, "decode", 0, gate.breaker), ...st.aiLookupLogs],
             breaker: gate.breaker,
             settings: { ...st.settings, dailyLookupCount: dailyCount, lastResetDate: today },
             needsReviewQueue: deterministicOnly
@@ -4542,7 +4387,6 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     ...(await aiRequestAuth(state.businessId)),
                     mode: "decode",
                     deterministicOnly,
-                    proRecheck: review.reopenedFromWrong === true, // auto-escalate a marked-wrong code to the stronger model
                     rawCode: rawCodeSanitized,
                     cleanCode: cleanCodeSanitized,
                     codeType,
@@ -5636,7 +5480,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   ? { ...ev, decodeStatus: "needs_review", reason: failReason }
                   : ev,
             ),
-            aiLookupLogs: [mkLog("error", s.primaryProvider, 0, nextBreaker), ...st.aiLookupLogs],
+            aiLookupLogs: [mkLog("error", "decode", 0, nextBreaker), ...st.aiLookupLogs],
             breaker: nextBreaker,
             aiStatus: { ...st.aiStatus, lastAttemptAt: nowIso, lastFailureReason: failReason },
             settings: { ...st.settings, dailyLookupCount: dailyCount, lastResetDate: today },
@@ -8174,7 +8018,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           : null;
         if (reviewId) {
           emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "needs_review_reopened", metadata: { code, fromProduct: productId } });
-          // 5. Stronger Gemini Pro correction recheck (cost-guarded; never auto-saves or counts).
+          // 5. Correction recheck through the decode pipeline (cost-guarded; never auto-saves or counts).
           await get().correctionRecheck(reviewId, { reason: opts?.reason });
         }
         // 6. Catalog revocation round (design §2.3): report the wrong identity to the shared master
@@ -8219,10 +8063,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
         emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "correction_recheck_requested", metadata: { code: review.cleanCode, reason: opts?.reason ?? "" } });
 
-        // Config-missing: do NOT fail the correction. Mark unavailable, keep in Needs Review, report key NAMES only.
-        if (!ai.geminiConfigured) {
-          patch({ correctionRecheckStatus: "unavailable", correctionRecheckedAt: now(), correctionRecheckMissingKeys: ["GEMINI_API_KEY"] });
-          emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "correction_recheck_completed", metadata: { code: review.cleanCode, status: "unavailable", missing: "GEMINI_API_KEY" } });
+        // Decode unavailable: do NOT fail the correction. Mark unavailable and keep it in Needs Review.
+        // The recheck runs the SAME decode pipeline as a normal scan (corpus -> Go-UPC -> Fetch V2 -> GPT,
+        // never Gemini), and that pipeline has free rungs, so a missing provider key is NOT a blocker. The
+        // only conditions that stop it running at all are the server kill switch and the server-side
+        // live-AI disable - the same two server flags the normal decode path honors. Key NAMES only.
+        if (ai.killSwitchOn || !ai.liveEnabled) {
+          const reason = ai.killSwitchOn ? "kill_switch" : "live_ai_disabled";
+          patch({
+            correctionRecheckStatus: "unavailable",
+            correctionRecheckedAt: now(),
+            ...(ai.missingKeys.length > 0 ? { correctionRecheckMissingKeys: [...ai.missingKeys] } : {}),
+          });
+          emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "correction_recheck_completed", metadata: { code: review.cleanCode, status: "unavailable", reason } });
           return;
         }
 
@@ -8235,11 +8088,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const res = await fetchWithBackoff("/api/ai-lookup", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            // proRecheck selects the strongest configured Gemini model server-side. Correction-only:
-            // it does NOT change normal scan provider order or premium fallback.
             body: JSON.stringify({
               ...(await aiRequestAuth(get().businessId)),
-              mode: "decode", proRecheck: true, rawCode: review.rawCode, cleanCode: review.cleanCode, codeType: detectCodeType(review.cleanCode), confidenceThreshold: 0.85,
+              mode: "decode", rawCode: review.rawCode, cleanCode: review.cleanCode, codeType: detectCodeType(review.cleanCode), confidenceThreshold: 0.85,
             }),
           });
           const data = await res.json();
@@ -8264,7 +8115,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               hasSuggestion: true, decodeStatus: "verified", confidence: decision?.confidence ?? best.confidence ?? 0,
               evidenceStrength: decision?.evidenceStrength ?? "none", exactCodeEvidenceVerifiedByApp: Boolean(decision?.exactCodeEvidenceVerifiedByApp),
               crossCheckDecision: decision?.crossCheck?.decision ?? "",
-              reason: "Gemini Pro recheck: verified correction suggested. Approve to save (still requires your confirmation).",
+              reason: "Correction recheck: verified correction suggested. Approve to save (still requires your confirmation).",
             });
           } else {
             // insufficient_evidence | conflict -> keep in Needs Review, safe message, NO trusted suggestion.
@@ -8272,8 +8123,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               correctionRecheckStatus: status, correctionRecheckedAt: now(),
               decodeStatus: status === "conflict" ? "conflict" : "needs_review",
               reason: status === "conflict"
-                ? "Gemini Pro recheck: providers conflict on identity. Kept in Needs Review - resolve manually."
-                : "Gemini Pro recheck: insufficient evidence to auto-correct. Kept in Needs Review.",
+                ? "Correction recheck: sources conflict on identity. Kept in Needs Review - resolve manually."
+                : "Correction recheck: insufficient evidence to auto-correct. Kept in Needs Review.",
             });
           }
           emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "correction_recheck_completed", metadata: { code: review.cleanCode, status } });

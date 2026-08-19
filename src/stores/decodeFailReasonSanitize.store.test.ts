@@ -17,7 +17,7 @@ function failWith(err: Error) {
 
 function aggressiveStore() {
   const store = createTestScanStore({ db: new MockDb() });
-  store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+  store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
   store.getState().updateSettings({ aiLookupEnabled: true });
   return store;
 }

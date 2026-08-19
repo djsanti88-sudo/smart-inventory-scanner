@@ -3,7 +3,8 @@
 // P6 Task A2 (GC-A, law-critical): the tenant-starvation cap-reorder fix. Failing-first proof for the
 // starvation case described in docs/archive/superpowers/plans/2026-07-20-phase6-sell-ready.md GC-A: with the
 // GLOBAL counter already drained (>= AI_LOOKUP_DAILY_LIMIT) and an authed tenant's OWN account usage at
-// 0, that tenant must SUCCEED on both the legacy 'lookup' path and the decode path (pre-fix: both 429).
+// 0, that tenant must SUCCEED on the decode path (pre-fix: 429). Consolidation A1 deleted the legacy
+// 'lookup' path (and its half of this suite) - decode is the only path this endpoint serves.
 // Anonymous traffic (no authedBusinessId) still hits the plain global cap exactly as before. An
 // account-cap-exhausted tenant still 429s with the honest account_daily_cap reasonCode. Charge-count
 // assertions prove L12 stays intact: exactly one global + one account charge per genuine paid compute,
@@ -120,7 +121,7 @@ describe("/api/ai-lookup GC-A tenant-starvation cap reorder (P6 Task A2)", () =>
   // counter in mock mode (today's real anonymous traffic shape) and then switching to live mode to
   // prove the authed tenant's request against that already-drained shared counter - both modes write
   // the SAME storage-backed global key (ladderStorage(), redirected to this suite's tmp dir).
-  async function drainGlobalAsAnonymous(n: number, mode: "lookup" | "decode" = "lookup") {
+  async function drainGlobalAsAnonymous(n: number, mode: "decode" | "decode-deep" = "decode") {
     process.env.NEXT_PUBLIC_AUTH_MODE = "mock";
     for (let i = 0; i < n; i++) {
       const res = await POST(makeRequest({ cleanCode: `9990001112${i}2`, mode }));
@@ -128,64 +129,6 @@ describe("/api/ai-lookup GC-A tenant-starvation cap reorder (P6 Task A2)", () =>
     }
     process.env.NEXT_PUBLIC_AUTH_MODE = "live";
   }
-
-  // --- LEGACY 'lookup' path -------------------------------------------------------------------------
-
-  it("legacy path: an authed tenant with acctUsed=0 SUCCEEDS even though the global counter is already drained", async () => {
-    process.env.AI_LOOKUP_DAILY_LIMIT = "1";
-    await drainGlobalAsAnonymous(1, "lookup"); // anonymous traffic exhausts the plain global cap
-    expect(await globalUsedNow()).toBeGreaterThanOrEqual(1);
-
-    const res = await authedReq({ mode: "lookup" });
-    expect(res.status).toBe(200); // FAILS PRE-FIX: legacy path 429s daily_cap here
-    expect((await res.json()).mode).toBe("lookup");
-  });
-
-  it("legacy path: anonymous traffic still 429s at the plain global daily cap (unchanged)", async () => {
-    process.env.NEXT_PUBLIC_AUTH_MODE = "mock";
-    process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // already exhausted
-    const res = await POST(makeRequest({ cleanCode: "111000222333", mode: "lookup" }));
-    expect(res.status).toBe(429);
-    expect((await res.json()).reasonCode).toBe("daily_cap");
-  });
-
-  it("legacy path: an account-cap-exhausted tenant still 429s with account_daily_cap, even with global room", async () => {
-    process.env.AI_LOOKUP_DAILY_LIMIT = "500";
-    process.env.AI_LOOKUP_ACCOUNT_DAILY_LIMIT = "0"; // tenant's own cap already exhausted
-    const res = await authedReq({ mode: "lookup" });
-    expect(res.status).toBe(429);
-    expect((await res.json()).reasonCode).toBe("account_daily_cap");
-  });
-
-  it("legacy path: exactly one global + one account charge per genuine paid compute; zero charges on a blocked request", async () => {
-    process.env.AI_LOOKUP_DAILY_LIMIT = "500";
-    const before = await globalUsedNow();
-    const acctBefore = await acctUsedNow("tenant-a");
-    const res = await authedReq({ mode: "lookup" });
-    expect(res.status).toBe(200);
-    expect(await globalUsedNow()).toBe(before + 1);
-    expect(await acctUsedNow("tenant-a")).toBe(acctBefore + 1);
-
-    // A blocked request (account cap exhausted) must charge NEITHER counter.
-    process.env.AI_LOOKUP_ACCOUNT_DAILY_LIMIT = "0";
-    const g2 = await globalUsedNow();
-    const a2 = await acctUsedNow("tenant-a");
-    const blocked = await authedReq({ mode: "lookup" });
-    expect(blocked.status).toBe(429);
-    expect(await globalUsedNow()).toBe(g2);
-    expect(await acctUsedNow("tenant-a")).toBe(a2);
-  });
-
-  it("legacy path: even an authed tenant is blocked once the platform BACKSTOP itself is drained", async () => {
-    process.env.AI_LOOKUP_DAILY_LIMIT = "1";
-    process.env.AI_LOOKUP_GLOBAL_BACKSTOP = "1"; // backstop == the plain limit for this test (tiny on purpose)
-    await drainGlobalAsAnonymous(1, "lookup"); // drains the shared bucket up to the backstop
-    expect(await globalUsedNow()).toBeGreaterThanOrEqual(1);
-
-    const res = await authedReq({ mode: "lookup" });
-    expect(res.status).toBe(429);
-    expect((await res.json()).reasonCode).toBe("daily_cap");
-  });
 
   // --- DECODE path -----------------------------------------------------------------------------------
 

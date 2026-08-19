@@ -115,7 +115,6 @@ test("live decode: verified vs suggested vs conflict vs vendor label, all mocked
   await page.goto("/settings");
   await page.getByTestId("clear-cache").click();
   await page.getByTestId("setting-ai-enabled").check();
-  await page.getByTestId("setting-provider").selectOption("gemini");
   // This spec inspects the decode STATUS + manual approve flow, so turn auto-add OFF here.
   await page.getByTestId("setting-auto-add").uncheck();
 

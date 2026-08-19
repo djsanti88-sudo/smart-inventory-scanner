@@ -35,7 +35,7 @@ describe("scanStore count-first durability (HARD RULE 0)", () => {
         // The status GET must succeed so keys read as configured; the decode POST always REJECTS.
         if (method === "GET") {
           return new Response(
-            JSON.stringify({ liveEnabled: true, autoDecodeOnScan: true, geminiConfigured: true, openaiConfigured: true, missingKeys: [], mode: "aggressive", dailyLimit: 100, emergencyStop: false }),
+            JSON.stringify({ liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true, missingKeys: [], mode: "aggressive", dailyLimit: 100, emergencyStop: false }),
             { status: 200, headers: { "content-type": "application/json" } },
           );
         }
@@ -51,7 +51,7 @@ describe("scanStore count-first durability (HARD RULE 0)", () => {
   it("a scan whose EVERY decode rung rejects still leaves a raw feed row + Needs Review entry", async () => {
     const store = createTestScanStore({ db: new MockDb() });
     // Turn the auto-decode gate ON (keys configured), so the scan attempts a live decode and it FAILS.
-    store.getState().setAiStatus({ liveEnabled: true, autoDecodeOnScan: true, geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().setAiStatus({ liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true, missingKeys: [] });
 
     const ev = store.getState().processScan("999888777666");
     expect(ev, "processScan returns the raw scan event synchronously (count-first)").not.toBeNull();
@@ -72,7 +72,7 @@ describe("scanStore count-first durability (HARD RULE 0)", () => {
 
   it("the raw feed row + Needs Review entry SURVIVE a persist/rehydrate cycle", async () => {
     const store = createTestScanStore({ db: new MockDb() });
-    store.getState().setAiStatus({ liveEnabled: true, autoDecodeOnScan: true, geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().setAiStatus({ liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true, missingKeys: [] });
 
     store.getState().processScan("555444333222");
     await new Promise((r) => setTimeout(r, 0));

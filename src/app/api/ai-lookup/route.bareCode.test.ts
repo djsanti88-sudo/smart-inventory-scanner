@@ -44,7 +44,7 @@ function decodeRequest(cleanCode: string) {
   });
 }
 
-function lookupRequest(cleanCode: string) {
+function noModeRequest(cleanCode: string) {
   return new Request("http://localhost/api/ai-lookup", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -86,12 +86,13 @@ describe("bare numeric scan codes reach the pipeline unmasked", () => {
     expect(flat).not.toContain("305");
   });
 
-  it("preserves a bare numeric lookup code in the legacy lookup response", async () => {
-    const res = await POST(lookupRequest("3220015959"));
-    expect(res.status).toBe(200);
-
-    const json = await res.json();
-    expect(json.sanitizedInput.cleanCodeSanitized).toBe("3220015959");
-    expect(json.sanitizedInput.cleanCodeSanitized).not.toBe("[redacted-phone]");
+  // Consolidation A1: the legacy 'lookup' response (which used to echo sanitizedInput for a
+  // mode-less request) is deleted. A mode-less POST is now refused up front and never sanitizes,
+  // never authenticates, and never reaches the pipeline.
+  it("a mode-less request is refused with 400 unsupported_mode and never reaches the pipeline", async () => {
+    const res = await POST(noModeRequest("3220015959"));
+    expect(res.status).toBe(400);
+    expect((await res.json()).reasonCode).toBe("unsupported_mode");
+    expect(runDecodePipeline).not.toHaveBeenCalled();
   });
 });

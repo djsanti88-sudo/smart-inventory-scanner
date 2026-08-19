@@ -89,7 +89,7 @@ describe("/api/ai-lookup rate-limit fail-open on storage init failure (Finding C
 
   it("POST: a storage init throw at the rate-limit site does NOT 500 - the request proceeds (fails open)", async () => {
     failNextStorageInit = true; // the POST rate-limit ladderStorage() throws
-    const res = await POST(makeRequest({ cleanCode: "111000222333", mode: "lookup" }));
+    const res = await POST(makeRequest({ cleanCode: "111000222333", mode: "decode" }));
     // Pre-fix: raw 500 (unhandled throw from the unguarded rate-limit site). Post-fix: fails open,
     // proceeds, and returns a normal (non-500) response.
     expect(res.status).not.toBe(500);

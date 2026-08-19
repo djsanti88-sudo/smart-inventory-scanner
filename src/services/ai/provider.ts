@@ -19,11 +19,6 @@ export interface AiLookupRequest {
   brandPrefixHint?: string;
 }
 
-export interface AiProvider {
-  name: string;
-  lookup(req: AiLookupRequest, signal?: AbortSignal): Promise<AiLookupResult>;
-}
-
 /** A safe empty result used when a provider cannot or should not return data. */
 export function emptyResult(): AiLookupResult {
   return {

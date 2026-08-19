@@ -42,7 +42,7 @@ function stub(resp: object) {
 
 function aggressiveStore() {
   const store = createTestScanStore({ db: new MockDb() });
-  store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+  store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
   store.getState().updateSettings({ aiLookupEnabled: true, scanContext: "any" });
   return store;
 }

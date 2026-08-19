@@ -5,7 +5,6 @@ import { type ProviderStatus } from "@/services/ai/decodeOrchestrator";
 import { decideDecode, isUsableProductName, isExampleOrTestRow } from "@/services/ai/decode";
 import { firecrawlScrapeCheap, searchIdentifyByBarcode, firecrawlKeysFromEnv } from "@/services/ai/firecrawlProvider";
 import { lookupBarcodeDb } from "@/server/retail-knowledge/barcodeDbProvider";
-import { groundIdentify, getLastGroundingStatus } from "@/services/ai/flashLiteGrounding";
 import { verifyCodeOnPage } from "@/services/ai/verifyCodeOnPage";
 import { resolveUnknownFast, type ParallelResolveDeps } from "@/services/ai/parallelResolve";
 import { decodeReasonCode, REASON_TEXT, sanitizeCustomerReason, allMissReasonCode, MISS_REASON_TEXT } from "@/services/ai/decodeFallback";
@@ -50,7 +49,7 @@ import { lookupMasterCatalog } from "@/server/catalog/masterLookup";
 // PURE EXTRACTION (Task 2.4): this module is the decode pipeline lifted verbatim out of
 // app/api/ai-lookup/route.ts. Zero behavior change - every domain rule (the daily cap charged only
 // inside the paid rungs after the free corpus/cache peek; the corpus -> Go-UPC -> Fetch V2 -> GPT
-// ladder order and short-circuit; IS_E2E mock-only; GEMINI_DECODE_DISABLED; honest reasons for
+// ladder order and short-circuit; IS_E2E mock-only; Gemini out of decode; honest reasons for
 // every non-decode) is preserved exactly as it was in the route. route.ts now parses the request,
 // applies the abuse/mock-mode gates, and shapes the response; it delegates the decode work here.
 
@@ -70,12 +69,12 @@ export class DailyCapExceededError extends Error {
   }
 }
 
-// OWNER ORDER 2026-07-06 ("remove Gemini for now"): Gemini is OUT of the decode path. Forensics
-// proved Gemini 3 grounding bills every executed search query with NO cap control and the queries
-// are invisible client-side ($6 real vs $0.53 computed, see LESSONS_LEARNED L11) - the gpt-5.5
-// ladder rung (capped, fully meterable) is the only paid decode engine. This gates the Gemini
-// fast/escalation providers AND the Plan D flash-lite grounding arm. Flip to false to restore.
-const GEMINI_DECODE_DISABLED = true;
+// OWNER ORDER 2026-07-06 ("remove Gemini for now"), made permanent by consolidation A1 (2026-08-19):
+// Gemini is OUT of the decode path and its provider/grounding modules are DELETED. Forensics proved
+// Gemini 3 grounding bills every executed search query with NO cap control and the queries are
+// invisible client-side ($6 real vs $0.53 computed, see LESSONS_LEARNED L11) - the gpt-5.5 ladder rung
+// (capped, fully meterable) is the only paid decode engine. Plan D consensus simply runs without a
+// grounding leg (the resolver treats an absent leg exactly as it treated a null-returning one).
 
 // MODULE-LEVEL Go-UPC gate: ONE instance per server process so the 2 req/s throttle + in-flight
 // dedup span every request (a per-request gate would let concurrent scans of the same code each
@@ -388,7 +387,7 @@ async function evalCombinedFirewall(code: string, result: AiLookupResult | undef
 // return and the final return) set it only when the paid GPT-5.5 ladder rung itself resolved the code.
 // Otherwise, "paid_ai" is detected from the literal provider-name strings that ONLY the legacy
 // fast/escalation/deep-fallback path ever pushes into providerNames: "gemini"/"openai" (decodeProviders /
-// escalationProviders - the default AiProvider names from createGeminiProvider/createOpenAiProvider),
+// escalationProviders - the provider names of the retired legacy Gemini/OpenAI path, still present in old cached rows),
 // "gemini:read"/"openai:read" (the pageReader's label override, used by enrichWithPageFetch to read a
 // fetched page), and "ai-deep"/"ai-cited-deep"/"firecrawl" (the Stage-2 deep fallback finders). Neither
 // the tire-corpus exit (providerNames come from TireKnowledgeProvider, e.g. "tire-corpus") nor the Plan D
@@ -1764,9 +1763,6 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         // is false and this fallback keeps its full original behavior, exact code included.
         lookupBarcodeDb: async () => upcItemDbResult ?? (await lookupBarcodeDb(code, { skipExact: upcItemDbExactTried })),
         retailDb: async () => (retailHit ? { name: retailHit.productName, brand: retailHit.brand } : null),
-        // Gemini grounding arm gated off with the rest of Gemini (owner order 2026-07-06); null
-        // is the arm's documented "miss" value, so Plan D consensus just proceeds without it.
-        groundIdentify: (c, opts) => (GEMINI_DECODE_DISABLED ? Promise.resolve(null) : groundIdentify(c, opts)),
         ...paidArms,
         prefixFloor: (c) => prefixFloorName(c, codeType),
       }).catch(() => null);
@@ -1808,9 +1804,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
             reasonCode: pdReasonCode,
             reasonText: pdReasonText,
             timedOut: false,
-            // groundingStatus makes a silent grounding outage (e.g. a model 503) visible in the decode
-            // debug instead of consensus quietly degrading to the two correlated DB votes.
-            debug: { providersAttempted: pdProviderNames, evidenceStrengths: pdEvidences.map((e) => e.strength), sourceCounts: pdResults.map((r) => (r.sourceUrls ?? []).length), corroborationPath: decision.corroborationPath ?? `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false, groundingStatus: getLastGroundingStatus(), retailLookup: retailLookupStatus },
+            debug: { providersAttempted: pdProviderNames, evidenceStrengths: pdEvidences.map((e) => e.strength), sourceCounts: pdResults.map((r) => (r.sourceUrls ?? []).length), corroborationPath: decision.corroborationPath ?? `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false, retailLookup: retailLookupStatus },
             sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
           };
         }
@@ -1828,7 +1822,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
           reasonCode: pdReasonCode,
           reasonText: pdReasonText,
           timedOut: false,
-          debug: { providersAttempted: pdProviderNames, evidenceStrengths: pdEvidences.map((e) => e.strength), sourceCounts: pdResults.map((r) => (r.sourceUrls ?? []).length), corroborationPath: decision.corroborationPath ?? `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false, groundingStatus: getLastGroundingStatus(), retailLookup: retailLookupStatus },
+          debug: { providersAttempted: pdProviderNames, evidenceStrengths: pdEvidences.map((e) => e.strength), sourceCounts: pdResults.map((r) => (r.sourceUrls ?? []).length), corroborationPath: decision.corroborationPath ?? `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false, retailLookup: retailLookupStatus },
           sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
         };
       }
