@@ -32,7 +32,8 @@ present-tense truth. Teach Bot harness commands live in `docs/COMMANDS.md` (not 
   changes (owner-gated, live cloud).
 - `npm run teach` / `teach:test` / `teach:regression` / `teach:cleanup` - Teach Bot live-app learning
   harness; full command reference in `docs/COMMANDS.md`.
-- `npm run proof:local` / `proof:full` - `tsc --noEmit` + `vitest run` / + `next build`.
+- `npm run proof:all` - THE gate (typecheck + all vitest projects + vitest-excluded node:test suites + teach-bot + test-file discovery, with an explicit NOT RUN list). `proof:local` / `proof:full` remain as the lighter typecheck + vitest (+ build) runs.
+- Best-guess identity + shared decode cache (2026-08-19): `src/server/decode/pipeline.test.ts` "L2 negative-cache cooldown, knowledge version, and the pay-once escalation marker" (17 cases: receipt fresh/expired/version-stale, free-only re-evaluation with a fetch stub that throws on any non-free host, pay-once marker, cooldown clock preserved, paid row kept over free title, cap-block replays the shown guess, coalescing); `src/services/ai/identityConfidenceBand.test.ts`; `src/stores/scanStore.rowControls.test.ts` (weak guess banded + Approve/Edit, typed confirm -> tenant alias without double count, floor names get no Approve, decline settles by code, repeat scan never re-decodes); `src/components/LiveScanFeedSuggestion.test.tsx` (controls by state, two-tap Reassign stating the blast radius, focus retention); e2e `e2e/best-guess-identity.spec.ts` (6 clerk-style scenarios, screenshots `e2e/proof/best-guess-*.png`).
 - `npm run dev` - manual run (http://localhost:3000, mock backend default).
 
 ## Coverage map (by area, verified 2026-07-29)
