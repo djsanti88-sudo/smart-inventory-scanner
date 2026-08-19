@@ -33,8 +33,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Hard step timeout (owner 2026-08-19): a stalled browser download fails fast and visibly
+      # instead of burning the whole job budget; re-run the job when the CDN recovers.
       - name: Install Playwright Chromium + OS deps
+        timeout-minutes: 6
         run: npx playwright install --with-deps chromium
+
+      # The one unit-level test that needs a real browser (report PDF rendering) lives here, next to
+      # the only job that installs one; the unit-tests job stays browser-free.
+      - name: Browser-backed report render test
+        run: npx vitest run scripts/__tests__/render-report-pdf.test.mjs
 
       - name: Run Playwright E2E (mock backend)
         run: npm run test:e2e
