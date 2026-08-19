@@ -407,6 +407,15 @@ Why each choice was made. Newest decisions at the bottom of each section.
 - **Status:** shipped 2026-08-19 (PR #38). Follow-up the same day: the auto-applied (>= 0.8) row
   now carries the same band + one-tap Approve as the inline path (production-found gap); the 0.8
   line, the retail-corpus 0.85 constant, the ladder, and the trust model are unchanged.
+- **Tenant confirmation is tenant-scoped (owner, 2026-08-19):** a feed-row Approve or typed identity
+  resolves with origin `tenant_approval`: same poison-guard bypass as `human` for that tenant's
+  product + approved alias, but never a device-shared verified-catalog entry. Platform/app-verified
+  knowledge (learned tier, master catalog, `auto_verify`) stays separate. `human` (Needs Review save)
+  is unchanged.
+- **FOLLOW-UP (pre-existing, not fixed here):** the deep-verify fallback (`backgroundVerifyDeep`)
+  calls `autoSuggestApplyOk` without the multi-variant gate the fast path applies, so a multi-speed-
+  rating listing can be auto-applied there. The feed's one-tap Approve is already gated
+  (`canOneTapApproveIdentity`); closing the auto-apply hole itself is a separate small PR.
 - **FUTURE (not built, owner 2026-08-19):** record Approve / Edit / Reassign / Not-this-product
   outcomes per source tier (tire corpus, retail corpus, master catalog, learned, paid fetched, AI
   guess) so the hard-coded confidence constants (0.85, x0.6 discount, 0.8 line) can be replaced by

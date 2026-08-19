@@ -240,6 +240,54 @@ describe("feed row identity controls (best-guess display)", () => {
     }
   });
 
+  // TENANT-SCOPED confirmation (owner decision 2026-08-19): a tenant's Approve/typed identity on a feed
+  // row teaches THAT tenant (verified product + approved alias) exactly like a human confirm, but it
+  // never writes the device-shared verified catalog - that is platform/app-verified knowledge, which
+  // stays separate. (The device catalog is not tenant-scoped, survives a tenant switch, and a verified
+  // entry auto-resolves + auto-counts the code for any later tenant with no review.)
+  it("confirmRowIdentity is tenant-scoped: verified tenant product + approved alias, NO device-catalog entry", async () => {
+    const store = aggressiveStore();
+    const { restore } = stub(WEAK_NEEDS_REVIEW);
+    try {
+      store.getState().processScan(CODE);
+      await vi.waitFor(() => expect(pendingRow(store)).toBeTruthy());
+      const row = pendingRow(store)!;
+
+      store.getState().confirmRowIdentity(row.id, { name: "Buffalo Wing Sauce 12oz", brand: "Anchor Bar" });
+
+      const alias = store.getState().aliases.find((a) => a.cleanCode === CODE)!;
+      expect(alias.approved).toBe(true);
+      const product = store.getState().products.find((p) => p.id === alias.productId)!;
+      expect(product.verified, "the tenant's own product is confirmed (poison guard bypassed by the human tap)").toBe(true);
+      expect(product.provisional).toBe(false);
+      const entry = store.getState().catalog.find((e) => e.normalizedBarcode === CODE || e.barcode === CODE);
+      expect(entry?.verificationStatus ?? "none", "no shared VERIFIED catalog entry from a tenant confirmation").not.toBe("verified");
+    } finally {
+      restore();
+    }
+  });
+
+  it("a direct human resolution (Needs Review save) still writes the verified catalog as before", async () => {
+    const store = aggressiveStore();
+    const { restore } = stub(WEAK_NEEDS_REVIEW);
+    try {
+      store.getState().processScan(CODE);
+      await vi.waitFor(() => expect(pendingRow(store)).toBeTruthy());
+      const review = store.getState().needsReviewQueue.find((r) => r.cleanCode === CODE)!;
+
+      store.getState().resolveUnknown(review.id, "create_new", {
+        applyToCount: true,
+        origin: "human",
+        newProduct: { name: "Buffalo Wing Sauce 12oz", brand: "Anchor Bar", primaryBarcode: CODE },
+      });
+
+      const entry = store.getState().catalog.find((e) => e.normalizedBarcode === CODE || e.barcode === CODE);
+      expect(entry?.verificationStatus).toBe("verified");
+    } finally {
+      restore();
+    }
+  });
+
   it("a second scan of a code that already shows a pending suggestion re-uses it and never pays for decode again", async () => {
     const store = aggressiveStore();
     const { spy, restore } = stub(WEAK_NEEDS_REVIEW);

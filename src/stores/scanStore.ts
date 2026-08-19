@@ -972,7 +972,10 @@ export interface ScanState {
       productId?: string;
       newProduct?: Partial<Product>;
       applyToCount?: boolean;
-      origin?: "human" | "ai" | "catalog" | "auto_verify" | "auto_count";
+      // "tenant_approval" = a tenant's own human confirmation (feed-row Approve / typed identity): same
+      // trust as "human" for THAT tenant's product + alias, but never writes the device-shared verified
+      // catalog (platform/app-verified knowledge stays separate from tenant knowledge).
+      origin?: "human" | "tenant_approval" | "ai" | "catalog" | "auto_verify" | "auto_count";
       autoVerify?: {
         score: number;
         verifiedBy: CatalogVerifiedBy;
@@ -6302,6 +6305,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
         if (action === "create_new") {
           const np = payload.newProduct ?? {};
+          // A person confirmed this identity (typed it or tapped Approve on it): the weak-guess poison
+          // guard, which exists to stop an evidence-less AI suggestion becoming verified by itself, does
+          // not apply. "tenant_approval" differs from "human" ONLY in what is written platform/device-wide.
+          const humanConfirmed = payload.origin === "human" || payload.origin === "tenant_approval";
 
           // DEDUP GUARD (data correctness): every auto-add path (AI auto-add, catalog auto-count) funnels
           // through create_new, so without this one barcode could spawn dozens of identical product rows
@@ -6451,8 +6458,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // with real evidence upgrades the provisional.
             if (products.find((p) => p.id === productId)?.provisional === true) {
               approvingProvisional = true;
-              // When origin is "human", the user is deliberately confirming the provisional - skip the guard.
-              const isWeakGuessReuse = isWeakGuess(review, np) && payload.origin !== "human";
+              // When a person confirmed it, they are deliberately confirming the provisional - skip the guard.
+              const isWeakGuessReuse = isWeakGuess(review, np) && !humanConfirmed;
               if (isWeakGuessReuse) {
                 weakGuessProduct = true;
                 // Leave the provisional as-is (not upgraded to verified).
@@ -6528,7 +6535,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // guard still applies (an evidence-less AI suggestion stays unverified + provisional).
             productId = provOrphanId;
             approvingProvisional = true;
-            weakGuessProduct = isWeakGuess(review, np) && payload.origin !== "human";
+            weakGuessProduct = isWeakGuess(review, np) && !humanConfirmed;
             const orphan = products.find((p) => p.id === provOrphanId)!;
             // FALKEN FIX (owner-reported live bug, 2026-07-20): this upgrade path used to write
             // np.brand/np.category/np.specsShort/np.specsFull verbatim with no fallback, so a
@@ -6575,7 +6582,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               verified: !weakGuessProduct,
               provisional: weakGuessProduct ? true : false,
               updatedAt: now(),
-              updatedBy: payload.origin === "human" ? "human" : orphan.updatedBy,
+              updatedBy: humanConfirmed ? "human" : orphan.updatedBy,
               // Task 4: structure the upgraded identity (deterministic only, never LLM on the hot
               // path). Guarded against clobbering a prior "human" stamp.
               ...safeStructuredFieldsFor(np.name ?? orphan.name, orphanEnriched.brand, orphan.structuredBy),
@@ -7005,9 +7012,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               ),
             });
           }
-          // origin "auto_count" (learning off) and "catalog" -> count only, no catalog write here.
+          // origin "tenant_approval" (a tenant's own confirmation: tenant product + alias only), "auto_count"
+          // (learning off) and "catalog" -> no shared-catalog write here.
         }
-        if (origin === "human") {
+        if (origin === "human" || origin === "tenant_approval") {
           get().recordFeedback(action === "create_new" ? "product_approved" : "alias_linked", {
             code: review.cleanCode,
             productId,
@@ -7225,12 +7233,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           if (!review) return;
         }
         const reviewId = review.id;
-        // origin "human" is correct HERE (and deliberately not in batchApprove): this identity was typed
-        // by a person, so the weak-guess poison guard - which exists to stop an evidence-less AI
-        // suggestion becoming a verified product - must not fire on it.
+        // origin "tenant_approval" (and deliberately not in batchApprove): a person typed or tapped
+        // Approve on this identity, so the weak-guess poison guard - which exists to stop an
+        // evidence-less AI suggestion becoming a verified product by itself - must not fire on it; but
+        // the confirmation is the TENANT's knowledge only (verified product + approved alias), never a
+        // device-shared verified-catalog entry that would auto-resolve the code for another tenant.
         get().resolveUnknown(reviewId, "create_new", {
           applyToCount: true,
-          origin: "human",
+          origin: "tenant_approval",
           newProduct: { name, brand: fields.brand ?? "", category: fields.category ?? "", primaryBarcode: code },
         });
         // Settle the inline tag on every row carrying this code's pending suggestion (same bookkeeping
