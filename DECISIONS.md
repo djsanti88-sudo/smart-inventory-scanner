@@ -448,3 +448,20 @@ Why each choice was made. Newest decisions at the bottom of each section.
   promoting into the platform learned tier; the deep-verify multi-variant auto-apply follow-up above;
   `tireKnowledge.generated.json` (71 MB) not LFS-tracked while the retail twin is (history rewrite on
   master, owner-gated).
+- **Deep-review panel residuals (2026-08-19, gpt-5.6-sol + gemini-3.6-flash legs; adjudicated, recorded
+  not fixed):**
+  (a) ROUTE-LEVEL per-account cap (GC-A) still 429s an authed tenant at their account cap BEFORE the
+  free ladder runs - the one remaining place a cap hides a free identity. The pipeline already
+  enforces the account cap atomically at paid egress, so the candidate fix is an advisory precheck +
+  lazy enforcement; that changes PR #35-reviewed behavior and needs its own proof run (owner call).
+  (b) Within one shared full-ladder arm, chargeOnEgress disarms before the settlement await resolves;
+  a rung timeout can let a later rung egress while the one arm-slot settlement is still in flight -
+  consistent with the recorded one-slot-per-arm policy, but the settle-rejection window is a known
+  narrow race (pre-existing).
+  (c) `paidRungRan` counts a rung that skipped on its own negative cache / budget gate as "ran", so
+  the pay-once marker can be minted without fresh paid egress (pre-existing PR #38 semantics; the
+  cooldown re-opens it).
+  (d) Plan D's paid Firecrawl arms spend prepaid credits outside the daily cap by design (documented);
+  they are now OFF when ENABLE_LIVE_AI_LOOKUP=false.
+  (e) A thrown `window.localStorage` property access (privacy-blocked storage) in the scan recovery
+  path could drop a repeated-code count; needs its own trace + failing test (scanStore recovery).

@@ -82,7 +82,17 @@ async function ensureTursoTable(client: TursoClient): Promise<boolean> {
     await client.execute({ sql: DDL, args: [] });
     const columns = await client.execute({ sql: "PRAGMA table_info(decode_cache)", args: [] });
     const hasSourceTier = columns.rows.some((r) => String(r.name) === "source_tier");
-    if (!hasSourceTier) await client.execute({ sql: SOURCE_TIER_COLUMN_DDL, args: [] });
+    if (!hasSourceTier) {
+      // Two cold instances can both see "no column" and race the ALTER; the loser's "duplicate
+      // column" error means the migration ALREADY SUCCEEDED, so it must not fail this request's
+      // cache read/write (deep-review 2026-08-19, Codex finding 6: treating it as failure turned a
+      // paid cache hit into a miss that could be repurchased). Any other ALTER error still fails.
+      try {
+        await client.execute({ sql: SOURCE_TIER_COLUMN_DDL, args: [] });
+      } catch (e) {
+        if (!/duplicate column/i.test((e as Error).message)) throw e;
+      }
+    }
     _tursoTableReady = true;
     return true;
   } catch (e) {

@@ -134,7 +134,7 @@ async function main() {
   if (!status) { console.error("Cannot reach the dev server on any of", PORT_CANDIDATES.join(", "), "- start it with `npm run dev` (or set SMOKE_BASE_URL)."); process.exit(1); }
   console.log("server:", BASE);
 
-  const canLive = LIVE && !status.e2e && (status.geminiConfigured || status.openaiConfigured);
+  const canLive = LIVE && !status.e2e && (status.openaiConfigured || status.firecrawlConfigured || status.goUpc?.configured);
   const blank = () => ({ total: 0, correct: 0, wrong: 0, needsReview: 0, unscored: 0 });
   const result = {
     date: DATE, mode: DEEP ? "deep" : "lean", provisional, ranLive: false,

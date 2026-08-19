@@ -90,6 +90,23 @@ describe("decodeCacheStore (Turso backend via fake libsql client)", () => {
     expect((await getPersistedDecode(paidRow.code))?.sourceTier).toBe("paid_rung");
   });
 
+  it("a lost ALTER race (duplicate column) is treated as migrated, not as a storage failure", async () => {
+    fake = makeFakeTurso({ legacySchema: true });
+    __resetForTest();
+    // Simulate the race loser: the PRAGMA said "no column", but another instance ALTERed first.
+    const original = fake.client.execute.bind(fake.client);
+    fake.client.execute = async (stmt: { sql: string; args: unknown[] }) => {
+      if (stmt.sql.startsWith("ALTER TABLE")) {
+        fake.columns.add("source_tier"); // the winner already migrated
+        throw new Error("SQLITE_ERROR: duplicate column name: source_tier");
+      }
+      return original(stmt);
+    };
+    await persistDecode(paidRow);
+    expect(fake.rows.get(paidRow.code)?.source_tier).toBe("paid_rung");
+    expect((await getPersistedDecode(paidRow.code))?.sourceTier).toBe("paid_rung");
+  });
+
   it("does not ALTER when the column already exists", async () => {
     await persistDecode(paidRow);
     expect(fake.executed.some((s) => s.startsWith("ALTER TABLE"))).toBe(false);

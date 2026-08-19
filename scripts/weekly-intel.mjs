@@ -23,7 +23,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function serverReady() {
   try {
     const s = await (await fetch(BASE + '/api/ai-lookup')).json();
-    return !s.e2e && (s.geminiConfigured || s.openaiConfigured);
+    return !s.e2e && (s.openaiConfigured || s.firecrawlConfigured || s.goUpc?.configured);
   } catch { return false; }
 }
 
