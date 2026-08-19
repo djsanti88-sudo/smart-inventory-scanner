@@ -41,7 +41,7 @@ import { selectBarcodeUrls } from "@/services/ai/barcodeSources";
 import { isSafePublicUrl } from "@/services/ai/urlSafety";
 import { runLadder, buildFreeLadderRungs, buildPaidLadderRungs, type RungOutcome, type LadderResult, type RunLadderContext, type LadderRung } from "@/server/upc/ladder";
 import { canonicalGtin, isGtinShaped } from "@/services/upc/gtin";
-import { paidWorkPossible } from "@/server/upc/paidWorkPossible";
+import { paidWorkPossible, liveAiLookupEnabled } from "@/server/upc/paidWorkPossible";
 import { steerFreeRungs } from "@/server/upc/freeRungSteering";
 import { getLearnedProduct, upsertLearnedProduct, shouldLearnDecode, prefixCheckNote, siblingPrefixConflict, type LearnedProductRow } from "@/server/learnedProducts";
 import { crossCheck } from "@/services/ai/crossCheckEngine";
@@ -1838,7 +1838,10 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // stale cached guess against NEW FREE knowledge, the paid half of the ladder is simply not built -
     // every branch below then sees an empty rung list and skips exactly as it does with no keys
     // configured (no charge, no provider call). Nothing else about the ladder changes.
-    const paidRungs = (): LadderRung[] => (freeOnlyPass ? [] : buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt }));
+    // ENABLE_LIVE_AI_LOOKUP=false (enforced server-side since 2026-08-19, see paidWorkPossible.ts): the
+    // paid half is not built at all, exactly like a free-only re-evaluation. Free rungs still run.
+    const paidRungs = (): LadderRung[] =>
+      freeOnlyPass || !liveAiLookupEnabled() ? [] : buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt });
 
     // wave-3 (2026-07-20 owner-ratified): annotate the fetchv2/gpt rungs with their REALISTIC budgets
     // (see DECODE_LADDER_FETCHV2_MS / DECODE_LADDER_GPT_MS above) - goupc is untouched (keeps the
@@ -1920,6 +1923,34 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       let paidRungRan = false; // true once a paid rung genuinely ran (pay-once marker, owner 2026-08-19)
       const reasonsAcc: Array<{ rung: string; reason: string }> = [...freeRun.reasons];
 
+      // CAP DENIAL KEEPS THE FREE SUGGESTION (consolidation 2026-08-19): a blown daily cap used to throw
+      // out of this branch, and the outer catch answered `cap_blocked` - discarding the free suggestion
+      // already in hand. That contradicted "free resolution always completes first and is NEVER
+      // blocked" (ORDER v3, above) and "always attach the best available identity". The cap decides
+      // only whether a PAID upgrade may be attempted; it never hides a free identity. On a denial the
+      // free suggestion stands, the skip is recorded per rung, nothing is charged, and the pay-once
+      // marker is NOT set (no paid rung ran, so the next uncapped scan may still escalate). Sticky for
+      // the rest of this branch: once the cap said no, later paid steps are skipped without re-asking.
+      let capDenied: DailyCapExceededError | null = null;
+      const paidStep = async (rung: string, run: () => Promise<LadderResult>): Promise<LadderResult | null> => {
+        if (capDenied) {
+          reasonsAcc.push({ rung, reason: `skipped: daily cap reached (${capDenied.message}); free suggestion kept` });
+          return null;
+        }
+        try {
+          const result = await withPaidChargeArmed(run);
+          paidRungRan = true;
+          return result;
+        } catch (e) {
+          if (e instanceof DailyCapExceededError) {
+            capDenied = e;
+            reasonsAcc.push({ rung, reason: `skipped: daily cap reached (${e.message}); free suggestion kept` });
+            return null;
+          }
+          throw e;
+        }
+      };
+
       // A win is "better" than the free stash when it is itself verified, or a suggestion with
       // STRICTLY higher confidence than the free suggestion's own confidence (never GPT-verified - that
       // is structurally impossible per gptResultToDecodePayload, so this check is honest for all three).
@@ -1933,11 +1964,12 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // ---- Step 1: Go-UPC only (unchanged behavior) ---------------------------------------------------
       const goUpcRungOnly = paidRungs().filter((r) => r.name === "goupc");
       const goUpcCanPay = goUpcRungOnly.length > 0 && !!process.env.GO_UPC_API_KEY;
-      if (goUpcCanPay) {
-        paidRungRan = true;
-        const goRun = await withPaidChargeArmed(() =>
-          runLadder(code, goUpcRungOnly, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
-        );
+      const goRun = goUpcCanPay
+        ? await paidStep("goupc", () =>
+            runLadder(code, goUpcRungOnly, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
+          )
+        : null;
+      if (goRun) {
         reasonsAcc.push(...goRun.reasons);
         // D6/Task 2 Step 3c (demotion ripple, CRITICAL): Go-UPC is now honestly labeled "suggested"
         // (never "verified" - see GoUpcProvider.ts), so this win-selection can no longer gate on the
@@ -1964,11 +1996,12 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         const fetchV2RungOnly = withRealisticBudgets(paidRungs().filter((r) => r.name === "fetchv2"));
         const gated = preflightTimeGate(fetchV2RungOnly, ladderDeadlineAt);
         reasonsAcc.push(...gated.skippedReasons);
-        if (fetchV2CanPay && gated.rungs.length > 0) {
-          paidRungRan = true;
-          const fv2Run = await withPaidChargeArmed(() =>
-            runLadder(code, gated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
-          );
+        const fv2Run = fetchV2CanPay && gated.rungs.length > 0
+          ? await paidStep("fetchv2", () =>
+              runLadder(code, gated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
+            )
+          : null;
+        if (fv2Run) {
           reasonsAcc.push(...fv2Run.reasons);
           if (isBetterThanFree(fv2Run.outcome)) {
             winningOutcome = fv2Run.outcome;
@@ -1988,11 +2021,12 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         // does. Nothing here duplicates or bypasses those checks; the preflight time gate is STRICTLY
         // additional (it fires before shouldRunGptRung ever runs, so a time-skipped GPT rung never even
         // reaches shouldRunGptRung's own budget-charging path - see preflightTimeGate's doc comment).
-        if (gated.rungs.length > 0 && !!process.env.OPENAI_API_KEY) {
-          paidRungRan = true;
-          const gptRun = await withPaidChargeArmed(() =>
-            runLadder(code, gated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
-          );
+        const gptRun = gated.rungs.length > 0 && !!process.env.OPENAI_API_KEY
+          ? await paidStep("gpt", () =>
+              runLadder(code, gated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
+            )
+          : null;
+        if (gptRun) {
           reasonsAcc.push(...gptRun.reasons);
           if (isBetterThanFree(gptRun.outcome)) {
             winningOutcome = gptRun.outcome;
@@ -2023,9 +2057,25 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // S5: ONE charge armed for the WHOLE paid ladder (unchanged from the single pre-ladder charge this
       // branch always did) - but it is now only spent if some rung genuinely reaches a provider. A
       // keyless/negative-cached/budget-declined run down this branch now bills zero instead of one.
-      const paidRun = paidWorkPossible(code)
-        ? await withPaidChargeArmed(runFullPaidLadder)
-        : await runFullPaidLadder();
+      let paidRun: LadderResult;
+      try {
+        paidRun = paidWorkPossible(code)
+          ? await withPaidChargeArmed(runFullPaidLadder)
+          : await runFullPaidLadder();
+      } catch (e) {
+        // CAP DENIAL KEEPS THE PLAN D STASH (consolidation 2026-08-19, same rule as the escalation
+        // branch above): a free floor/suggestion Plan D already found must not be thrown away because
+        // the PAID ladder may not run. Only when nothing free exists does the denial propagate and the
+        // request settle as an honest cap_blocked (with the $0 prefix floor, see the outer catch).
+        // A bare prefix FLOOR ("<Brand> / product unconfirmed", source "floor") is a naming convenience,
+        // not an identity: that case still settles as cap_blocked (the outer catch carries the floor).
+        const stashHasIdentity =
+          !!planDStash &&
+          !planDStash.providerNames.includes("parallel:floor") &&
+          isUsableProductName(planDStash.results[0]?.productName ?? "");
+        if (!(e instanceof DailyCapExceededError) || !stashHasIdentity) throw e;
+        paidRun = { settledBy: undefined, outcome: undefined, reasons: [{ rung: "paid-ladder", reason: `skipped: daily cap reached (${e.message}); free suggestion kept` }] };
+      }
       // Concatenate reasons free-phase-then-paid-phase so an unresolved response still lists every rung
       // that actually ran, honestly, in the order it ran (including any preflight-skipped rung).
       ladderRun = { settledBy: paidRun.settledBy, outcome: paidRun.outcome, reasons: [...freeRun.reasons, ...preGated.skippedReasons, ...paidRun.reasons] };

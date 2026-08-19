@@ -210,7 +210,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
   // wave-3: DECODE_LADDER_TOTAL_MS added so a test that overrides it (the wave-3 preflight/budget
   // suite) never leaks into a later test in the same file (test-isolation fix, found live while
   // writing the wave-3 non_public_code_type test below).
-  const keys = ["IS_E2E", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "GO_UPC_API_KEY", "BRAVE_SEARCH_API_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DECODE_CACHE_FILE", "LEARNED_PRODUCTS_FILE", "DECODE_LADDER_TOTAL_MS", "DECODE_NEGATIVE_TTL_MS", "DECODE_MISS_TTL_MS"];
+  const keys = ["IS_E2E", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "GO_UPC_API_KEY", "BRAVE_SEARCH_API_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DECODE_CACHE_FILE", "LEARNED_PRODUCTS_FILE", "DECODE_LADDER_TOTAL_MS", "DECODE_NEGATIVE_TTL_MS", "DECODE_MISS_TTL_MS", "ENABLE_LIVE_AI_LOOKUP"];
   let fetchSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -1043,17 +1043,84 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect(await readDailyUsed(await ladderStorage())).toBe(1);
     });
 
-    it("ESCALATION cap-blocked: an exhausted cap blocks the Go-UPC escalation, free suggestion still stands, zero charge", async () => {
+    it("ESCALATION cap-blocked: an exhausted cap skips the Go-UPC escalation, the free suggestion STILL STANDS (never cap_blocked), zero charge, no Go-UPC call", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // cap already exhausted
       process.env.GO_UPC_API_KEY = "test-key";
       stubUpcSuggestionThenGoupc({ goupcVerified: true });
 
       const out = await runDecodePipeline(makeReq(VALID_GTIN));
 
-      // The cap gate throws before the paid Go-UPC escalation runs -> route turns it into a cap block.
-      expect(out.kind).toBe("cap_blocked");
-      if (out.kind !== "cap_blocked") throw new Error("unreachable");
-      expect(out.message).toMatch(/cap/i);
+      // The cap decides only whether a PAID upgrade may be attempted. The free UPCitemdb suggestion
+      // already in hand is the answer - a cap block must never hide an identity the free rungs found.
+      expect(out.kind).toBe("computed");
+      if (out.kind !== "computed") throw new Error("unreachable");
+      expect(out.payload.providerNames).toContain("upcitemdb");
+      expect(out.payload.results[0]?.brand).toBe("Falken");
+      // The skip is recorded honestly per paid rung, and Go-UPC was never called (no charge, no egress).
+      const reasons = out.payload.debug.ladderReasons as Array<{ rung: string; reason: string }>;
+      expect(reasons.some((r) => r.rung === "goupc" && /daily cap/i.test(r.reason))).toBe(true);
+      expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes(GOUPC_HOST))).toBe(false);
+      expect(await readDailyUsed(await ladderStorage())).toBe(0);
+    });
+
+    it("ESCALATION cap-blocked: the pay-once marker is NOT set (no paid rung ran), so the next uncapped scan may still escalate", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "0";
+      process.env.GO_UPC_API_KEY = "test-key";
+      stubUpcSuggestionThenGoupc({ goupcVerified: true });
+
+      const first = await runDecodePipeline(makeReq(VALID_GTIN));
+      expect(first.kind).toBe("computed");
+
+      // Cap opens up: a forced retry escalates to Go-UPC and the paid answer wins.
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const second = await runDecodePipeline({ ...makeReq(VALID_GTIN), forceRetry: true });
+      expect(second.kind).toBe("computed");
+      if (second.kind !== "computed") throw new Error("unreachable");
+      expect(second.payload.results[0]?.brand).toBe("Continental");
+      expect(await readDailyUsed(await ladderStorage())).toBe(1);
+    });
+
+    it("TOTAL-MISS cap-blocked: a Plan D SUGGESTION (padded-variant UPCitemdb hit) survives an exhausted cap instead of a cap_blocked answer", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // cap exhausted
+      process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // paid work genuinely possible -> a real cap denial
+      // Rung-0 (exact code) misses; Plan D's zero-pad fallback hits the 13-digit variant -> a free suggestion.
+      fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(UPCITEMDB_HOST)) {
+          if (url.includes(`upc=0${VALID_GTIN}`)) {
+            return new Response(JSON.stringify({ code: "OK", items: [{ title: "Falken Wildpeak A/T3W 265/70R17", brand: "Falken" }] }), { status: 200 });
+          }
+          return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
+        }
+        if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(out.kind).toBe("computed");
+      if (out.kind !== "computed") throw new Error("unreachable");
+      expect(JSON.stringify(out.payload.results)).toMatch(/Falken/);
+      expect(out.payload.decision.status).not.toBe("verified");
+      const reasons = out.payload.debug.ladderReasons as Array<{ rung: string; reason: string }>;
+      expect(reasons.some((r) => r.rung === "paid-ladder" && /daily cap/i.test(r.reason))).toBe(true);
+      expect(await readDailyUsed(await ladderStorage())).toBe(0);
+    });
+
+    it("ENABLE_LIVE_AI_LOOKUP=false: no paid rung is built or charged (free suggestion stands, zero Go-UPC calls, zero slots)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      process.env.ENABLE_LIVE_AI_LOOKUP = "false";
+      stubUpcSuggestionThenGoupc({ goupcVerified: true });
+
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(out.kind).toBe("computed");
+      if (out.kind !== "computed") throw new Error("unreachable");
+      expect(out.payload.results[0]?.brand).toBe("Falken"); // the free suggestion, not the paid Go-UPC answer
+      expect(ladderRungsOf(out)).not.toContain("goupc");
+      expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes(GOUPC_HOST))).toBe(false);
       expect(await readDailyUsed(await ladderStorage())).toBe(0);
     });
 
