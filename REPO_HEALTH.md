@@ -2,15 +2,21 @@
 
 Regenerate, don't hand-drift. Last updated: 2026-08-19
 
-## Branch truth 2026-08-19 (verified with git, not memory)
+## Branch truth 2026-08-19 evening (consolidation session; verified with git, not memory)
 
-- `origin/master` = 9f50440b (PR #36). Local `master` was 4 commits behind at the time; rebase it
-  before branching anything else.
-- `feat/best-guess-identity-cache` (worktree `C:/tmp/wt-bestguess`): 6 commits on top of
-  origin/master, LOCAL ONLY (not pushed, no PR). Built + proven (see PROGRESS.md). Owner gate: PR.
-- `refactor/pre-aws-cleanup` (main checkout): unmerged, unpushed, does NOT contain origin/master;
-  carries uncommitted doc edits (CLAUDE/AGENTS/GUARDRAILS/PROGRESS) superseded by newer versions
-  of the same files on the best-guess branch, plus an uncommitted corpus regeneration.
+- `origin/master` = 6f65039c (PR #39); local `master` == origin/master.
+- `chore/consolidation-2026-08-19` (worktree `C:/tmp/wt-consolidation`): `refactor/pre-aws-cleanup`
+  REBASED onto master (32 commits; the pre-squash originals of PR #35 dropped; the 17 MB
+  `review.jsonl.gz` blob excised from the branch history before any push) plus the consolidation
+  work (see `docs/superpowers/plans/2026-08-19-consolidation-map.md` and DECISIONS.md 2026-08-19).
+  The old branch tip is preserved at tag `backup/pre-aws-cleanup-2026-08-19`; the WIP stash was
+  applied and committed (corpus 2026-08-17 regeneration + Teach Bot app-knowledge), original kept
+  at tag `backup/stash0-pre-aws-wip-2026-08-19`.
+- `feat/best-guess-identity-cache`: MERGED (PR #38). `feat/post-pr38-consolidation`: MERGED (PR #39).
+- Worktree sweep 2026-08-19: obsolete/merged worktrees removed after salvaging every dirty diff and
+  untracked file to `C:/tmp/worktree-salvage-2026-08-19/<name>/` (tracked-changes.patch +
+  untracked/). Kept: the parked `benchmark-tire-db-automation` branch (no worktree), and the
+  unmerged-content worktrees pending owner triage listed below.
 
 ## CRITICAL callouts
 

@@ -110,7 +110,7 @@ AI_VERIFIED_CODES.forEach((code, i) => {
   };
 });
 
-// A4-high: suggested, confidence >= 0.8 -> auto-applies + "unconfirmed" tag, review auto-closes.
+// A4-high: suggested, confidence >= 0.8 -> auto-applies with the confidence band + one-tap Approve, review auto-closes.
 SUGGESTED_HIGH_CODES.forEach((code, i) => {
   RESPONSES[code] = {
     providerNames: ["gemini", "openai"],
@@ -123,7 +123,7 @@ SUGGESTED_HIGH_CODES.forEach((code, i) => {
   };
 });
 
-// A4-low: suggested, confidence < 0.8 -> counts immediately with an inline "(suggested, N%)" tag,
+// A4-low: suggested, confidence < 0.8 -> counts immediately with the inline app-derived band tag,
 // pointer-only approve/decline, no open Needs Review (Task 9b, owner-ratified 2026-07-14).
 SUGGESTED_LOW_CODES.forEach((code, i) => {
   const conf = 0.3 + i * 0.05;
@@ -314,12 +314,17 @@ test("mixed-tier count law: 60+ scans across every resolution tier, feed=N, tota
   const feed = page.getByTestId("scan-feed-body");
   // A3/A5 verified tiers show the honest app-confirmed label.
   await expect(feed).toContainText("Verified (app-confirmed)");
-  // A4-high auto-applies with the neutral "unconfirmed" tag (never the amber "(suggested)" tag).
+  // A4-high auto-applies with the app-derived confidence band + one-tap Approve (owner 2026-08-19,
+  // PR #39: the auto-applied path carries the same band + Approve as the inline path; the old
+  // neutral "unconfirmed" tag is retired). Never the raw provider percentage, never "Verified".
   const highRow = feed.locator("tr").filter({ hasText: "High Suggested 0" });
-  await expect(highRow).toContainText("unconfirmed");
+  await expect(highRow).toContainText("confidence)");
+  await expect(highRow.locator('[data-testid^="approve-"]')).toBeVisible();
+  await expect(highRow).not.toContainText("Verified");
   // A4-low shows the honest confidence-tagged inline suggestion, pointer-only controls.
   const lowRow = feed.locator("tr").filter({ hasText: "Low Suggested 0" });
-  await expect(lowRow.locator('[data-testid^="feed-suggestion-"]')).toContainText("(suggested,");
+  // Band label, never a raw provider percentage (owner 2026-08-19).
+  await expect(lowRow.locator('[data-testid^="feed-suggestion-"]')).toContainText("(Suggested -");
   // A6 conflict collapses to the neutral "Suggested" label (Plan C), never "Verified".
   await expect(feed).toContainText("Suggested");
 
