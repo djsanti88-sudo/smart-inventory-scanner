@@ -126,7 +126,14 @@ function run(label, cmd, args) {
   }
 
   results.push({ label, ok, detail, skipped });
-  if (!ok) process.stdout.write(out.split("\n").slice(-25).join("\n") + "\n");
+  if (!ok) {
+    // 25 tail lines was too small: with 240+ node:test subtests the single "not ok" line scrolled out
+    // and CI could fail without naming the failing test. Print the failing lines first, then the tail.
+    const lines = out.split("\n");
+    const failing = lines.filter((l) => /^not ok|AssertionError|ERR_ASSERTION|^\s*✖/.test(l)).slice(0, 40);
+    if (failing.length) process.stdout.write("--- failing lines ---\n" + failing.join("\n") + "\n");
+    process.stdout.write(lines.slice(-60).join("\n") + "\n");
+  }
   else process.stdout.write(`${detail}\n`);
   return ok;
 }
@@ -364,13 +371,17 @@ function main() {
   if (present.length) run(`node:test (${present.length} vitest-excluded suites, serial)`, process.execPath, ["--test", "--test-concurrency=1", ...present]);
 
   const teachSuites = discoverTestFiles(["e2e/teach"]);
-  run("teach bot suite", process.execPath, ["--test", "e2e/teach/**/*.test.mjs"]);
+  // Node 20 (the CI runner) does not expand glob patterns for --test; pass the discovered files
+  // explicitly so the leg runs identically on every Node version.
+  if (teachSuites.length) run(`teach bot suite (${teachSuites.length} files)`, process.execPath, ["--test", ...teachSuites]);
 
   // SELF-DETECTION: reconcile the real filesystem against what any runner in this file
   // actually knows about. NODE_TEST_SUITES is used in full here (not just `present`) --
   // a suite temporarily narrowed out via NODE_TEST_SKIP is still DECLARED, so it must not
   // be reported as an unknown orphan on top of being reported as narrowed.
-  const declaredNotRun = NOT_RUN.flatMap((entry) => entry[3] ?? []);
+  // VITEST_EXTRA_EXCLUDE entries are DECLARED coverage reductions (reported loudly as NARROWED and
+  // gated by PROOF_ALL_ACCEPT_NARROWED) - the orphan scan must not double-report them as unknown.
+  const declaredNotRun = [...NOT_RUN.flatMap((entry) => entry[3] ?? []), ...VITEST_EXTRA_EXCLUDE];
   const discovered = discoverTestFiles();
   const orphans = collectedByVitest === null
     ? [] // vitest's own leg already failed to produce a report; that failure alone fails the gate below -- don't pile on with a misleading "everything is an orphan" report.
