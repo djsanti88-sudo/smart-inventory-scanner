@@ -130,7 +130,7 @@ File organization: every file has one obvious home; group by feature or domain w
 
 ## Owner-gated actions
 
-Require explicit owner approval before: deploy, git push, production promotion or rollback, production database mutation, production credentials, paid or live API calls, deleting or overwriting real data, sending business or customer data to third parties, publishing, emails or messages, changes to external production systems.
+Require explicit owner approval before: deploy, git push, merging or pushing to `master` (it auto-deploys production; see `docs/DEPLOY_TRUTH.md`), production promotion or rollback, production database mutation, production credentials, paid or live API calls, deleting or overwriting real data, sending business or customer data to third parties, publishing, emails or messages, changes to external production systems.
 
 Local code, tests, mocks, documentation, analysis, and screenshots do not require approval unless another project rule is stricter.
 

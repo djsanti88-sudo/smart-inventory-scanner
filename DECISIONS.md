@@ -354,6 +354,9 @@ Why each choice was made. Newest decisions at the bottom of each section.
   owner completes that dashboard step, merges to `master` still deploy nothing by itself and production
   continues to ship via the manual/CLI path. Once the dashboard step is done, merge to `master` becomes
   the production trigger. See `docs/DEPLOY_TRUTH.md` for the full current state.
+- **Closed 2026-08-06 (recorded 2026-08-19):** the dashboard Git connection is live; a merge to
+  `master` deploys production automatically and is therefore an owner-gated action (explicit OK in the
+  current conversation, every merge). `docs/DEPLOY_TRUTH.md` is the single statement of this rule.
 
 ## MPN part-number web research CANCELLED (standing owner order, 2026-07-28)
 - **Decision:** live web research for tire manufacturer part numbers (MPN) is CANCELLED as a standing
