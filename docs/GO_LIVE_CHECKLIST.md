@@ -87,7 +87,7 @@ now current).
     is enabled under Authentication for `smart-inventory-scanner-app`, and that
     `inventory-lovat-six.vercel.app` is in Authentication > Settings > Authorized domains (missing this
     produces `auth/unauthorized-domain` on every production sign-in attempt).
-12. **Production data cleanup.** Execute `coordination/PROD_CLEANUP_PLAN.md`: dry run first
+12. **Production data cleanup.** Execute `docs/archive/coordination-2026-06/PROD_CLEANUP_PLAN.md` (June plan, archived): dry run first
     (`node scripts/prod-cleanup-poison.mjs`, no writes), review printed matches and the backup JSON,
     apply only after explicit owner sign-off (`--apply --soft --yes-write-to-production` plus the typed
     confirmation phrase). Removes poisoned rows (Manstel/745125495781 misidentification) from an
