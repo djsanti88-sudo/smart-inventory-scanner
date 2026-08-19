@@ -112,3 +112,40 @@ export function prettifyBrand(input: string): string {
   if (BRAND_MAP[lower]) return BRAND_MAP[lower];
   return titleCaseToken(input);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Per-row display resolution shared by FinalCountTable, SessionCountsTable and LiveScanFeed (the
+// same four helpers used to be copied into each table; one home since 2026-08-19). Pure: no React.
+// ---------------------------------------------------------------------------------------------
+import type { Product } from "@/types";
+import { customerDisplayName } from "@/services/displayName";
+import { matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
+
+/** Display brand: deterministic-structurer field first, then the stored brand. */
+export function resolvedBrand(product: Product): string {
+  return prettifyBrand(product.structuredBrand || product.brand);
+}
+
+/** Display model; "" when the structurer produced none (tables render their own empty-cell mark).
+ *  Non-platform roles get the same customerDisplayName() cleaning the Name column already applies, so
+ *  a raw "UPC ... -" prefix or "Fits ..." clause never leaks in through the Model column. */
+export function resolvedModel(product: Product, isPlatform: boolean): string {
+  if (!product.structuredModel) return "";
+  const model = prettifyProductName(product.structuredModel);
+  return isPlatform ? model : prettifyProductName(customerDisplayName(model));
+}
+
+/** Plain-digit size ("2457016") for filtering and tooltips. */
+export function resolvedSizeTag(product: Product): string {
+  return product.sizeTag || plainTireSizeDigits(product.specsShort);
+}
+
+/** Canonical, human-readable size ("245/70R16"), falling back to the raw sizeTag, then "-". */
+export function resolvedSizeDisplay(product: Product): string {
+  return resolvedCanonicalSize(product) ?? product.sizeTag ?? "-";
+}
+
+/** Canonical size from the product's structured specs, or undefined when none parses. */
+export function resolvedCanonicalSize(product: Product | undefined): string | undefined {
+  return product ? matchTireSize(product.specsShort)?.canonical.split(" ")[0] : undefined;
+}

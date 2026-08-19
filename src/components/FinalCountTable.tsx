@@ -4,49 +4,16 @@ import { useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { customerDisplayName } from "@/services/displayName";
-import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
+import { prettifyProductName, resolvedBrand, resolvedModel, resolvedSizeTag, resolvedSizeDisplay } from "@/services/format/productDisplay";
 import { getReviewIdentityBand, identityBandLabel } from "@/services/ai/identityConfidenceBand";
 import { DecodeStatusBadge, SyncBadge } from "@/components/badges";
-import { matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
 import { filterProducts } from "@/services/polish/filterProducts";
 import { requiresOwnerPin } from "@/services/security/destructiveGuard";
 import type { InventoryCount, Product, UnknownCodeReview } from "@/types";
 
-// Task 4 (product-name polish): resolves the display Brand / Model / Size for one row, preferring
-// the deterministic-structurer fields and falling back to the existing product.brand/name/specsShort
-// so older (pre-structuring) products still render sensibly.
-function resolvedBrand(product: Product): string {
-  return prettifyBrand(product.structuredBrand || product.brand);
-}
-// Task 4 review fix: the Model column shows the table's existing empty-cell convention ("-") for a
-// row with no structuredModel yet, rather than duplicating the full Product-column name. Filtering
-// by name still works via the description field (structuredDescription falls back to product.name).
-//
-// Regression fix (2026-07-12 merge-train gate, P5 bot): the deterministic structurer
-// (structureProduct, run by the polish backfill migration) parses the RAW stored name, so a messy
-// legacy name like "UPC 086699205636 - Defender LTX M/S Fits: 2004 Chevrolet" can produce a
-// structuredModel that still carries the UPC prefix / fitment clause when the structurer's brand/
-// junk heuristics do not fully strip them. The Name column already cleans via customerDisplayName()
-// for non-platform roles; the Model column now gets the same treatment so a customer never sees a
-// raw UPC or "Fits" clause leak in through this column instead.
-function resolvedModel(product: Product, isPlatform: boolean): string {
-  if (!product.structuredModel) return "";
-  const model = prettifyProductName(product.structuredModel);
-  return isPlatform ? model : prettifyProductName(customerDisplayName(model));
-}
-function resolvedSizeTag(product: Product): string {
-  return product.sizeTag || plainTireSizeDigits(product.specsShort);
-}
-// Task 6: the Size cell shows the canonical, human-readable size ("245/70R16") instead of the
-// digit-mash ("2457016") the Specs column already spells out in full. Falls back to the raw
-// sizeTag when specsShort has no parseable tire size (e.g. legacy rows, non-tire products), and
-// finally to "-" so the cell never renders blank or throws. The digit form still exists via
-// resolvedSizeTag() for the filter box and moves to the cell's title tooltip (some owners search
-// tires by the plain sidewall digits).
-function resolvedSizeDisplay(product: Product): string {
-  return matchTireSize(product.specsShort)?.canonical.split(" ")[0] ?? product.sizeTag ?? "-";
-}
+// Per-row Brand / Model / Size resolution lives in services/format/productDisplay.ts (shared with
+// SessionCountsTable and LiveScanFeed).
 
 // DEFECT #29/#37 residual (live-reproduced 2026-08-05/06, canelo round 2): same freeze class as
 // LiveScanFeed - a fresh-device restore with ~1,800 count rows synchronously mounted ALL of them into

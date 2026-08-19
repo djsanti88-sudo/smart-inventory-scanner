@@ -4,10 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { DecodeStatusBadge, MatchBadge, StatusBadge, SyncBadge } from "@/components/badges";
-import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
+import { prettifyBrand, prettifyProductName, resolvedCanonicalSize } from "@/services/format/productDisplay";
 import { getIdentityConfidenceBand, getReviewIdentityBand, identityBandLabel } from "@/services/ai/identityConfidenceBand";
 import { canOneTapApproveIdentity } from "@/stores/scanGates";
-import { matchTireSize } from "@/services/tire/tireSizeNormalizer";
 import { canonicalTireSize } from "@/services/catalog/tireListingNormalizer";
 import type { Product, UnknownCodeReview } from "@/types";
 
@@ -16,9 +15,7 @@ import type { Product, UnknownCodeReview } from "@/types";
 // linked product has no parseable structured size yet (e.g. still-provisional rows). Never guesses;
 // "-" when neither source yields a confident size.
 function resolvedFeedSize(product: Product | undefined, displayName: string): string {
-  const fromProduct = product ? matchTireSize(product.specsShort)?.canonical.split(" ")[0] : undefined;
-  if (fromProduct) return fromProduct;
-  return canonicalTireSize(displayName) || "-";
+  return resolvedCanonicalSize(product) ?? (canonicalTireSize(displayName) || "-");
 }
 
 // DEFECT #29/#37 residual (live-reproduced 2026-08-05/06, canelo round 2): after the Map-lookup fix

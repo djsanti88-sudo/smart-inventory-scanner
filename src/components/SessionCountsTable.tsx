@@ -3,9 +3,8 @@
 import { useMemo, useState } from "react";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { customerDisplayName } from "@/services/displayName";
-import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
+import { prettifyProductName, resolvedBrand, resolvedModel, resolvedSizeTag, resolvedSizeDisplay } from "@/services/format/productDisplay";
 import { DecodeStatusBadge } from "@/components/badges";
-import { matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
 import type { Product } from "@/types";
 
 // One row of the session counts spreadsheet. `product` is the store join (getProduct) when the
@@ -23,22 +22,6 @@ export interface SessionCountRow {
   aliasesSeen?: string[];
 }
 
-// Same per-row resolution helpers FinalCountTable uses (FinalCountTable.tsx:18-48), replicated here
-// because they are module-private there and this table must not touch the home page's component.
-function resolvedBrand(product: Product): string {
-  return prettifyBrand(product.structuredBrand || product.brand);
-}
-function resolvedModel(product: Product, isPlatform: boolean): string {
-  if (!product.structuredModel) return "";
-  const model = prettifyProductName(product.structuredModel);
-  return isPlatform ? model : prettifyProductName(customerDisplayName(model));
-}
-function resolvedSizeTag(product: Product): string {
-  return product.sizeTag || plainTireSizeDigits(product.specsShort);
-}
-function resolvedSizeDisplay(product: Product): string {
-  return matchTireSize(product.specsShort)?.canonical.split(" ")[0] ?? product.sizeTag ?? "-";
-}
 
 // Session detail page: the "full spreadsheet" of a session's product counts - the same columns, in
 // the same order, as the home page's "Your counts" table (FinalCountTable.tsx:119-138) EXCEPT the
