@@ -302,6 +302,9 @@ export interface UnknownCodeReview {
   decodeStatus: FeedDecodeStatus;
   evidenceStrength: EvidenceStrength;
   exactCodeEvidenceVerifiedByApp: boolean; // set ONLY by the app's EvidenceVerifier
+  /** Display-safe band derived at the customer-safe persist boundary (the raw confidence/evidence
+   *  inputs never reach a customer's disk); a live review computes it from those inputs instead. */
+  identityBand?: IdentityConfidenceBand;
   crossCheckDecision: string;
   // Per-provider summaries (e.g. Gemini result, OpenAI result) shown in the review.
   decodeProviderSummaries?: { provider: string; productName: string; sources: number }[];

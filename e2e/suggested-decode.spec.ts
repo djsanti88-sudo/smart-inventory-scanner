@@ -1,18 +1,20 @@
 import { test, expect, type Page, type Route } from "./fixtures";
 
-// Task 10 (docs/archive/superpowers/plans/2026-07-09-decode-ux-fixes.md, Step 2): browser proof for the
-// suggested-decode UX end to end. A mocked decode response with confidence 0.92 (>= 0.8) and
-// decision.status "suggested" must:
-//   1. Show the suggested identity on the scan feed (not the "Unidentified item" placeholder).
-//   2. Tag it with the neutral "unconfirmed" label (never the amber "(suggested)" tag, which is
-//      reserved for confidence < 0.8 - see LiveScanFeed.tsx's suggestionTag logic).
-//   3. OWNER ORDER 2026-07-10: any decode with confidence >= 0.8 must no longer sit in Needs
-//      Review at all - the identity auto-applies onto the counted row and the review auto-closes
-//      (scanStore.ts autoSuggestApplyOk). The review therefore disappears from /review (it is
-//      resolved + synced, filtered out by NeedsReviewTable's `status === "open" ||
-//      syncStatus !== "synced"` visible-rows filter) and the Review nav badge excludes it.
+// Task 10 (docs/archive/superpowers/plans/2026-07-09-decode-ux-fixes.md, Step 2) + the auto-applied
+// band/Approve contract (owner decision 2026-08-19, production-found gap): browser proof for the
+// suggested-decode UX end to end. A mocked decode with confidence 0.92 (>= 0.8) and decision.status
+// "suggested" - the same shape a retail-corpus exact hit (0.85) produces on production - must:
+//   1. Show the suggested identity on the scan feed (not the "Unidentified item" placeholder) and
+//      count immediately.
+//   2. Tag it with the app-derived band "(Suggested - medium confidence)", never a raw percentage
+//      and never the old neutral "unconfirmed" word, with a one-tap Approve + Edit + Reassign.
+//   3. OWNER ORDER 2026-07-10 (unchanged): any decode with confidence >= 0.8 must no longer sit in
+//      Needs Review at all - the identity auto-applies onto the counted row and the review
+//      auto-closes (scanStore.ts autoSuggestApplyOk); the Review nav badge excludes it.
+//   4. Approve confirms the identity through the human-approval core (tenant alias), keeps scanner
+//      focus, and the rescan resolves deterministically with no second decode.
 // All provider traffic is mocked via page.route; the Playwright webServer runs IS_E2E=1
-// (mock-only), so no live Gemini/OpenAI calls are made.
+// (mock-only), so no live provider calls are made.
 
 const PROOF = "e2e/proof";
 
@@ -66,10 +68,12 @@ async function scan(page: Page, code: string) {
   await input.press("Enter");
 }
 
-test("suggested decode (confidence 0.92) shows identity + unconfirmed tag; review auto-closes (owner order 2026-07-10)", async ({ page }) => {
+test("auto-applied suggestion (0.92): counts, shows the medium band + Approve/Edit/Reassign, no %, review auto-closes; Approve teaches the alias and keeps scanner focus", async ({ page }) => {
+  let posts = 0;
   await page.route("**/api/ai-lookup", async (route: Route) => {
     const req = route.request();
     if (req.method() === "GET") return route.fulfill({ json: STATUS });
+    posts += 1;
     return route.fulfill({ json: suggestedDecodeResponse(CODE) });
   });
 
@@ -83,28 +87,68 @@ test("suggested decode (confidence 0.92) shows identity + unconfirmed tag; revie
   await page.goto("/scan");
   await expect(page.getByTestId("auto-decode-status")).toContainText("On");
 
+  // A clerk scans once, like a keyboard-wedge scanner would.
   await scan(page, CODE);
 
-  // Feed row shows the suggested identity, not the "Unidentified item" placeholder, tagged
-  // "unconfirmed" (neutral - confidence 0.92 >= 0.8), never the amber "(suggested)" tag.
+  // Counted immediately (TOP-LEVEL LAW), identity shown, not the placeholder.
   const feedRow = page.locator('[data-testid^="feed-product-"]').filter({ hasText: "Michelin Defender" });
   await expect(feedRow).toHaveCount(1);
   await expect(feedRow).toContainText(SUGGESTED_NAME);
-  await expect(feedRow).toContainText("unconfirmed");
-  await expect(feedRow).not.toContainText("(suggested)");
   await expect(page.getByTestId("scan-feed-body")).not.toContainText("Unidentified item");
+  const countRow = page.locator('[data-testid^="count-row-"]').filter({ hasText: "Michelin Defender" });
+  await expect(countRow).toHaveCount(1);
+  await expect(countRow.locator('[data-testid^="qty-"]')).toHaveText("1");
+
+  // The app-derived band, never a percentage, never the old "unconfirmed" word - on the feed AND the count table.
+  const tag = page.locator('[data-testid^="feed-review-suggestion-"]');
+  await expect(tag).toHaveCount(1);
+  await expect(tag).toContainText("(Suggested - medium confidence)");
+  await expect(tag).not.toContainText("%");
+  await expect(feedRow).not.toContainText("unconfirmed");
+  await expect(countRow).toContainText("(Suggested - medium confidence)");
+  await expect(countRow).not.toContainText("%");
+
+  // Controls: one-tap Approve + Edit + Reassign, all pointer-only (scanner safety).
+  const approveBtn = page.locator('[data-testid^="approve-applied-"]');
+  const editBtn = page.locator('[data-testid^="edit-identity-"]');
+  const reassignBtn = page.locator('[data-testid^="reassign-"]').filter({ hasText: "Reassign" });
+  await expect(approveBtn).toHaveCount(1);
+  await expect(editBtn).toHaveCount(1);
+  await expect(reassignBtn).toHaveCount(1);
+  await expect(approveBtn).toHaveAttribute("tabindex", "-1");
+  const focusedAfterScan = await page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
+  expect(focusedAfterScan).toBe("scanner-input");
 
   await page.screenshot({ path: `${PROOF}/suggested-decode.png`, fullPage: true });
 
-  // OWNER ORDER 2026-07-10: confidence 0.92 (>= 0.8) auto-applies the identity and auto-closes the
-  // review instead of leaving it open - the Review nav link shows no red open-count badge (Nav.tsx
-  // filters status === "open"), and the row disappears from /review entirely (NeedsReviewTable only
-  // shows status === "open" || syncStatus !== "synced").
+  // OWNER ORDER 2026-07-10 (unchanged): >= 0.8 auto-applies and auto-closes the review - no red
+  // open-count badge on the Review link.
   const reviewNavLink = page.getByRole("link", { name: "Review" });
   await expect(reviewNavLink.locator("span")).toHaveCount(0);
+
+  // Approve: a real pointer click; the tag and Approve disappear, the row keeps its count, the
+  // scanner keeps focus, and the identity is now confirmed (Edit-only row).
+  const postsBefore = posts;
+  await approveBtn.click();
+  await expect(tag).toHaveCount(0);
+  await expect(approveBtn).toHaveCount(0);
+  await expect(page.locator('[data-testid^="edit-product-"]')).toHaveCount(1);
+  await expect(countRow.locator('[data-testid^="qty-"]')).toHaveText("1");
+  const focusedAfterApprove = await page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
+  expect(focusedAfterApprove).toBe("scanner-input");
+
+  // Rescan: deterministic via the approved alias - count 2, NO second decode POST.
+  await scan(page, CODE);
+  await expect(countRow.locator('[data-testid^="qty-"]')).toHaveText("2");
+  await expect(page.locator('[data-testid^="feed-product-"]').filter({ hasText: "Michelin Defender" })).toHaveCount(2);
+  expect(posts).toBe(postsBefore);
+  await expect(reviewNavLink.locator("span")).toHaveCount(0);
+
+  await page.screenshot({ path: `${PROOF}/suggested-decode-approved.png`, fullPage: true });
+
+  // The auto-closed review never appears on /review.
   await page.goto("/review");
-  const row = page.getByTestId(`review-row-${CODE}`);
-  await expect(row).toHaveCount(0);
+  await expect(page.getByTestId(`review-row-${CODE}`)).toHaveCount(0);
 });
 
 // ---------------------------------------------------------------------------------------------

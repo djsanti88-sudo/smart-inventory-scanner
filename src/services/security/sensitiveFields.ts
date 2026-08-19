@@ -87,6 +87,9 @@ export const CUSTOMER_SAFE_REVIEW_FIELDS = [
   "id", "businessId", "sessionId", "cleanCode",
   "suggestedProductName", "suggestedBrand", "suggestedCategory", "suggestedSpecsShort", "suggestedImageUrl",
   "reason", "blockingReasons", "hasSuggestion", "decodeStatus", "status",
+  // Display-safe derived band (high/medium/low), written by sanitizeReview from the confidence/evidence
+  // inputs that are deliberately NOT persisted here - keeps the row's band honest across a reload.
+  "identityBand",
   "createdAt", "resolvedAt", "resolvedBy", "resolutionAction", "syncStatus", "idempotencyKey",
   // STABLE-ID FIX: a LOCAL product id (not a barcode/gtin/reusable code), safe to persist - lets
   // resolveUnknown re-link this review's own provisional placeholder by id after a customer reload

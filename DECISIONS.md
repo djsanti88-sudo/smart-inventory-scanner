@@ -354,6 +354,9 @@ Why each choice was made. Newest decisions at the bottom of each section.
   owner completes that dashboard step, merges to `master` still deploy nothing by itself and production
   continues to ship via the manual/CLI path. Once the dashboard step is done, merge to `master` becomes
   the production trigger. See `docs/DEPLOY_TRUTH.md` for the full current state.
+- **Closed 2026-08-06 (recorded 2026-08-19):** the dashboard Git connection is live; a merge to
+  `master` deploys production automatically and is therefore an owner-gated action (explicit OK in the
+  current conversation, every merge). `docs/DEPLOY_TRUTH.md` is the single statement of this rule.
 
 ## MPN part-number web research CANCELLED (standing owner order, 2026-07-28)
 - **Decision:** live web research for tire manufacturer part numbers (MPN) is CANCELLED as a standing
@@ -401,5 +404,20 @@ Why each choice was made. Newest decisions at the bottom of each section.
   suggestion. Decide after measuring the correction rate.
 - **OPEN (b):** should tenant approvals ever promote to the platform learned tier? Current = never.
   Recommendation: only with app-verified evidence or multiple independent tenant confirmations.
-- **Status:** plan approved 2026-08-19; code lands on `feat/best-guess-identity-cache`. Until the
-  tasks ship, docs describe TARGET behavior where marked, not shipped behavior.
+- **Status:** shipped 2026-08-19 (PR #38). Follow-up the same day: the auto-applied (>= 0.8) row
+  now carries the same band + one-tap Approve as the inline path (production-found gap); the 0.8
+  line, the retail-corpus 0.85 constant, the ladder, and the trust model are unchanged.
+- **Tenant confirmation is tenant-scoped (owner, 2026-08-19):** a feed-row Approve or typed identity
+  resolves with origin `tenant_approval`: same poison-guard bypass as `human` for that tenant's
+  product + approved alias, but never a device-shared verified-catalog entry. Platform/app-verified
+  knowledge (learned tier, master catalog, `auto_verify`) stays separate. `human` (Needs Review save)
+  is unchanged.
+- **FOLLOW-UP (pre-existing, not fixed here):** the deep-verify fallback (`backgroundVerifyDeep`)
+  calls `autoSuggestApplyOk` without the multi-variant gate the fast path applies, so a multi-speed-
+  rating listing can be auto-applied there. The feed's one-tap Approve is already gated
+  (`canOneTapApproveIdentity`); closing the auto-apply hole itself is a separate small PR.
+- **FUTURE (not built, owner 2026-08-19):** record Approve / Edit / Reassign / Not-this-product
+  outcomes per source tier (tire corpus, retail corpus, master catalog, learned, paid fetched, AI
+  guess) so the hard-coded confidence constants (0.85, x0.6 discount, 0.8 line) can be replaced by
+  measured accuracy, and so OPEN (a) is decided from data. Cheap: the approve/decline/markWrong
+  audit events already exist; what is missing is the source tier on the event and a report.

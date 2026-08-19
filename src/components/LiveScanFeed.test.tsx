@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { LiveScanFeed } from "@/components/LiveScanFeed";
 import { useScanStore } from "@/stores/scanStore";
 import type { ScanEvent, UnknownCodeReview, Product } from "@/types";
@@ -16,8 +16,10 @@ vi.mock("@/services/security/useAccessLevel", () => ({
 // must still surface the decoded suggestion identity on the feed row instead of showing the placeholder
 // forever. ensureProvisionalCount ALWAYS creates that placeholder before decode finishes, so `product` is
 // truthy and a naive `product ? undefined : suggestion` lookup skips the suggestion entirely (the bug).
-// Trust rule: a high-confidence (>=0.8) suggestion is tagged "unconfirmed" (neutral), never a bare identity
-// and never the amber "(suggested)" tag reserved for low-confidence (<0.8) suggestions.
+// Trust rule (owner decision 2026-08-19): every non-verified identity on the row carries the app-derived
+// band ("Suggested - high/medium/low confidence"), never a bare identity, never a raw percentage, and
+// the same wording whether the guess came through the inline-pending path or the auto-applied
+// (>= 0.8, review auto-closed) path. An auto-applied row also gets the one-tap Approve.
 
 function provisionalProduct(id: string, code: string): Product {
   return {
@@ -60,7 +62,7 @@ function baseEvent(code: string, productId: string): ScanEvent {
   } as unknown as ScanEvent;
 }
 
-function suggestionReview(code: string, confidence: number): UnknownCodeReview {
+function suggestionReview(code: string, confidence: number, extra: Partial<UnknownCodeReview> = {}): UnknownCodeReview {
   return {
     id: "rv1",
     cleanCode: code,
@@ -68,7 +70,11 @@ function suggestionReview(code: string, confidence: number): UnknownCodeReview {
     suggestedBrand: "Michelin",
     suggestedPrimarySku: "",
     confidence,
+    decodeStatus: "suggested",
+    evidenceStrength: "none",
+    exactCodeEvidenceVerifiedByApp: false,
     status: "open",
+    ...extra,
   } as unknown as UnknownCodeReview;
 }
 
@@ -83,26 +89,85 @@ describe("LiveScanFeed - suggested identity over provisional placeholder (Task 3
     const code = "0866990000123";
     const product = provisionalProduct("prod1", code);
     const event = baseEvent(code, product.id);
-    const review = suggestionReview(code, 0.92);
+    // Auto-applied: the review auto-closed (resolvedBy "auto"), the product stays provisional/unverified.
+    const review = suggestionReview(code, 0.92, { status: "resolved", resolvedBy: "auto", provisionalProductId: product.id });
     useScanStore.setState({ scanFeed: [event], needsReviewQueue: [review], products: [product], finalCounts: [] });
 
     render(<LiveScanFeed />);
 
     expect(screen.getByText(/Michelin Defender LTX/)).toBeInTheDocument();
     expect(screen.queryByText(/Unidentified item/)).not.toBeInTheDocument();
-    expect(screen.getByText(/unconfirmed/i)).toBeInTheDocument();
-    expect(screen.queryByText(/\(suggested\)/)).not.toBeInTheDocument();
-
-    // COSMETIC FIX (2026-08-04, cocacola-bug-report.md): the product name and the "unconfirmed" tag
-    // must be separated by an actual space character, not just a CSS margin - otherwise the two
-    // differently-styled adjacent text runs can read as one concatenated word (e.g. "Delinte
-    // D7unconfirmed") in a screenshot.
+    // The band, not the old neutral "unconfirmed" word, and never a percentage.
     const nameCell = screen.getByTestId("feed-product-ev1");
-    expect(nameCell.textContent).toMatch(/\S\s+unconfirmed$/);
-    expect(nameCell.textContent).not.toMatch(/\Sunconfirmed$/);
+    expect(nameCell.textContent).toMatch(/Suggested - medium confidence/);
+    expect(nameCell.textContent).not.toMatch(/unconfirmed|%/);
+    // COSMETIC (2026-08-04, cocacola-bug-report.md): a real space between the name and the tag, so the
+    // two differently-styled runs never read as one word ("Delinte D7Suggested") in a screenshot.
+    expect(nameCell.textContent).toMatch(/\S\s+\(Suggested - medium confidence\)/);
+    // One-tap Approve + Edit on the auto-applied row (Approve = the same human-approval core the sheet uses).
+    expect(screen.getByTestId("approve-applied-ev1")).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByTestId("edit-identity-ev1")).toBeInTheDocument();
   });
 
-  it("low-confidence suggestion keeps the (suggested) tag", () => {
+  it("one-tap Approve on an auto-applied row confirms that identity (tenant alias), then the row shows Edit only", () => {
+    const code = "0866990000123";
+    const product = provisionalProduct("prod1", code);
+    const event = baseEvent(code, product.id);
+    const review = suggestionReview(code, 0.92, { status: "resolved", resolvedBy: "auto", provisionalProductId: product.id });
+    const confirmRowIdentity = vi.fn((id: string, fields: { name: string; brand?: string }) => {
+      // Simulate the store's outcome: product verified with the confirmed identity, alias approved.
+      useScanStore.setState((s) => ({
+        products: s.products.map((p) => (p.id === product.id ? { ...p, name: fields.name, brand: fields.brand ?? "", verified: true, provisional: false } : p)),
+        needsReviewQueue: s.needsReviewQueue.map((r) => (r.id === review.id ? { ...r, resolvedBy: "human" } : r)),
+      }));
+    });
+    useScanStore.setState({ scanFeed: [event], needsReviewQueue: [review], products: [product], finalCounts: [], confirmRowIdentity } as never);
+
+    render(<LiveScanFeed />);
+    fireEvent.click(screen.getByTestId("approve-applied-ev1"));
+
+    expect(confirmRowIdentity).toHaveBeenCalledWith("ev1", { name: "Michelin Defender LTX M/S 275/60R20", brand: "Michelin" });
+    expect(screen.queryByTestId("approve-applied-ev1")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Suggested -/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("edit-product-ev1")).toBeInTheDocument();
+  });
+
+  it("a review whose decode the app VERIFIED but did not auto-save reads the high band (same rule as the inline path)", () => {
+    const code = "0866990000789";
+    const product = provisionalProduct("prod3", code);
+    const event = baseEvent(code, product.id);
+    const review = suggestionReview(code, 0.9, {
+      decodeStatus: "verified", exactCodeEvidenceVerifiedByApp: false, status: "resolved", resolvedBy: "auto", provisionalProductId: product.id,
+    });
+    useScanStore.setState({ scanFeed: [event], needsReviewQueue: [review], products: [product], finalCounts: [] });
+
+    render(<LiveScanFeed />);
+
+    expect(screen.getByTestId("feed-product-ev1").textContent).toMatch(/Suggested - high confidence/);
+  });
+
+  // Deep-review findings (2026-08-19): even if some path auto-applied it, a one-tap Approve must never sit
+  // on a name that is not ONE real product - the prefix-floor naming aid or a multi-variant listing.
+  it.each([
+    ["prefix-floor naming aid", "Acme / product unconfirmed"],
+    ["multi-variant listing", "Nokian 205 50 R17 93V, 93W, 93H"],
+  ])("an auto-applied %s shows the band but NO one-tap Approve (Edit stays)", (_label, name) => {
+    const code = "0866990000999";
+    const product = provisionalProduct("prod9", code);
+    const event = baseEvent(code, product.id);
+    const review = suggestionReview(code, 0.85, {
+      suggestedProductName: name, status: "resolved", resolvedBy: "auto", provisionalProductId: product.id,
+    });
+    useScanStore.setState({ scanFeed: [event], needsReviewQueue: [review], products: [product], finalCounts: [] });
+
+    render(<LiveScanFeed />);
+
+    expect(screen.getByTestId("feed-product-ev1").textContent).toMatch(/Suggested - medium confidence/);
+    expect(screen.queryByTestId("approve-applied-ev1")).not.toBeInTheDocument();
+    expect(screen.getByTestId("edit-identity-ev1")).toBeInTheDocument();
+  });
+
+  it("a low-confidence review-derived suggestion shows the low band and no Approve (deliberate hold stays in review)", () => {
     const code = "0866990000456";
     const product = provisionalProduct("prod2", code);
     const event = baseEvent(code, product.id);
@@ -112,8 +177,9 @@ describe("LiveScanFeed - suggested identity over provisional placeholder (Task 3
     render(<LiveScanFeed />);
 
     expect(screen.getByText(/Michelin Defender LTX/)).toBeInTheDocument();
-    expect(screen.getByText(/\(suggested\)/)).toBeInTheDocument();
-    expect(screen.queryByText(/^unconfirmed$/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId("feed-product-ev1").textContent).toMatch(/Suggested - low confidence/);
+    expect(screen.queryByText(/unconfirmed|%/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("approve-applied-ev1")).not.toBeInTheDocument();
   });
 
   it("a real (non-provisional) product still displays normally with no tag", () => {

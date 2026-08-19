@@ -972,7 +972,10 @@ export interface ScanState {
       productId?: string;
       newProduct?: Partial<Product>;
       applyToCount?: boolean;
-      origin?: "human" | "ai" | "catalog" | "auto_verify" | "auto_count";
+      // "tenant_approval" = a tenant's own human confirmation (feed-row Approve / typed identity): same
+      // trust as "human" for THAT tenant's product + alias, but never writes the device-shared verified
+      // catalog (platform/app-verified knowledge stays separate from tenant knowledge).
+      origin?: "human" | "tenant_approval" | "ai" | "catalog" | "auto_verify" | "auto_count";
       autoVerify?: {
         score: number;
         verifiedBy: CatalogVerifiedBy;
@@ -6302,6 +6305,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
         if (action === "create_new") {
           const np = payload.newProduct ?? {};
+          // A person confirmed this identity (typed it or tapped Approve on it): the weak-guess poison
+          // guard, which exists to stop an evidence-less AI suggestion becoming verified by itself, does
+          // not apply. "tenant_approval" differs from "human" ONLY in what is written platform/device-wide.
+          const humanConfirmed = payload.origin === "human" || payload.origin === "tenant_approval";
 
           // DEDUP GUARD (data correctness): every auto-add path (AI auto-add, catalog auto-count) funnels
           // through create_new, so without this one barcode could spawn dozens of identical product rows
@@ -6341,11 +6348,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // B2 FIX (owner-reported, 268-row review, 2026-07-20): raw string equality here missed a
           // leading-zero GTIN variant of an already-counted identity (848983027580 vs 00848983027580),
           // minting a duplicate product row instead of aggregating the quantity onto the existing one.
-          // Compare via the SAME canonical-GTIN key universal import already uses (aggKeyFor,
-          // ~scanStore.ts:5282) - canonicalGtin strips leading zeros then re-pads to 14 digits for any
+          // Compare via the SAME canonical-GTIN key universal import already uses (aggKeyFor, below in
+          // this file) - canonicalGtin strips leading zeros then re-pads to 14 digits for any
           // GTIN-shaped code; a non-GTIN-shaped code (e.g. a part number) falls through unchanged, so a
           // part number's leading zeros still carry meaning and are never canonicalized away.
-          const canon = (c: string): string => c; // TEMP: verify RED
+          const canon = (c: string): string => canonicalGtin(c) ?? c;
           const identityCodesCanonical = identityCodes.map(canon);
           const countedProductIds = new Set(state.finalCounts.map((c) => c.productId));
           for (const p of state.products) {
@@ -6451,8 +6458,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // with real evidence upgrades the provisional.
             if (products.find((p) => p.id === productId)?.provisional === true) {
               approvingProvisional = true;
-              // When origin is "human", the user is deliberately confirming the provisional - skip the guard.
-              const isWeakGuessReuse = isWeakGuess(review, np) && payload.origin !== "human";
+              // When a person confirmed it, they are deliberately confirming the provisional - skip the guard.
+              const isWeakGuessReuse = isWeakGuess(review, np) && !humanConfirmed;
               if (isWeakGuessReuse) {
                 weakGuessProduct = true;
                 // Leave the provisional as-is (not upgraded to verified).
@@ -6528,7 +6535,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // guard still applies (an evidence-less AI suggestion stays unverified + provisional).
             productId = provOrphanId;
             approvingProvisional = true;
-            weakGuessProduct = isWeakGuess(review, np) && payload.origin !== "human";
+            weakGuessProduct = isWeakGuess(review, np) && !humanConfirmed;
             const orphan = products.find((p) => p.id === provOrphanId)!;
             // FALKEN FIX (owner-reported live bug, 2026-07-20): this upgrade path used to write
             // np.brand/np.category/np.specsShort/np.specsFull verbatim with no fallback, so a
@@ -6575,7 +6582,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               verified: !weakGuessProduct,
               provisional: weakGuessProduct ? true : false,
               updatedAt: now(),
-              updatedBy: payload.origin === "human" ? "human" : orphan.updatedBy,
+              updatedBy: humanConfirmed ? "human" : orphan.updatedBy,
               // Task 4: structure the upgraded identity (deterministic only, never LLM on the hot
               // path). Guarded against clobbering a prior "human" stamp.
               ...safeStructuredFieldsFor(np.name ?? orphan.name, orphanEnriched.brand, orphan.structuredBy),
@@ -7005,9 +7012,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               ),
             });
           }
-          // origin "auto_count" (learning off) and "catalog" -> count only, no catalog write here.
+          // origin "tenant_approval" (a tenant's own confirmation: tenant product + alias only), "auto_count"
+          // (learning off) and "catalog" -> no shared-catalog write here.
         }
-        if (origin === "human") {
+        if (origin === "human" || origin === "tenant_approval") {
           get().recordFeedback(action === "create_new" ? "product_approved" : "alias_linked", {
             code: review.cleanCode,
             productId,
@@ -7178,11 +7186,31 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (ev.suggestion && ev.suggestion.status !== "pending") return;
         const code = ev.cleanCode || "";
         if (code && st.aliases.some((a) => a.cleanCode === code && a.approved)) return;
-        let review = st.needsReviewQueue.find(
-          (r) =>
-            (r.status === "open" || r.status === "suggested") &&
-            ((code && r.cleanCode === code) || (ev.matchedProductId && r.provisionalProductId === ev.matchedProductId)),
-        );
+        const ownsRow = (r: UnknownCodeReview) =>
+          (code !== "" && r.cleanCode === code) || (!!ev.matchedProductId && r.provisionalProductId === ev.matchedProductId);
+        let review = st.needsReviewQueue.find((r) => (r.status === "open" || r.status === "suggested") && ownsRow(r));
+        if (!review) {
+          // AUTO-APPLIED row (>= 0.8 suggestion applied onto the provisional, review auto-closed, product
+          // still unverified): the human's Approve/Edit confirms THAT review, not a blank reopened one, so
+          // the decode's confidence/evidence fields stay on the record. Reactivate it in place as OPEN
+          // (not "suggested"): if resolveUnknown then refuses to guess (dedup conflict, suggest_link) the
+          // review is exactly where those branches expect it - visible in Needs Review - instead of
+          // parked in "suggested" where no surface can finish it.
+          const autoApplied = st.needsReviewQueue.find((r) => r.status === "resolved" && r.resolvedBy === "auto" && ownsRow(r));
+          if (autoApplied) {
+            // Stale click: another path already verified this product, so there is nothing left to
+            // confirm - never fall through to the blank-reopen fallback on a settled review.
+            if (st.products.find((p) => p.id === autoApplied.provisionalProductId)?.verified) return;
+            set((s2) => ({
+              needsReviewQueue: s2.needsReviewQueue.map((r) =>
+                r.id === autoApplied.id
+                  ? { ...r, status: "open" as const, resolvedAt: null, resolvedBy: null, resolutionAction: null }
+                  : r,
+              ),
+            }));
+            review = get().needsReviewQueue.find((r) => r.id === autoApplied.id);
+          }
+        }
         if (!review) {
           // No awaiting review (e.g. an old row whose review was already settled): open one through the
           // existing path so the resolution below runs on a real review record, never on a synthetic one.
@@ -7205,12 +7233,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           if (!review) return;
         }
         const reviewId = review.id;
-        // origin "human" is correct HERE (and deliberately not in batchApprove): this identity was typed
-        // by a person, so the weak-guess poison guard - which exists to stop an evidence-less AI
-        // suggestion becoming a verified product - must not fire on it.
+        // origin "tenant_approval" (and deliberately not in batchApprove): a person typed or tapped
+        // Approve on this identity, so the weak-guess poison guard - which exists to stop an
+        // evidence-less AI suggestion becoming a verified product by itself - must not fire on it; but
+        // the confirmation is the TENANT's knowledge only (verified product + approved alias), never a
+        // device-shared verified-catalog entry that would auto-resolve the code for another tenant.
         get().resolveUnknown(reviewId, "create_new", {
           applyToCount: true,
-          origin: "human",
+          origin: "tenant_approval",
           newProduct: { name, brand: fields.brand ?? "", category: fields.category ?? "", primaryBarcode: code },
         });
         // Settle the inline tag on every row carrying this code's pending suggestion (same bookkeeping
