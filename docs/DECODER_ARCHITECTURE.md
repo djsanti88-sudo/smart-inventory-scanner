@@ -1,8 +1,8 @@
 # Decoder Architecture (v2.0.0 - decode ladder era)
 
 How an unknown scanned code becomes (or does not become) a counted product. Deterministic code owns
-truth; AI only suggests; counting happens only through human approval or the app-verified auto-count
-gate. Quick map for a new session or developer. (v1.0.0 described the concurrent two-provider
+truth; AI only suggests. Every scan counts immediately; what the ladder decides is the IDENTITY on the
+counted row, and only human approval or the app-verified auto-count gate makes that identity trusted. Quick map for a new session or developer. (v1.0.0 described the concurrent two-provider
 orchestrator; v2 replaced it with the cost-ordered ladder below. Sections 3-9 carry over.)
 
 **Doc boundary:** `docs/ARCHITECTURE.md` section 3 owns file/line wiring (what imports what, where a
@@ -15,7 +15,10 @@ fix the stale one rather than trusting it.
   ONLY from an APPROVED alias (`alias.approved === true`) or a VERIFIED product (`product.verified`).
 - AI is NEVER called for a known match. Different codes can map to one product via aliases; duplicate
   scans increment quantity, never create duplicate product rows.
-- Unknown / vendor-label / conflicting codes route to the Needs Review queue, never a guess.
+- Unknown / vendor-label / conflicting codes never become `known` on a guess. The counted row still
+  shows the best available identity, labeled as suggested with an app-derived confidence band
+  (`identityConfidenceBand.ts`) and Approve / Edit controls; the review record is kept for the audit
+  trail. Only human approval or app-verified evidence turns that identity into an alias.
 
 ## 2. Decode ladder (unknown codes only) - `src/server/decode/pipeline.ts` orchestrates, `src/server/upc/ladder.ts` drives rungs
 - The REAL decode orchestrator is `runDecodePipeline` in `src/server/decode/pipeline.ts` (fronted by
@@ -45,6 +48,55 @@ fix the stale one rather than trusting it.
 - `CrossCheckEngine` still compares sources structurally when more than one answered:
   agree | conflict | single_provider | weak.
 
+## 2b. Shared decode cache semantics (L1 process cache + L2 Turso `decode_cache`)
+- **L1, in-process** (`src/services/ai/decodeCache.ts`): a SUCCESS is cached indefinitely for the life
+  of the process; a MISS is cached for `DECODE_MISS_TTL_MS` (default 600000 ms = 10 min) so the same
+  unresolved code stops re-running the whole pipeline on every scan. `withDecodeCache` also does L3
+  in-flight coalescing: concurrent scans of the same key join one compute, so only the winner can
+  charge a slot or call a provider. `forceRefresh` (the manual "Retry live decode" / `forceRetry`
+  path) bypasses both the read and the in-flight map.
+- **L2, Turso `decode_cache`** (`getPersistedDecode` / `persistDecode`, read in `pipeline.ts` on an L1
+  miss and BEFORE the daily cap gate): a platform asset every tenant replays for $0, across serverless
+  instances. Two row kinds: `result` (a decode with an identity) and `no_result_receipt` (the ladder
+  ran and settled on nothing). No schema change was needed for the cooldown work: every row's payload
+  carries its stamp inside `payload.debug.cache` via `withCacheStamp` / `readCacheStamp`, holding
+  `knowledgeVersion` and, when applicable, `paidEscalationExhausted: true`.
+- **Cooldown.** `decodeNegativeTtlMs()` (`DECODE_NEGATIVE_TTL_MS`, default 7 days) is how long a stored
+  "no result", and a stored guess that paid rungs already failed to beat, stays authoritative. It is a
+  tuning value, not a product rule.
+- **Knowledge version.** `getDecodeKnowledgeVersion()` composes the hand-bumped `DECODE_LADDER_VERSION`
+  with the `generated_at` stamp of the tire and retail corpus meta files (`v1|tire:...|retail:...`),
+  memoized per process, degrading a missing meta file to `none`. Bump `DECODE_LADDER_VERSION` when a
+  provider is added, removed, or swapped, when the rung order changes, or when a resolver/trust rule
+  that decides identity changes. Corpus rebuilds need no bump - their build stamps are already part of
+  the composed version. Nothing else may mint a version string.
+- **Read rules** (`pipeline.ts`, the block that sets `staleRow` / `freeOnlyPass`):
+  - a `no_result_receipt` is treated as a MISS once it ages past the cooldown OR the knowledge version
+    moved (an absent stamp counts as stale, so legacy rows expire); the code then recomputes normally,
+    paid rungs included. A receipt is NOT permanent.
+  - a non-verified `result` (a guess, marker or not) whose version moved is re-evaluated with the paid
+    rungs switched off for that pass (`freeOnlyPass`), because what changed is the FREE knowledge and
+    the code was already paid for once.
+  - once the cooldown itself has lapsed, a full compute including paid rungs is allowed again.
+  - a row whose cached `decision.status` is `verified` replays regardless of version.
+  - the existing misread / example-row guards are unchanged and still null a poisoned hit; `forceRetry`
+    skips the L2 read entirely and overwrites the row with its fresh compute.
+- **Write rules** (the write-through after `computeDecode`, all rows stamped by `withCacheStamp`):
+  - paid results persist: a `verified` or `suggested` settle with a source tier, and any `paid_rung`
+    outcome carrying a usable identity even at `needs_review` status (e.g. `goupc_inferred`).
+  - a FREE suggestion that the paid rungs ran on and failed to beat persists with the pay-once marker
+    (`paidEscalationExhausted = paidRungRan && winningOutcome === freeRun.outcome`), so another
+    instance replays the guess instead of re-buying the same misses.
+  - a fresh usable answer REPLACES a stale row even when it came from a free rung (`replacesStaleRow`),
+    so the row stops re-evaluating on every scan.
+  - if the re-evaluation found nothing usable, the old guess is replayed with its stamp refreshed (and
+    written back into L1), carrying its pay-once marker forward: a best guess already shown never
+    regresses to "Unidentified".
+  - an exhausted ladder with no identity writes a `no_result_receipt`; a free corpus/cache win is
+    otherwise still not persisted, so a corpus correction is never masked by a stale row.
+- Caching and dedupe are enrichment only: no cache read, receipt, cooldown, or coalesced request can
+  stop a scanned row from appearing in the feed or counting (AGENTS.md TOP-LEVEL LAW).
+
 ## 3. Verified-only early exit (W1)
 - `runDecode` early-exits ONLY when `decideDecode` returns `verified`. A usable product NAME alone is
   not enough; unverified / suggested / conflict keep running until a verified hit or the budget.
@@ -55,8 +107,9 @@ fix the stale one rather than trusting it.
   true (scanStore.ts) and requires status verified + app-verified exact code + confidence >= 0.8 +
   (for tires) full specs + a public barcode shape + no firewall/brand-prefix conflict. Set it false
   for manual-review-everything mode. High-trust SUGGESTIONS (>= 0.8 or app-verified exact) auto-apply
-  to the counted row; lower-confidence identities display with a "(suggested)" tag and stay
-  review-first.
+  to the counted row; a weaker decode that still produced a usable name (including a `needs_review`
+  status) is shown inline on the counted row as a labeled best guess with Approve / Edit / Not this
+  product, never as a verified identity and never as an alias (`suggestionInline` in `scanStore.ts`).
 - Identity merge is SIZE-AWARE (`src/services/catalog/identityMerge.ts`): tire size is derived from
   `specsShort`/`specsFull` (corpus names are slugs that never carry sizes), so same-model-DIFFERENT-SIZE
   decodes mint distinct products instead of collapsing into review suggestions.

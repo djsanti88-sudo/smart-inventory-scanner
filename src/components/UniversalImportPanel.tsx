@@ -6,6 +6,7 @@ import { IMPORT_FIELD_ORDER, type ColumnMapping, type ImportField, type ImportPr
 import { inferColumnMapping, validateManualMapping, type FieldTier } from "@/services/columnIntelligence";
 import { readUniversalFile } from "@/services/universalFileReader";
 import { buildImportPreview, describeSkippedSheets, mapUniversalRows, type PreviewMatchResult } from "@/services/universalImportPreview";
+import { getIdentityConfidenceBand, identityBandWord } from "@/services/ai/identityConfidenceBand";
 
 const PREVIEW_LIMIT = 20;
 
@@ -199,7 +200,7 @@ export function UniversalImportPanel({
           <div className="overflow-auto">
             <table className="w-full text-left text-sm">
               <thead><tr><th className="px-2 py-2">Line</th><th className="px-2 py-2">Item</th><th className="px-2 py-2">Qty</th><th className="px-2 py-2">Result</th><th className="px-2 py-2">Why</th></tr></thead>
-              <tbody>{preview.rows.slice(0, PREVIEW_LIMIT).map((row) => <tr key={row.line} className="border-t border-zinc-100"><td className="px-2 py-2">{row.line}</td><td className="px-2 py-2">{row.source?.expected.name ?? row.source?.partNumber ?? "Unreadable row"}</td><td className="px-2 py-2">{row.source?.quantity ?? "-"}</td><td className="px-2 py-2 font-medium">{row.status}</td><td className="px-2 py-2">{row.reason}{row.confidence !== null ? ` (${Math.round(row.confidence * 100)}%)` : ""}</td></tr>)}</tbody>
+              <tbody>{preview.rows.slice(0, PREVIEW_LIMIT).map((row) => <tr key={row.line} className="border-t border-zinc-100"><td className="px-2 py-2">{row.line}</td><td className="px-2 py-2">{row.source?.expected.name ?? row.source?.partNumber ?? "Unreadable row"}</td><td className="px-2 py-2">{row.source?.quantity ?? "-"}</td><td className="px-2 py-2 font-medium">{row.status}</td><td className="px-2 py-2">{row.reason}{row.status === "exact" ? " (Exact)" : row.confidence !== null ? ` (${identityBandWord(getIdentityConfidenceBand({ confidence: row.confidence }))})` : ""}</td></tr>)}</tbody>
             </table>
           </div>
           {!summary && <button type="button" data-testid="import-apply" disabled={busy} onClick={() => void apply()} className="min-h-[44px] w-fit rounded-lg bg-blue-600 px-4 font-medium text-white disabled:opacity-50">Apply {preview.total} rows</button>}

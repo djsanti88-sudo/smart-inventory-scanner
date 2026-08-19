@@ -1,6 +1,16 @@
 # Repo Health — sync truth
 
-Regenerate, don't hand-drift. Last updated: 2026-08-09
+Regenerate, don't hand-drift. Last updated: 2026-08-19
+
+## Branch truth 2026-08-19 (verified with git, not memory)
+
+- `origin/master` = 9f50440b (PR #36). Local `master` was 4 commits behind at the time; rebase it
+  before branching anything else.
+- `feat/best-guess-identity-cache` (worktree `C:/tmp/wt-bestguess`): 6 commits on top of
+  origin/master, LOCAL ONLY (not pushed, no PR). Built + proven (see PROGRESS.md). Owner gate: PR.
+- `refactor/pre-aws-cleanup` (main checkout): unmerged, unpushed, does NOT contain origin/master;
+  carries uncommitted doc edits (CLAUDE/AGENTS/GUARDRAILS/PROGRESS) superseded by newer versions
+  of the same files on the best-guess branch, plus an uncommitted corpus regeneration.
 
 ## CRITICAL callouts
 

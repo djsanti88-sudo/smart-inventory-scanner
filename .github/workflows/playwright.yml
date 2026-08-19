@@ -33,8 +33,29 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright Chromium + OS deps
-        run: npx playwright install --with-deps chromium
+      # Browser binary cached on the Playwright version so the download leaves the hot path.
+      - name: Get Playwright version
+        id: pw-version
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
+
+      # NO --with-deps (owner 2026-08-19): ubuntu-latest already ships Chromium's OS libraries, and
+      # --with-deps runs apt-get against azure.archive.ubuntu.com, which stalled for 20+ minutes on
+      # PR #38 and was the real cause of the "Chromium install hangs" failures. Hard step timeout so
+      # a genuinely stalled download fails fast and visibly; re-run the job when the CDN recovers.
+      - name: Install Playwright Chromium
+        timeout-minutes: 6
+        run: npx playwright install chromium
+
+      # The one unit-level test that needs a real browser (report PDF rendering) lives here, next to
+      # the only job that installs one; the unit-tests job stays browser-free.
+      - name: Browser-backed report render test
+        run: npx vitest run scripts/__tests__/render-report-pdf.test.mjs
 
       - name: Run Playwright E2E (mock backend)
         run: npm run test:e2e

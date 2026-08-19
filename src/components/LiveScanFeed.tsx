@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { DecodeStatusBadge, MatchBadge, StatusBadge, SyncBadge } from "@/components/badges";
 import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
+import { getIdentityConfidenceBand, identityBandLabel } from "@/services/ai/identityConfidenceBand";
 import { matchTireSize } from "@/services/tire/tireSizeNormalizer";
 import { canonicalTireSize } from "@/services/catalog/tireListingNormalizer";
 import type { Product, UnknownCodeReview } from "@/types";
@@ -29,6 +30,101 @@ function resolvedFeedSize(product: Product | undefined, displayName: string): st
 export const FEED_RENDER_WINDOW = 150;
 export const FEED_RENDER_CHUNK = 300;
 
+// SCANNER SAFETY (non-negotiable, shared by every row control): pointer-only targets - tabIndex -1 so
+// they are never in the tab/Enter path, and onMouseDown preventDefault so clicking one never moves
+// focus off #scanner-input. A scanner Enter burst can never trigger them.
+const rowButtonProps = {
+  type: "button" as const,
+  tabIndex: -1,
+  onMouseDown: (me: React.MouseEvent) => me.preventDefault(),
+};
+
+// Reassign is PRODUCT-scoped (markWrong moves EVERY counted unit of the product and deactivates every
+// approved alias mapped to it), so a single stray click on a dense feed can move a whole session's count
+// for that product. It is therefore a TWO-TAP control: the first tap only arms a confirm that STATES the
+// blast radius ("Move 3 units?"), the second fires it. The armed state disarms itself on Escape, on a
+// click anywhere else, and after this timeout, so it can never sit armed waiting for an accidental tap.
+const REASSIGN_CONFIRM_MS = 5000;
+
+/** Prefill value for the confirm sheet: a best guess only. A placeholder label ("Unidentified item
+ *  (barcode ...)") is not an identity - prefilling it would make the operator delete it first. */
+function bestGuessPrefill(name: string | undefined): string {
+  return name && !name.startsWith("Unidentified item") ? name : "";
+}
+
+/** Bring the scanner back after a manual form interaction (the only place focus intentionally moves). */
+function refocusScanner() {
+  document.getElementById("scanner-input")?.focus();
+}
+
+/**
+ * The row's identity sheet. Two DISTINCT operations, never merged: "confirm" hands a human-typed
+ * identity to confirmRowIdentity (tenant approved alias), "edit" hands product fields to correctProduct
+ * (metadata only, alias untouched). Deliberately minimal - name + brand - and never autofocused, so
+ * rendering it can not steal the scanner's focus.
+ */
+function RowIdentitySheet({
+  eventId,
+  mode,
+  initialName,
+  initialBrand,
+  onSave,
+  onClose,
+}: {
+  eventId: string;
+  mode: "confirm" | "edit";
+  initialName: string;
+  initialBrand: string;
+  onSave: (fields: { name: string; brand: string }) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(initialName);
+  const [brand, setBrand] = useState(initialBrand);
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1" data-testid={`identity-sheet-${eventId}`}>
+      <input
+        aria-label="product name"
+        data-testid={`identity-name-${eventId}`}
+        value={name}
+        onChange={(ev) => setName(ev.target.value)}
+        placeholder="Product name"
+        className="min-h-[36px] rounded border border-zinc-300 px-2 text-sm"
+      />
+      <input
+        aria-label="brand"
+        data-testid={`identity-brand-${eventId}`}
+        value={brand}
+        onChange={(ev) => setBrand(ev.target.value)}
+        placeholder="Brand"
+        className="min-h-[36px] w-28 rounded border border-zinc-300 px-2 text-sm"
+      />
+      <button
+        type="button"
+        data-testid={`identity-save-${eventId}`}
+        onClick={() => {
+          onSave({ name: name.trim(), brand: brand.trim() });
+          onClose();
+          refocusScanner();
+        }}
+        className="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+      >
+        {mode === "confirm" ? "Confirm identity" : "Save details"}
+      </button>
+      <button
+        type="button"
+        data-testid={`identity-cancel-${eventId}`}
+        onClick={() => {
+          onClose();
+          refocusScanner();
+        }}
+        className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+      >
+        Cancel
+      </button>
+    </div>
+  );
+}
+
 // Raw live scan feed: every scan event in order, newest first. Keeps the full audit trail. Raw/clean
 // codes AND the internal match type are platformOwner-only; customers see the product name + part number
 // and the scan status of each scan, never the code strings or how the code matched internally.
@@ -38,8 +134,34 @@ export function LiveScanFeed() {
   const needsReviewQueue = useScanStore((s) => s.needsReviewQueue);
   const approveSuggestion = useScanStore((s) => s.approveSuggestion);
   const declineSuggestion = useScanStore((s) => s.declineSuggestion);
+  const confirmRowIdentity = useScanStore((s) => s.confirmRowIdentity);
+  const correctProduct = useScanStore((s) => s.correctProduct);
+  const markWrong = useScanStore((s) => s.markWrong);
+  const finalCounts = useScanStore((s) => s.finalCounts);
   const isPlatform = useIsPlatformOwner();
   const [renderWindow, setRenderWindow] = useState(FEED_RENDER_WINDOW);
+  // At most one row sheet is open at a time (identity confirm, or product metadata edit).
+  const [sheet, setSheet] = useState<{ eventId: string; mode: "confirm" | "edit" } | null>(null);
+  // At most one Reassign is armed at a time (the row's event id).
+  const [armedReassign, setArmedReassign] = useState<string | null>(null);
+
+  // Disarm on Escape, on a click anywhere else, or after REASSIGN_CONFIRM_MS. The confirm button itself
+  // stops its own mousedown from reaching this listener, so tapping it confirms instead of disarming.
+  useEffect(() => {
+    if (!armedReassign) return;
+    const disarm = () => setArmedReassign(null);
+    const onKeyDown = (ke: KeyboardEvent) => {
+      if (ke.key === "Escape") disarm();
+    };
+    const timer = window.setTimeout(disarm, REASSIGN_CONFIRM_MS);
+    document.addEventListener("mousedown", disarm);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("mousedown", disarm);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [armedReassign]);
 
   // PERF FIX (defect #37, live-reproduced 2026-08-05/06): the store's getProduct(id) does a linear
   // `products.find()`. Calling it once per rendered scanFeed row made this O(scanFeed.length *
@@ -69,6 +191,14 @@ export function LiveScanFeed() {
   // Display-only window: scanFeed is already newest-first, so slicing from the front keeps the newest
   // rows visible exactly as before. Clamp against the current feed length so a shrunken feed (e.g.
   // "Clear session") never leaves a stale negative hidden count.
+  // Counted quantity per product, built once per finalCounts change (same O(1)-per-row shape as the
+  // productsById index above). It is what Reassign's confirm copy names, and what decides whether the
+  // control renders at all - a product with nothing counted has no quantity to move.
+  const countedQtyByProduct = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of finalCounts) m.set(c.productId, (m.get(c.productId) ?? 0) + c.quantity);
+    return m;
+  }, [finalCounts]);
   const visibleFeed = useMemo(() => scanFeed.slice(0, renderWindow), [scanFeed, renderWindow]);
   const hiddenCount = Math.max(0, scanFeed.length - visibleFeed.length);
 
@@ -149,6 +279,22 @@ export function LiveScanFeed() {
                       ? "unconfirmed"
                       : "(suggested)"
                     : null;
+                // ROW STATE -> CONTROLS (owner decision 2026-08-19). Three distinct operations, never one
+                // umbrella "edit": a verified row offers metadata Edit only (no Approve - it is already
+                // trusted); a row carrying a pending guess offers Approve / Edit (confirm the identity) /
+                // Not this product; a row with no identity offers Identify. Reassign (the count-transfer
+                // path) stays its own control on any counted row.
+                const pendingInline = inline?.status === "pending";
+                // A row has a candidate when it carries the pending inline guess OR a review-derived
+                // suggestion (the latter is shown when the inline guess was deliberately withheld: context
+                // conflict, tire deep-verify pending, auto-add off). Either way the operator is editing a
+                // name, not identifying from nothing; Approve stays inline-only so a deliberate hold is
+                // never bypassed from the feed.
+                const hasCandidate = pendingInline || bestGuessPrefill(suggestion?.suggestedProductName) !== "";
+                const verifiedRow = e.decodeStatus === "verified" || Boolean(product?.verified);
+                const canEditMetadata = verifiedRow && Boolean(product);
+                const reassignQty = product ? (countedQtyByProduct.get(product.id) ?? 0) : 0;
+                const canReassign = Boolean(product) && e.status === "known" && reassignQty > 0;
                 // Same display priority as the name: real product brand wins, then the decode
                 // suggestion's brand, then whatever the provisional placeholder carries.
                 const displayBrand = prettifyBrand(
@@ -170,66 +316,148 @@ export function LiveScanFeed() {
                       </td>
                     )}
                     <td className="px-4 py-3" data-testid={`feed-brand-${e.id}`}>{displayBrand || "-"}</td>
-                    <td className="px-4 py-3" data-testid={`feed-product-${e.id}`}>
-                      {displayName}
-                      {/* Task 9b: pending inline suggestion - honest confidence + pointer-only
-                          approve/decline. SCANNER SAFETY (non-negotiable): tabIndex={-1} and
-                          onMouseDown preventDefault so focus NEVER leaves #scanner-input; a scanner
-                          Enter burst can never trigger these controls. */}
-                      {inline && inline.status === "pending" ? (
-                        <span
-                          className="ml-1 inline-flex items-center gap-1 whitespace-nowrap align-middle text-xs text-amber-700"
-                          data-testid={`feed-suggestion-${e.id}`}
-                        >
-                          (suggested, {Math.round((inline.confidence ?? 0) * 100)}%)
-                          <button
-                            type="button"
-                            tabIndex={-1}
-                            onMouseDown={(me) => me.preventDefault()}
-                            onClick={() => approveSuggestion(e.id)}
-                            aria-label={`Approve ${inline.productName}`}
-                            title={`Approve ${inline.productName}`}
-                            data-testid={`approve-suggestion-${e.id}`}
-                            className="inline-flex h-6 w-6 items-center justify-center rounded border border-emerald-300 bg-emerald-50 font-semibold text-emerald-700 hover:bg-emerald-100"
+                    <td className="px-4 py-3">
+                      {/* The identity text (name + its honest tags) stays in its own node, so the row
+                          controls beside it are never part of what the row "says" the product is. */}
+                      <span data-testid={`feed-product-${e.id}`}>
+                        {displayName}
+                        {/* Task 9b: pending inline suggestion - honest confidence + pointer-only
+                            approve/decline. SCANNER SAFETY (non-negotiable): tabIndex={-1} and
+                            onMouseDown preventDefault so focus NEVER leaves #scanner-input; a scanner
+                            Enter burst can never trigger these controls. */}
+                        {inline && inline.status === "pending" ? (
+                          <span
+                            className="ml-1 inline-flex items-center gap-1 whitespace-nowrap align-middle text-xs text-amber-700"
+                            data-testid={`feed-suggestion-${e.id}`}
                           >
-                            ✓
-                          </button>
+                            {/* Owner decision 2026-08-19: an app-derived band, never a raw provider
+                                percentage. The raw confidence stays on the event for audit. */}
+                            ({identityBandLabel(inline.band ?? getIdentityConfidenceBand({ confidence: inline.confidence }))})
+                            <button
+                              {...rowButtonProps}
+                              onClick={() => approveSuggestion(e.id)}
+                              aria-label={`Approve ${inline.productName}`}
+                              title={`Approve ${inline.productName}`}
+                              data-testid={`approve-suggestion-${e.id}`}
+                              className="inline-flex h-6 w-6 items-center justify-center rounded border border-emerald-300 bg-emerald-50 font-semibold text-emerald-700 hover:bg-emerald-100"
+                            >
+                              ✓
+                            </button>
+                            <button
+                              {...rowButtonProps}
+                              onClick={() => declineSuggestion(e.id)}
+                              aria-label="Not this product"
+                              title="Not this product"
+                              data-testid={`decline-suggestion-${e.id}`}
+                              className="inline-flex h-6 w-6 items-center justify-center rounded border border-red-300 bg-red-50 font-semibold text-red-700 hover:bg-red-100"
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ) : null}
+                        {/* COSMETIC FIX (2026-08-04, cocacola-bug-report.md): adjacent {text}{element} JSX
+                            renders with no whitespace text node between them - the ml-1 margin alone (4px)
+                            reads as a concatenated word ("Delinte D7unconfirmed") in a screenshot. Add a
+                            literal space, matching the codebase's own {" "} convention elsewhere. */}
+                        {suggestionTag === "unconfirmed" ? (
+                          <>
+                            {" "}
+                            <span className="ml-1 rounded px-1 text-xs text-zinc-600">unconfirmed</span>
+                          </>
+                        ) : suggestionTag === "(suggested)" ? (
+                          <>
+                            {" "}
+                            <span className="ml-1 text-xs text-amber-700">(suggested)</span>
+                          </>
+                        ) : null}
+                        {/* Task 9: an app-verified decode that counted despite being off the business scan
+                            context (e.g. hot sauce in a tire shop) shows this advisory tag - it counted, but
+                            the operator sees it is not a tire. */}
+                        {e.offCategory ? (
+                          <span className="ml-1 text-xs text-amber-700" data-testid={`feed-off-category-${e.id}`}>
+                            Off-category item
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="ml-2 inline-flex items-center gap-1 align-middle text-xs" data-testid={`row-actions-${e.id}`}>
+                        {canEditMetadata ? (
                           <button
-                            type="button"
-                            tabIndex={-1}
-                            onMouseDown={(me) => me.preventDefault()}
-                            onClick={() => declineSuggestion(e.id)}
-                            aria-label="Not this product"
-                            title="Not this product"
-                            data-testid={`decline-suggestion-${e.id}`}
-                            className="inline-flex h-6 w-6 items-center justify-center rounded border border-red-300 bg-red-50 font-semibold text-red-700 hover:bg-red-100"
+                            {...rowButtonProps}
+                            onClick={() => setSheet({ eventId: e.id, mode: "edit" })}
+                            aria-label={`Edit ${displayName}`}
+                            data-testid={`edit-product-${e.id}`}
+                            className="rounded border border-zinc-300 px-1.5 py-0.5 text-zinc-700 hover:bg-zinc-100"
                           >
-                            ✕
+                            Edit
                           </button>
-                        </span>
-                      ) : null}
-                      {/* COSMETIC FIX (2026-08-04, cocacola-bug-report.md): adjacent {text}{element} JSX
-                          renders with no whitespace text node between them - the ml-1 margin alone (4px)
-                          reads as a concatenated word ("Delinte D7unconfirmed") in a screenshot. Add a
-                          literal space, matching the codebase's own {" "} convention elsewhere. */}
-                      {suggestionTag === "unconfirmed" ? (
-                        <>
-                          {" "}
-                          <span className="ml-1 rounded px-1 text-xs text-zinc-600">unconfirmed</span>
-                        </>
-                      ) : suggestionTag === "(suggested)" ? (
-                        <>
-                          {" "}
-                          <span className="ml-1 text-xs text-amber-700">(suggested)</span>
-                        </>
-                      ) : null}
-                      {/* Task 9: an app-verified decode that counted despite being off the business scan
-                          context (e.g. hot sauce in a tire shop) shows this advisory tag - it counted, but
-                          the operator sees it is not a tire. */}
-                      {e.offCategory ? (
-                        <span className="ml-1 text-xs text-amber-700" data-testid={`feed-off-category-${e.id}`}>
-                          Off-category item
-                        </span>
+                        ) : !verifiedRow ? (
+                          <button
+                            {...rowButtonProps}
+                            onClick={() => setSheet({ eventId: e.id, mode: "confirm" })}
+                            aria-label={hasCandidate ? `Edit ${inline?.productName ?? suggestion?.suggestedProductName}` : "Identify this item"}
+                            data-testid={hasCandidate ? `edit-identity-${e.id}` : `identify-row-${e.id}`}
+                            className="rounded border border-zinc-300 px-1.5 py-0.5 text-zinc-700 hover:bg-zinc-100"
+                          >
+                            {hasCandidate ? "Edit" : "Identify"}
+                          </button>
+                        ) : null}
+                        {canReassign && product ? (
+                          armedReassign === e.id ? (
+                            <button
+                              {...rowButtonProps}
+                              // stopPropagation so this tap does not reach the document-level disarm
+                              // listener before its own click lands. preventDefault (from rowButtonProps)
+                              // still holds, so the scanner keeps focus.
+                              onMouseDown={(me) => {
+                                me.preventDefault();
+                                me.stopPropagation();
+                              }}
+                              onClick={() => {
+                                setArmedReassign(null);
+                                void markWrong(product.id, { reason: "reassigned from the scan feed" });
+                              }}
+                              aria-label={`Confirm reassign: move ${reassignQty} counted ${reassignQty === 1 ? "unit" : "units"} of ${displayName}`}
+                              title="Every counted unit of this product moves to a new unidentified row"
+                              data-testid={`reassign-confirm-${e.id}`}
+                              className="rounded border border-amber-400 bg-amber-50 px-1.5 py-0.5 font-medium text-amber-800 hover:bg-amber-100"
+                            >
+                              Move {reassignQty} {reassignQty === 1 ? "unit" : "units"}?
+                            </button>
+                          ) : (
+                            <button
+                              {...rowButtonProps}
+                              onMouseDown={(me) => {
+                                me.preventDefault();
+                                me.stopPropagation();
+                              }}
+                              onClick={() => setArmedReassign(e.id)}
+                              aria-label="Reassign to a different product"
+                              title="This is a different product - move the count"
+                              data-testid={`reassign-${e.id}`}
+                              className="rounded border border-zinc-300 px-1.5 py-0.5 text-zinc-700 hover:bg-zinc-100"
+                            >
+                              Reassign
+                            </button>
+                          )
+                        ) : null}
+                      </span>
+                      {sheet?.eventId === e.id ? (
+                        <RowIdentitySheet
+                          eventId={e.id}
+                          mode={sheet.mode}
+                          initialName={
+                            sheet.mode === "edit"
+                              ? (product?.name ?? "")
+                              : bestGuessPrefill(inline?.productName ?? suggestion?.suggestedProductName)
+                          }
+                          initialBrand={sheet.mode === "edit" ? (product?.brand ?? "") : (inline?.brand ?? suggestion?.suggestedBrand ?? "")}
+                          onSave={(fields) =>
+                            sheet.mode === "edit" && product
+                              ? correctProduct(product.id, { name: fields.name, brand: fields.brand })
+                              : confirmRowIdentity(e.id, { name: fields.name, brand: fields.brand })
+                          }
+                          onClose={() => setSheet(null)}
+                        />
                       ) : null}
                     </td>
                     <td className="px-4 py-3 text-sm" data-testid={`feed-size-${e.id}`}>

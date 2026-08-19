@@ -60,7 +60,8 @@ whether merged). Batch A modules shipped: `e2e/teach/{knowledge,ladder,manifest,
 | `npm run build` | `next build` (no turbopack, deliberate; see DECISIONS.md). |
 | `npm run start` | `next start` after a build. |
 | `npm run lint` | ESLint flat config. Custom rule: `src/app/api/**` may not import the client Firebase SDK. |
-| `npm run proof:local` | `tsc --noEmit && vitest run` (typecheck + full unit suite). |
+| `npm run proof:all` | THE gate: typecheck + every vitest project + the vitest-excluded node:test suites + teach-bot suite + test-file discovery; prints an explicit NOT RUN list. Use this, not `proof:local`, before claiming green. |
+| `npm run proof:local` | `tsc --noEmit && vitest run` (typecheck + vitest only; blind to the node:test suites). |
 | `npm run proof:full` | proof:local + `next build`. |
 
 ## Unit tests (Vitest)
@@ -182,7 +183,7 @@ clone - this section is the durable name list. Client-exposed vars are
   `UPCITEMDB_DAILY_LIMIT`, `OPENFOODFACTS_PER_MINUTE_LIMIT`
 - Spend/rate guards: `AI_LOOKUP_DAILY_LIMIT` (default 2000), `AI_LOOKUP_KILL_SWITCH`,
   `AI_LOOKUP_RATE_LIMIT` / `_WINDOW_MS` / `_GET_RATE_LIMIT`, `ENABLE_LIVE_AI_LOOKUP`,
-  `ENABLE_AUTO_DECODE_ON_SCAN`, `AI_LOOKUP_MODE`, `DECODE_CACHE_FILE`, `DECODE_MISS_TTL_MS`
+  `ENABLE_AUTO_DECODE_ON_SCAN`, `AI_LOOKUP_MODE`, `DECODE_CACHE_FILE`, `DECODE_MISS_TTL_MS` (L1 miss, default 10 min), `DECODE_NEGATIVE_TTL_MS` (L2 no-result cooldown, default 7 days; only the cooldown reopens paid rungs)
 - Data stores: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`
 - Roles: `PLATFORM_OWNER_EMAILS` / `_UIDS` (+ `NEXT_PUBLIC_` mirrors)
 - Test-only (never real prod): `IS_E2E`, `NEXT_PUBLIC_E2E_AUTH_BYPASS`, `NEXT_PUBLIC_E2E_PLATFORM_OWNER`,

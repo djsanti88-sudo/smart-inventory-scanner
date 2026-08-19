@@ -367,3 +367,39 @@ Why each choice was made. Newest decisions at the bottom of each section.
 - **Source:** captured operationally in the `db-blank-filler` skill
   (`.claude/skills/db-blank-filler/SKILL.md`, "MPN backlog policy" section), promoted here as the
   durable decision record so it survives skill-file edits.
+
+## Identity philosophy: best available guess, honest label, easy correction, pay once (owner, 2026-08-19)
+
+- **Decision:** at the DISPLAY layer, Scanbin always attaches and shows the best identity available
+  for a scanned code, immediately, labeled as suggested when not verified, with Approve and Edit on
+  the row. This reverses the 2026-07 rule "prefer unknown over a wrong guess" for display only. The
+  TRUST layer is unchanged and strict: a guess is never shown or stored as verified; a guess never
+  becomes an approved alias without human confirmation (Approve / typed confirm) or app-verified
+  evidence; the platform learned tier learns from app-verified evidence only; tenant confirmations
+  create tenant aliases only.
+- **Row states and controls:** verified (trusted corpus hit, tenant approved alias, or app-verified
+  exact-code evidence) = Edit metadata only, no Approve; suggested = Approve + Edit; unidentified
+  (no candidate at all) = Identify. Three distinct operations: confirm identity (tenant alias),
+  edit metadata (tenant product fields only), reassign (existing count-transfer path). Original scan
+  evidence is permanent; nothing is deleted.
+- **Shared decode cache (Turso `decode_cache`) is a platform asset:** verified and paid-suggestion
+  results replay for $0 for every tenant. A failed search is an event, not an identity: a
+  `no_result_receipt` expires (configurable cooldown) and is invalidated when the decode knowledge
+  version changes (resolver + ladder + corpus builds). Once a usable suggestion has been shown after
+  paid decoding, another scan of that code must not trigger paid decoding again unless the cached
+  answer was explicitly invalidated (cooldown, version, forceRetry, admin invalidation). A stale
+  suggested row is re-evaluated with free rungs only. Verified rows replay regardless of version but
+  stay correctable (forceRetry, admin invalidate, known-bad rule); never technically immutable.
+- **Confidence display:** an app-derived band (High / Medium / Low) from one shared function, never a
+  raw provider percentage, until calibration is measured. Raw scores stay in the data.
+- **Why:** the product ships with disclaimers and editable rows; a useful best guess beats a feed of
+  "Unidentified"; every researched barcode should make the whole platform cheaper and smarter.
+- **Gemini out of decode** (moved here from GUARDRAILS): provider decision, not a product invariant.
+  Gemini grounding bills every executed search with no cap control (real $6 vs $0.53 computed, see
+  LESSONS_LEARNED L11). Enforced by `GEMINI_DECODE_DISABLED` in `pipeline.ts`.
+- **OPEN (a):** retail corpus = truth (no Approve) or high-trust suggestion (Approve)? Current =
+  suggestion. Decide after measuring the correction rate.
+- **OPEN (b):** should tenant approvals ever promote to the platform learned tier? Current = never.
+  Recommendation: only with app-verified evidence or multiple independent tenant confirmations.
+- **Status:** plan approved 2026-08-19; code lands on `feat/best-guess-identity-cache`. Until the
+  tasks ship, docs describe TARGET behavior where marked, not shipped behavior.

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { LiveScanFeed } from "@/components/LiveScanFeed";
 import ScanPage from "@/app/(app)/scan/page";
 import { useScanStore } from "@/stores/scanStore";
-import type { ScanEvent, UnknownCodeReview, Product } from "@/types";
+import type { Alias, ScanEvent, UnknownCodeReview, Product } from "@/types";
 
 // PHASE 1 (Suggested display, no count): a weak-source non-public scan (e.g. X004DY7YUT) that did NOT count
 // must show its decoded suggested product name on the scan FEED row instead of "Product: -", tagged
@@ -145,8 +145,12 @@ describe("LiveScanFeed - Task 9b inline suggestion approve/decline (scanner-safe
         expect(useScanStore.getState().scanFeed.find((e) => e.cleanCode === CODE9B)?.suggestion?.status).toBe("pending");
       });
       const row = useScanStore.getState().scanFeed.find((e) => e.cleanCode === CODE9B)!;
-      // Honest confidence copy, per the owner-ratified format.
-      expect(screen.getByTestId(`feed-suggestion-${row.id}`).textContent).toContain("(suggested, 30%)");
+      // Owner decision 2026-08-19: an app-derived band, never a raw provider percentage.
+      const tag = screen.getByTestId(`feed-suggestion-${row.id}`).textContent ?? "";
+      expect(tag).toContain("Suggested - low confidence");
+      expect(tag).not.toContain("%");
+      // The raw number is still on the event for audit.
+      expect(row.suggestion?.confidence).toBeCloseTo(0.3);
       // No open Needs Review item was created for the suggestion.
       expect(useScanStore.getState().needsReviewQueue.filter((r) => r.status === "open")).toHaveLength(0);
 
@@ -166,6 +170,9 @@ describe("LiveScanFeed - Task 9b inline suggestion approve/decline (scanner-safe
       // Approve went through the existing human-approval core: permanent approved alias.
       const alias = useScanStore.getState().aliases.find((a) => a.cleanCode === CODE9B);
       expect(alias?.approved).toBe(true);
+      // Approve and Edit sit together on a suggested row; Edit opens the confirm sheet, never a
+      // separate umbrella action.
+      expect(screen.queryByTestId(`edit-identity-${row.id}`), "Edit is gone with the settled suggestion").toBeNull();
       // The tag + controls are gone (suggestion settled).
       expect(screen.queryByTestId(`feed-suggestion-${row.id}`)).toBeNull();
 
@@ -213,5 +220,191 @@ describe("LiveScanFeed - Task 9b inline suggestion approve/decline (scanner-safe
       restore();
       useScanStore.getState().clearLocalCache();
     }
+  });
+});
+
+// Best-guess identity row controls (owner decision 2026-08-19). Three DISTINCT operations wired by row
+// state: confirm identity (tenant alias), edit metadata (product fields only), reassign (count transfer).
+
+/** A WEAK decode: honest status "needs_review", but with a usable name worth showing. */
+function weakResponse() {
+  const r = suggested9bResponse(0.3);
+  return { ...r, decision: { ...r.decision, status: "needs_review" } };
+}
+
+function seedRow(over: Partial<ScanEvent> = {}, product?: Partial<Product>) {
+  const event = {
+    id: "row1", rawCode: "078742051451", cleanCode: "078742051451", matchedProductId: product ? "p1" : null,
+    matchType: "barcode", status: product ? "known" : "needs_review", quantityAfterScan: product ? 1 : 0,
+    reason: "", syncStatus: "synced", createdAt: Date.now(), ...over,
+  } as unknown as ScanEvent;
+  useScanStore.setState({
+    scanFeed: [event], needsReviewQueue: [], finalCounts: [],
+    products: product ? [{ id: "p1", name: "Purified Water 500ml", brand: "Member's Mark", primarySku: "", ...product } as unknown as Product] : [],
+  });
+  return event;
+}
+
+describe("LiveScanFeed - row identity controls by state", () => {
+  it("a weak (needs_review) decode with a usable name shows the name, the band, Approve and Edit - and no percentage", async () => {
+    useScanStore.getState().clearLocalCache();
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (_u: unknown, init?: RequestInit) =>
+      ((init?.method ?? "GET").toUpperCase() !== "POST"
+        ? { ok: false, json: async () => ({}) }
+        : { ok: true, json: async () => weakResponse() }) as Response,
+    ) as unknown as typeof fetch;
+    const user = userEvent.setup();
+    try {
+      render(<ScanPage />);
+      enableAutoDecode();
+      const input = screen.getByTestId("scanner-input") as HTMLInputElement;
+      await user.type(input, `${CODE9B}{Enter}`);
+      await vi.waitFor(() => {
+        expect(useScanStore.getState().scanFeed.find((e) => e.cleanCode === CODE9B)?.suggestion?.status).toBe("pending");
+      });
+      const row = useScanStore.getState().scanFeed.find((e) => e.cleanCode === CODE9B)!;
+
+      expect(screen.getByTestId(`feed-product-${row.id}`).textContent).toContain("Original Anchor Bar Hot Sauce");
+      const tag = screen.getByTestId(`feed-suggestion-${row.id}`).textContent ?? "";
+      expect(tag).toContain("Suggested - low confidence");
+      expect(tag).not.toContain("%");
+      expect(screen.getByTestId(`approve-suggestion-${row.id}`)).toBeTruthy();
+      const edit = screen.getByTestId(`edit-identity-${row.id}`);
+      expect(edit.getAttribute("tabindex"), "scanner safety").toBe("-1");
+      // Opening the sheet never steals focus from the scan input.
+      expect(input).toHaveFocus();
+      await user.click(edit);
+      expect(input).toHaveFocus();
+      expect(screen.getByTestId(`identity-sheet-${row.id}`)).toBeTruthy();
+    } finally {
+      globalThis.fetch = original;
+      useScanStore.getState().clearLocalCache();
+    }
+  });
+
+  it("a verified row offers Edit (metadata) and never Approve", () => {
+    const event = seedRow({ decodeStatus: "verified" }, { verified: true, provisional: false });
+    render(<LiveScanFeed />);
+    expect(screen.getByTestId(`edit-product-${event.id}`)).toBeTruthy();
+    expect(screen.queryByTestId(`approve-suggestion-${event.id}`)).toBeNull();
+  });
+
+  it("editing a verified row changes product fields only - the alias is untouched", async () => {
+    const user = userEvent.setup();
+    const event = seedRow({ decodeStatus: "verified" }, { verified: true, provisional: false });
+    useScanStore.setState({
+      aliases: [{ id: "a1", productId: "p1", cleanCode: event.cleanCode, approved: true, confidence: 1 } as unknown as Alias],
+    });
+    render(<LiveScanFeed />);
+
+    await user.click(screen.getByTestId(`edit-product-${event.id}`));
+    const name = screen.getByTestId(`identity-name-${event.id}`);
+    expect((name as HTMLInputElement).value, "metadata edit opens on the current product fields").toBe("Purified Water 500ml");
+    await user.clear(name);
+    await user.type(name, "Spring Water 500ml");
+    await user.click(screen.getByTestId(`identity-save-${event.id}`));
+
+    const st = useScanStore.getState();
+    expect(st.products.find((p) => p.id === "p1")?.name).toBe("Spring Water 500ml");
+    expect(st.aliases).toHaveLength(1);
+    expect(st.aliases[0].approved, "metadata edits never touch alias trust").toBe(true);
+    expect(st.aliases[0].productId).toBe("p1");
+  });
+
+  it("an unidentified row offers Identify, and confirming a typed identity teaches a tenant approved alias", async () => {
+    useScanStore.getState().clearLocalCache();
+    const user = userEvent.setup();
+    try {
+      render(<ScanPage />);
+      const input = screen.getByTestId("scanner-input") as HTMLInputElement;
+      // AI off: the scan counts as an unidentified provisional row with an open review (no decode).
+      await user.type(input, `${CODE9B}{Enter}`);
+      const row = useScanStore.getState().scanFeed.find((e) => e.cleanCode === CODE9B)!;
+      expect(row.suggestion, "no guess to show").toBeUndefined();
+
+      await user.click(screen.getByTestId(`identify-row-${row.id}`));
+      expect(input, "identify never steals scanner focus").toHaveFocus();
+      const nameInput = screen.getByTestId(`identity-name-${row.id}`) as HTMLInputElement;
+      expect(nameInput.value, "no guess to prefill - a placeholder label is not an identity").toBe("");
+      await user.type(nameInput, "Buffalo Wing Sauce 12oz");
+      await user.click(screen.getByTestId(`identity-save-${row.id}`));
+
+      const st = useScanStore.getState();
+      const alias = st.aliases.find((a) => a.cleanCode === CODE9B);
+      expect(alias?.approved).toBe(true);
+      expect(st.products.find((p) => p.id === alias?.productId)?.name).toBe("Buffalo Wing Sauce 12oz");
+    } finally {
+      useScanStore.getState().clearLocalCache();
+    }
+  });
+
+  it("Reassign is a two-tap confirm that names the blast radius: the first tap moves nothing, the second moves every counted unit of the product", async () => {
+    const user = userEvent.setup();
+    // markWrong is PRODUCT-scoped: it moves EVERY counted unit of the product, not just this row's.
+    // Seed 3 units across 2 feed rows of the same product so the confirm copy has to say so.
+    const rowA = {
+      id: "rowA", rawCode: "078742051451", cleanCode: "078742051451", matchedProductId: "p1", matchType: "barcode",
+      status: "known", quantityAfterScan: 2, decodeStatus: "verified", reason: "", syncStatus: "synced", createdAt: Date.now(),
+    } as unknown as ScanEvent;
+    const rowB = { ...rowA, id: "rowB", quantityAfterScan: 3 } as ScanEvent;
+    useScanStore.setState({
+      scanFeed: [rowB, rowA],
+      needsReviewQueue: [],
+      products: [{ id: "p1", name: "Purified Water 500ml", brand: "Member's Mark", primarySku: "", verified: true, provisional: false, primaryBarcode: "078742051451" } as unknown as Product],
+      finalCounts: [{ id: "c1", businessId: "b", sessionId: "s", productId: "p1", quantity: 3, scanEventIds: [rowA.id, rowB.id], aliasesSeen: [rowA.cleanCode] } as never],
+    });
+    render(<LiveScanFeed />);
+
+    const arm = screen.getByTestId(`reassign-${rowA.id}`);
+    expect(arm.getAttribute("tabindex"), "scanner safety").toBe("-1");
+    await user.click(arm);
+
+    // FIRST TAP MOVES NOTHING - it only arms a confirm that states the real blast radius.
+    expect(useScanStore.getState().finalCounts.find((c) => c.productId === "p1")?.quantity).toBe(3);
+    const confirm = screen.getByTestId(`reassign-confirm-${rowA.id}`);
+    expect(confirm.textContent).toContain("Move 3 units?");
+    expect(confirm.getAttribute("tabindex"), "scanner safety").toBe("-1");
+
+    await user.click(confirm);
+    await vi.waitFor(() => {
+      expect(useScanStore.getState().finalCounts.some((c) => c.productId === "p1")).toBe(false);
+    });
+    const st = useScanStore.getState();
+    // All 3 units moved (the documented product-scoped semantic), none were deleted, and both scan
+    // events survive.
+    expect(st.finalCounts.reduce((n, c) => n + c.quantity, 0)).toBe(3);
+    expect(st.scanFeed.some((e) => e.id === rowA.id)).toBe(true);
+    expect(st.scanFeed.some((e) => e.id === rowB.id)).toBe(true);
+  });
+
+  it("the armed Reassign confirm is cancelled by Escape, and never steals the scanner's focus", async () => {
+    useScanStore.getState().clearLocalCache();
+    const user = userEvent.setup();
+    try {
+      render(<ScanPage />);
+      const input = screen.getByTestId("scanner-input") as HTMLInputElement;
+      // AI off: the scan counts one unit onto its own provisional row.
+      await user.type(input, `${CODE9B}{Enter}`);
+      const row = useScanStore.getState().scanFeed.find((e) => e.cleanCode === CODE9B)!;
+
+      expect(input).toHaveFocus();
+      await user.click(screen.getByTestId(`reassign-${row.id}`));
+      expect(input, "arming never moves focus off the scanner").toHaveFocus();
+      expect(screen.getByTestId(`reassign-confirm-${row.id}`).textContent).toContain("Move 1 unit?");
+
+      await user.keyboard("{Escape}");
+      expect(screen.queryByTestId(`reassign-confirm-${row.id}`), "Escape disarms").toBeNull();
+      expect(useScanStore.getState().finalCounts.reduce((n, c) => n + c.quantity, 0)).toBe(1);
+    } finally {
+      useScanStore.getState().clearLocalCache();
+    }
+  });
+
+  it("a counted-nothing row offers no Reassign at all (there is no quantity to move)", () => {
+    const event = seedRow({ decodeStatus: "verified" }, { verified: true, provisional: false });
+    useScanStore.setState({ finalCounts: [] });
+    render(<LiveScanFeed />);
+    expect(screen.queryByTestId(`reassign-${event.id}`)).toBeNull();
   });
 });

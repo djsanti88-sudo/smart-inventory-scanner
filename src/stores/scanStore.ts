@@ -54,6 +54,7 @@ import {
 import { sanitizeForAiLookup } from "@/services/sanitizer";
 import { sanitizeCustomerReason, MISS_REASON_TEXT } from "@/services/ai/decodeFallback";
 import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
+import { getIdentityConfidenceBand } from "@/services/ai/identityConfidenceBand";
 import { buildCleanupRecommendations } from "@/services/cleanup/recommendations";
 import type { CatalogEntry, CatalogHit, ShopOverride } from "@/services/catalog/catalogTypes";
 import { decideLookup, upsertVerified, applyAiCandidate, observeScan } from "@/services/catalog/localCatalogProvider";
@@ -65,7 +66,7 @@ import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/services/
 import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
 import { prefixFloorName, type PrefixFloorResult } from "@/services/catalog/prefixFloor";
-import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel, brandIsOnlyFloorGuess } from "@/services/catalog/prefixFloorEnrich";
+import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel, brandIsOnlyFloorGuess, isFloorGuessOnlyLabel } from "@/services/catalog/prefixFloorEnrich";
 import { detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable, toMasterAwareStoreEntry } from "@/services/catalog/sanitizeCatalog";
 import { findIdentityMerge } from "@/services/catalog/identityMerge";
@@ -1000,6 +1001,14 @@ export interface ScanState {
    *  idempotency-keyed alias write, poison guard, dedup guard, and provisional upgrade are inherited,
    *  never re-implemented. No-op unless the row's suggestion.status is "pending" (double-tap safe). */
   approveSuggestion: (scanEventId: string) => void;
+  /** Best-guess identity (owner decision 2026-08-19): confirm a HUMAN-TYPED identity for a feed row
+   *  (the "Identify" / "Edit" confirm sheet). Thin wrapper: it locates the row's still-awaiting review
+   *  (open or parked-suggested, creating one when the row has none) and hands the typed fields to the
+   *  EXISTING human-approval core, resolveUnknown "create_new" - so the tenant approved alias, count
+   *  upgrade, and idempotency come from that one path and are never re-implemented here. Writes tenant
+   *  data only: no corpus, no learned tier, no shared cache. No-op on an empty name or a row whose
+   *  suggestion is already settled (double-tap safe). */
+  confirmRowIdentity: (scanEventId: string, fields: { name: string; brand?: string; category?: string }) => void;
   /** Task 9b: decline the feed row's PENDING inline suggestion ("Not this product"). Renames the
    *  counted provisional row to the prefix floor (or the safe Unidentified placeholder) FIRST, and
    *  ONLY THEN creates/reopens the OPEN Needs Review item (decline is now the only suggestion path
@@ -3271,6 +3280,34 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           scanDeviceId,
         );
 
+        // BEST GUESS ON EVERY SCAN OF THE CODE (owner decision 2026-08-19): a repeat scan of a code whose
+        // best guess is already on screen carries the SAME pending suggestion (and its confirm controls)
+        // onto this new row, instead of a bare row with no identity. Display only - the decode that
+        // produced it settled long ago, so this costs nothing and re-decodes nothing.
+        // Never on a deterministically KNOWN row: that identity is settled, a guess would only muddy it.
+        const awaitingReview = isKnown
+          ? undefined
+          : get().needsReviewQueue.find(
+              (r) =>
+                r.cleanCode === cleaned.cleanCode &&
+                (r.status === "open" || r.status === "suggested") &&
+                isUsableProductName(r.suggestedProductName),
+            );
+        if (awaitingReview) {
+          event.suggestion = {
+            productName: awaitingReview.suggestedProductName,
+            brand: awaitingReview.suggestedBrand,
+            confidence: awaitingReview.confidence,
+            // No status passed: a review still awaiting a human is by definition not a verified identity.
+            band: getIdentityConfidenceBand({
+              confidence: awaitingReview.confidence,
+              evidenceStrength: awaitingReview.evidenceStrength,
+              exactCodeEvidenceVerifiedByApp: awaitingReview.exactCodeEvidenceVerifiedByApp,
+            }),
+            status: "pending",
+          };
+        }
+
         if (effectiveCountable && effectiveProductId) {
           // Deterministic increment in local state FIRST (instant UI, no server round-trip).
           const { counts, count } = incrementInventoryCount(get().finalCounts, event, idFactory);
@@ -5292,12 +5329,23 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // decodes, and blocked-verified decodes still create/keep open reviews (unchanged).
             // autoAddOn gate: with autoAddDecodedProducts OFF the owner asked for EVERY decode to go to
             // manual review (documented master switch) - suggestions then keep landing in the open queue.
+            // BEST-GUESS DISPLAY (owner decision 2026-08-19): the inline suggestion is no longer limited
+            // to an honestly-"suggested" decision. A WEAKER "needs_review" decision that still produced a
+            // usable name carries that best guess on the counted row too, banded and correctable, instead
+            // of showing the operator nothing. Every trust exclusion above is unchanged - only the
+            // status clause widened, and nothing here creates an alias or marks anything verified.
+            // FLOOR-GUESS EXCLUSION (F5): the prefix-floor naming aid ("<Brand> / product unconfirmed")
+            // passes isUsableProductName and carries a brand, but it names NO product - it is a GS1
+            // prefix statistic, not a candidate identity. Putting a one-tap Approve on it would teach an
+            // approved alias for a product nobody ever identified, which is exactly the trust line the
+            // best-guess decision kept strict. Such a row keeps the honest floor text with Edit/Identify.
             const suggestionInline =
               autoAddOn &&
               !autoSuggestApplied &&
               !multiVariantIdentity &&
-              decision?.status === "suggested" &&
+              (decision?.status === "suggested" || decision?.status === "needs_review") &&
               isUsableProductName(best?.productName ?? "") &&
+              !isFloorGuessOnlyLabel(suggestionFields.suggestedProductName) &&
               !contextConflict &&
               !(tireScan && !fastWasVerified);
             if (suggestionInline) {
@@ -5305,6 +5353,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 productName: suggestionFields.suggestedProductName,
                 brand: suggestionFields.suggestedBrand,
                 confidence: decision?.confidence ?? 0,
+                band: getIdentityConfidenceBand(decision),
                 status: "pending" as const,
               };
               set((st) => ({
@@ -5847,6 +5896,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 productName: freshAfter.suggestedProductName,
                 brand: freshAfter.suggestedBrand,
                 confidence: freshAfter.confidence,
+                band: getIdentityConfidenceBand(decision),
                 status: "pending" as const,
               };
               set((st) => ({
@@ -7113,6 +7163,70 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         get().batchApprove([review.id]); // settles the row tag itself on success
       },
 
+      // Best-guess identity (owner decision 2026-08-19): confirm a HUMAN-TYPED identity from the feed
+      // row. REUSE, never duplicate: everything after locating the review is resolveUnknown
+      // "create_new", the same core the Needs Review "Save product" button calls - so the tenant
+      // approved alias, the no-double-count provisional upgrade, and the dedup guard are inherited.
+      // Nothing platform-wide is written here (no corpus, no learned tier, no shared decode cache).
+      confirmRowIdentity: (scanEventId, fields) => {
+        const st = get();
+        const ev = st.scanFeed.find((e) => e.id === scanEventId);
+        const name = (fields.name ?? "").trim();
+        if (!ev || !name) return;
+        // Double-tap / re-confirm guards: a settled suggestion, or a code that is ALREADY taught as an
+        // approved alias, is a hard no-op - a second confirm must never mint a second product or count.
+        if (ev.suggestion && ev.suggestion.status !== "pending") return;
+        const code = ev.cleanCode || "";
+        if (code && st.aliases.some((a) => a.cleanCode === code && a.approved)) return;
+        let review = st.needsReviewQueue.find(
+          (r) =>
+            (r.status === "open" || r.status === "suggested") &&
+            ((code && r.cleanCode === code) || (ev.matchedProductId && r.provisionalProductId === ev.matchedProductId)),
+        );
+        if (!review) {
+          // No awaiting review (e.g. an old row whose review was already settled): open one through the
+          // existing path so the resolution below runs on a real review record, never on a synthetic one.
+          if (!code) return;
+          const createdId = get().reopenNeedsReview(code, "Identity typed by the operator");
+          // NO-DOUBLE-COUNT (F6): reopenNeedsReview mints a review with NO provisionalProductId, and
+          // resolveUnknown's legacy fallbacks for finding the already-counted provisional (identifier
+          // fields, reconstructed placeholder name) are exactly what a customer persist strips and what
+          // the prefix-floor rename overwrites. Without the row's OWN provisional the resolution mints a
+          // fresh product and re-counts the scan - one physical scan, two units. Stamp the row's
+          // provisional onto the review so the existing approve-the-provisional path is taken instead.
+          if (createdId && ev.matchedProductId) {
+            set((s2) => ({
+              needsReviewQueue: s2.needsReviewQueue.map((r) =>
+                r.id === createdId && !r.provisionalProductId ? { ...r, provisionalProductId: ev.matchedProductId } : r,
+              ),
+            }));
+          }
+          review = createdId ? get().needsReviewQueue.find((r) => r.id === createdId) : undefined;
+          if (!review) return;
+        }
+        const reviewId = review.id;
+        // origin "human" is correct HERE (and deliberately not in batchApprove): this identity was typed
+        // by a person, so the weak-guess poison guard - which exists to stop an evidence-less AI
+        // suggestion becoming a verified product - must not fire on it.
+        get().resolveUnknown(reviewId, "create_new", {
+          applyToCount: true,
+          origin: "human",
+          newProduct: { name, brand: fields.brand ?? "", category: fields.category ?? "", primaryBarcode: code },
+        });
+        // Settle the inline tag on every row carrying this code's pending suggestion (same bookkeeping
+        // batchApprove does), and only when the review really left the awaiting states.
+        const settled = get().needsReviewQueue.find((r) => r.id === reviewId);
+        if (settled && settled.status !== "open" && settled.status !== "suggested") {
+          set((s2) => ({
+            scanFeed: s2.scanFeed.map((e) =>
+              e.suggestion?.status === "pending" && (e.id === scanEventId || (code !== "" && e.cleanCode === code))
+                ? { ...e, suggestion: { ...e.suggestion, status: "approved" as const } }
+                : e,
+            ),
+          }));
+        }
+      },
+
       // Task 9b: inline decline ("Not this product"). Order is owner-ratified: rename the counted row
       // to the prefix floor FIRST (a declined identity never stays on the count; the floor/placeholder
       // is a naming aid, NEVER a verified identity), and ONLY THEN create/reopen the OPEN Needs Review
@@ -7154,8 +7268,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   : p,
               )
             : s2.products,
+          // The repeat-scan attach puts the SAME pending suggestion on every row of this code, so a
+          // decline settles them ALL (the same shape confirmRowIdentity uses). Settling only the clicked
+          // row would leave live Approve controls on an identity the operator just rejected.
           scanFeed: s2.scanFeed.map((e) =>
-            e.id === scanEventId && e.suggestion
+            e.suggestion?.status === "pending" && (e.id === scanEventId || (code !== "" && e.cleanCode === code))
               ? { ...e, suggestion: { ...e.suggestion, status: "declined" as const }, reason: declineReason }
               : e,
           ),

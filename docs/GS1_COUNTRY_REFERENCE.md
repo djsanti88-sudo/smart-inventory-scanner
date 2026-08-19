@@ -55,7 +55,8 @@ If a prefix is not listed here, the function returns null rather than guessing.
 A proposed 500+ entry "tire manufacturer prefix" dataset was rejected. GS1 company prefixes do not
 reliably decode to a specific brand, and the supplied dataset was machine-generated and corrupted (it
 contained stray non-data text). Mapping a prefix to a brand would be fabricated identity, which
-violates the project rule "prefer Needs Review over a wrong guess." Product identity comes only from
+violates the project rule "a guess is never verified; the best available identity is shown as
+suggested." Product identity comes only from
 verified evidence plus human approval, never from a prefix lookup.
 
 ## Deriving UPC-A/EAN-13 twin forms
