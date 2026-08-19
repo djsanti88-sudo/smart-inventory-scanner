@@ -7,11 +7,24 @@
 ## Current phase and active plan
 
 - Branch: `feat/best-guess-identity-cache` (off `origin/master` 9f50440b; worktree `C:/tmp/wt-bestguess`).
-- Work: best-guess identity display + row Approve/Edit/Reassign + honest shared decode cache
-  (negative-cache cooldown + knowledge version, pay-once escalation marker, free re-evaluation).
-  Decision record: `DECISIONS.md` "Identity philosophy ... (owner, 2026-08-19)". Plan lives in the
-  owner conversation (not a file); tasks: 1 decision record, 2 cache, 3 row controls, 4 browser
-  proof, 5 docs describe shipped behavior.
+  BUILT AND PROVEN LOCALLY 2026-08-19, NOT merged, NOT pushed (owner-gated).
+- What shipped on the branch: best-guess identity display + row controls by state (verified = Edit
+  metadata; suggested = Approve + Edit + Not this product; review-held candidate = Edit; no candidate
+  = Identify; Reassign = two-tap confirm naming the blast radius, product-scoped markWrong), typed
+  confirm -> tenant alias, app-derived confidence band (never a raw %), and the honest shared decode
+  cache (composed knowledge version, negative-cache cooldown, pay-once marker, free-only
+  re-evaluation incl. Plan D paid arms off, cooldown clock preserved, paid rows never replaced by
+  free titles, cap-block replays the shown guess). Decision record: `DECISIONS.md` "Identity
+  philosophy ... (owner, 2026-08-19)". Cache semantics: `docs/DECODER_ARCHITECTURE.md` 2b.
+- Proof: proof:all typecheck + vitest 4152 passed + teach 288 + 0 orphaned test files (node:test leg:
+  76 ENOENT failures = gitignored local data absent in the fresh worktree, same suites 123/123 in the
+  main tree); mock e2e incl. new `e2e/best-guess-identity.spec.ts` (6 clerk scenarios, screenshots in
+  `e2e/proof/best-guess-*.png`); qa:bots tire 1/1, security 2/2, full 12/12; independent adversarial
+  review: 13 findings, 12 fixed with failing-first tests, 1 comment-only.
+- Next (owner decides): open PR to master; then the two OPEN decisions in DECISIONS.md (retail corpus
+  trust; multi-tenant learned-tier promotion). Separate ticket: `scanStore.ts` `canon` TEMP stub
+  (`const canon = (c) => c; // TEMP: verify RED`, pre-existing on master since 0570ca9e) disables the
+  canonical-GTIN orphan dedup it documents.
 - Keep this block current; `AGENTS.md` points here for "what are we doing now."
 
 ## Standing hazards

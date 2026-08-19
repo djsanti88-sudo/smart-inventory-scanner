@@ -335,3 +335,20 @@ usable pre-promote gate for a remote database.
 
 **Rule.** Replace an infeasible check with a feasible equivalent (a full readability scan) and label any
 skipped check explicitly rather than letting it silently pass. Guard: boss-override verify gate A.
+
+## L26 (2026-08-19). A permanent negative cache condemned real barcodes to "Unidentified" forever
+
+**What happened.** A `no_result_receipt` in the shared Turso `decode_cache` never expired and carried no
+record of the knowledge that produced it, so a code the ladder missed once replayed as "Unidentified" for
+every tenant forever, even after a corpus rebuild or a new provider would have answered it. The opposite
+leak ran alongside it: an escalation where paid rungs failed to beat a free suggestion was not persisted
+at all, so every serverless instance re-bought the same misses for the same code.
+
+**Rule.** A failed search is an event, not an identity. Misses expire (`decodeNegativeTtlMs()`, default 7
+days) and are invalidated whenever the composed decode knowledge version moves
+(`getDecodeKnowledgeVersion()` = ladder version plus each corpus build stamp); a researched code is never
+paid for twice (`paidEscalationExhausted` marks the pay-once row, a stale guess is re-evaluated with free
+rungs only, and the old guess replays rather than regressing to "Unidentified"); and the best available
+identity is shown on the counted row immediately, labeled with an app-derived confidence band and
+correctable through Approve / Edit. Guards: `src/server/decode/pipeline.test.ts`,
+`src/stores/scanStore.rowControls.test.ts`, `src/services/ai/identityConfidenceBand.test.ts`.
