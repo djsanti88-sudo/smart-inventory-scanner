@@ -13,6 +13,16 @@ const nextConfig: NextConfig = {
   // NOTE: the tire corpus is now served from Turso (table `tires`) like retail, so we no longer
   // bundle the 68MB tireKnowledge.generated.json into the function (it is .vercelignored). The old
   // outputFileTracingIncludes for that JSON was removed with the move to Turso.
+  //
+  // The two tiny corpus .meta.json files ARE traced into the decode route: knowledgeVersion.ts reads
+  // their `generated_at` via fs to compose the decode knowledge version that invalidates stale cache
+  // rows when a corpus is rebuilt. Without tracing they would silently degrade to "none" in prod.
+  outputFileTracingIncludes: {
+    "/api/ai-lookup": [
+      "src/server/tire-knowledge/tireKnowledge.generated.meta.json",
+      "src/server/retail-knowledge/retailKnowledge.generated.meta.json",
+    ],
+  },
 };
 
 export default nextConfig;

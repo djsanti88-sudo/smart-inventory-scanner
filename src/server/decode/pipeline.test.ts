@@ -161,6 +161,7 @@ import { fetchV2 } from "@/services/fetchV2/index";
 import { makeResult } from "@/services/fetchV2/types";
 import { lookupRetailBarcodeAsync, __resetRetailKnowledgeCacheForTests } from "@/server/retail-knowledge/retailKnowledgeIndex";
 import { lookupMasterCatalog, __resetMasterLookupMemoForTests } from "@/server/catalog/masterLookup";
+import { getDecodeKnowledgeVersion } from "@/server/decode/knowledgeVersion";
 
 // Thin unit tests for the extracted decode pipeline (Task 2.4). They run with NO API keys and a fully
 // STUBBED global.fetch, so NO live provider call and NO real network can occur - every rung either
@@ -202,7 +203,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
   // wave-3: DECODE_LADDER_TOTAL_MS added so a test that overrides it (the wave-3 preflight/budget
   // suite) never leaks into a later test in the same file (test-isolation fix, found live while
   // writing the wave-3 non_public_code_type test below).
-  const keys = ["IS_E2E", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "GO_UPC_API_KEY", "BRAVE_SEARCH_API_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DECODE_CACHE_FILE", "LEARNED_PRODUCTS_FILE", "DECODE_LADDER_TOTAL_MS"];
+  const keys = ["IS_E2E", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "GO_UPC_API_KEY", "BRAVE_SEARCH_API_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DECODE_CACHE_FILE", "LEARNED_PRODUCTS_FILE", "DECODE_LADDER_TOTAL_MS", "DECODE_NEGATIVE_TTL_MS"];
   let fetchSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -2963,5 +2964,241 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect(classifyGptFailureDetail(undefined)).toBe("other");
       expect(classifyGptFailureDetail("")).toBe("other");
     });
+  });
+
+  // L2 HONESTY + FRUGALITY (owner 2026-08-19, "a failed search is an event, not an identity"): a
+  // no_result_receipt is no longer permanent (it expires on the cooldown and dies when the decode
+  // knowledge version moves), a free suggestion that paid rungs already failed to beat is recorded so
+  // the next instance never re-buys those same misses, and a stale non-verified row is re-evaluated
+  // with FREE rungs only. A verified row still replays regardless of version.
+  describe("L2 negative-cache cooldown, knowledge version, and the pay-once escalation marker", () => {
+    const GOUPC_API = "go-upc.com/api";
+
+    // A row's payload carries its stamp inside debug.cache (no schema change). Pass version null to
+    // build a LEGACY row (no stamp at all) - those count as stale.
+    function stamped(body: Record<string, unknown>, version: string | null, extra?: Record<string, unknown>): string {
+      const debug = { ...((body.debug as Record<string, unknown> | undefined) ?? {}) };
+      if (version !== null) debug.cache = { knowledgeVersion: version, ...extra };
+      return JSON.stringify({ ...body, debug });
+    }
+
+    function receiptRow(code: string, opts: { version?: string | null; ageMs?: number } = {}): PersistedDecode {
+      const body = {
+        mode: "decode", providerNames: ["gpt"], results: [], evidences: [],
+        decision: { status: "needs_review", confidence: 0, reason: "No rung resolved the code." },
+        reasonCode: "no_result", reasonText: "No rung resolved the code.", debug: { ladderPath: "none" },
+      };
+      return {
+        code, kind: "no_result_receipt",
+        payload: stamped(body, opts.version === undefined ? getDecodeKnowledgeVersion() : opts.version),
+        tier: "gpt_none", createdAt: Date.now() - (opts.ageMs ?? 0),
+      };
+    }
+
+    function suggestionRow(code: string, opts: { version?: string | null; status?: string; name?: string; brand?: string } = {}): PersistedDecode {
+      const name = opts.name ?? "Falken Wildpeak A/T3W 265/70R17";
+      const brand = opts.brand ?? "Falken";
+      const status = opts.status ?? "needs_review";
+      const body = {
+        mode: "decode", providerNames: ["upcitemdb"],
+        results: [{ productName: name, brand, category: "Tire", confidence: 0.5, needsHumanReview: true, sourceUrls: [], verifiedFacts: [], primaryBarcode: code }],
+        evidences: [], decision: { status, confidence: 0.5, reason: "prior suggestion", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false },
+        reasonCode: status === "verified" ? "verified" : "no_result", reasonText: "prior suggestion", debug: { ladderPath: "upcitemdb" },
+      };
+      return {
+        code, kind: "result",
+        payload: stamped(body, opts.version === undefined ? getDecodeKnowledgeVersion() : opts.version),
+        tier: status, sourceTier: "paid_rung", createdAt: Date.now() - 3600_000,
+      };
+    }
+
+    const stubGoUpcHit = (name: string, brand: string) => {
+      fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
+        if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+        if (url.includes("go-upc.com")) return new Response(JSON.stringify({ inferred: false, product: { name, brand, category: "Tire", specs: [] } }), { status: 200 });
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+    };
+
+    // Any call to the PAID Go-UPC API throws, so a test that must not re-pay fails loudly.
+    const stubNoPaidCalls = (opts: { upcItemDbHit?: boolean } = {}) => {
+      const spy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(GOUPC_API)) throw new Error("paid Go-UPC must NOT be called on this pass");
+        if (url.includes(UPCITEMDB_HOST)) {
+          return opts.upcItemDbHit
+            ? new Response(JSON.stringify({ code: "OK", items: [{ title: "Falken Wildpeak A/T3W 265/70R17", brand: "Falken", category: "Tire" }] }), { status: 200 })
+            : new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
+        }
+        if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", spy);
+      return spy;
+    };
+
+    it("a FRESH receipt (current version, inside the cooldown) still replays with zero provider work", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(receiptRow("00900000000300"));
+
+      const out = await runDecodePipeline(makeReq("900000000300"));
+
+      expect(out.kind).toBe("persisted");
+      expect(fetchSpy.mock.calls.length).toBe(0); // no rung ran at all
+    });
+
+    it("a receipt OLDER than the cooldown is a MISS: the ladder gets one honest new try", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.DECODE_NEGATIVE_TTL_MS = "1000";
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(receiptRow("00900000000317", { ageMs: 60_000 }));
+
+      const out = await runDecodePipeline(makeReq("900000000317"));
+
+      expect(out.kind).toBe("computed"); // recomputed, not replayed
+    }, 30000);
+
+    it("a receipt whose knowledge version differs (or is absent: a legacy row) is a MISS", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(receiptRow("00900000000324", { version: "stale-version" }));
+      expect((await runDecodePipeline(makeReq("900000000324"))).kind).toBe("computed");
+
+      clearDecodeCache();
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(receiptRow("00900000000324", { version: null }));
+      expect((await runDecodePipeline(makeReq("900000000324"))).kind).toBe("computed");
+    }, 30000);
+
+    it("a recompute that finds a candidate OVERWRITES the stale receipt with a result row", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      stubGoUpcHit("Continental TrueContact Tour 235/60R18", "Continental");
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(receiptRow("00900000000331", { version: "stale-version" }));
+
+      const out = await runDecodePipeline(makeReq("900000000331"));
+      expect(out.kind).toBe("computed");
+
+      const row = await getPersistedDecode("00900000000331");
+      expect(row?.kind).toBe("result");
+      const payload = JSON.parse(row!.payload) as { debug: { cache?: { knowledgeVersion?: string } } };
+      expect(payload.debug.cache?.knowledgeVersion).toBe(getDecodeKnowledgeVersion());
+    }, 30000);
+
+    it("PAY-ONCE MARKER: a free suggestion that paid rungs failed to beat is persisted, and the next scan replays it with ZERO paid calls", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      // Free UPCitemdb suggestion stands; the paid Go-UPC escalation genuinely runs and misses.
+      fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [{ title: "Falken Wildpeak A/T3W 265/70R17", brand: "Falken", category: "Tire" }] }), { status: 200 });
+        if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+
+      const first = await runDecodePipeline(makeReq("900000000348"));
+      expect(first.kind).toBe("computed");
+      expect(fetchSpy.mock.calls.some(([u]) => String(u).includes(GOUPC_API))).toBe(true); // paid rung really ran
+
+      const row = await getPersistedDecode("00900000000348");
+      expect(row?.kind).toBe("result");
+      const payload = JSON.parse(row!.payload) as { debug: { cache?: { paidEscalationExhausted?: boolean } } };
+      expect(payload.debug.cache?.paidEscalationExhausted).toBe(true);
+
+      // A different serverless instance (L1 empty) scans the same code: replay, never re-pay.
+      clearDecodeCache();
+      const secondSpy = stubNoPaidCalls();
+      const second = await runDecodePipeline(makeReq("900000000348"));
+      expect(second.kind).toBe("persisted");
+      if (second.kind !== "persisted") throw new Error("unreachable");
+      expect(JSON.stringify(second.body.results)).toMatch(/Falken/);
+      expect(secondSpy.mock.calls.some(([u]) => String(u).includes(GOUPC_API))).toBe(false);
+    }, 30000);
+
+    it("a STALE-VERSION suggestion re-runs FREE rungs only; a free miss replays the old suggestion and refreshes its stamp", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key"; // paid work WOULD be possible - it must still not happen
+      const paidSpy = stubNoPaidCalls();
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(suggestionRow("00900000000355", { version: "stale-version" }));
+
+      const out = await runDecodePipeline(makeReq("900000000355"));
+
+      expect(out.kind).toBe("persisted"); // the old best guess still stands, never a regression to unknown
+      if (out.kind !== "persisted") throw new Error("unreachable");
+      expect(JSON.stringify(out.body.results)).toMatch(/Falken/);
+      expect(paidSpy.mock.calls.some(([u]) => String(u).includes(GOUPC_API))).toBe(false);
+
+      const row = await getPersistedDecode("00900000000355");
+      const payload = JSON.parse(row!.payload) as { debug: { cache?: { knowledgeVersion?: string } } };
+      expect(payload.debug.cache?.knowledgeVersion).toBe(getDecodeKnowledgeVersion()); // stamp refreshed
+    }, 30000);
+
+    it("a COOLED-DOWN suggestion whose full re-evaluation finds a NEW usable answer keeps the NEW one (never overwritten by the old guess)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.DECODE_NEGATIVE_TTL_MS = "1000"; // the stored row (1h old) is past the cooldown: paid work is permitted again
+      process.env.GO_UPC_API_KEY = "test-key";
+      stubGoUpcHit("Continental TrueContact Tour 235/60R18", "Continental");
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(suggestionRow("00900000000393"));
+
+      const out = await runDecodePipeline(makeReq("900000000393"));
+
+      expect(out.kind).toBe("computed"); // the fresh (paid-for) answer is what the caller sees
+      if (out.kind !== "computed") throw new Error("unreachable");
+      expect(JSON.stringify(out.payload.results)).toMatch(/Continental/);
+
+      const row = await getPersistedDecode("00900000000393");
+      expect(row?.kind).toBe("result");
+      expect(row!.payload).toMatch(/Continental/); // persisted fresh, not clobbered by the old Falken guess
+      expect(row!.payload).not.toMatch(/Falken/);
+    }, 30000);
+
+    it("a STALE-VERSION suggestion that the FREE pass now resolves VERIFIED has its row replaced", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      stubNoPaidCalls();
+      vi.mocked(resolveUnknownFast).mockResolvedValueOnce({ name: "Continental TrueContact Tour 235/60R18", brand: "Continental", verified: true, aiCalled: false, source: "barcode_db" });
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(suggestionRow("00900000000362", { version: "stale-version" }));
+
+      const out = await runDecodePipeline(makeReq("900000000362"));
+
+      expect(out.kind).toBe("computed");
+      if (out.kind !== "computed") throw new Error("unreachable");
+      expect(out.payload.decision.status).toBe("verified");
+
+      const row = await getPersistedDecode("00900000000362");
+      expect(row?.kind).toBe("result");
+      expect(row!.payload).toMatch(/Continental/);
+      const payload = JSON.parse(row!.payload) as { debug: { cache?: { knowledgeVersion?: string } } };
+      expect(payload.debug.cache?.knowledgeVersion).toBe(getDecodeKnowledgeVersion());
+    }, 30000);
+
+    it("a VERIFIED row replays even when its knowledge version is stale (verified rows are not re-evaluated)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(suggestionRow("00900000000379", { version: "stale-version", status: "verified" }));
+
+      const out = await runDecodePipeline(makeReq("900000000379"));
+
+      expect(out.kind).toBe("persisted");
+      if (out.kind !== "persisted") throw new Error("unreachable");
+      expect((out.body.decision as { status?: string }).status).toBe("verified");
+      expect(fetchSpy.mock.calls.length).toBe(0);
+    });
+
+    it("two concurrent scans of an EXPIRED-receipt code compute ONCE (in-flight coalescing unchanged) and both get the result", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.DECODE_NEGATIVE_TTL_MS = "1000";
+      process.env.GO_UPC_API_KEY = "test-key";
+      stubGoUpcHit("Continental TrueContact Tour 235/60R18", "Continental");
+      vi.mocked(getPersistedDecode).mockResolvedValue(receiptRow("00900000000386", { ageMs: 60_000 }));
+
+      const [a, b] = await Promise.all([runDecodePipeline(makeReq("900000000386")), runDecodePipeline(makeReq("900000000386"))]);
+
+      expect(a.kind).toBe("computed");
+      expect(b.kind).toBe("computed");
+      if (a.kind !== "computed" || b.kind !== "computed") throw new Error("unreachable");
+      expect(a.payload.results[0]?.brand).toBe(b.payload.results[0]?.brand);
+      // ONE compute: the paid Go-UPC API was contacted exactly once for both scans.
+      expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes(GOUPC_API)).length).toBe(1);
+    }, 30000);
   });
 });

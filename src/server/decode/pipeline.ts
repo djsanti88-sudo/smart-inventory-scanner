@@ -9,7 +9,8 @@ import { groundIdentify, getLastGroundingStatus } from "@/services/ai/flashLiteG
 import { verifyCodeOnPage } from "@/services/ai/verifyCodeOnPage";
 import { resolveUnknownFast } from "@/services/ai/parallelResolve";
 import { decodeReasonCode, REASON_TEXT, sanitizeCustomerReason, allMissReasonCode, MISS_REASON_TEXT } from "@/services/ai/decodeFallback";
-import { withDecodeCache, getDecodeCache } from "@/services/ai/decodeCache";
+import { withDecodeCache, getDecodeCache, setDecodeCache } from "@/services/ai/decodeCache";
+import { getDecodeKnowledgeVersion, decodeNegativeTtlMs } from "@/server/decode/knowledgeVersion";
 import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { isLikelyMisreadGtin } from "@/services/upc/misread";
 import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
@@ -403,6 +404,22 @@ const PAID_AI_PROVIDER_MARKERS = new Set(["gemini", "openai", "gemini:read", "op
 // "parallel:<source>" provider name ahead of it in providerNames (see the Fetch V2 rung wiring above) -
 // hence `.some()` membership, not an exact-array match.
 const PAID_RUNG_PROVIDERS = new Set(["go-upc", "fetchv2"]);
+
+// L2 ROW STAMP (owner 2026-08-19): every row this pipeline persists records the decode knowledge
+// version it was computed under, and - for a free suggestion the paid rungs already failed to beat -
+// that paying again would buy nothing new. It lives INSIDE the payload's debug (debug.cache), so the
+// decode_cache schema is untouched: no new column, no migration. The read side treats an absent stamp
+// as stale (legacy rows predate this rule). See knowledgeVersion.ts for the two dials.
+function withCacheStamp(body: object, extra?: { paidEscalationExhausted?: true }): string {
+  const debug = (body as { debug?: Record<string, unknown> }).debug ?? {};
+  return JSON.stringify({ ...body, debug: { ...debug, cache: { knowledgeVersion: getDecodeKnowledgeVersion(), ...extra } } });
+}
+
+/** The stamp a stored row carries (absent on a legacy row - see withCacheStamp). */
+function readCacheStamp(parsedPayload: Record<string, unknown>): { knowledgeVersion?: string; paidEscalationExhausted?: true } {
+  const debug = (parsedPayload.debug as Record<string, unknown> | undefined) ?? {};
+  return (debug.cache as { knowledgeVersion?: string; paidEscalationExhausted?: true } | undefined) ?? {};
+}
 
 export function classifySourceTier(reasonCode: string, providerNames: string[]): "paid_ai" | "gpt_ladder" | "paid_rung" | null {
   if (reasonCode === "gpt_ladder") return "gpt_ladder";
@@ -1031,6 +1048,43 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     }
   }
 
+  // COOLDOWN + KNOWLEDGE VERSION (owner 2026-08-19, "a failed search is an event, not an identity").
+  // A stored row is only as good as the knowledge that produced it:
+  //   - a no_result_receipt is a MISS once it ages past the cooldown OR the knowledge version moved
+  //     (an absent stamp is a legacy row = stale). It then recomputes normally, paid rungs included -
+  //     the cooldown lapsing is exactly what buys the ladder one honest new try.
+  //   - a non-verified "result" (a guess, including a pay-once escalation marker) whose version moved
+  //     is NOT replayed blindly: it is re-evaluated with the PAID rungs switched off for this pass
+  //     (freeOnlyPass below), because what changed is the FREE knowledge, and the app already paid for
+  //     this code once. Once the cooldown itself lapses, paying again is permitted like any receipt.
+  //     Either way the old guess is kept as the fallback: a best guess already shown must never
+  //     regress to "Unidentified" (see the stale-row replay after the compute below).
+  //   - a VERIFIED row replays regardless of version; forceRetry (above) remains its correction path.
+  let staleRow: { row: PersistedDecode; payload: Record<string, unknown> } | null = null;
+  let freeOnlyPass = false;
+  if (persistedHit && parsedPayload) {
+    const versionStale = readCacheStamp(parsedPayload).knowledgeVersion !== getDecodeKnowledgeVersion();
+    const cooledDown = Date.now() - persistedHit.createdAt > decodeNegativeTtlMs();
+    const cachedStatus = (parsedPayload.decision as { status?: string } | undefined)?.status;
+    if (persistedHit.kind === "no_result_receipt") {
+      if (versionStale || cooledDown) persistedHit = null;
+    } else if (cachedStatus !== "verified" && (versionStale || cooledDown)) {
+      staleRow = { row: persistedHit, payload: parsedPayload };
+      freeOnlyPass = !cooledDown;
+      persistedHit = null;
+    }
+  }
+
+  // The one shape a persisted row replays as (used by the cache hit here and by the stale-row fallback
+  // after a re-evaluation that found nothing better).
+  const persistedReplay = (parsed: Record<string, unknown>, row: PersistedDecode, extraDebug?: Record<string, unknown>): DecodePipelineResult => ({
+    kind: "persisted",
+    body: {
+      ...parsed,
+      debug: { ...((parsed.debug as Record<string, unknown> | undefined) ?? {}), cached: true, persistedCacheHit: true, persistedKind: row.kind, persistedTier: row.tier, ...extraDebug },
+    },
+  });
+
   if (persistedHit) {
     if (parsedPayload) {
       const priorDebug = (parsedPayload.debug as Record<string, unknown> | undefined) ?? {};
@@ -1040,13 +1094,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         reasons: (priorDebug.ladderReasons as Array<{ rung: string; reason: string }> | undefined) ?? [],
         sourceTier: persistedHit.sourceTier ?? null,
       });
-      return {
-        kind: "persisted",
-        body: {
-          ...parsedPayload,
-          debug: { ...priorDebug, cached: true, persistedCacheHit: true, persistedKind: persistedHit.kind, persistedTier: persistedHit.tier },
-        },
-      };
+      return persistedReplay(parsedPayload, persistedHit);
     }
   }
 
@@ -1170,6 +1218,11 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // return below); read at the withDecodeCache call site to decide the L2 write-through. Declared
   // outside computeDecode (per-request, not per-process) so it reflects THIS request's outcome only.
   let receiptState: { eligible: boolean; reason?: string } = { eligible: false };
+  // PAY-ONCE MARKER (owner 2026-08-19): set by the escalation branch when paid rungs genuinely ran on
+  // top of a free suggestion and none of them beat it. Read at the write-through so the row records
+  // "paying again buys nothing new" and the next instance replays the suggestion instead of re-buying
+  // the same misses. Declared per-request, exactly like receiptState.
+  let paidEscalationExhausted = false;
 
   // The expensive decode (fast path + deep fallback) is cached by code: once a barcode resolves to a
   // real product, a repeat scan in this server returns instantly with NO AI/Firecrawl spend. Only a
@@ -1713,6 +1766,12 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       }
     }
 
+    // FREE-ONLY RE-EVALUATION SWITCH (owner 2026-08-19): when this pass exists only to re-check a
+    // stale cached guess against NEW FREE knowledge, the paid half of the ladder is simply not built -
+    // every branch below then sees an empty rung list and skips exactly as it does with no keys
+    // configured (no charge, no provider call). Nothing else about the ladder changes.
+    const paidRungs = (): LadderRung[] => (freeOnlyPass ? [] : buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt }));
+
     // wave-3 (2026-07-20 owner-ratified): annotate the fetchv2/gpt rungs with their REALISTIC budgets
     // (see DECODE_LADDER_FETCHV2_MS / DECODE_LADDER_GPT_MS above) - goupc is untouched (keeps the
     // uniform DECODE_LADDER_RUNG_MS default via runLadder's opts.perRungTimeoutMs fallback). Applied
@@ -1790,6 +1849,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       let winningOutcome: RungOutcome | undefined = freeRun.outcome;
       let winningSettledBy: string | undefined = freeRun.settledBy;
       let beatFree = false; // true once a paid rung's outcome has replaced the free stash
+      let paidRungRan = false; // true once a paid rung genuinely ran (pay-once marker, owner 2026-08-19)
       const reasonsAcc: Array<{ rung: string; reason: string }> = [...freeRun.reasons];
 
       // A win is "better" than the free stash when it is itself verified, or a suggestion with
@@ -1803,9 +1863,10 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       };
 
       // ---- Step 1: Go-UPC only (unchanged behavior) ---------------------------------------------------
-      const goUpcRungOnly = buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt }).filter((r) => r.name === "goupc");
+      const goUpcRungOnly = paidRungs().filter((r) => r.name === "goupc");
       const goUpcCanPay = goUpcRungOnly.length > 0 && !!process.env.GO_UPC_API_KEY;
       if (goUpcCanPay) {
+        paidRungRan = true;
         const goRun = await withPaidChargeArmed(() =>
           runLadder(code, goUpcRungOnly, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
         );
@@ -1832,10 +1893,11 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         // run its free keyless pattern-URL door, never genuinely paid work). fetchV2CanPay here mirrors
         // paidWorkPossible.ts's OWN internal fetchV2 check (Brave or any Firecrawl key) in isolation.
         const fetchV2CanPay = !!process.env.BRAVE_SEARCH_API_KEY || firecrawlKeysFromEnv().length > 0;
-        const fetchV2RungOnly = withRealisticBudgets(buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt }).filter((r) => r.name === "fetchv2"));
+        const fetchV2RungOnly = withRealisticBudgets(paidRungs().filter((r) => r.name === "fetchv2"));
         const gated = preflightTimeGate(fetchV2RungOnly, ladderDeadlineAt);
         reasonsAcc.push(...gated.skippedReasons);
         if (fetchV2CanPay && gated.rungs.length > 0) {
+          paidRungRan = true;
           const fv2Run = await withPaidChargeArmed(() =>
             runLadder(code, gated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
           );
@@ -1850,7 +1912,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
 
       // ---- Step 3: GPT, only when nothing has beaten the free suggestion yet -------------------------
       if (!beatFree) {
-        const gptRungOnly = withRealisticBudgets(buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt }).filter((r) => r.name === "gpt"));
+        const gptRungOnly = withRealisticBudgets(paidRungs().filter((r) => r.name === "gpt"));
         const gated = preflightTimeGate(gptRungOnly, ladderDeadlineAt);
         reasonsAcc.push(...gated.skippedReasons);
         // shouldRunGptRung (inside maybeGptLadder/runGpt) still applies its own gates - non_public_code_type,
@@ -1859,6 +1921,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         // additional (it fires before shouldRunGptRung ever runs, so a time-skipped GPT rung never even
         // reaches shouldRunGptRung's own budget-charging path - see preflightTimeGate's doc comment).
         if (gated.rungs.length > 0 && !!process.env.OPENAI_API_KEY) {
+          paidRungRan = true;
           const gptRun = await withPaidChargeArmed(() =>
             runLadder(code, gated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
           );
@@ -1869,6 +1932,11 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
           }
         }
       }
+
+      // PAY-ONCE MARKER: paid rungs ran on top of this free suggestion and the stash still stands.
+      // The write-through records that on the row so another instance replays the suggestion instead
+      // of re-buying the same misses (until the cooldown or a knowledge-version change reopens it).
+      paidEscalationExhausted = paidRungRan && winningOutcome === freeRun.outcome;
 
       ladderRun = { settledBy: winningSettledBy, outcome: winningOutcome, reasons: reasonsAcc };
     } else if (!freeRun.outcome) {
@@ -1881,7 +1949,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // filters out either one whose minimum viable window no longer fits the remaining ladder deadline
       // BEFORE it is ever started (preflightTimeGate) - goupc is unaffected (kept at its existing
       // DECODE_LADDER_RUNG_MS default via runLadder's own opts.perRungTimeoutMs fallback).
-      const preGated = preflightTimeGate(withRealisticBudgets(buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt })), ladderDeadlineAt);
+      const preGated = preflightTimeGate(withRealisticBudgets(paidRungs()), ladderDeadlineAt);
       const runFullPaidLadder = () =>
         runLadder(code, preGated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) });
       // S5: ONE charge armed for the WHOLE paid ladder (unchanged from the single pre-ladder charge this
@@ -2177,21 +2245,53 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // conflict, with no paid-rung identity) is left untouched - it stays retryable exactly like today's
   // short-TTL L1 miss cache. forceRetry's fresh compute overwrites whatever was there (persistDecode is
   // an upsert by code).
+  //
+  // Two additions (owner 2026-08-19): a free suggestion the PAID rungs already failed to beat persists
+  // with the pay-once marker (paidEscalationExhausted), and a re-evaluated stale row that came back
+  // VERIFIED overwrites itself even from a free rung - correcting a row that already exists is not the
+  // same as minting a new free-rung row, so the "free wins never persist" rule still holds elsewhere.
+  // Every row written here carries the knowledge stamp (withCacheStamp).
   if (!e2eMode() && !cached) {
     const status = payload.decision.status;
     const sourceTier = classifySourceTier(payload.reasonCode, payload.providerNames);
     const hasUsableIdentity = payload.results.some((r) => isUsableProductName(r.productName));
-    if (status === "verified" || status === "suggested") {
-      if (sourceTier) {
-        await persistDecode({ code: cacheKey, kind: "result", payload: JSON.stringify(payload), tier: status, sourceTier, createdAt: Date.now() });
-      }
+    const persistResult = (extra?: { paidEscalationExhausted?: true }) =>
+      persistDecode({ code: cacheKey, kind: "result", payload: withCacheStamp(payload, extra), tier: status, sourceTier: sourceTier ?? undefined, createdAt: Date.now() });
+    // A stale row being re-evaluated is REPLACED by any fresh usable answer, even a free one (a free
+    // suggestion is otherwise never persisted, but here it replaces a stale stored guess so the row
+    // stops re-evaluating on every scan; the fresh stamp records the knowledge it was computed under).
+    const replacesStaleRow = !!staleRow && hasUsableIdentity;
+    if ((status === "verified" || status === "suggested") && (sourceTier || replacesStaleRow)) {
+      await persistResult();
     } else if (sourceTier === "paid_rung" && hasUsableIdentity) {
       // A paid_rung suggestion that never reached "verified"/"suggested" status (e.g. goupc_inferred
       // stays "needs_review") - still paid work, still persists, tier records the true status.
-      await persistDecode({ code: cacheKey, kind: "result", payload: JSON.stringify(payload), tier: status, sourceTier, createdAt: Date.now() });
+      await persistResult();
+    } else if (paidEscalationExhausted && hasUsableIdentity) {
+      await persistResult({ paidEscalationExhausted: true });
     } else if (receiptState.eligible) {
-      await persistDecode({ code: cacheKey, kind: "no_result_receipt", payload: JSON.stringify(payload), tier: receiptState.reason ?? "unknown", createdAt: Date.now() });
+      await persistDecode({ code: cacheKey, kind: "no_result_receipt", payload: withCacheStamp(payload), tier: receiptState.reason ?? "unknown", createdAt: Date.now() });
     }
+  }
+
+  // STALE-ROW FALLBACK (owner 2026-08-19): the re-evaluation above ran because a cached guess had gone
+  // stale. A fresh answer with a USABLE identity wins and was persisted just above (newer knowledge,
+  // and on a cooled-down full pass it was paid for - never throw that away). Only when the fresh pass
+  // found NOTHING usable does the cached guess replay, with its stamp refreshed, so the row is
+  // re-checked again only after the next knowledge change or cooldown: a best guess already shown
+  // never regresses to "Unidentified". The L1 entry is overwritten with the replayed guess too -
+  // otherwise the free pass's short-TTL miss would serve "Unidentified" for the rest of that window.
+  // E2E never reaches here: staleRow is only ever set by the L2 read, skipped under e2eMode().
+  const freshUsable = payload.results.some((r) => isUsableProductName(r.productName));
+  if (staleRow && !freshUsable) {
+    // The pay-once marker survives the refresh (a row that already exhausted paid rungs still has).
+    const marker = readCacheStamp(staleRow.payload).paidEscalationExhausted ? ({ paidEscalationExhausted: true } as const) : undefined;
+    await persistDecode({
+      code: cacheKey, kind: "result", payload: withCacheStamp(staleRow.payload, marker),
+      tier: staleRow.row.tier, sourceTier: staleRow.row.sourceTier, createdAt: Date.now(),
+    });
+    setDecodeCache(cacheKey, staleRow.payload);
+    return persistedReplay(staleRow.payload, staleRow.row, { cacheReevaluated: freeOnlyPass ? "free_rungs_only" : "full" });
   }
 
   // TASK 21 (owner-ratified 2026-07-15): LEARNED-PRODUCTS WRITE. Fire-and-forget, best-effort - a
