@@ -28,16 +28,23 @@ export interface PersistedDecode {
    *  a different question ("which stage paid for this"), not "what did the ladder decide". */
   tier: string;
   /** Result-only (never set on a "no_result_receipt"): which PAID stage produced this "result" -
-   *  "gpt_ladder" (the GPT-5.5 ladder rung), "paid_ai" (the legacy Gemini/OpenAI fast/escalation/
-   *  deep-fallback path), or "paid_rung" (the Go-UPC or Fetch V2 ladder rung - PAY-ONCE rule, owner
+   *  "gpt_ladder" (the GPT-5.5 ladder rung), "paid_ai" (historical rows from the retired legacy
+   *  Gemini/OpenAI path), or "paid_rung" (the Go-UPC or Fetch V2 ladder rung - PAY-ONCE rule, owner
    *  2026-07-14: persists on a verified win AND on a paid suggestion, e.g. goupc_inferred, since the
-   *  paid call already happened either way). A free-rung result (tire corpus / Turso retail / Plan D)
-   *  is never persisted at all (see pipeline.ts's classifySourceTier), so this field is always present
-   *  whenever `kind` is "result". NOT yet stored by the Turso backend (schema unchanged by this fix -
-   *  documented debt); the file-fallback backend persists it as a normal JSON property.
+   *  paid call already happened either way). A free suggestion that paid rungs failed to beat persists
+   *  WITHOUT a sourceTier (pay-once marker lives in the payload). pipeline.ts reads this back to keep
+   *  "a bare free title must not overwrite an identity the app already bought" honest, so BOTH
+   *  backends must persist it: the file backend as a JSON property, Turso in the `source_tier`
+   *  column (added 2026-08-19 as an idempotent ALTER; before that Turso dropped it and the rule was
+   *  silently inverted in production).
    */
   sourceTier?: "paid_ai" | "gpt_ladder" | "paid_rung";
   createdAt: number;
+}
+
+const SOURCE_TIERS = new Set<string>(["paid_ai", "gpt_ladder", "paid_rung"]);
+function asSourceTier(v: unknown): PersistedDecode["sourceTier"] | undefined {
+  return typeof v === "string" && SOURCE_TIERS.has(v) ? (v as PersistedDecode["sourceTier"]) : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -47,6 +54,10 @@ let _tursoClient: TursoClient | null | "unavailable" = null;
 let _tursoTableReady = false;
 
 const DDL = "CREATE TABLE IF NOT EXISTS decode_cache (code TEXT PRIMARY KEY, kind TEXT, payload TEXT, tier TEXT, created_at INTEGER)";
+// Additive, idempotent schema step: rows written before 2026-08-19 simply read back with a NULL
+// source_tier (= "unknown", treated exactly like the pre-fix behavior for that row). Rollback is
+// ignoring the column; nothing else depends on it.
+const SOURCE_TIER_COLUMN_DDL = "ALTER TABLE decode_cache ADD COLUMN source_tier TEXT";
 
 async function getTursoClient(): Promise<TursoClient | null> {
   if (_tursoClient === "unavailable") return null;
@@ -67,6 +78,9 @@ async function ensureTursoTable(client: TursoClient): Promise<boolean> {
   if (_tursoTableReady) return true;
   try {
     await client.execute({ sql: DDL, args: [] });
+    const columns = await client.execute({ sql: "PRAGMA table_info(decode_cache)", args: [] });
+    const hasSourceTier = columns.rows.some((r) => String(r.name) === "source_tier");
+    if (!hasSourceTier) await client.execute({ sql: SOURCE_TIER_COLUMN_DDL, args: [] });
     _tursoTableReady = true;
     return true;
   } catch (e) {
@@ -129,16 +143,18 @@ export async function getPersistedDecode(code: string): Promise<PersistedDecode 
       const ready = await ensureTursoTable(client);
       if (!ready) return null;
       const result = await client.execute({
-        sql: "SELECT code, kind, payload, tier, created_at FROM decode_cache WHERE code = ?",
+        sql: "SELECT code, kind, payload, tier, source_tier, created_at FROM decode_cache WHERE code = ?",
         args: [key],
       });
       const row = result.rows[0];
       if (!row) return null;
+      const sourceTier = asSourceTier(row.source_tier);
       const entry: PersistedDecode = {
         code: String(row.code),
         kind: row.kind === "no_result_receipt" ? "no_result_receipt" : "result",
         payload: String(row.payload ?? ""),
         tier: String(row.tier ?? ""),
+        ...(sourceTier ? { sourceTier } : {}),
         createdAt: Number(row.created_at) || 0,
       };
       return entry;
@@ -164,9 +180,9 @@ export async function persistDecode(entry: PersistedDecode): Promise<void> {
       if (!ready) return;
       await client.execute({
         sql:
-          "INSERT INTO decode_cache (code, kind, payload, tier, created_at) VALUES (?, ?, ?, ?, ?) " +
-          "ON CONFLICT(code) DO UPDATE SET kind=excluded.kind, payload=excluded.payload, tier=excluded.tier, created_at=excluded.created_at",
-        args: [normalized.code, normalized.kind, normalized.payload, normalized.tier, normalized.createdAt],
+          "INSERT INTO decode_cache (code, kind, payload, tier, source_tier, created_at) VALUES (?, ?, ?, ?, ?, ?) " +
+          "ON CONFLICT(code) DO UPDATE SET kind=excluded.kind, payload=excluded.payload, tier=excluded.tier, source_tier=excluded.source_tier, created_at=excluded.created_at",
+        args: [normalized.code, normalized.kind, normalized.payload, normalized.tier, normalized.sourceTier ?? null, normalized.createdAt],
       });
       return;
     }
