@@ -240,3 +240,8 @@ tire-barcodes-1000.txt
 
 # Large analysis ledgers are local outputs, never committed (2026-08-19)
 docs/analysis/**/*.jsonl.gz
+
+# Regenerable tire-knowledge snapshots/viewers (data/tire-knowledge/scripts/*.py rebuild them); removed from git 2026-08-19
+data/tire-knowledge/outputs/backup_corpus_*.csv
+data/tire-knowledge/exports/
+data/tire-knowledge/tire_corpus_view.html
