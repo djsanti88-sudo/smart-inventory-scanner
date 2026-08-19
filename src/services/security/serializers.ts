@@ -4,6 +4,8 @@
 
 import type { AccessLevel } from "@/services/security/roleAccess";
 import { stripSensitive, CUSTOMER_SAFE_PRODUCT_FIELDS, CUSTOMER_SAFE_REVIEW_FIELDS, CUSTOMER_SAFE_SCANEVENT_FIELDS } from "@/services/security/sensitiveFields";
+import { getReviewIdentityBand } from "@/services/ai/identityConfidenceBand";
+import type { UnknownCodeReview } from "@/types";
 
 export interface CustomerProduct {
   id: string;
@@ -81,6 +83,8 @@ export function sanitizeReview<T extends Record<string, unknown>>(review: T, lev
   if (level === "platform") return review;
   const out: Record<string, unknown> = {};
   for (const f of CUSTOMER_SAFE_REVIEW_FIELDS) if (f in review) out[f] = review[f];
+  // The band is what the customer sees; its raw inputs stay off disk, so derive it here once.
+  if (review.hasSuggestion) out.identityBand = getReviewIdentityBand(review as unknown as UnknownCodeReview);
   return out;
 }
 

@@ -168,6 +168,78 @@ describe("feed row identity controls (best-guess display)", () => {
     }
   });
 
+  // Deep-review finding (2026-08-19): when Approve on an auto-applied row hits the dedup CONFLICT guard
+  // (more than one existing product owns the identity) resolveUnknown returns without resolving. The
+  // review must then be OPEN (visible in Needs Review with its conflict), never parked in "suggested"
+  // where no surface offers a way to finish it.
+  it("Approve on an auto-applied row that hits the dedup conflict leaves the review OPEN (visible), not stranded in 'suggested'", async () => {
+    const store = aggressiveStore();
+    const { restore } = stub({
+      ...WEAK_NEEDS_REVIEW,
+      results: [{ ...WEAK_NEEDS_REVIEW.results[0], productName: "Chandelle Sabor Chocolate", brand: "Nestle", confidence: 0.85 }],
+      decision: { ...WEAK_NEEDS_REVIEW.decision, status: "suggested", confidence: 0.85, evidenceStrength: "none" },
+    });
+    try {
+      store.getState().processScan(CODE);
+      await vi.waitFor(() =>
+        expect(store.getState().needsReviewQueue.find((r) => r.cleanCode === CODE)?.status).toBe("resolved"),
+      );
+      const review = store.getState().needsReviewQueue.find((r) => r.cleanCode === CODE)!;
+      const row = store.getState().scanFeed.find((e) => e.cleanCode === CODE)!;
+      // Two OTHER verified products already own this barcode -> the dedup guard must refuse to guess.
+      const owner = (id: string) => ({
+        ...store.getState().products[0], id, name: `Owner ${id}`, brand: "X", primaryBarcode: CODE, gtin: "", upc: "", ean: "", primarySku: "",
+        verified: true, provisional: false, status: "active" as const,
+      });
+      store.setState((s) => ({ products: [...s.products, owner("own-a"), owner("own-b")] }));
+
+      store.getState().confirmRowIdentity(row.id, { name: review.suggestedProductName, brand: review.suggestedBrand });
+
+      const after = store.getState().needsReviewQueue.find((r) => r.id === review.id)!;
+      expect(after.status, "unresolved conflict stays visible as an OPEN review").toBe("open");
+      expect(store.getState().aliases.some((a) => a.cleanCode === CODE && a.approved)).toBe(false);
+      expect(store.getState().finalCounts.reduce((n, c) => n + c.quantity, 0)).toBe(1);
+    } finally {
+      restore();
+    }
+  });
+
+  // Deep-review finding (2026-08-19): a stale Approve click on an auto-applied row whose product was
+  // VERIFIED by another path in between must be a no-op - never fall through to the blank-reopen
+  // fallback, which would resolve onto the now non-provisional product and count the scan a second time.
+  it("Approve on an auto-applied row whose product was verified meanwhile is a no-op (no second count, no reopened review)", async () => {
+    const store = aggressiveStore();
+    const { restore } = stub({
+      ...WEAK_NEEDS_REVIEW,
+      results: [{ ...WEAK_NEEDS_REVIEW.results[0], productName: "Chandelle Sabor Chocolate", brand: "Nestle", confidence: 0.85 }],
+      decision: { ...WEAK_NEEDS_REVIEW.decision, status: "suggested", confidence: 0.85, evidenceStrength: "none" },
+    });
+    try {
+      store.getState().processScan(CODE);
+      await vi.waitFor(() =>
+        expect(store.getState().needsReviewQueue.find((r) => r.cleanCode === CODE)?.status).toBe("resolved"),
+      );
+      const review = store.getState().needsReviewQueue.find((r) => r.cleanCode === CODE)!;
+      const row = store.getState().scanFeed.find((e) => e.cleanCode === CODE)!;
+      // Another path verified the product (no alias for this code was taught).
+      store.setState((s) => ({
+        products: s.products.map((p) => (p.id === review.provisionalProductId ? { ...p, verified: true, provisional: false } : p)),
+      }));
+      const reviewsBefore = store.getState().needsReviewQueue.length;
+
+      store.getState().confirmRowIdentity(row.id, { name: review.suggestedProductName, brand: review.suggestedBrand });
+
+      expect(store.getState().finalCounts.reduce((n, c) => n + c.quantity, 0), "one physical scan, one unit").toBe(1);
+      expect(store.getState().needsReviewQueue.length, "no blank review reopened").toBe(reviewsBefore);
+      const after = store.getState().needsReviewQueue.find((r) => r.id === review.id)!;
+      expect(after.status).toBe("resolved");
+      expect(after.reopenedFromWrong, "the settled review is left untouched, not reopened and wiped").not.toBe(true);
+      expect(after.confidence).toBeCloseTo(0.85);
+    } finally {
+      restore();
+    }
+  });
+
   it("a second scan of a code that already shows a pending suggestion re-uses it and never pays for decode again", async () => {
     const store = aggressiveStore();
     const { spy, restore } = stub(WEAK_NEEDS_REVIEW);

@@ -7184,12 +7184,21 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (!review) {
           // AUTO-APPLIED row (>= 0.8 suggestion applied onto the provisional, review auto-closed, product
           // still unverified): the human's Approve/Edit confirms THAT review, not a blank reopened one, so
-          // the decode's confidence/evidence fields stay on the record. Reactivate it in place as
-          // "suggested" so resolveUnknown's awaiting-status guard accepts it.
+          // the decode's confidence/evidence fields stay on the record. Reactivate it in place as OPEN
+          // (not "suggested"): if resolveUnknown then refuses to guess (dedup conflict, suggest_link) the
+          // review is exactly where those branches expect it - visible in Needs Review - instead of
+          // parked in "suggested" where no surface can finish it.
           const autoApplied = st.needsReviewQueue.find((r) => r.status === "resolved" && r.resolvedBy === "auto" && ownsRow(r));
-          if (autoApplied && !st.products.find((p) => p.id === autoApplied.provisionalProductId)?.verified) {
+          if (autoApplied) {
+            // Stale click: another path already verified this product, so there is nothing left to
+            // confirm - never fall through to the blank-reopen fallback on a settled review.
+            if (st.products.find((p) => p.id === autoApplied.provisionalProductId)?.verified) return;
             set((s2) => ({
-              needsReviewQueue: s2.needsReviewQueue.map((r) => (r.id === autoApplied.id ? { ...r, status: "suggested" as const } : r)),
+              needsReviewQueue: s2.needsReviewQueue.map((r) =>
+                r.id === autoApplied.id
+                  ? { ...r, status: "open" as const, resolvedAt: null, resolvedBy: null, resolutionAction: null }
+                  : r,
+              ),
             }));
             review = get().needsReviewQueue.find((r) => r.id === autoApplied.id);
           }

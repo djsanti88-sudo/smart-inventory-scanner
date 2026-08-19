@@ -5,7 +5,7 @@ import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { customerDisplayName } from "@/services/displayName";
 import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
-import { getIdentityConfidenceBand, identityBandLabel } from "@/services/ai/identityConfidenceBand";
+import { getReviewIdentityBand, identityBandLabel } from "@/services/ai/identityConfidenceBand";
 import { DecodeStatusBadge, SyncBadge } from "@/components/badges";
 import { matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
@@ -311,15 +311,7 @@ function CountRow({
   const displayBrand = resolvedBrand(displayProduct);
   // Trust rule (same as the feed): an unverified identity carries the app-derived band, never a raw
   // percentage. No tag when no suggestion/review is findable for a provisional row.
-  const suggestionLabel = suggestion
-    ? identityBandLabel(
-        getIdentityConfidenceBand({
-          confidence: suggestion.confidence,
-          evidenceStrength: suggestion.evidenceStrength,
-          exactCodeEvidenceVerifiedByApp: suggestion.exactCodeEvidenceVerifiedByApp,
-        }),
-      )
-    : null;
+  const suggestionLabel = suggestion ? identityBandLabel(getReviewIdentityBand(suggestion)) : null;
   const statusBadge = product.verified ? (
     <DecodeStatusBadge status="verified" />
   ) : product.provisional && (suggestion || hasAppliedIdentity) ? (

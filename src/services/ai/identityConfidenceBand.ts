@@ -1,4 +1,4 @@
-import type { DecodeDecision, IdentityConfidenceBand } from "@/types";
+import type { DecodeDecision, IdentityConfidenceBand, UnknownCodeReview } from "@/types";
 
 /**
  * THE single confidence-band rule (owner decision 2026-08-19). The product shows an app-derived band,
@@ -22,6 +22,21 @@ export function getIdentityConfidenceBand(
   if (decision.exactCodeEvidenceVerifiedByApp === true || decision.status === "verified") return "high";
   if ((decision.confidence ?? 0) >= 0.8 || decision.evidenceStrength === "fetched_source") return "medium";
   return "low";
+}
+
+/** The same rule applied to a review record (the decode's fields the review kept), so a row whose
+ *  identity is read from its review bands exactly like a row carrying the decision itself. */
+export function getReviewIdentityBand(
+  review: Pick<UnknownCodeReview, "decodeStatus" | "confidence" | "evidenceStrength" | "exactCodeEvidenceVerifiedByApp" | "identityBand">,
+): IdentityConfidenceBand {
+  // A review rehydrated from the customer-safe persist carries the derived band and none of its inputs.
+  if (review.identityBand) return review.identityBand;
+  return getIdentityConfidenceBand({
+    status: review.decodeStatus === "verified" ? "verified" : undefined,
+    confidence: review.confidence,
+    evidenceStrength: review.evidenceStrength,
+    exactCodeEvidenceVerifiedByApp: review.exactCodeEvidenceVerifiedByApp,
+  });
 }
 
 /** Row copy for an unconfirmed identity, e.g. "Suggested - medium confidence". Never a percentage. */

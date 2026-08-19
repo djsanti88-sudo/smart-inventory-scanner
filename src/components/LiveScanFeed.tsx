@@ -5,7 +5,8 @@ import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { DecodeStatusBadge, MatchBadge, StatusBadge, SyncBadge } from "@/components/badges";
 import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
-import { getIdentityConfidenceBand, identityBandLabel } from "@/services/ai/identityConfidenceBand";
+import { getIdentityConfidenceBand, getReviewIdentityBand, identityBandLabel } from "@/services/ai/identityConfidenceBand";
+import { canOneTapApproveIdentity } from "@/stores/scanGates";
 import { matchTireSize } from "@/services/tire/tireSizeNormalizer";
 import { canonicalTireSize } from "@/services/catalog/tireListingNormalizer";
 import type { Product, UnknownCodeReview } from "@/types";
@@ -273,21 +274,17 @@ export function LiveScanFeed() {
                 // is never rendered without a tag. A review-derived suggestion (no inline guess on the row)
                 // gets the SAME app-derived band as the inline path, computed from the decode fields the
                 // review kept - never a raw percentage.
-                const reviewBand =
-                  !inline && suggestion
-                    ? getIdentityConfidenceBand({
-                        confidence: suggestion.confidence,
-                        evidenceStrength: suggestion.evidenceStrength,
-                        exactCodeEvidenceVerifiedByApp: suggestion.exactCodeEvidenceVerifiedByApp,
-                      })
-                    : null;
+                const reviewBand = !inline && suggestion ? getReviewIdentityBand(suggestion) : null;
                 // AUTO-APPLIED (>= 0.8) row: the guess was applied onto the still-unverified provisional and
                 // its review auto-closed, so it never carried a pending inline guess. It gets the one-tap
                 // Approve too, through the same human-approval core the confirm sheet uses. A deliberately
                 // held OPEN review (context conflict, deep-verify pending) is not auto-applied and keeps
                 // Edit/Identify only, so the hold is never bypassed from the feed.
                 const autoApplied =
-                  reviewBand !== null && suggestion?.status === "resolved" && suggestion.resolvedBy === "auto";
+                  reviewBand !== null &&
+                  suggestion?.status === "resolved" &&
+                  suggestion.resolvedBy === "auto" &&
+                  canOneTapApproveIdentity(suggestion.suggestedProductName);
                 // ROW STATE -> CONTROLS (owner decision 2026-08-19). Three distinct operations, never one
                 // umbrella "edit": a verified row offers metadata Edit only (no Approve - it is already
                 // trusted); a row carrying a pending guess offers Approve / Edit (confirm the identity) /

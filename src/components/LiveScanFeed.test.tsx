@@ -132,6 +132,41 @@ describe("LiveScanFeed - suggested identity over provisional placeholder (Task 3
     expect(screen.getByTestId("edit-product-ev1")).toBeInTheDocument();
   });
 
+  it("a review whose decode the app VERIFIED but did not auto-save reads the high band (same rule as the inline path)", () => {
+    const code = "0866990000789";
+    const product = provisionalProduct("prod3", code);
+    const event = baseEvent(code, product.id);
+    const review = suggestionReview(code, 0.9, {
+      decodeStatus: "verified", exactCodeEvidenceVerifiedByApp: false, status: "resolved", resolvedBy: "auto", provisionalProductId: product.id,
+    });
+    useScanStore.setState({ scanFeed: [event], needsReviewQueue: [review], products: [product], finalCounts: [] });
+
+    render(<LiveScanFeed />);
+
+    expect(screen.getByTestId("feed-product-ev1").textContent).toMatch(/Suggested - high confidence/);
+  });
+
+  // Deep-review findings (2026-08-19): even if some path auto-applied it, a one-tap Approve must never sit
+  // on a name that is not ONE real product - the prefix-floor naming aid or a multi-variant listing.
+  it.each([
+    ["prefix-floor naming aid", "Acme / product unconfirmed"],
+    ["multi-variant listing", "Nokian 205 50 R17 93V, 93W, 93H"],
+  ])("an auto-applied %s shows the band but NO one-tap Approve (Edit stays)", (_label, name) => {
+    const code = "0866990000999";
+    const product = provisionalProduct("prod9", code);
+    const event = baseEvent(code, product.id);
+    const review = suggestionReview(code, 0.85, {
+      suggestedProductName: name, status: "resolved", resolvedBy: "auto", provisionalProductId: product.id,
+    });
+    useScanStore.setState({ scanFeed: [event], needsReviewQueue: [review], products: [product], finalCounts: [] });
+
+    render(<LiveScanFeed />);
+
+    expect(screen.getByTestId("feed-product-ev1").textContent).toMatch(/Suggested - medium confidence/);
+    expect(screen.queryByTestId("approve-applied-ev1")).not.toBeInTheDocument();
+    expect(screen.getByTestId("edit-identity-ev1")).toBeInTheDocument();
+  });
+
   it("a low-confidence review-derived suggestion shows the low band and no Approve (deliberate hold stays in review)", () => {
     const code = "0866990000456";
     const product = provisionalProduct("prod2", code);

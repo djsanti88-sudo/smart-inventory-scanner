@@ -22,6 +22,9 @@
  * The master switch settings.autoAddDecodedProducts (default true) is applied by the CALLER, not here.
  */
 
+import { isFloorGuessOnlyLabel } from "@/services/catalog/prefixFloorEnrich";
+import { parseTireIdentity } from "@/services/catalog/tireListingNormalizer";
+
 /** Public barcode shapes: the only code types a bare provider self-report may ever auto-count on. */
 const PUBLIC_BARCODE_SHAPES: readonly string[] = ["upc_a", "ean_13", "gtin_14"];
 
@@ -138,4 +141,17 @@ export function shouldAutoApplySuggestion(input: AutoApplySuggestionInput): bool
     ((input.confidence >= 0.8 && input.status !== "verified") ||
       (input.status === "verified" && input.exactCodeEvidenceVerifiedByApp === true))
   );
+}
+
+/**
+ * ONE-TAP APPROVE gate for a feed row (best-guess display, owner decision 2026-08-19). A human tap
+ * teaches an approved tenant alias, so the name under the button must be a real candidate identity:
+ *  - never the prefix-floor NAMING AID ("<Brand> / product unconfirmed") - it names no product (F5);
+ *  - never a multi-variant listing ("... 97W / 99H / 101V ...") - it names several products, not one.
+ * Both already keep the inline pending path honest; this applies the same line to a row whose
+ * identity was auto-applied (>= 0.8) and later surfaced with Approve. Edit/Identify stay available.
+ */
+export function canOneTapApproveIdentity(name: string | undefined): boolean {
+  const n = (name ?? "").trim();
+  return n !== "" && !isFloorGuessOnlyLabel(n) && !parseTireIdentity(n).multiVariant;
 }
