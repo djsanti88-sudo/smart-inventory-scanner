@@ -19,6 +19,9 @@
 - A verified row replays regardless of version and stays correctable through `forceRetry`. -> `src/server/decode/pipeline.ts`
 - Decode only attaches identity; dedupe and caching never block or hide a counted row. -> AGENTS.md "TOP-LEVEL LAW"
 - A code not in the DB always continues through the ladder, in every environment; probes never dead-end (owner rule 2026-08-05). -> LESSONS_LEARNED.md L16, `src/stores/scanStore.ladderContinuation.test.ts`
+- A daily-cap denial skips the paid upgrade only; a free suggestion already in hand is never discarded and no pay-once marker is written for it. -> `paidStep` in `src/server/decode/pipeline.ts`, `pipeline.test.ts` "ESCALATION cap-blocked"
+- `ENABLE_LIVE_AI_LOOKUP=false` means zero paid rungs on the server, not only in the client gate; `AI_LOOKUP_KILL_SWITCH` stops every decode. -> `src/server/upc/paidWorkPossible.ts`
+- Gemini is used nowhere in the app; `/api/ai-lookup` has one mode (`decode`). -> `docs/DECODER_ARCHITECTURE.md` section 2
 
 ## Tenancy
 - Tenant-owned records (products, aliases, scans, counts, sessions, review items) are scoped by `businessId`. -> `FIREBASE_SECURITY.md`
