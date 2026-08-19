@@ -14,10 +14,11 @@
 import { existsSync } from "node:fs";
 
 /**
- * @param {string} absolutePath  the local-only file or directory the suite needs
- * @param {string} label         short human name, e.g. "tire-DB repair package"
- * @returns {false | string}     node:test `skip` option value
+ * @param {string} dataPath  the local-only file or directory the suite needs (absolute, or relative to
+ *                           the repo root the test is run from)
+ * @param {string} label     short human name, e.g. "tire-DB repair package"
+ * @returns {false | string} node:test `skip` option value
  */
-export function skipUnlessLocalData(absolutePath, label) {
-  return existsSync(absolutePath) ? false : `${label} absent in this checkout (gitignored local data: ${absolutePath})`;
+export function skipUnlessLocalData(dataPath, label) {
+  return existsSync(dataPath) ? false : `${label} absent in this checkout (gitignored local data: ${dataPath})`;
 }

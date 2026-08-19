@@ -22,7 +22,6 @@ export interface SessionCountRow {
   aliasesSeen?: string[];
 }
 
-
 // Session detail page: the "full spreadsheet" of a session's product counts - the same columns, in
 // the same order, as the home page's "Your counts" table (FinalCountTable.tsx:119-138) EXCEPT the
 // Sync and Actions columns: this is a read-only historical view, so no mutating controls. The page

@@ -1,7 +1,7 @@
 import type { AiLookupResult } from "@/types";
 import { sanitizeForAiLookup } from "@/services/sanitizer";
 import { detectCodeType } from "@/services/codeTypeDetector";
-import { killSwitchOn, checkRateLimit, readDailyUsed, intEnv, getGptLadderStatus } from "@/services/security/aiSpendGuard";
+import { killSwitchOn, checkRateLimit, readDailyUsed, readDailyUsedForAccount, intEnv, getGptLadderStatus } from "@/services/security/aiSpendGuard";
 import { GPT_LADDER_WORST_CASE_USD, type GptFromScratchResult } from "@/services/ai/gptFromScratch";
 import { goUpcUsage } from "@/server/upc/goUpcUsage";
 import { ladderStorage } from "@/server/upc/storage";
@@ -15,7 +15,6 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { isLiveAuth } from "@/services/auth/authMode";
 import { clampConfidenceThreshold } from "@/services/security/decodePolicy";
-import { readDailyUsedForAccount } from "@/services/security/aiSpendGuard";
 import { buildMasterCatalogEntry, appendMasterCatalogEntry } from "@/server/catalog/masterAppend";
 import { logServerEvent } from "@/server/log";
 import { cleanScanCode } from "@/services/scanCleaner";

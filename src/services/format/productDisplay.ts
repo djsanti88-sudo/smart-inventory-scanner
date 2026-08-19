@@ -1,6 +1,9 @@
 // Pure display-only formatting for slug-style product names and lowercase brand strings coming out of
 // the tire corpus (e.g. "wrangler_workhorse_at", brand "goodyear"). NEVER used for matching/normalized
 // fields - those stay untouched. No React / next imports (services stay pure, per project convention).
+import type { Product } from "@/types";
+import { customerDisplayName } from "@/services/displayName";
+import { matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
 
 // Per-token uppercase map for known tire-spec abbreviations.
 const TOKEN_MAP: Record<string, string> = {
@@ -114,12 +117,9 @@ export function prettifyBrand(input: string): string {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Per-row display resolution shared by FinalCountTable, SessionCountsTable and LiveScanFeed (the
-// same four helpers used to be copied into each table; one home since 2026-08-19). Pure: no React.
+// Per-row display resolution shared by FinalCountTable, SessionCountsTable and LiveScanFeed (these
+// helpers used to be copied into each table; one home since 2026-08-19). Pure: no React.
 // ---------------------------------------------------------------------------------------------
-import type { Product } from "@/types";
-import { customerDisplayName } from "@/services/displayName";
-import { matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
 
 /** Display brand: deterministic-structurer field first, then the stored brand. */
 export function resolvedBrand(product: Product): string {

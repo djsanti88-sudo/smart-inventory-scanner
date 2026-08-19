@@ -42,9 +42,11 @@ export interface PersistedDecode {
   createdAt: number;
 }
 
-const SOURCE_TIERS = new Set<string>(["paid_ai", "gpt_ladder", "paid_rung"]);
-function asSourceTier(v: unknown): PersistedDecode["sourceTier"] | undefined {
-  return typeof v === "string" && SOURCE_TIERS.has(v) ? (v as PersistedDecode["sourceTier"]) : undefined;
+// A NULL column (rows written before the source_tier ALTER) and an unrecognized string both read back
+// as undefined, i.e. "unknown tier", exactly the pre-column behavior for that row.
+const SOURCE_TIERS = ["paid_ai", "gpt_ladder", "paid_rung"] as const;
+function asSourceTier(v: unknown): PersistedDecode["sourceTier"] {
+  return SOURCE_TIERS.find((tier) => tier === v);
 }
 
 // ---------------------------------------------------------------------------

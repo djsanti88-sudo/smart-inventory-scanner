@@ -6,13 +6,6 @@ import nodeTest from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { skipUnlessLocalData } from "./lib/localDataSkip.mjs";
-// The override script reads the gitignored boss export (backups/boss-export-2026-08-05/*) from inside
-// its own helpers, so the whole suite self-skips (visibly) when that export is not in this checkout.
-const BOSS_EXPORT_DIR = "backups/boss-export-2026-08-05";
-const BOSS_LEDGER = `${BOSS_EXPORT_DIR}/boss_override_actions.jsonl`;
-const SKIP = skipUnlessLocalData(BOSS_EXPORT_DIR, "boss export (2026-08-05)");
-const test = (name, optsOrFn, maybeFn) =>
-  typeof optsOrFn === "function" ? nodeTest(name, { skip: SKIP }, optsOrFn) : nodeTest(name, { skip: SKIP || optsOrFn.skip, ...optsOrFn }, maybeFn);
 import {
   classifyBossRows,
   buildUidToBarcodes,
@@ -38,6 +31,13 @@ import {
   SOURCE_NAME,
   BATCH_ID,
 } from "./boss-override-2026-08-05.mjs";
+
+// The override script reads the gitignored boss export (backups/boss-export-2026-08-05/*) from inside
+// its own helpers, so the whole suite self-skips (visibly) when that export is not in this checkout.
+const BOSS_EXPORT_DIR = "backups/boss-export-2026-08-05";
+const BOSS_LEDGER = `${BOSS_EXPORT_DIR}/boss_override_actions.jsonl`;
+const SKIP = skipUnlessLocalData(BOSS_EXPORT_DIR, "boss export (2026-08-05)");
+const test = (name, fn) => nodeTest(name, { skip: SKIP }, fn);
 
 function bossRow(overrides = {}) {
   return {

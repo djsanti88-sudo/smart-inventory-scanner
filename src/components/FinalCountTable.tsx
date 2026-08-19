@@ -12,9 +12,6 @@ import { filterProducts } from "@/services/polish/filterProducts";
 import { requiresOwnerPin } from "@/services/security/destructiveGuard";
 import type { InventoryCount, Product, UnknownCodeReview } from "@/types";
 
-// Per-row Brand / Model / Size resolution lives in services/format/productDisplay.ts (shared with
-// SessionCountsTable and LiveScanFeed).
-
 // DEFECT #29/#37 residual (live-reproduced 2026-08-05/06, canelo round 2): same freeze class as
 // LiveScanFeed - a fresh-device restore with ~1,800 count rows synchronously mounted ALL of them into
 // the DOM. WINDOWING (display-only, sanctioned contingency - no new dependency): render only the first

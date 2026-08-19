@@ -69,6 +69,12 @@ export class DailyCapExceededError extends Error {
   }
 }
 
+/** One wording for every "the cap refused a PAID upgrade, the free identity still stands" skip reason,
+ *  so the escalation branch and the full-paid-ladder branch can never drift apart in what they report. */
+function capSkipReason(message: string): string {
+  return `skipped: daily cap reached (${message}); free suggestion kept`;
+}
+
 // OWNER ORDER 2026-07-06 ("remove Gemini for now"), made permanent by consolidation A1 (2026-08-19):
 // Gemini is OUT of the decode path and its provider/grounding modules are DELETED. Forensics proved
 // Gemini 3 grounding bills every executed search query with NO cap control and the queries are
@@ -1926,19 +1932,21 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // marker is NOT set (no paid rung ran, so the next uncapped scan may still escalate). Sticky for
       // the rest of this branch: once the cap said no, later paid steps are skipped without re-asking.
       let capDenied: DailyCapExceededError | null = null;
-      const paidStep = async (rung: string, run: () => Promise<LadderResult>): Promise<LadderResult | null> => {
+      const paidStep = async (rung: string, rungs: LadderRung[]): Promise<LadderResult | null> => {
         if (capDenied) {
-          reasonsAcc.push({ rung, reason: `skipped: daily cap reached (${capDenied.message}); free suggestion kept` });
+          reasonsAcc.push({ rung, reason: capSkipReason(capDenied.message) });
           return null;
         }
         try {
-          const result = await withPaidChargeArmed(run);
+          const result = await withPaidChargeArmed(() =>
+            runLadder(code, rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
+          );
           paidRungRan = true;
           return result;
         } catch (e) {
           if (e instanceof DailyCapExceededError) {
             capDenied = e;
-            reasonsAcc.push({ rung, reason: `skipped: daily cap reached (${e.message}); free suggestion kept` });
+            reasonsAcc.push({ rung, reason: capSkipReason(e.message) });
             return null;
           }
           throw e;
@@ -1958,11 +1966,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // ---- Step 1: Go-UPC only (unchanged behavior) ---------------------------------------------------
       const goUpcRungOnly = paidRungs().filter((r) => r.name === "goupc");
       const goUpcCanPay = goUpcRungOnly.length > 0 && !!process.env.GO_UPC_API_KEY;
-      const goRun = goUpcCanPay
-        ? await paidStep("goupc", () =>
-            runLadder(code, goUpcRungOnly, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
-          )
-        : null;
+      const goRun = goUpcCanPay ? await paidStep("goupc", goUpcRungOnly) : null;
       if (goRun) {
         reasonsAcc.push(...goRun.reasons);
         // D6/Task 2 Step 3c (demotion ripple, CRITICAL): Go-UPC is now honestly labeled "suggested"
@@ -1990,11 +1994,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         const fetchV2RungOnly = withRealisticBudgets(paidRungs().filter((r) => r.name === "fetchv2"));
         const gated = preflightTimeGate(fetchV2RungOnly, ladderDeadlineAt);
         reasonsAcc.push(...gated.skippedReasons);
-        const fv2Run = fetchV2CanPay && gated.rungs.length > 0
-          ? await paidStep("fetchv2", () =>
-              runLadder(code, gated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
-            )
-          : null;
+        const fv2Run = fetchV2CanPay && gated.rungs.length > 0 ? await paidStep("fetchv2", gated.rungs) : null;
         if (fv2Run) {
           reasonsAcc.push(...fv2Run.reasons);
           if (isBetterThanFree(fv2Run.outcome)) {
@@ -2015,11 +2015,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         // does. Nothing here duplicates or bypasses those checks; the preflight time gate is STRICTLY
         // additional (it fires before shouldRunGptRung ever runs, so a time-skipped GPT rung never even
         // reaches shouldRunGptRung's own budget-charging path - see preflightTimeGate's doc comment).
-        const gptRun = gated.rungs.length > 0 && !!process.env.OPENAI_API_KEY
-          ? await paidStep("gpt", () =>
-              runLadder(code, gated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
-            )
-          : null;
+        const gptRun = gated.rungs.length > 0 && !!process.env.OPENAI_API_KEY ? await paidStep("gpt", gated.rungs) : null;
         if (gptRun) {
           reasonsAcc.push(...gptRun.reasons);
           if (isBetterThanFree(gptRun.outcome)) {
@@ -2068,7 +2064,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
           !planDStash.providerNames.includes("parallel:floor") &&
           isUsableProductName(planDStash.results[0]?.productName ?? "");
         if (!(e instanceof DailyCapExceededError) || !stashHasIdentity) throw e;
-        paidRun = { settledBy: undefined, outcome: undefined, reasons: [{ rung: "paid-ladder", reason: `skipped: daily cap reached (${e.message}); free suggestion kept` }] };
+        paidRun = { settledBy: undefined, outcome: undefined, reasons: [{ rung: "paid-ladder", reason: capSkipReason(e.message) }] };
       }
       // Concatenate reasons free-phase-then-paid-phase so an unresolved response still lists every rung
       // that actually ran, honestly, in the order it ran (including any preflight-skipped rung).

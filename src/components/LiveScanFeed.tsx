@@ -10,10 +10,10 @@ import { canOneTapApproveIdentity } from "@/stores/scanGates";
 import { canonicalTireSize } from "@/services/catalog/tireListingNormalizer";
 import type { Product, UnknownCodeReview } from "@/types";
 
-// Size column: same structured-size source FinalCountTable already uses (product.specsShort via
-// matchTireSize), falling back to a deterministic parse of the row's own display name when the
-// linked product has no parseable structured size yet (e.g. still-provisional rows). Never guesses;
-// "-" when neither source yields a confident size.
+// Size column: the same structured-size source the count tables use (resolvedCanonicalSize), falling
+// back to a deterministic parse of the row's own display name when the linked product has no parseable
+// structured size yet (e.g. still-provisional rows). Never guesses; "-" when neither source yields a
+// confident size.
 function resolvedFeedSize(product: Product | undefined, displayName: string): string {
   return resolvedCanonicalSize(product) ?? (canonicalTireSize(displayName) || "-");
 }
