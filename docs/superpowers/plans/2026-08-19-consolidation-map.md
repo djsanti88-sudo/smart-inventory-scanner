@@ -24,8 +24,8 @@ over new abstraction. Anything not listed below was judged "leave alone" on purp
   `src/services/ai/{sizeRace,asinVerify,fallbackRunner,groundedSpecFinder,flashLiteGrounding}.ts`
   (+tests), `runDecode` in `decodeOrchestrator.ts`, the permanently disabled Gemini grounding arm in
   `pipeline.ts`/`parallelResolve.ts`, `trustedExact{Authorization,Membership}Cache.ts` (unwired,
-  kept in history at `backup/pre-aws-cleanup-2026-08-19`), `@playwright/cli` devDependency,
-  the 5 leftover `scripts/tmp-*.mjs` whose inputs were already deleted, 13 one-off scripts with zero
+  kept in history at `backup/pre-aws-cleanup-2026-08-19`), `mockProvider`/`prompt.ts`/`AiProvider`
+  (orphaned with the legacy mode), the 5 leftover `scripts/tmp-*.mjs` whose inputs were already deleted, 13 one-off scripts with zero
   live references (one-time migrations, superseded probes).
 - Reported-only env flags removed from the GET status and the settings page: `ENABLE_GEMINI_LOOKUP`,
   `ENABLE_OPENAI_LOOKUP`, `ENABLE_PREMIUM_MODEL_FALLBACK`, `AI_LOOKUP_MODE`,
@@ -34,7 +34,9 @@ over new abstraction. Anything not listed below was judged "leave alone" on purp
 - `FinalCountTable`/`SessionCountsTable`/`LiveScanFeed` duplicated `resolved*` display helpers ->
   `src/services/format/productDisplay.ts`.
 - `correctionRecheck` no longer requires a Gemini key (it runs the decode pipeline, which never uses
-  Gemini).
+  Gemini). The Settings "AI service" select (mock/gemini/openai) and `settings.primaryProvider` /
+  `fallbackProvider` are gone: the ladder is server-decided, the control did nothing.
+- `@playwright/cli` stays: it is the agent browser driver (`npx playwright-cli`, docs/playwright/PLAYWRIGHT.md).
 - Root: `archive/` (dead Supabase foundation), `proof-archive/`, `deploy-proof/` PNGs, `plans/`
   (one June file) removed or archived under `docs/archive/`; `tire_prefixes_*.csv` move to
   `data/tire-knowledge/prefixes/`; 61 MB of regenerable tire-knowledge snapshots dropped (gitignored).
