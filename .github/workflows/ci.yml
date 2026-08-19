@@ -41,15 +41,11 @@ name: CI
 # flake red on every CI run; the same coverage intent (CSV parsing edge cases, mapping inference, error
 # surfacing) is still exercised by non-fixture-dependent tests elsewhere in the import test suite.
 #
-# LOCAL-BACKUP-DATA NOTE (node:test leg): scripts/tire-db-repair/10_promote_execute.test.mjs defaults
-# its REAL_STAGING_DIR to backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/turso-staging/,
-# which lives under the entirely-gitignored /backups/ path (.gitignore:153) -- the same "known-good LOCAL
-# checkout only" shape as the stress fixtures above, verified absent from `git ls-files`. Without that
-# data the suite's `before()` hook throws ENOENT on `copyFileSync`, not a graceful skip. Skipped below
-# (via NODE_TEST_SKIP) rather than left to hard-fail every CI run; all 60 other node:test assertions in
-# the tire-db-repair suite family (03/09/11/model_styling/validate) do not depend on this local-only data
-# and run normally. Reproduce this leg locally with `npm run proof:all` (no env vars needed) or
-# `node --test scripts/tire-db-repair/10_promote_execute.test.mjs` on a machine that has /backups/.
+# LOCAL-BACKUP-DATA NOTE (node:test leg): the tire-db-repair and boss-override suites read gitignored
+# local data under /backups/ (.gitignore). Since 2026-08-19 they self-skip VISIBLY when that data is
+# absent (scripts/lib/localDataSkip.mjs) and proof-all.mjs reports the skip count, so this job needs no
+# NODE_TEST_SKIP knob for them. Reproduce the full leg locally with `npm run proof:all` on a machine
+# that has /backups/.
 
 on:
   push:
@@ -84,17 +80,16 @@ jobs:
   unit-tests:
     name: unit-tests
     runs-on: ubuntu-latest
-    timeout-minutes: 40
-    # See the CORPUS DB / STRESS FIXTURES / LOCAL-BACKUP-DATA notes at the top of this file for exactly
-    # why each of these three suites is excluded and why that is safe (self-contained CI knobs added to
+    timeout-minutes: 30
+    # See the CORPUS DB / STRESS FIXTURES notes at the top of this file for exactly
+    # why each of these two suites is excluded and why that is safe (self-contained CI knobs added to
     # scripts/proof-all.mjs; local `npm run proof:all` with no env vars set still runs all of them).
     env:
       VITEST_EXTRA_EXCLUDE: "src/server/tire-knowledge/dtHarvestIntegration.test.ts,src/components/UniversalImportPanel.fixtures.test.tsx"
-      NODE_TEST_SKIP: "scripts/tire-db-repair/10_promote_execute.test.mjs"
       # proof-all.mjs exits non-zero on a narrowed run unless this is set (2026-08-16 clean-room
       # review, HIGH: a narrowed run used to exit 0 and be reported as "all local legs green" with
       # no distinguishable failure signal). Setting it here makes CI's narrowing -- already fully
-      # explained by the CORPUS DB / STRESS FIXTURES / LOCAL-BACKUP-DATA notes above -- a deliberate,
+      # explained by the CORPUS DB / STRESS FIXTURES notes above -- a deliberate,
       # visible acknowledgment rather than a silent default; a NEW, unexplained narrowing anywhere
       # else still fails the gate.
       PROOF_ALL_ACCEPT_NARROWED: "1"
@@ -116,7 +111,7 @@ jobs:
       # a 20-minute timeout on PR #38).
 
       # THE honest gate: typecheck + vitest (unit+dom, minus the two CI-unreachable-data suites above)
-      # + all vitest-excluded node:test suites (minus the one CI-unreachable-data suite above) + the
+      # + all vitest-excluded node:test suites (local-data suites self-skip visibly) + the
       # teach-bot node:test suite. scripts/proof-all.mjs prints an explicit NOT RUN section for anything
       # it does not cover (Firestore emulator suites, mock Playwright E2E, human-bot proof, production
       # build) -- those stay in their own dedicated workflows/local runs, unchanged by this job.

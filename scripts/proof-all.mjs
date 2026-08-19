@@ -111,11 +111,19 @@ function run(label, cmd, args) {
   // node:test: "ℹ pass 12" / "ℹ fail 0"
   const nodePass = out.match(/^\s*.?\s*pass (\d+)$/m);
   const nodeFail = out.match(/^\s*.?\s*fail (\d+)$/m);
+  // node:test: "ℹ skipped 74" -- the local-data suites (scripts/lib/localDataSkip.mjs) skip VISIBLY
+  // when gitignored data is absent (fresh worktree, CI); surface it exactly like vitest's skips.
+  const nodeSkip = out.match(/^\s*.?\s*skipped (\d+)$/m);
 
   let detail = ok ? "ok" : `FAILED (exit ${r.status})`;
   let skipped = 0;
   if (vitest) { detail = `${vitest[1]} passed`; skipped = Number(vitest[2] ?? 0); if (skipped) detail += `, ${skipped} skipped`; }
-  else if (nodePass) { detail = `${nodePass[1]} passed`; if (nodeFail && Number(nodeFail[1]) > 0) detail += `, ${nodeFail[1]} FAILED`; }
+  else if (nodePass) {
+    detail = `${nodePass[1]} passed`;
+    if (nodeFail && Number(nodeFail[1]) > 0) detail += `, ${nodeFail[1]} FAILED`;
+    skipped = Number(nodeSkip?.[1] ?? 0);
+    if (skipped) detail += `, ${skipped} skipped (local-only data absent)`;
+  }
 
   results.push({ label, ok, detail, skipped });
   if (!ok) process.stdout.write(out.split("\n").slice(-25).join("\n") + "\n");
@@ -281,7 +289,7 @@ export function buildSummaryReport({ results, missing, skippedByEnv, vitestExtra
 
   lines.push("\nNOT RUN BY THIS GATE -- green above does NOT cover these:");
   for (const [name, why, cmd] of NOT_RUN) lines.push(`  - ${name}\n      ${why}; run: ${cmd}`);
-  if (totalSkipped) lines.push(`\n  ${totalSkipped} test(s) reported SKIPPED above (mostly the emulator-gated suites).`);
+  if (totalSkipped) lines.push(`\n  ${totalSkipped} test(s) reported SKIPPED above (emulator-gated vitest suites; node:test suites whose gitignored local data is absent - scripts/lib/localDataSkip.mjs).`);
 
   if (failed.length) {
     lines.push(`\nRESULT: FAILED -- ${failed.length} leg(s): ${failed.map((f) => f.label).join(", ")}`);
