@@ -25,7 +25,8 @@ over new abstraction. Anything not listed below was judged "leave alone" on purp
   (+tests), `runDecode` in `decodeOrchestrator.ts`, the permanently disabled Gemini grounding arm in
   `pipeline.ts`/`parallelResolve.ts`, `trustedExact{Authorization,Membership}Cache.ts` (unwired,
   kept in history at `backup/pre-aws-cleanup-2026-08-19`), `@playwright/cli` devDependency,
-  the 5 leftover `scripts/tmp-*.mjs` whose inputs were already deleted.
+  the 5 leftover `scripts/tmp-*.mjs` whose inputs were already deleted, 13 one-off scripts with zero
+  live references (one-time migrations, superseded probes).
 - Reported-only env flags removed from the GET status and the settings page: `ENABLE_GEMINI_LOOKUP`,
   `ENABLE_OPENAI_LOOKUP`, `ENABLE_PREMIUM_MODEL_FALLBACK`, `AI_LOOKUP_MODE`,
   `GEMINI_*`/`OPENAI_*_MODEL` report fields, `TRUSTED_EXACT_BOSS_BUSINESS_IDS` (no longer gates
@@ -36,7 +37,7 @@ over new abstraction. Anything not listed below was judged "leave alone" on purp
   Gemini).
 - Root: `archive/` (dead Supabase foundation), `proof-archive/`, `deploy-proof/` PNGs, `plans/`
   (one June file) removed or archived under `docs/archive/`; `tire_prefixes_*.csv` move to
-  `data/tire-knowledge/prefixes/`; `build-report-pdf.mjs` moves next to its sibling in `scripts/`.
+  `data/tire-knowledge/prefixes/`; 61 MB of regenerable tire-knowledge snapshots dropped (gitignored).
 - Branch blob `docs/analysis/retail-corpus-v2-2026-08-03/review.jsonl.gz` (17 MB, never pushed)
   excised from the branch history before the first push.
 - Docs: stale references fixed (`docs/COMMANDS.md` teach files, `docs/README.md` index,
