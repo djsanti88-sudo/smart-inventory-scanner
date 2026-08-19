@@ -42,6 +42,10 @@ describe("codeFromNamePrefix", () => {
     expect(codeFromNamePrefix("GTIN 00029142712886 - Cooper")).toBe("00029142712886");
     expect(codeFromNamePrefix("EAN: 4019238008678 - Falken")).toBe("4019238008678");
   });
+  it("accepts an en dash or em dash separator exactly like the render-side cleaner (one shared matcher)", () => {
+    expect(codeFromNamePrefix("UPC 086699205636 – Defender LTX M/S")).toBe("086699205636");
+    expect(codeFromNamePrefix("UPC 086699205636 — Defender LTX M/S")).toBe("086699205636");
+  });
   it("returns null for ordinary names (leaves them untouched)", () => {
     expect(codeFromNamePrefix("Discoverer A/T3 LT245/75R16")).toBeNull();
     expect(codeFromNamePrefix("UPC scanner cleaning kit - 3 pack")).toBeNull(); // "scanner" is not a code

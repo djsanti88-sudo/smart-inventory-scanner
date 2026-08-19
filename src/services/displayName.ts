@@ -4,12 +4,14 @@
 //   - a leading "UPC|EAN|GTIN|Barcode <code> - " identifier prefix, and
 //   - a trailing "Fits ..." vehicle-fitment clause.
 // Non-matching names pass through unchanged, and it never returns empty (falls back to the raw name).
+import { splitLegacyIdentifierPrefix } from "@/services/productDedup";
 
 export function customerDisplayName(name: string | undefined): string {
   const raw = (name ?? "").trim();
-  let s = raw;
-  // Leading identifier prefix: "UPC 086699205636 - ", "GTIN: 00086699205636 - ", etc. (code >= 6 chars).
-  s = s.replace(/^(?:UPC|EAN|GTIN|BARCODE)\s*[:#]?\s*[A-Za-z0-9][A-Za-z0-9-]{4,}\s*[-–—]\s+/i, "");
+  // Leading identifier prefix: "UPC 086699205636 - ", "GTIN: 00086699205636 - ", etc. One shared matcher
+  // with the dedup/backfill side (productDedup.ts) so render and data logic never disagree on what a
+  // legacy identifier prefix is.
+  let s = splitLegacyIdentifierPrefix(raw)?.rest ?? raw;
   // Trailing fitment clause: "... Fits 2004 Chevrolet", "... - Fits: Ford F-150". Requires whitespace
   // before "Fits" so it is a separate word (never strips inside "Benefits", "Outfits", etc.).
   s = s.replace(/\s+(?:[-–—]\s*)?Fits[\s:].*$/i, "");
