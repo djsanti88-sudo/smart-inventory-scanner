@@ -25,7 +25,7 @@ promoted to known products.
 ## Artifacts and receipts
 
 - `off-process.receipt.json`: raw-source and enriched-evidence counts plus SHA-256 hashes.
-- `review.jsonl.gz`: complete non-serving review/quarantine ledger.
+- `review.jsonl.gz`: complete non-serving review/quarantine ledger (17 MB; NOT committed - kept in the local analysis output and reproducible from the corpus v2 build; a git history ledger is not a product asset).
 - `projection-diff.json`: exact serving drift against the frozen baseline.
 - `knowledge-db.receipt.json`: SQLite row counts, integrity checks, and DB/gzip hash parity.
 - `src/server/retail-knowledge/retailKnowledge.generated.meta.json`: classification and

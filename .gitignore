@@ -237,3 +237,6 @@ test-2000-barcodes.txt
 tire-barcodes-1000.txt
 # Local review-tool state.
 .claude/.deep-review-radar.json
+
+# Large analysis ledgers are local outputs, never committed (2026-08-19)
+docs/analysis/**/*.jsonl.gz
