@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { safeStructuredFieldsFor } from "@/services/polish/structuredFields";
+import { getIdentityConfidenceBand, identityBandWord } from "@/services/ai/identityConfidenceBand";
 import type { UnknownCodeReview } from "@/types";
 
 // Build 3 (docs/archive/superpowers/specs/2026-07-05-batch-approve-design.md): batch-approve screen for the
@@ -185,8 +186,15 @@ export function SuggestedApprovalPanel() {
                         <StructuredPreview review={r} />
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-sm tabular-nums" data-testid="suggested-confidence">
-                      {r.confidence > 0 ? `${Math.round(r.confidence * 100)}%` : "-"}
+                    <td className="px-4 py-3 text-sm" data-testid="suggested-confidence">
+                      {/* Owner decision 2026-08-19: the app's own band, never a raw provider percentage. */}
+                      {identityBandWord(
+                        getIdentityConfidenceBand({
+                          confidence: r.confidence,
+                          evidenceStrength: r.evidenceStrength,
+                          exactCodeEvidenceVerifiedByApp: r.exactCodeEvidenceVerifiedByApp,
+                        }),
+                      )}
                     </td>
                     <td className="px-4 py-3 text-sm">
                       <span data-testid="suggested-source-count">{r.sourceUrls?.length ?? 0}</span>

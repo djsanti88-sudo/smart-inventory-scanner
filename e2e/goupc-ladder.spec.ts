@@ -198,7 +198,7 @@ test.describe("Go-UPC decode ladder (mocked)", () => {
     await page.screenshot({ path: `${PROOF}/goupc-exact-autocount.png`, fullPage: true });
   });
 
-  test("2. inferred hit -> Needs Review suggestion with product attached", async ({ page }) => {
+  test("2. inferred hit -> inline suggestion on the counted row (Approve/Edit), product attached, not an open review", async ({ page }) => {
     const code = "034000002719"; // checksum-valid UPC-A, distinct from scenario 1
     await page.route("**/api/ai-lookup", async (route: Route) => {
       const req = route.request();
@@ -213,14 +213,18 @@ test.describe("Go-UPC decode ladder (mocked)", () => {
 
     await scan(page, code);
 
-    // Feed row settles to "Suggested" (DecodeStatusBadge collapses needs_review -> "Suggested").
-    await expect(page.getByTestId("scan-feed-body")).toContainText("Suggested", { timeout: 15_000 });
+    // Best-guess identity (owner 2026-08-19): a needs_review decode WITH a usable name no longer
+    // sits in the open Needs Review queue. The best available identity is attached to the counted
+    // feed row immediately, labeled as a suggestion with an app-derived confidence band (never a raw
+    // percentage), with inline Approve / Edit controls; the review record is parked as "suggested".
+    const feed = page.getByTestId("scan-feed-body");
+    await expect(feed).toContainText("Generic AA Battery Multipack", { timeout: 15_000 });
+    await expect(feed).toContainText("Suggested");
+    await expect(feed).not.toContainText("%");
+    await expect(page.locator('[data-testid^="approve-suggestion-"]')).toHaveCount(1);
 
     await page.goto("/review");
-    const row = page.getByTestId(`review-row-${code}`);
-    await expect(row).toBeVisible();
-    // The suggested product name from the Go-UPC inferred result is attached to the review row.
-    await expect(row).toContainText("Generic AA Battery Multipack");
+    await expect(page.getByTestId(`review-row-${code}`)).toHaveCount(0);
 
     await page.screenshot({ path: `${PROOF}/goupc-inferred-suggest.png`, fullPage: true });
   });

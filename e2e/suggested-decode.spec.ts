@@ -110,7 +110,7 @@ test("suggested decode (confidence 0.92) shows identity + unconfirmed tag; revie
 // ---------------------------------------------------------------------------------------------
 // Task 9b (owner-ratified 2026-07-14): inline suggestion approve/decline on the feed row.
 // A LOW-confidence suggestion (0.3, below the 0.8 auto-apply bar) counts immediately, shows the
-// honest "(suggested, 30%)" tag with pointer-only ✓/✕ controls, and creates NO open Needs Review
+// honest "(Suggested - low confidence)" band tag (app-derived band, never a raw percentage) with pointer-only ✓/✕ controls, and creates NO open Needs Review
 // item. Approve = permanent alias via the existing human-approval core -> a rescan resolves
 // deterministically with NO second decode call. Decline renames the row to the safe placeholder
 // and ONLY THEN opens the review. All decode traffic is mocked (IS_E2E=1 webServer + page.route).
@@ -179,7 +179,7 @@ async function setupNonTireSuggested(page: Page, counter: { posts: number }) {
   await expect(page.getByTestId("auto-decode-status")).toContainText("On");
 }
 
-test("Task 9b APPROVE: low-conf suggestion shows '(suggested, 30%)' + controls, no open review; approve clears the tag, keeps scanner focus, and the rescan is deterministic-known (no second decode)", async ({ page }) => {
+test("Task 9b APPROVE: low-conf suggestion shows the (Suggested - low confidence) band + controls, no open review; approve clears the tag, keeps scanner focus, and the rescan is deterministic-known (no second decode)", async ({ page }) => {
   const counter = { posts: 0 };
   await setupNonTireSuggested(page, counter);
 
@@ -188,7 +188,8 @@ test("Task 9b APPROVE: low-conf suggestion shows '(suggested, 30%)' + controls, 
   // The counted row shows the suggested identity + the honest confidence tag + the two controls.
   const tag = page.locator('[data-testid^="feed-suggestion-"]');
   await expect(tag).toHaveCount(1);
-  await expect(tag).toContainText("(suggested, 30%)");
+  await expect(tag).toContainText("(Suggested - low confidence)");
+  await expect(tag).not.toContainText("%");
   const approveBtn = page.locator('[data-testid^="approve-suggestion-"]');
   const declineBtn = page.locator('[data-testid^="decline-suggestion-"]');
   await expect(approveBtn).toHaveCount(1);

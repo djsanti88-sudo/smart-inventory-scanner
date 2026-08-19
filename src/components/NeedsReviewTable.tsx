@@ -6,6 +6,7 @@ import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { StatusBadge, SyncBadge } from "@/components/badges";
 import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
 import { prettifyProductName } from "@/services/format/productDisplay";
+import { getIdentityConfidenceBand, identityBandWord } from "@/services/ai/identityConfidenceBand";
 import type { UnknownCodeReview } from "@/types";
 
 // Shows the decode pipeline outcome. Two visible states only: "Verified" (app-confirmed) and
@@ -229,8 +230,17 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
           <span className="text-zinc-600">No suggestion</span>
         )}
       </td>
-      <td className="px-4 py-3 text-sm tabular-nums">
-        {review.confidence > 0 ? `${Math.round(review.confidence * 100)}%` : "-"}
+      <td className="px-4 py-3 text-sm">
+        {/* Owner decision 2026-08-19: the app's own band, never a raw provider percentage. */}
+        {review.hasSuggestion
+          ? identityBandWord(
+              getIdentityConfidenceBand({
+                confidence: review.confidence,
+                evidenceStrength: review.evidenceStrength,
+                exactCodeEvidenceVerifiedByApp: review.exactCodeEvidenceVerifiedByApp,
+              }),
+            )
+          : "-"}
       </td>
       {isPlatform && <td className="px-4 py-3 text-sm">{review.providerName || "-"}</td>}
       <td className="px-4 py-3">

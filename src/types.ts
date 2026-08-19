@@ -207,7 +207,10 @@ export interface ScanEvent {
   suggestion?: {
     productName: string;
     brand: string;
-    confidence: number; // 0..1 decision confidence, shown honestly in the tag
+    confidence: number; // 0..1 raw decision confidence - kept for audit, never rendered as a percentage
+    /** App-derived band the row actually displays (getIdentityConfidenceBand). Optional: rows persisted
+     *  before the band existed fall back to a band computed from `confidence` at render time. */
+    band?: IdentityConfidenceBand;
     status: "pending" | "approved" | "declined";
   };
   quantityDelta: number;
@@ -526,6 +529,10 @@ export interface AiLookupResult {
 // --- Evidence verification (the app independently verifies the exact code in real evidence) ---
 
 export type EvidenceStrength = "none" | "url_only" | "snippet" | "grounding_chunk" | "fetched_source";
+
+/** App-derived confidence band shown to the operator instead of a raw provider percentage (owner
+ *  decision 2026-08-19). The one rule that produces it lives in services/ai/identityConfidenceBand.ts. */
+export type IdentityConfidenceBand = "high" | "medium" | "low";
 
 export interface ProviderEvidence {
   sourceUrls: string[];
