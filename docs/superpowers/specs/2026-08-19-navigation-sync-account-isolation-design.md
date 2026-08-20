@@ -6,15 +6,15 @@ The owner approved the recommended repair for the production incident where a 1,
 
 ## Goal
 
-Keep every local scan, count, and best-known identity stable while cloud writes are pending; make large cloud queues drain materially faster without reordering writes to the same entity; preserve strict account and tenant isolation; make historical counts obey the every-scan-counts law; remove false state-corruption errors; and prove repeated application navigation does not change the Scan page.
+Keep every local scan, count, and best-known identity stable while cloud writes are pending; move product writes through large cloud queues sooner without weakening correction ordering; preserve strict account and tenant isolation; make historical counts obey the every-scan-counts law; remove false state-corruption errors; and prove repeated application navigation does not change the Scan page.
 
 ## Measurable success
 
 - A same-account, same-business business-context reload never replaces a locally pending product or alias with an older or incomplete Firestore snapshot.
-- History, Reconcile, Settings, and Scan can be traversed three complete times without re-running business bootstrap, flashing a second loading state, changing the scan total, changing summed quantity, losing product identity, or creating blank joined rows.
+- History, Reconcile, Settings, and Scan can be traversed three complete times without remounting business bootstrap, flashing a second loading state, changing the scan total, changing summed quantity, losing product identity, or creating blank joined rows.
 - A real account or business change still clears tenant-visible state before loading the new tenant.
-- Cloud sync runs no more than four independent writes concurrently and preserves FIFO order for every entity key.
-- A 3,000-item synthetic queue drains without loss, duplication, stale overwrite, or unbounded concurrency.
+- Cloud sync may run no more than four independent `SAVE_PRODUCT` writes concurrently, preserves FIFO order for repeated writes to the same product, and processes all non-product writes in their original serial order.
+- A large synthetic product backlog proves bounded concurrency and same-product ordering without parallelizing any count transfer, scan-event correction, session, review, or alias write.
 - Past-session count rows include known, resolved, suggested, needs-review, and unidentified physical scan events.
 - A valid live store does not log `wrong-shape field(s)` and valid arrays keep their original references.
 - Two Firebase Auth emulator users, each with a different Firestore business and membership, can use the same browser without seeing each other's scans, counts, products, reviews, history, selected business, or persisted local state.
@@ -25,7 +25,7 @@ Keep every local scan, count, and best-known identity stable while cloud writes 
 
 ### 1. Pending-aware business-context merge
 
-The async loader used by `setBusinessContext` will stop assigning `products: data.products` and `aliases: data.aliases` directly. A pure helper will merge the remote snapshot over the current tenant's local arrays while inspecting that tenant's pending queue.
+The async loader used by `setBusinessContext` will stop assigning `products: data.products` and `aliases: data.aliases` directly. Pure helpers will merge the remote snapshot over the current tenant's local arrays while inspecting that tenant's pending queue.
 
 - Local products with pending `SAVE_PRODUCT` operations remain authoritative until their operation drains.
 - Local aliases with pending `RESOLVE_ALIAS` operations remain authoritative until their operation drains.
@@ -36,35 +36,32 @@ The async loader used by `setBusinessContext` will stop assigning `products: dat
 
 The helper will be reused by both initial business-context loading and `refreshFromCloud` so the two reload paths cannot drift again.
 
-### 2. Navigation bootstrap fast path
+The existing pending-aware rules for sessions, final counts, and scan events remain in force. This repair must not replace or weaken them. The current business-data loader does not return review rows, so the local review queue remains local-authoritative during a reload rather than being invented as a remote merge surface.
 
-`BusinessContextGate` currently starts every mount in `resolving` and repeats session, membership, per-UID hydration, business-context loading, and Firestore reads. Because each page mounts its own gate, client navigation appears to open the page and then reload it.
+### 2. Persistent authenticated business bootstrap
 
-The gate will derive an initial ready state from the existing store only when all of these facts are already true:
+`BusinessContextGate` currently owns both the bootstrap effect and the page-level rendering gate. Every page mount therefore repeats session, membership, per-UID hydration, business-context loading, and Firestore reads. Client navigation appears to open the page and then reload it.
 
-- cloud mode is enabled;
-- `businessContextReady` and `businessDataLoaded` are true;
-- the store has a non-null signed-in `userId`;
-- the locally selected business id exactly equals the store's current `businessId`.
+The bootstrap effect will move into a client provider mounted once inside the protected `(app)` layout. Next.js preserves that layout and its client state across navigation. Existing page-level `BusinessContextGate` wrappers become consumers of the provider's already-validated status, so the platform-owner catalog page can continue to ignore business gating while ordinary tenant pages keep their fail-closed UI.
 
-When those conditions hold, the new gate mount renders immediately and skips duplicate bootstrap. If any condition fails, the existing fail-closed session, membership, per-UID hydration, and `setBusinessContext` flow runs unchanged. Normal sign-out clears the selected business and resets readiness, and a real business selection changes the selected id, so neither account changes nor business changes can take the fast path accidentally.
+The provider always performs the existing `getSession`, membership validation, per-UID hydration, and `setBusinessContext` chain. It never trusts selected-business or Zustand state as proof of authority. On sign-out, account change, membership failure, or selected-business mismatch, the existing fail-closed states remain visible and tenant data is not rendered. Tests that mount a gate without the app layout retain a small compatibility wrapper so component tests and isolated consumers still run the full authenticated bootstrap rather than silently falling open.
 
 ### 3. Bounded ordered cloud synchronization
 
 `FirebaseSyncTarget.apply(item)` remains the only durable write primitive. Its per-item Firestore transaction, applied-key marker, payload hash, and count dedupe contract remain unchanged.
 
-Only the cloud drain scheduler changes:
+Only product scheduling changes:
 
-- maximum in-flight applies: four;
-- stable product priority among currently ready items, reducing the missing-product join window;
-- FIFO ordering by dependency key, using `entityType:entityId`; `INCREMENT_COUNT` continues using its existing count entity id, which also keeps balanced transfer pairs ordered;
-- a later same-key item cannot start until the prior same-key item succeeds;
-- a retryable or terminal failure blocks later same-key items for that pass and leaves them queued;
-- token and account-context checks run before each apply starts;
-- successful late completions are reconciled monotonically, while stale error bookkeeping cannot overwrite a newer pass;
+- a stable product-first phase selects only `SAVE_PRODUCT` items;
+- maximum in-flight product applies: four;
+- repeated writes for the same product retain FIFO order, and a failed product write blocks later writes for that product in the same pass;
+- token and account-context checks run before each product apply starts;
+- successful product completions use the existing monotonic progress reconciliation;
+- after the product phase, every remaining item is applied serially in original queue order through the existing path;
+- all `INCREMENT_COUNT`, `SAVE_SCAN_EVENT`, `SAVE_SESSION`, `SAVE_UNKNOWN_SCAN`, and `RESOLVE_ALIAS` writes remain serial, so balanced mark-wrong transfers and other cross-document corrections cannot be split across lanes;
 - existing progress flushing, retry metadata, quarantine behavior, synced-event id accumulation, timeout, watchdog, and mock-backend synchronous behavior remain intact.
 
-Naive `Promise.all` is forbidden because it can let an older provisional product or scan event overwrite its later settled identity. Firestore batching is out of scope because the current contract requires transactional reads of applied-key and count documents before writes.
+Naive `Promise.all` across the whole queue is forbidden because it can split a count transfer or let an older provisional scan event overwrite its later settled identity. Firestore batching is out of scope because the current contract requires transactional reads of applied-key and count documents before writes.
 
 ### 4. Historical count derivation
 
@@ -96,9 +93,11 @@ Existing per-UID key format and sign-out wipe policy remain unchanged unless a f
 - Emulator setup uses unique fixed tenant ids and clears only those exact emulator collections before each run.
 - No live AI provider is enabled; `IS_E2E=1` and empty provider keys remain mandatory.
 - A context mismatch during sync stops scheduling new writes. Already committed successes are still removed from the queue exactly once.
-- A failed same-entity write prevents a newer same-entity payload from passing it in the same drain.
+- A failed product write prevents a newer payload for that product from passing it in the same drain.
+- Non-product writes retain their original serial ordering, including the zero-out, repointed event, and add-in steps of a correction.
 - A failed remote load preserves local state and surfaces the existing sync error.
 - Account isolation tests assert both absence of foreign UI data and absence of foreign tenant identifiers in active persisted state.
+- Pending and failed sync copy explicitly says the scans are saved on this device but are not synced yet.
 
 ## Test design
 
@@ -110,8 +109,8 @@ Existing per-UID key format and sign-out wipe policy remain unchanged unless a f
 - Valid nested-array fields preserve reference identity and `processScan` emits no false wrong-shape error.
 - A genuinely malformed nested field is still repaired and logged.
 - Past-session unknown, suggested, and needs-review events contribute to timeline-derived counts.
-- Business-context gate remount skips bootstrap only for an already-loaded matching business and uses full bootstrap for a different business or reset account.
-- Ordered cloud scheduler proves maximum concurrency four, per-entity FIFO, failure blocking, context cancellation, progress reconciliation, no stale scan/product overwrite, and a complete 3,000-item drain.
+- A layout-mounted business provider runs bootstrap once across page navigation while preserving full session and membership validation on first mount, account change, business change, and retry.
+- Product scheduling proves maximum concurrency four, same-product FIFO, same-product failure blocking, context cancellation, progress reconciliation, and unchanged serial order for every non-product item.
 
 ### Firebase emulator proof
 
@@ -123,6 +122,7 @@ Existing per-UID key format and sign-out wipe policy remain unchanged unless a f
 
 - Add a mock or emulator-backed 1,000-scan scenario using hardware-scanner style input.
 - Record the Scan baseline: feed total, identified total, product count, summed quantity, and a stable identity sample.
+- Stall or slow the cloud drain so the pending queue is still non-empty during navigation; assert the baseline before navigation, mid-backlog after every return, after an injected retryable failure, and after the final drain.
 - Execute History, Reconcile, Settings, Scan three times.
 - After every return to Scan, assert all baseline values are unchanged, no blank product join appears, the scanner regains focus, and no business bootstrap loading state flashes.
 - Hard reload once after the queue drains and repeat the invariants.
