@@ -92,6 +92,16 @@ function membership(userId = "user-1") {
   };
 }
 
+function businessMembership(businessId: string, businessName: string, userId = "user-1") {
+  return {
+    id: `${businessId}_${userId}`,
+    businessId,
+    businessName,
+    userId,
+    role: "owner",
+  };
+}
+
 function PageGate({ route }: { route: string }) {
   return (
     <BusinessContextGate key={route}>
@@ -126,6 +136,34 @@ function BusinessSelectionHarness() {
   return (
     <BusinessContextProvider>
       {route === "Business" ? <BusinessPage /> : <PageGate route="Scan" />}
+    </BusinessContextProvider>
+  );
+}
+
+function ReadyBusinessSwitchHarness() {
+  const [route, setRoute] = React.useState("Scan");
+  return (
+    <BusinessContextProvider>
+      {route === "Switch" ? (
+        <button
+          type="button"
+          data-testid="select-business-biz-b"
+          onClick={() => {
+            mocks.setSelectedBusinessId("biz-b");
+            window.dispatchEvent(
+              new CustomEvent("sis:selected-business-changed", { detail: { businessId: "biz-b" } }),
+            );
+            setRoute("Scan");
+          }}
+        >
+          Select Shop B
+        </button>
+      ) : (
+        <>
+          <button type="button" data-testid="go-switch" onClick={() => setRoute("Switch")}>Switch business</button>
+          <PageGate route="Scan" />
+        </>
+      )}
     </BusinessContextProvider>
   );
 }
@@ -252,5 +290,43 @@ describe("BusinessContextGate persistent provider", () => {
       mocks.listMemberships.mock.invocationCallOrder[mocks.listMemberships.mock.invocationCallOrder.length - 1];
     const businessContextSet = mocks.setBusinessContext.mock.invocationCallOrder[0];
     expect(lastMembershipValidation).toBeLessThan(businessContextSet);
+  });
+
+  it("withholds gated scan content during an already-ready switch until the new business is validated", async () => {
+    selectedBusinessId = "biz-a";
+    mocks.state.businessContextReady = true;
+    mocks.state.businessDataLoaded = true;
+    mocks.getSelectedBusinessId.mockImplementation(() => selectedBusinessId);
+    mocks.setSelectedBusinessId.mockImplementation((businessId: string) => {
+      selectedBusinessId = businessId;
+    });
+    mocks.getSession.mockResolvedValue({ uid: "user-1" });
+    let resolveBizBMemberships: (memberships: ReturnType<typeof businessMembership>[]) => void = () => {};
+    mocks.listMemberships
+      .mockResolvedValueOnce([businessMembership("biz-a", "Shop A")])
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveBizBMemberships = resolve;
+      }));
+    mocks.rehydrateForUid.mockResolvedValue(undefined);
+    mocks.hasMeaningfulLegacyBlobAsync.mockResolvedValue(false);
+    mocks.hasPersistedBlobAsync.mockResolvedValue(false);
+
+    render(<ReadyBusinessSwitchHarness />);
+
+    expect(await screen.findByTestId("page")).toHaveTextContent("Scan");
+    expect(mocks.setBusinessContext).toHaveBeenCalledWith("biz-a", "user-1");
+    mocks.setBusinessContext.mockClear();
+    screen.getByTestId("go-switch").click();
+    expect(await screen.findByTestId("select-business-biz-b")).toBeInTheDocument();
+
+    screen.getByTestId("select-business-biz-b").click();
+
+    await waitFor(() => expect(screen.queryByTestId("select-business-biz-b")).toBeNull());
+    expect(screen.queryByTestId("page")).toBeNull();
+    expect(screen.getByTestId("business-loading")).toBeInTheDocument();
+
+    resolveBizBMemberships([businessMembership("biz-b", "Shop B")]);
+    await waitFor(() => expect(mocks.setBusinessContext).toHaveBeenCalledWith("biz-b", "user-1"));
+    expect(screen.getByTestId("page")).toHaveTextContent("Scan");
   });
 });

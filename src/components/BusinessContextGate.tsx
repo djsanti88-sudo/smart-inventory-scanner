@@ -254,6 +254,14 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
     );
   }
 
+  if (status === "resolving") {
+    return (
+      <div data-testid="business-loading" className="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-600">
+        Loading business data...
+      </div>
+    );
+  }
+
   // Needs a signed-in user or a selected business: a clear, actionable message (no fake context).
   if (status === "no-user" || status === "no-business") {
     return (
