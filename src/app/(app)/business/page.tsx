@@ -14,6 +14,8 @@ import { setSelectedBusinessId } from "@/lib/selectedBusiness";
 import { useRouter } from "next/navigation";
 import { useScanStore } from "@/stores/scanStore";
 
+const SELECTED_BUSINESS_CHANGED_EVENT = "sis:selected-business-changed";
+
 // Business-creation + membership flow. A signed-in user sees the businesses they belong to (with their
 // admin/counter role) and can create a new business (becoming its admin via the hardened RPC). This is
 // the foundation; Phase 2 wires the selected business into the live scan/count workflow.
@@ -192,7 +194,13 @@ export default function BusinessPage() {
               <button
                 type="button"
                 data-testid={`select-business-${m.businessId}`}
-                onClick={() => { setSelectedBusinessId(m.businessId); router.push("/scan"); }}
+                onClick={() => {
+                  setSelectedBusinessId(m.businessId);
+                  window.dispatchEvent(
+                    new CustomEvent(SELECTED_BUSINESS_CHANGED_EVENT, { detail: { businessId: m.businessId } }),
+                  );
+                  router.push("/scan");
+                }}
                 className="rounded bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700"
               >
                 Select

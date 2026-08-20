@@ -15,6 +15,7 @@ import { hasMeaningfulLegacyBlobAsync, hasPersistedBlobAsync, persistKeyForUid }
 // gate's call site only; getSession/listMemberships keep their existing contract for every other
 // caller (notably AuthGuard).
 const AUTH_BOOTSTRAP_TIMEOUT_MS = 15_000;
+const SELECTED_BUSINESS_CHANGED_EVENT = "sis:selected-business-changed";
 
 type BusinessContextStatus = "resolving" | "no-user" | "no-business" | "adopt-choice" | "ready" | "error";
 type PendingBusinessContext = { businessId: string; uid: string };
@@ -108,6 +109,20 @@ export function BusinessContextProvider({ children }: { children: React.ReactNod
     })();
     return () => { active = false; };
   }, [cloud, setBusinessContext, retryToken]);
+
+  useEffect(() => {
+    if (!cloud || typeof window === "undefined") return;
+    const rebootstrap = () => {
+      setStatus("resolving");
+      setPendingCtx(null);
+      setAdoptStatus("idle");
+      setRetryToken((t) => t + 1);
+    };
+    window.addEventListener(SELECTED_BUSINESS_CHANGED_EVENT, rebootstrap);
+    return () => {
+      window.removeEventListener(SELECTED_BUSINESS_CHANGED_EVENT, rebootstrap);
+    };
+  }, [cloud]);
 
   const runAdopt = useCallback(async () => {
     if (!pendingCtx) return;
