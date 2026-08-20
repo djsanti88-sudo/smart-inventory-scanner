@@ -1769,6 +1769,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
               entityType: "Product", entityId: product.id, operation: "SAVE_PRODUCT", payload: product,
               idempotencyKey: buildIdempotencyKey(state.businessId, event.sessionId, `${product.id}:decode:${productVersion}`, "SAVE_PRODUCT"), scanEventId: null,
+              syncLane: "independent_product",
             }),
           );
         }
@@ -5815,7 +5816,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // never reach the backend. Suffix `:provisional` so the first (placeholder) write and any
             // later distinct write to this id mint different keys; the key is still minted once here and
             // reused verbatim on every retry of THIS item, so retry dedupe is unaffected.
-            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "Product", entityId: provId, operation: "SAVE_PRODUCT", payload: provProduct, idempotencyKey: buildIdempotencyKey(bId, sId, `${provId}:provisional`, "SAVE_PRODUCT"), scanEventId: null }),
+            makeQueueItem({
+              idFactory,
+              now,
+              businessId: bId,
+              sessionId: sId,
+              entityType: "Product",
+              entityId: provId,
+              operation: "SAVE_PRODUCT",
+              payload: provProduct,
+              idempotencyKey: buildIdempotencyKey(bId, sId, `${provId}:provisional`, "SAVE_PRODUCT"),
+              scanEventId: null,
+              syncLane: freshTransferKeys ? undefined : "independent_product",
+            }),
             makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "ScanEvent", entityId: countedEvent.id, operation: "SAVE_SCAN_EVENT", payload: countedEvent, idempotencyKey: saveScanEventKey, scanEventId: countedEvent.id }),
             makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "InventoryCount", entityId: countId, operation: "INCREMENT_COUNT", payload: incPayload, idempotencyKey: countedEvent.idempotencyKey, scanEventId: countedEvent.id }),
           ]);

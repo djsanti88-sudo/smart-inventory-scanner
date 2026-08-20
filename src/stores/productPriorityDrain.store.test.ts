@@ -347,4 +347,53 @@ describe("product-priority cloud drain", () => {
     expect(target.started.map((entry) => entry.id)).toEqual(queuedBeforeDrain.map((entry) => entry.id));
     expect(target.maxActive).toBe(1);
   });
+
+  it("starts real scan-created provisional products concurrently while scan and count writes remain serial afterward", async () => {
+    const target = new ControlledTarget();
+    const store = createTestScanStore({ db: target, cloudBackend: true });
+    store.getState().setBusinessContext(BIZ, USER);
+    store.getState().updateSettings({ aiLookupEnabled: false });
+    store.setState({ online: false, sessionId: SESSION });
+
+    for (let i = 0; i < 6; i += 1) {
+      const event = store.getState().processScan(`UNKNOWN-SCAN-BACKLOG-${i}`);
+      expect(event, `unknown scan ${i} still creates a counted feed row`).toBeTruthy();
+    }
+
+    const queuedBeforeDrain = store.getState().pendingSyncQueue;
+    const productItems = queuedBeforeDrain.filter((entry) => entry.operation === "SAVE_PRODUCT");
+    const serialItems = queuedBeforeDrain.filter((entry) => entry.operation !== "SAVE_PRODUCT");
+    expect(productItems).toHaveLength(6);
+    expect(productItems.every((entry) => entry.syncLane === "independent_product")).toBe(true);
+    expect(serialItems.some((entry) => entry.operation === "SAVE_SCAN_EVENT")).toBe(true);
+    expect(serialItems.some((entry) => entry.operation === "INCREMENT_COUNT")).toBe(true);
+
+    store.getState().setOnline(true);
+
+    await waitForStarts(target, 4);
+    expect(target.started.map((entry) => entry.item.operation)).toEqual([
+      "SAVE_PRODUCT",
+      "SAVE_PRODUCT",
+      "SAVE_PRODUCT",
+      "SAVE_PRODUCT",
+    ]);
+    expect(target.maxActive).toBe(4);
+
+    for (let productIndex = 0; productIndex < productItems.length; productIndex += 1) {
+      target.started[productIndex].resolve();
+      if (productIndex + 4 < productItems.length) await waitForStarts(target, productIndex + 5);
+      await flush();
+    }
+
+    for (let i = 0; i < serialItems.length; i += 1) {
+      await waitForStarts(target, productItems.length + i + 1);
+      const started = target.started.at(-1)!;
+      expect(started.item.id).toBe(serialItems[i].id);
+      expect(started.activeAtStart).toBe(1);
+      started.resolve();
+      await flush();
+    }
+
+    expect(store.getState().pendingSyncQueue).toHaveLength(0);
+  });
 });
