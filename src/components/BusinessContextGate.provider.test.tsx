@@ -1,0 +1,185 @@
+import React from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+
+const mocks = vi.hoisted(() => {
+  const state = {
+    businessContextReady: false,
+    businessDataLoaded: false,
+  };
+  return {
+    getSession: vi.fn(),
+    listMemberships: vi.fn(),
+    setBusinessContext: vi.fn((businessId: string, uid: string) => {
+      state.businessContextReady = true;
+      state.businessDataLoaded = true;
+      return { businessId, uid };
+    }),
+    rehydrateForUid: vi.fn(),
+    hasMeaningfulLegacyBlobAsync: vi.fn(),
+    hasPersistedBlobAsync: vi.fn(),
+    getSelectedBusinessId: vi.fn(),
+    state,
+  };
+});
+
+vi.mock("@/services/auth/authMode", () => ({ isLiveAuth: () => true }));
+vi.mock("@/lib/selectedBusiness", () => ({
+  getSelectedBusinessId: () => mocks.getSelectedBusinessId(),
+  isFirebaseBackend: () => true,
+}));
+vi.mock("@/lib/auth", () => ({
+  getSession: (...args: unknown[]) => mocks.getSession(...args),
+  listMemberships: (...args: unknown[]) => mocks.listMemberships(...args),
+}));
+vi.mock("@/stores/scanPersistNamespace", () => ({
+  hasMeaningfulLegacyBlobAsync: (...args: unknown[]) => mocks.hasMeaningfulLegacyBlobAsync(...args),
+  hasPersistedBlobAsync: (...args: unknown[]) => mocks.hasPersistedBlobAsync(...args),
+  persistKeyForUid: (uid: string | null) => (uid ? `sis-scan-${uid}` : "sis-scan-v1"),
+}));
+vi.mock("@/stores/scanStore", () => ({
+  useScanStore: Object.assign(
+    (select: (state: Record<string, unknown>) => unknown) =>
+      select({
+        businessContextReady: mocks.state.businessContextReady,
+        businessDataLoaded: mocks.state.businessDataLoaded,
+        setBusinessContext: mocks.setBusinessContext,
+      }),
+    {
+      getState: () => ({
+        rehydrateForUid: mocks.rehydrateForUid,
+        adoptLegacyLocalData: vi.fn(),
+      }),
+    },
+  ),
+}));
+
+import * as BusinessContextGateModule from "./BusinessContextGate";
+
+const BusinessContextProvider =
+  (BusinessContextGateModule as typeof BusinessContextGateModule & {
+    BusinessContextProvider?: React.ComponentType<{ children: React.ReactNode }>;
+  }).BusinessContextProvider ?? React.Fragment;
+const { BusinessContextGate } = BusinessContextGateModule;
+
+function membership(userId = "user-1") {
+  return {
+    id: `active_${userId}`,
+    businessId: "biz-1",
+    businessName: "Persistent Shop",
+    userId,
+    role: "owner",
+  };
+}
+
+function PageGate({ route }: { route: string }) {
+  return (
+    <BusinessContextGate key={route}>
+      <div data-testid="page">{route}</div>
+    </BusinessContextGate>
+  );
+}
+
+function PersistentProviderHarness() {
+  const [route, setRoute] = React.useState("Scan");
+  return (
+    <BusinessContextProvider>
+      <button type="button" onClick={() => setRoute("History")}>History</button>
+      <button type="button" onClick={() => setRoute("Reconcile")}>Reconcile</button>
+      <button type="button" onClick={() => setRoute("Settings")}>Settings</button>
+      <button type="button" onClick={() => setRoute("Scan")}>Scan</button>
+      <PageGate route={route} />
+    </BusinessContextProvider>
+  );
+}
+
+afterEach(() => {
+  cleanup();
+  mocks.getSession.mockReset();
+  mocks.listMemberships.mockReset();
+  mocks.setBusinessContext.mockClear();
+  mocks.rehydrateForUid.mockReset();
+  mocks.hasMeaningfulLegacyBlobAsync.mockReset();
+  mocks.hasPersistedBlobAsync.mockReset();
+  mocks.getSelectedBusinessId.mockReset();
+  mocks.state.businessContextReady = false;
+  mocks.state.businessDataLoaded = false;
+});
+
+describe("BusinessContextGate persistent provider", () => {
+  it("keeps authenticated business bootstrap alive while page-level gates remount across navigation", async () => {
+    mocks.getSelectedBusinessId.mockReturnValue("biz-1");
+    mocks.getSession.mockResolvedValue({ uid: "user-1" });
+    mocks.listMemberships.mockResolvedValue([membership()]);
+    mocks.rehydrateForUid.mockResolvedValue(undefined);
+    mocks.hasMeaningfulLegacyBlobAsync.mockResolvedValue(false);
+    mocks.hasPersistedBlobAsync.mockResolvedValue(false);
+
+    render(<PersistentProviderHarness />);
+
+    await waitFor(() => expect(screen.getByTestId("page")).toHaveTextContent("Scan"));
+    expect(screen.queryByTestId("business-loading")).toBeNull();
+
+    for (let i = 0; i < 3; i += 1) {
+      screen.getByRole("button", { name: "History" }).click();
+      await waitFor(() => expect(screen.getByTestId("page")).toHaveTextContent("History"));
+      screen.getByRole("button", { name: "Reconcile" }).click();
+      await waitFor(() => expect(screen.getByTestId("page")).toHaveTextContent("Reconcile"));
+      screen.getByRole("button", { name: "Settings" }).click();
+      await waitFor(() => expect(screen.getByTestId("page")).toHaveTextContent("Settings"));
+      screen.getByRole("button", { name: "Scan" }).click();
+      await waitFor(() => expect(screen.getByTestId("page")).toHaveTextContent("Scan"));
+      expect(screen.queryByTestId("business-loading")).toBeNull();
+    }
+
+    expect(mocks.getSession).toHaveBeenCalledTimes(1);
+    expect(mocks.listMemberships).toHaveBeenCalledTimes(1);
+    expect(mocks.rehydrateForUid).toHaveBeenCalledTimes(1);
+    expect(mocks.setBusinessContext).toHaveBeenCalledTimes(1);
+    expect(mocks.setBusinessContext).toHaveBeenCalledWith("biz-1", "user-1");
+  });
+
+  it("fails closed when the selected business is not in the authenticated membership list", async () => {
+    mocks.getSelectedBusinessId.mockReturnValue("biz-1");
+    mocks.getSession.mockResolvedValue({ uid: "user-1" });
+    mocks.listMemberships.mockResolvedValue([]);
+    mocks.rehydrateForUid.mockResolvedValue(undefined);
+    mocks.hasMeaningfulLegacyBlobAsync.mockResolvedValue(false);
+    mocks.hasPersistedBlobAsync.mockResolvedValue(false);
+
+    render(
+      <BusinessContextProvider>
+        <BusinessContextGate>
+          <div data-testid="page">Scan</div>
+        </BusinessContextGate>
+      </BusinessContextProvider>,
+    );
+
+    expect(await screen.findByTestId("business-context-banner")).toBeInTheDocument();
+    expect(screen.queryByTestId("page")).toBeNull();
+    expect(mocks.rehydrateForUid).not.toHaveBeenCalled();
+    expect(mocks.setBusinessContext).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the selected membership belongs to a different signed-in user", async () => {
+    mocks.getSelectedBusinessId.mockReturnValue("biz-1");
+    mocks.getSession.mockResolvedValue({ uid: "user-2" });
+    mocks.listMemberships.mockResolvedValue([membership("user-1")]);
+    mocks.rehydrateForUid.mockResolvedValue(undefined);
+    mocks.hasMeaningfulLegacyBlobAsync.mockResolvedValue(false);
+    mocks.hasPersistedBlobAsync.mockResolvedValue(false);
+
+    render(
+      <BusinessContextProvider>
+        <BusinessContextGate>
+          <div data-testid="page">Scan</div>
+        </BusinessContextGate>
+      </BusinessContextProvider>,
+    );
+
+    expect(await screen.findByTestId("business-context-banner")).toBeInTheDocument();
+    expect(screen.queryByTestId("page")).toBeNull();
+    expect(mocks.rehydrateForUid).not.toHaveBeenCalled();
+    expect(mocks.setBusinessContext).not.toHaveBeenCalled();
+  });
+});
