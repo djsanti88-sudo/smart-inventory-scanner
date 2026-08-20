@@ -118,7 +118,9 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
 
   // 10. Open History/session detail before finishing: the active session's scan timeline must be
   // readable from Firestore after reload, not just the product-count summary.
-  await page.goto("/history");
+  await page.getByRole("link", { name: "History" }).click();
+  await expect(page).toHaveURL(/\/history$/);
+  await expect(page.getByTestId("business-loading")).toHaveCount(0);
   await expect(page.getByTestId("history-table")).toBeVisible();
   const activeHistoryRow = page.locator('[data-testid^="history-row-"]').first();
   await expect(activeHistoryRow).toContainText("4");
@@ -129,7 +131,9 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
   await expect(page.getByTestId("session-timeline-table").locator("tbody tr")).toHaveCount(4);
   await expect(page.getByTestId("session-timeline-table")).toContainText(UNKNOWN_CODE);
   await page.screenshot({ path: `${PROOF}/05b-history-detail-timeline.png`, fullPage: true });
-  await page.goto("/scan");
+  await page.getByRole("link", { name: "Scan", exact: true }).click();
+  await expect(page).toHaveURL(/\/scan$/);
+  await expect(page.getByTestId("business-loading")).toHaveCount(0);
 
   // 11. Finish the session (persists completed state + audit), then export a CSV.
   await page.getByText("Sessions and export", { exact: true }).click();

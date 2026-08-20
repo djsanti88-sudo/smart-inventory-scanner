@@ -7,6 +7,32 @@ import {
 } from "./admin";
 
 const SELECTED_BUSINESS_KEY = "sis-selected-business-v1";
+const LEGACY_PERSIST_KEY = "sis-scan-v1";
+const PERSIST_DB_NAME = "sis-persist";
+const PERSIST_STORE_NAME = "kv";
+
+type PersistSummary = {
+  businessId: string;
+  userId: string | null;
+  productNames: string[];
+  productBusinessIds: string[];
+  scanBusinessIds: string[];
+  scanCodes: string[];
+  countBusinessIds: string[];
+  countProductIds: string[];
+  reviewBusinessIds: string[];
+  reviewCodes: string[];
+};
+
+type PersistSnapshot = {
+  inspectedKeys: string[];
+  localStorage: Record<string, string | null>;
+  indexedDB: Record<string, string | null>;
+  parsed: Record<string, Partial<Record<"localStorage" | "indexedDB", PersistSummary | null>>>;
+};
+
+const persistKeyForUid = (uid: string) => `sis-scan-${uid}`;
+const persistStampKey = (key: string) => `${key}::stamp`;
 
 async function signIn(page: Page, fixture: AccountTenantFixture) {
   await page.goto("/login");
@@ -94,6 +120,233 @@ async function expectActiveTenantOnly(
   expect(state.reviewCodes).not.toContain(`${foreign.label}-review-marker`);
 }
 
+async function readPersistSnapshot(page: Page): Promise<PersistSnapshot> {
+  const keys = [
+    persistKeyForUid(TWO_ACCOUNT_A.uid),
+    persistStampKey(persistKeyForUid(TWO_ACCOUNT_A.uid)),
+    persistKeyForUid(TWO_ACCOUNT_B.uid),
+    persistStampKey(persistKeyForUid(TWO_ACCOUNT_B.uid)),
+    LEGACY_PERSIST_KEY,
+    persistStampKey(LEGACY_PERSIST_KEY),
+  ];
+
+  return page.evaluate(
+    async ({ keys, dbName, storeName }) => {
+      type Summary = {
+        businessId: string;
+        userId: string | null;
+        productNames: string[];
+        productBusinessIds: string[];
+        scanBusinessIds: string[];
+        scanCodes: string[];
+        countBusinessIds: string[];
+        countProductIds: string[];
+        reviewBusinessIds: string[];
+        reviewCodes: string[];
+      };
+      type Snapshot = {
+        inspectedKeys: string[];
+        localStorage: Record<string, string | null>;
+        indexedDB: Record<string, string | null>;
+        parsed: Record<string, Partial<Record<"localStorage" | "indexedDB", Summary | null>>>;
+      };
+
+      const decodeRaw = (stored: string | null): string | null => {
+        if (stored === null) return null;
+        if (!stored.startsWith("sisv1:")) return stored;
+        const rest = stored.slice("sisv1:".length);
+        const separator = rest.indexOf(":");
+        if (separator === -1) return stored;
+        return rest.slice(separator + 1);
+      };
+
+      const asArray = <T>(value: T[] | undefined): T[] => (Array.isArray(value) ? value : []);
+      const summarize = (stored: string | null): Summary | null => {
+        const raw = decodeRaw(stored);
+        if (raw === null) return null;
+        try {
+          const parsed = JSON.parse(raw) as {
+            state?: {
+              businessId?: string;
+              userId?: string | null;
+              products?: Array<{ businessId?: string; name?: string }>;
+              scanFeed?: Array<{ businessId?: string; cleanCode?: string }>;
+              finalCounts?: Array<{ businessId?: string; productId?: string }>;
+              needsReviewQueue?: Array<{ businessId?: string; cleanCode?: string }>;
+            };
+          };
+          const state = parsed.state ?? {};
+          return {
+            businessId: state.businessId ?? "",
+            userId: state.userId ?? null,
+            productNames: asArray(state.products).map((p) => p.name ?? ""),
+            productBusinessIds: asArray(state.products).map((p) => p.businessId ?? ""),
+            scanBusinessIds: asArray(state.scanFeed).map((e) => e.businessId ?? ""),
+            scanCodes: asArray(state.scanFeed).map((e) => e.cleanCode ?? ""),
+            countBusinessIds: asArray(state.finalCounts).map((c) => c.businessId ?? ""),
+            countProductIds: asArray(state.finalCounts).map((c) => c.productId ?? ""),
+            reviewBusinessIds: asArray(state.needsReviewQueue).map((r) => r.businessId ?? ""),
+            reviewCodes: asArray(state.needsReviewQueue).map((r) => r.cleanCode ?? ""),
+          };
+        } catch {
+          return null;
+        }
+      };
+
+      const localStorageValues: Record<string, string | null> = {};
+      for (const key of keys) localStorageValues[key] = window.localStorage.getItem(key);
+
+      const indexedDbValues: Record<string, string | null> = Object.fromEntries(keys.map((key) => [key, null]));
+      if ("indexedDB" in window) {
+        const hasKnownDb = await (async () => {
+          if (typeof indexedDB.databases !== "function") return true;
+          try {
+            const databases = await indexedDB.databases();
+            return databases.some((db) => db.name === dbName);
+          } catch {
+            return true;
+          }
+        })();
+
+        if (hasKnownDb) {
+          await new Promise<void>((resolve) => {
+            const open = indexedDB.open(dbName);
+            open.onerror = () => resolve();
+            open.onupgradeneeded = () => {
+              open.transaction?.abort();
+              resolve();
+            };
+            open.onsuccess = () => {
+              const db = open.result;
+              if (!db.objectStoreNames.contains(storeName)) {
+                db.close();
+                resolve();
+                return;
+              }
+              const tx = db.transaction(storeName, "readonly");
+              const store = tx.objectStore(storeName);
+              for (const key of keys) {
+                const request = store.get(key);
+                request.onsuccess = () => {
+                  indexedDbValues[key] = typeof request.result === "string" ? request.result : null;
+                };
+              }
+              tx.oncomplete = () => {
+                db.close();
+                resolve();
+              };
+              tx.onerror = () => {
+                db.close();
+                resolve();
+              };
+              tx.onabort = () => {
+                db.close();
+                resolve();
+              };
+            };
+          });
+        }
+      }
+
+      const parsed: Snapshot["parsed"] = {};
+      for (const key of keys) {
+        parsed[key] = {
+          localStorage: summarize(localStorageValues[key]),
+          indexedDB: summarize(indexedDbValues[key]),
+        };
+      }
+
+      return {
+        inspectedKeys: keys,
+        localStorage: localStorageValues,
+        indexedDB: indexedDbValues,
+        parsed,
+      };
+    },
+    { keys, dbName: PERSIST_DB_NAME, storeName: PERSIST_STORE_NAME },
+  );
+}
+
+function persistedSummaries(snapshot: PersistSnapshot, key: string): PersistSummary[] {
+  return Object.values(snapshot.parsed[key] ?? {}).filter((s): s is PersistSummary => Boolean(s));
+}
+
+function allPersistedBusinessIds(summary: PersistSummary): string[] {
+  return [
+    summary.businessId,
+    ...summary.productBusinessIds,
+    ...summary.scanBusinessIds,
+    ...summary.countBusinessIds,
+    ...summary.reviewBusinessIds,
+  ].filter(Boolean);
+}
+
+function expectSummaryExcludes(summary: PersistSummary, foreign: AccountTenantFixture) {
+  expect(allPersistedBusinessIds(summary)).not.toContain(foreign.businessId);
+  expect(summary.productNames).not.toContain(foreign.productName);
+  expect(summary.scanCodes).not.toContain(foreign.markerBarcode);
+  expect(summary.scanCodes).not.toContain(foreign.scanBarcode);
+  expect(summary.countProductIds).not.toContain(foreign.productId);
+  expect(summary.reviewCodes).not.toContain(`${foreign.label}-review-marker`);
+}
+
+function expectPersistedKeyIsNamespaced(
+  snapshot: PersistSnapshot,
+  owner: AccountTenantFixture,
+  foreign: AccountTenantFixture,
+) {
+  for (const summary of persistedSummaries(snapshot, persistKeyForUid(owner.uid))) {
+    expectSummaryExcludes(summary, foreign);
+    expect(allPersistedBusinessIds(summary).every((id) => id === owner.businessId)).toBe(true);
+  }
+}
+
+async function expectPersistenceTenantOnly(
+  page: Page,
+  active: AccountTenantFixture,
+  foreign: AccountTenantFixture,
+) {
+  const activeKey = persistKeyForUid(active.uid);
+  await expect
+    .poll(
+      async () => {
+        const snapshot = await readPersistSnapshot(page);
+        return persistedSummaries(snapshot, activeKey).some((summary) => {
+          return (
+            allPersistedBusinessIds(summary).includes(active.businessId) &&
+            summary.productNames.includes(active.productName) &&
+            summary.scanCodes.includes(active.markerBarcode)
+          );
+        });
+      },
+      { message: `${active.label} per-uid persisted blob should hydrate/write`, timeout: 15_000 },
+    )
+    .toBe(true);
+
+  const snapshot = await readPersistSnapshot(page);
+  expect(snapshot.inspectedKeys).toEqual([
+    persistKeyForUid(TWO_ACCOUNT_A.uid),
+    persistStampKey(persistKeyForUid(TWO_ACCOUNT_A.uid)),
+    persistKeyForUid(TWO_ACCOUNT_B.uid),
+    persistStampKey(persistKeyForUid(TWO_ACCOUNT_B.uid)),
+    LEGACY_PERSIST_KEY,
+    persistStampKey(LEGACY_PERSIST_KEY),
+  ]);
+
+  expectPersistedKeyIsNamespaced(snapshot, TWO_ACCOUNT_A, TWO_ACCOUNT_B);
+  expectPersistedKeyIsNamespaced(snapshot, TWO_ACCOUNT_B, TWO_ACCOUNT_A);
+
+  for (const summary of persistedSummaries(snapshot, LEGACY_PERSIST_KEY)) {
+    expectSummaryExcludes(summary, TWO_ACCOUNT_A);
+    expectSummaryExcludes(summary, TWO_ACCOUNT_B);
+    expect(allPersistedBusinessIds(summary)).not.toContain(TWO_ACCOUNT_A.businessId);
+    expect(allPersistedBusinessIds(summary)).not.toContain(TWO_ACCOUNT_B.businessId);
+  }
+
+  const rawActiveBlobs = [snapshot.localStorage[activeKey], snapshot.indexedDB[activeKey]];
+  expect(rawActiveBlobs.some((raw) => raw !== null)).toBe(true);
+}
+
 async function expectEmulatorTenantScoped(
   active: AccountTenantFixture,
   foreign: AccountTenantFixture,
@@ -129,6 +382,7 @@ test("same browser sign-in A to B to A never leaks selected business, store stat
   await scan(page, TWO_ACCOUNT_A.scanBarcode);
   await waitDrained(page);
   await expectActiveTenantOnly(page, TWO_ACCOUNT_A, TWO_ACCOUNT_B, "2");
+  await expectPersistenceTenantOnly(page, TWO_ACCOUNT_A, TWO_ACCOUNT_B);
   await expectEmulatorTenantScoped(TWO_ACCOUNT_A, TWO_ACCOUNT_B, 2);
 
   await signOutVisibly(page);
@@ -139,6 +393,7 @@ test("same browser sign-in A to B to A never leaks selected business, store stat
   await scan(page, TWO_ACCOUNT_B.scanBarcode);
   await waitDrained(page);
   await expectActiveTenantOnly(page, TWO_ACCOUNT_B, TWO_ACCOUNT_A, "2");
+  await expectPersistenceTenantOnly(page, TWO_ACCOUNT_B, TWO_ACCOUNT_A);
   await expectEmulatorTenantScoped(TWO_ACCOUNT_B, TWO_ACCOUNT_A, 2);
 
   await signOutVisibly(page);
@@ -146,5 +401,6 @@ test("same browser sign-in A to B to A never leaks selected business, store stat
 
   await signIn(page, TWO_ACCOUNT_A);
   await expectActiveTenantOnly(page, TWO_ACCOUNT_A, TWO_ACCOUNT_B, "2");
+  await expectPersistenceTenantOnly(page, TWO_ACCOUNT_A, TWO_ACCOUNT_B);
   await expectEmulatorTenantScoped(TWO_ACCOUNT_A, TWO_ACCOUNT_B, 2);
 });
