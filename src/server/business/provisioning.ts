@@ -100,13 +100,13 @@ export async function provisionBusiness(
         tx.set(profileRef, profilePayload(identity, !profile.exists), { merge: true });
         return { status: "existing", businessId: preferred };
       }
-      if (validBusinessIds.length > 0 && (preferred || validBusinessIds.length > 1)) {
-        tx.set(profileRef, profilePayload(identity, !profile.exists), { merge: true });
-        return { status: "selection_required", businessIds: validBusinessIds };
-      }
       if (validBusinessIds.length === 1) {
         tx.set(profileRef, profilePayload(identity, !profile.exists), { merge: true });
         return { status: "existing", businessId: validBusinessIds[0] };
+      }
+      if (validBusinessIds.length > 1) {
+        tx.set(profileRef, profilePayload(identity, !profile.exists), { merge: true });
+        return { status: "selection_required", businessIds: validBusinessIds };
       }
 
       const deterministicBusinessId = defaultBusinessIdFor(identity.uid);
