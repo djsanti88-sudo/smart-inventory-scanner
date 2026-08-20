@@ -1,3 +1,6 @@
+> FROZEN ARCHIVE (2026-08-19). Historical log; cites the retired ENGINEERING_DOCTRINE.md. Living
+> risks now live in REPO_HEALTH.md (Known issues); decisions in DECISIONS.md.
+
 # Risk Register
 
 Per `ENGINEERING_DOCTRINE.md`. Significant tasks log risks here: risk, severity, likelihood, mitigation, approval, status.

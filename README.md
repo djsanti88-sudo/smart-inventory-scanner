@@ -17,7 +17,8 @@ tires, auto parts, supplements, tools, retail, and more (multi-trade, tires are 
 - Vitest (node project for pure services, jsdom for components/stores), Playwright for E2E proof
 - Turso/libsql + local SQLite for the 78,000+ tire and 4M+ retail barcodes, decode cache, and ladder usage
 - Firebase Auth/Firestore foundation (emulator-first) for the multi-tenant backend path
-- Vercel for preview deploys (production promotion is owner-gated)
+- Vercel: PR previews via the GitHub connection; merging to `master` auto-deploys production
+  (owner-gated action, see `docs/DEPLOY_TRUTH.md`)
 
 ## Getting started
 

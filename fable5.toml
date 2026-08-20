@@ -193,7 +193,7 @@ patterns = ["package.json", "package-lock.json", "next.config.*", "playwright*.t
 agents = ["release-hygiene", "security", "observability", "performance-device"]
 
 [[routes]]
-patterns = ["docs/**", "PLAN_TEMPLATE.md", "PROGRESS.md", "RISK_REGISTER.md"]
+patterns = ["docs/**", "PROGRESS.md"]
 agents = ["project-manager", "simplicity-enforcer", "budget-analyst"]
 
 [[routes]]
