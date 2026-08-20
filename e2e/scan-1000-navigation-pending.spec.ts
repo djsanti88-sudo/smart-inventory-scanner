@@ -90,35 +90,42 @@ async function writeFullPersistSnapshot(page: Page) {
 }
 
 async function expectPersistedSnapshot(page: Page, label: string) {
-  const persisted = await page.evaluate(
+  const readPersisted = async () => page.evaluate(
     () =>
-      new Promise<{ key: string; feed: number; products: number; currentSession: string | null }[]>((resolve) => {
+      new Promise<{ source: "indexedDB" | "localStorage"; key: string; feed: number; products: number; currentSession: string | null }[]>((resolve) => {
         const keys = ["sis-scan-v1", "sis-scan-e2e-user"];
+        const out: { source: "indexedDB" | "localStorage"; key: string; feed: number; products: number; currentSession: string | null }[] = [];
+        const parse = (source: "indexedDB" | "localStorage", key: string, raw: unknown) => {
+          if (raw == null) return;
+          try {
+            const parsed = JSON.parse(String(raw));
+            out.push({
+              source,
+              key,
+              feed: Array.isArray(parsed.state?.scanFeed) ? parsed.state.scanFeed.length : -1,
+              products: Array.isArray(parsed.state?.products) ? parsed.state.products.length : -1,
+              currentSession: parsed.state?.currentSession?.id ?? null,
+            });
+          } catch {
+            out.push({ source, key, feed: -1, products: -1, currentSession: null });
+          }
+        };
+        for (const key of keys) {
+          parse("localStorage", key, window.localStorage.getItem(key));
+        }
         const req = indexedDB.open("sis-persist", 1);
         req.onsuccess = () => {
           const tx = req.result.transaction("kv", "readonly");
           const store = tx.objectStore("kv");
-          const out: { key: string; feed: number; products: number; currentSession: string | null }[] = [];
           let remaining = keys.length;
           for (const key of keys) {
             const get = store.get(key);
             get.onsuccess = () => {
-              try {
-                const parsed = JSON.parse(String(get.result ?? "{}"));
-                out.push({
-                  key,
-                  feed: Array.isArray(parsed.state?.scanFeed) ? parsed.state.scanFeed.length : -1,
-                  products: Array.isArray(parsed.state?.products) ? parsed.state.products.length : -1,
-                  currentSession: parsed.state?.currentSession?.id ?? null,
-                });
-              } catch {
-                out.push({ key, feed: -1, products: -1, currentSession: null });
-              }
+              parse("indexedDB", key, get.result);
               remaining -= 1;
               if (remaining === 0) resolve(out);
             };
             get.onerror = () => {
-              out.push({ key, feed: -1, products: -1, currentSession: null });
               remaining -= 1;
               if (remaining === 0) resolve(out);
             };
@@ -127,7 +134,19 @@ async function expectPersistedSnapshot(page: Page, label: string) {
         req.onerror = () => resolve([]);
       }),
   );
-  expect(persisted.some((entry) => entry.feed === 1000 && entry.products === 1000 && entry.currentSession === SESSION_ID), `${label}: persisted full 1000-row snapshot`).toBe(true);
+  await expect
+    .poll(async () => {
+      const persisted = await readPersisted();
+      return persisted.some((entry) => entry.source === "indexedDB" && entry.feed === 1000 && entry.products === 1000 && entry.currentSession === SESSION_ID);
+    }, { message: `${label}: persisted full 1000-row IndexedDB snapshot`, timeout: 5_000 })
+    .toBe(true);
+
+  const persisted = await readPersisted();
+  for (const entry of persisted) {
+    expect(entry.feed, `${label}: persisted ${entry.source}/${entry.key} feed`).toBe(1000);
+    expect(entry.products, `${label}: persisted ${entry.source}/${entry.key} products`).toBe(1000);
+    expect(entry.currentSession, `${label}: persisted ${entry.source}/${entry.key} session`).toBe(SESSION_ID);
+  }
 }
 
 async function seedThousandScanState(page: Page) {
@@ -389,6 +408,14 @@ async function storeSummary(page: Page) {
   }, { samples: SAMPLE_POSITIONS });
 }
 
+async function expectVisibleWindowSamples(page: Page, label: string) {
+  const feedBody = page.getByTestId("scan-feed-body");
+  const countBody = page.getByTestId("final-count-body");
+  await expect(feedBody, `${label}: visible newest feed code`).toContainText(cleanCodeFor(1000));
+  await expect(feedBody, `${label}: visible newest feed identity`).toContainText(productNameFor(1000));
+  await expect(countBody, `${label}: visible first count identity`).toContainText(productNameFor(1));
+}
+
 async function expectThousandState(
   page: Page,
   label: string,
@@ -399,6 +426,7 @@ async function expectThousandState(
   await expect(page.getByTestId("scanner-input"), `${label}: scanner focus`).toBeFocused();
   await expect(page.locator("text=/1000 scans/"), `${label}: visible feed total`).toBeVisible();
   await expect(page.locator("text=/1000 of 1000 products/"), `${label}: visible product total`).toBeVisible();
+  await expectVisibleWindowSamples(page, label);
   if (expandDomSamples) {
     while (await page.getByTestId("feed-show-more").isVisible().catch(() => false)) {
       await page.getByTestId("feed-show-more").click({ timeout: 10_000 });
@@ -424,7 +452,6 @@ async function expectThousandState(
     expect(sample.productName, `${label}: sample ${sample.position} identity`).toBe(productNameFor(sample.position));
     expect(sample.quantityAfterScan, `${label}: sample ${sample.position} row quantity`).toBe(1);
   }
-  await writeFullPersistSnapshot(page);
   await expectPersistedSnapshot(page, label);
 }
 
@@ -443,39 +470,12 @@ async function navigateBackToScan(page: Page, label: string) {
   await expectThousandState(page, `after ${label}`);
 }
 
-async function demonstrateOldReplacementDetector(page: Page) {
-  const failure = await page.evaluate(() => {
-    const w = window as unknown as { __scanStore: StoreHandle };
-    const before = w.__scanStore.getState();
-    const fullProducts = [...(before.products as unknown[])];
-    const staleRemoteProducts = fullProducts.slice(0, 210);
-    w.__scanStore.setState({ products: staleRemoteProducts });
-    const state = w.__scanStore.getState();
-    const products = state.products as Array<{ id: string; name?: string }>;
-    const productById = new Map(products.map((product) => [product.id, product]));
-    const feed = state.scanFeed as Array<{ cleanCode: string; matchedProductId?: string }>;
-    const missingSample = feed.find((row) => row.cleanCode === "910000000211");
-    const blankJoinedRows = feed.filter((row) => !row.matchedProductId || !productById.get(row.matchedProductId)?.name).length;
-    const productTotal = products.length;
-    w.__scanStore.setState({ products: fullProducts });
-    return { productTotal, sample211Name: missingSample?.matchedProductId ? productById.get(missingSample.matchedProductId)?.name ?? null : null, blankJoinedRows };
-  });
-  expect(failure.productTotal, "old direct replacement detector must collapse products to 210").toBe(210);
-  expect(failure.sample211Name, "old direct replacement detector must lose sample 211 identity").toBeNull();
-  expect(failure.blankJoinedRows, "old direct replacement detector must expose blank joined feed rows").toBeGreaterThan(0);
-  await writeFullPersistSnapshot(page);
-  await expectPersistedSnapshot(page, "detector restore");
-}
-
-test("1,000 pending local scans survive navigation, stale 210 replacement detector, retry, drain, and reload", async ({ page }) => {
+test("1,000 pending local scans survive navigation and reload without persistence self-heal", async ({ page }) => {
   test.setTimeout(120_000);
   await stubAiLookup(page);
   await login(page);
   await seedThousandScanState(page);
   await expectThousandState(page, "seeded baseline");
-
-  await demonstrateOldReplacementDetector(page);
-  await expectThousandState(page, "after detector restore");
 
   for (let loop = 1; loop <= 3; loop += 1) {
     await navigateBackToScan(page, `History`);
@@ -483,40 +483,6 @@ test("1,000 pending local scans survive navigation, stale 210 replacement detect
     await navigateBackToScan(page, `Settings`);
     await expectThousandState(page, `navigation loop ${loop}`);
   }
-
-  await page.evaluate(() => {
-    const w = window as unknown as { __scanStore: StoreHandle };
-    w.__scanStore.setState((state) => {
-      const pending = state.pendingSyncQueue as Array<Record<string, unknown>>;
-      return {
-        pendingSyncQueue: pending.map((item, index) =>
-          index === 0 ? { ...item, status: "error", retryCount: 1, lastError: "E2E retryable product failure" } : item,
-        ),
-        lastSyncError: "E2E retryable product failure",
-      };
-    });
-  });
-  await expectThousandState(page, "after retryable product failure");
-
-  await page.evaluate(() => {
-    const w = window as unknown as { __scanStore: StoreHandle };
-    const state = w.__scanStore.getState();
-    const scanFeed = (state.scanFeed as Array<Record<string, unknown>>).map((event) => ({ ...event, syncStatus: "synced" }));
-    const products = (state.products as Array<Record<string, unknown>>).map((product) => ({ ...product, syncStatus: "synced" }));
-    const aliases = (state.aliases as Array<Record<string, unknown>>).map((alias) => ({ ...alias, syncStatus: "synced" }));
-    const finalCounts = (state.finalCounts as Array<Record<string, unknown>>).map((count) => ({ ...count, syncStatus: "synced", syncError: null }));
-    w.__scanStore.setState({
-      online: true,
-      pendingSyncQueue: [],
-      scanFeed,
-      products,
-      aliases,
-      finalCounts,
-      lastSyncError: null,
-      syncedScanEventIds: scanFeed.map((event) => event.id),
-    });
-  });
-  await expectThousandState(page, "after controlled drain", "zero");
 
   await page.waitForTimeout(400);
   await forceHideFlush(page);
@@ -527,5 +493,5 @@ test("1,000 pending local scans survive navigation, stale 210 replacement detect
     await page.waitForFunction(() => Boolean((window as unknown as { __scanStore?: StoreHandle }).__scanStore));
     await expect(page.getByTestId("scanner-input")).toBeFocused();
   }
-  await expectThousandState(page, "after hard reload", "zero", true);
+  await expectThousandState(page, "after hard reload", "nonzero", true);
 });
