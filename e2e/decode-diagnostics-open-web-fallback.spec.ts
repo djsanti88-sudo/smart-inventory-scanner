@@ -105,5 +105,8 @@ test("decode diagnostics + open-web fallback: fast path intact, honest reasons, 
   await page.goto("/review");
   const unlistedRow = page.getByTestId(`review-row-${UNLISTED}`);
   await expect(unlistedRow).toBeVisible();
-  await expect(unlistedRow.getByTestId("review-reason")).toContainText("no product matched");
+  // The row shows the deterministic pre-decode reason until the mocked decode settles; on a slow CI
+  // runner that flip can outlive the 5s default (flaked on the post-merge master run 2026-08-19, same
+  // class as phase1-benchmark). Still requires the decode-settled reason, never the interim one.
+  await expect(unlistedRow.getByTestId("review-reason")).toContainText("no product matched", { timeout: 20000 });
 });
