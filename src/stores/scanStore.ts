@@ -2181,18 +2181,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         unflushedCount = 0;
       };
 
-      for (const item of batch) {
+      const contextStillActive = () => {
+        if (activeDrainToken !== token) return false;
+        const live = get();
+        return (
+          live.businessContextReady &&
+          live.businessId === activeBusinessId &&
+          live.userId === activeUserId
+        );
+      };
+
+      const applySyncItem = async (item: PendingSyncItem): Promise<"applied" | "failed" | "stopped"> => {
         // Token mismatch stops SENDING new applies; whatever already succeeded is saved by the flush
         // below regardless (see flushProgress comment).
-        if (activeDrainToken !== token) break;
-        const live = get();
-        if (
-          !live.businessContextReady ||
-          live.businessId !== activeBusinessId ||
-          live.userId !== activeUserId
-        ) {
-          break;
-        }
+        if (!contextStillActive()) return "stopped";
         const itemIdentity = queueItemIdentity(item);
         let res;
         try {
@@ -2239,6 +2241,42 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }
         unflushedCount += 1;
         if (unflushedCount >= PROGRESS_FLUSH_CHUNK) flushProgress();
+        return res.ok ? "applied" : "failed";
+      };
+
+      const productItems = batch.filter((item) => item.operation === "SAVE_PRODUCT");
+      const nonProductItems = batch.filter((item) => item.operation !== "SAVE_PRODUCT");
+      if (productItems.length > 0) {
+        const PRODUCT_DRAIN_CONCURRENCY = 4;
+        const groups = new Map<string, PendingSyncItem[]>();
+        for (const item of productItems) {
+          const group = groups.get(item.entityId);
+          if (group) group.push(item);
+          else groups.set(item.entityId, [item]);
+        }
+        const productGroups = [...groups.values()];
+        let nextGroupIndex = 0;
+        const runProductWorker = async () => {
+          while (contextStillActive()) {
+            const group = productGroups[nextGroupIndex];
+            nextGroupIndex += 1;
+            if (!group) return;
+            for (const item of group) {
+              const result = await applySyncItem(item);
+              if (result !== "applied") break;
+            }
+          }
+        };
+        await Promise.all(
+          Array.from({ length: Math.min(PRODUCT_DRAIN_CONCURRENCY, productGroups.length) }, () =>
+            runProductWorker(),
+          ),
+        );
+      }
+
+      for (const item of nonProductItems) {
+        const result = await applySyncItem(item);
+        if (result === "stopped") break;
       }
       flushProgress();
     };

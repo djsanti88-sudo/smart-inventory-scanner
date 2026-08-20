@@ -1,0 +1,266 @@
+import { describe, expect, it } from "vitest";
+import { createTestScanStore } from "@/stores/scanStore";
+import type { SyncTarget } from "@/services/db/syncTarget";
+import type { SyncResult } from "@/services/mockDb";
+import type { PendingSyncItem, SyncOperation } from "@/types";
+
+const BIZ = "biz-product-priority";
+const USER = "user-product-priority";
+const SESSION = "session-product-priority";
+
+type StartedApply = {
+  item: PendingSyncItem;
+  activeAtStart: number;
+  resolve: (result?: SyncResult) => void;
+};
+
+class ControlledTarget implements SyncTarget {
+  readonly started: StartedApply[] = [];
+  readonly finished: PendingSyncItem[] = [];
+  maxActive = 0;
+  private active = 0;
+
+  apply(item: PendingSyncItem): Promise<SyncResult> {
+    this.active += 1;
+    this.maxActive = Math.max(this.maxActive, this.active);
+    return new Promise((resolve) => {
+      this.started.push({
+        item,
+        activeAtStart: this.active,
+        resolve: (result = { ok: true, alreadyApplied: false }) => {
+          this.active -= 1;
+          this.finished.push(item);
+          resolve(result);
+        },
+      });
+    });
+  }
+
+  resolve(entityId: string, result?: SyncResult) {
+    const apply = this.started.find((entry) => entry.item.entityId === entityId);
+    expect(apply, `${entityId} has started`).toBeDefined();
+    apply!.resolve(result);
+  }
+
+  resolveAll(result?: SyncResult) {
+    for (const apply of [...this.started]) {
+      if (!this.finished.includes(apply.item)) apply.resolve(result);
+    }
+  }
+
+  setFailure() {}
+  reset() {}
+}
+
+class AutoResolvingTarget implements SyncTarget {
+  readonly started: PendingSyncItem[] = [];
+  maxActive = 0;
+  private active = 0;
+
+  apply(item: PendingSyncItem): Promise<SyncResult> {
+    this.active += 1;
+    this.maxActive = Math.max(this.maxActive, this.active);
+    this.started.push(item);
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        this.active -= 1;
+        resolve({ ok: true, alreadyApplied: false });
+      }, 0);
+    });
+  }
+
+  setFailure() {}
+  reset() {}
+}
+
+const flush = async (ticks = 20) => {
+  for (let i = 0; i < ticks; i += 1) {
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+};
+
+const waitForStarts = async (target: ControlledTarget, count: number) => {
+  for (let i = 0; i < 20 && target.started.length < count; i += 1) {
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  expect(target.started.map((entry) => entry.item.entityId)).toHaveLength(count);
+};
+
+function item(operation: SyncOperation, entityId: string, extra?: Partial<PendingSyncItem>): PendingSyncItem {
+  const entityType: PendingSyncItem["entityType"] =
+    operation === "SAVE_PRODUCT" ? "Product" :
+    operation === "SAVE_SCAN_EVENT" ? "ScanEvent" :
+    operation === "INCREMENT_COUNT" ? "InventoryCount" :
+    operation === "SAVE_UNKNOWN_SCAN" ? "UnknownCodeReview" :
+    operation === "RESOLVE_ALIAS" ? "Alias" :
+    "CountSession";
+  return {
+    id: `q-${entityId}-${operation}`,
+    businessId: BIZ,
+    sessionId: SESSION,
+    entityType,
+    entityId,
+    operation,
+    payload: { id: entityId, businessId: BIZ, sessionId: SESSION },
+    status: "pending",
+    retryCount: 0,
+    lastError: null,
+    createdAt: "2026-08-20T00:00:00.000Z",
+    updatedAt: "2026-08-20T00:00:00.000Z",
+    idempotencyKey: `${BIZ}:${SESSION}:${entityId}:${operation}`,
+    scanEventId: operation === "SAVE_SCAN_EVENT" || operation === "INCREMENT_COUNT" ? entityId : null,
+    ...extra,
+  };
+}
+
+function startStore(target: SyncTarget, queue: PendingSyncItem[]) {
+  const store = createTestScanStore({ db: target, cloudBackend: true });
+  store.getState().setBusinessContext(BIZ, USER);
+  store.setState({ pendingSyncQueue: queue, sessionId: SESSION });
+  store.getState().retrySync();
+  return store;
+}
+
+describe("product-priority cloud drain", () => {
+  it("starts independent SAVE_PRODUCT writes ahead of queued non-product work with at most four active applies", async () => {
+    const target = new ControlledTarget();
+    const queue = [
+      item("SAVE_SCAN_EVENT", "scan-before-products"),
+      item("SAVE_PRODUCT", "product-1"),
+      item("SAVE_PRODUCT", "product-2"),
+      item("SAVE_PRODUCT", "product-3"),
+      item("SAVE_PRODUCT", "product-4"),
+      item("SAVE_PRODUCT", "product-5"),
+    ];
+    startStore(target, queue);
+
+    await waitForStarts(target, 4);
+
+    expect(target.started.map((entry) => entry.item.entityId)).toEqual([
+      "product-1",
+      "product-2",
+      "product-3",
+      "product-4",
+    ]);
+    expect(target.maxActive).toBe(4);
+
+    target.resolve("product-1");
+    await waitForStarts(target, 5);
+    expect(target.started[4].item.entityId).toBe("product-5");
+    expect(target.maxActive).toBe(4);
+
+    target.resolveAll();
+    await waitForStarts(target, 6);
+    expect(target.started[5].item.entityId).toBe("scan-before-products");
+    target.resolveAll();
+    await flush();
+  });
+
+  it("keeps writes for the same product FIFO while other products drain concurrently", async () => {
+    const target = new ControlledTarget();
+    startStore(target, [
+      item("SAVE_PRODUCT", "same-product", { id: "q-same-product-first", idempotencyKey: "same-product:first" }),
+      item("SAVE_PRODUCT", "same-product", { id: "q-same-product-second", idempotencyKey: "same-product:second" }),
+      item("SAVE_PRODUCT", "other-product"),
+    ]);
+
+    await waitForStarts(target, 2);
+    expect(target.started.map((entry) => entry.item.id)).toEqual(["q-same-product-first", "q-other-product-SAVE_PRODUCT"]);
+
+    target.resolve("same-product");
+    await waitForStarts(target, 3);
+    expect(target.started[2].item.id).toBe("q-same-product-second");
+
+    target.resolveAll();
+    await flush();
+  });
+
+  it("blocks later writes for the same product for the current pass after the first write fails", async () => {
+    const target = new ControlledTarget();
+    const store = startStore(target, [
+      item("SAVE_PRODUCT", "fragile-product", { id: "q-fragile-first", idempotencyKey: "fragile:first" }),
+      item("SAVE_PRODUCT", "fragile-product", { id: "q-fragile-second", idempotencyKey: "fragile:second" }),
+      item("SAVE_PRODUCT", "healthy-product"),
+    ]);
+
+    await waitForStarts(target, 2);
+    target.started.find((entry) => entry.item.id === "q-fragile-first")!.resolve({
+      ok: false,
+      alreadyApplied: false,
+      error: "first product write failed",
+      retryable: true,
+    });
+    target.resolve("healthy-product");
+    await flush();
+
+    expect(target.started.map((entry) => entry.item.id)).not.toContain("q-fragile-second");
+    expect(store.getState().pendingSyncQueue.map((entry) => entry.id)).toEqual(["q-fragile-first", "q-fragile-second"]);
+    expect(store.getState().pendingSyncQueue[0]).toMatchObject({
+      id: "q-fragile-first",
+      status: "error",
+      retryCount: 1,
+      lastError: "first product write failed",
+    });
+  });
+
+  it("keeps all non-product operations serial and in original order", async () => {
+    const target = new AutoResolvingTarget();
+    const operations: Array<[SyncOperation, string]> = [
+      ["SAVE_SCAN_EVENT", "scan-1"],
+      ["INCREMENT_COUNT", "count-1"],
+      ["SAVE_SESSION", "session-1"],
+      ["SAVE_UNKNOWN_SCAN", "review-1"],
+      ["RESOLVE_ALIAS", "alias-1"],
+    ];
+    startStore(target, operations.map(([operation, entityId]) => item(operation, entityId)));
+
+    for (let i = 0; i < 20 && target.started.length < operations.length; i += 1) await flush(1);
+
+    expect(target.started.map((entry) => entry.entityId)).toEqual(operations.map(([, entityId]) => entityId));
+    expect(target.maxActive).toBe(1);
+  });
+
+  it("stops new starts after a context change while reconciling successes that already committed", async () => {
+    const target = new ControlledTarget();
+    const store = startStore(target, [
+      item("SAVE_PRODUCT", "context-product-1"),
+      item("SAVE_PRODUCT", "context-product-2"),
+      item("SAVE_PRODUCT", "context-product-3"),
+      item("SAVE_PRODUCT", "context-product-4"),
+      item("SAVE_PRODUCT", "context-product-5"),
+    ]);
+
+    await waitForStarts(target, 4);
+    target.resolve("context-product-1");
+    store.getState().setBusinessContext("biz-other", "user-other");
+    target.resolve("context-product-2");
+    target.resolve("context-product-3");
+    target.resolve("context-product-4");
+    await flush();
+
+    expect(target.started.map((entry) => entry.item.entityId)).not.toContain("context-product-5");
+    expect(store.getState().pendingSyncQueue.filter((entry) => entry.businessId === BIZ).map((entry) => entry.entityId))
+      .toEqual(["context-product-5"]);
+  });
+
+  it("drains a product-only queue in bounded groups without exceeding four active applies", async () => {
+    const target = new ControlledTarget();
+    const store = startStore(
+      target,
+      Array.from({ length: 9 }, (_, i) => item("SAVE_PRODUCT", `bulk-product-${i + 1}`)),
+    );
+
+    for (let expectedStarts = 4; expectedStarts <= 9; expectedStarts += 1) {
+      await waitForStarts(target, expectedStarts);
+      target.started[expectedStarts - 4].resolve();
+      await flush();
+    }
+    target.resolveAll();
+    await flush();
+
+    expect(target.maxActive).toBe(4);
+    expect(store.getState().pendingSyncQueue).toHaveLength(0);
+  });
+});
