@@ -61,7 +61,7 @@ describe("D3 site 1: runLiveDecodeOnce fast-decode auto-link merge unions the pl
 
     // Now scan a DIFFERENT code whose LIVE decode returns a VERIFIED identity with the SAME canonical
     // GTIN -> identity-merge auto_link -> the scan's own placeholder (mergeOrphanId) transfers into p1.
-    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     store.getState().updateSettings({ aiLookupEnabled: true });
     const original = globalThis.fetch;
     globalThis.fetch = vi.fn(async () => ({
@@ -111,7 +111,7 @@ describe("D3 site 2: backgroundVerifyDeep merge unions the placeholder's history
     // no tireOk requirement) - the branch that actually contains site 2's ownProvId/mergeTargetId merge.
     // The identity-merge TIRE rule only requires size AGREEMENT when BOTH sides carry a parseable size
     // (identityMerge.ts bothHaveTireSize), so an empty decoded size still auto_links on the matching GTIN.
-    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     store.getState().updateSettings({ aiLookupEnabled: true, scanContext: "tire" });
     const identity = {
       productName: "Hankook Dynapro AT2", brand: "Hankook", category: "Tire",

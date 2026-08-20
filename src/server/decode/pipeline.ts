@@ -5,7 +5,6 @@ import { type ProviderStatus } from "@/services/ai/decodeOrchestrator";
 import { decideDecode, isUsableProductName, isExampleOrTestRow } from "@/services/ai/decode";
 import { firecrawlScrapeCheap, searchIdentifyByBarcode, firecrawlKeysFromEnv } from "@/services/ai/firecrawlProvider";
 import { lookupBarcodeDb } from "@/server/retail-knowledge/barcodeDbProvider";
-import { groundIdentify, getLastGroundingStatus } from "@/services/ai/flashLiteGrounding";
 import { verifyCodeOnPage } from "@/services/ai/verifyCodeOnPage";
 import { resolveUnknownFast, type ParallelResolveDeps } from "@/services/ai/parallelResolve";
 import { decodeReasonCode, REASON_TEXT, sanitizeCustomerReason, allMissReasonCode, MISS_REASON_TEXT } from "@/services/ai/decodeFallback";
@@ -41,7 +40,7 @@ import { selectBarcodeUrls } from "@/services/ai/barcodeSources";
 import { isSafePublicUrl } from "@/services/ai/urlSafety";
 import { runLadder, buildFreeLadderRungs, buildPaidLadderRungs, type RungOutcome, type LadderResult, type RunLadderContext, type LadderRung } from "@/server/upc/ladder";
 import { canonicalGtin, isGtinShaped } from "@/services/upc/gtin";
-import { paidWorkPossible } from "@/server/upc/paidWorkPossible";
+import { paidWorkPossible, liveAiLookupEnabled } from "@/server/upc/paidWorkPossible";
 import { steerFreeRungs } from "@/server/upc/freeRungSteering";
 import { getLearnedProduct, upsertLearnedProduct, shouldLearnDecode, prefixCheckNote, siblingPrefixConflict, type LearnedProductRow } from "@/server/learnedProducts";
 import { crossCheck } from "@/services/ai/crossCheckEngine";
@@ -50,7 +49,7 @@ import { lookupMasterCatalog } from "@/server/catalog/masterLookup";
 // PURE EXTRACTION (Task 2.4): this module is the decode pipeline lifted verbatim out of
 // app/api/ai-lookup/route.ts. Zero behavior change - every domain rule (the daily cap charged only
 // inside the paid rungs after the free corpus/cache peek; the corpus -> Go-UPC -> Fetch V2 -> GPT
-// ladder order and short-circuit; IS_E2E mock-only; GEMINI_DECODE_DISABLED; honest reasons for
+// ladder order and short-circuit; IS_E2E mock-only; Gemini out of decode; honest reasons for
 // every non-decode) is preserved exactly as it was in the route. route.ts now parses the request,
 // applies the abuse/mock-mode gates, and shapes the response; it delegates the decode work here.
 
@@ -70,12 +69,18 @@ export class DailyCapExceededError extends Error {
   }
 }
 
-// OWNER ORDER 2026-07-06 ("remove Gemini for now"): Gemini is OUT of the decode path. Forensics
-// proved Gemini 3 grounding bills every executed search query with NO cap control and the queries
-// are invisible client-side ($6 real vs $0.53 computed, see LESSONS_LEARNED L11) - the gpt-5.5
-// ladder rung (capped, fully meterable) is the only paid decode engine. This gates the Gemini
-// fast/escalation providers AND the Plan D flash-lite grounding arm. Flip to false to restore.
-const GEMINI_DECODE_DISABLED = true;
+/** One wording for every "the cap refused a PAID upgrade, the free identity still stands" skip reason,
+ *  so the escalation branch and the full-paid-ladder branch can never drift apart in what they report. */
+function capSkipReason(message: string): string {
+  return `skipped: daily cap reached (${message}); free suggestion kept`;
+}
+
+// OWNER ORDER 2026-07-06 ("remove Gemini for now"), made permanent by consolidation A1 (2026-08-19):
+// Gemini is OUT of the decode path and its provider/grounding modules are DELETED. Forensics proved
+// Gemini 3 grounding bills every executed search query with NO cap control and the queries are
+// invisible client-side ($6 real vs $0.53 computed, see LESSONS_LEARNED L11) - the gpt-5.5 ladder rung
+// (capped, fully meterable) is the only paid decode engine. Plan D consensus simply runs without a
+// grounding leg (the resolver treats an absent leg exactly as it treated a null-returning one).
 
 // MODULE-LEVEL Go-UPC gate: ONE instance per server process so the 2 req/s throttle + in-flight
 // dedup span every request (a per-request gate would let concurrent scans of the same code each
@@ -388,7 +393,7 @@ async function evalCombinedFirewall(code: string, result: AiLookupResult | undef
 // return and the final return) set it only when the paid GPT-5.5 ladder rung itself resolved the code.
 // Otherwise, "paid_ai" is detected from the literal provider-name strings that ONLY the legacy
 // fast/escalation/deep-fallback path ever pushes into providerNames: "gemini"/"openai" (decodeProviders /
-// escalationProviders - the default AiProvider names from createGeminiProvider/createOpenAiProvider),
+// escalationProviders - the provider names of the retired legacy Gemini/OpenAI path, still present in old cached rows),
 // "gemini:read"/"openai:read" (the pageReader's label override, used by enrichWithPageFetch to read a
 // fetched page), and "ai-deep"/"ai-cited-deep"/"firecrawl" (the Stage-2 deep fallback finders). Neither
 // the tire-corpus exit (providerNames come from TireKnowledgeProvider, e.g. "tire-corpus") nor the Plan D
@@ -626,6 +631,29 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // run completes - so a swallowed per-rung denial can never let a DOWNSTREAM paid rung run unmetered,
   // and the request settles as an honest cap_blocked instead of a needs-review that hid the spend.
   let capDenialInArm: DailyCapExceededError | null = null;
+  // GENERALIZED STICKY FAILURE (DC-2 fix, 2026-08-13, money-leak remediation, Codex xhigh review):
+  // `paidChargeArmed` is consumed BEFORE awaiting settlePaidCharge() (see chargeOnEgress below), so a
+  // re-entrant egress can never double-charge -- but until this fix ONLY a DailyCapExceededError made
+  // the arm sticky (capDenialInArm above). settlePaidCharge() can also reject for a NON-cap reason: the
+  // GLOBAL chargeDailySlot/chargeDailySlotConditional write itself is NOT wrapped in the S4 fail-open
+  // try/catch that only the PER-ACCOUNT half gets (see settlePaidCharge's doc comment) -- a genuine
+  // Turso/storage hiccup on that call throws a plain Error straight out of settlePaidCharge. Pre-fix,
+  // that left the arm silently "spent" with ZERO successful charge behind it: in the SHARED full-ladder
+  // arm (goupc -> fetchv2 -> gpt all arm together, see withPaidChargeArmed(runFullPaidLadder) below), a
+  // LATER rung's own chargeOnEgress() saw `!paidChargeArmed`, silently no-op'd, and proceeded straight to
+  // REAL PAID EGRESS with nothing charged. `chargeFailureInArm` makes every later chargeOnEgress() call
+  // in this arm throw too (mirrors capDenialInArm's stickiness, generalized to any settlement failure),
+  // so a later rung in the same arm always DECLINES egress instead of running unmetered.
+  //
+  // Deliberately NOT re-thrown by withPaidChargeArmed's `finally` (unlike capDenialInArm): a non-cap
+  // storage hiccup fails only the paid rungs it actually blocked (each already catches chargeOnEgress()
+  // locally and records an honest skip/miss reason -- see maybeGptLadder, runFetchV2, and runLadder's own
+  // catch around runGoUpc's uncaught client() throw), so the request still settles as an honest
+  // needs_review rather than an uncaught 500 that would blow past the DailyCapExceededError-only catch
+  // in the outer computeDecode try/catch below. Unmetered spend is worse than a missed decode (owner
+  // doctrine); refusing every later egress in this arm is the fail-closed choice, at the cost of this one
+  // request's paid ladder for a single storage blip.
+  let chargeFailureInArm: Error | null = null;
 
   const assertPaidCapAvailable = async (): Promise<void> => {
     if (e2eMode()) return;
@@ -742,12 +770,20 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // Sticky: a prior denial in this arm makes every later egress deny too, so the rung's own egress
     // catch skips it BEFORE its provider call (no unmetered spend down the shared full-ladder arm).
     if (capDenialInArm) throw capDenialInArm;
+    // DC-2: a prior NON-cap settlement failure is equally sticky - see chargeFailureInArm's doc comment
+    // above. Without this, a later rung in the same arm would see `!paidChargeArmed` and no-op straight
+    // into unmetered egress instead of declining.
+    if (chargeFailureInArm) throw chargeFailureInArm;
     if (!paidChargeArmed) return;
     paidChargeArmed = false; // consume BEFORE awaiting, so a re-entrant egress can never double-charge
     try {
       await settlePaidCharge();
     } catch (e) {
-      if (e instanceof DailyCapExceededError) capDenialInArm = e;
+      if (e instanceof DailyCapExceededError) {
+        capDenialInArm = e;
+      } else {
+        chargeFailureInArm = e instanceof Error ? e : new Error(String(e));
+      }
       throw e;
     }
   };
@@ -757,6 +793,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     await assertPaidCapAvailable();
     paidChargeArmed = true;
     capDenialInArm = null;
+    chargeFailureInArm = null;
     try {
       return await run();
     } finally {
@@ -765,6 +802,10 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // runLadder's per-rung catch - fail the WHOLE arm with it so the outer handler returns an honest
       // cap_blocked, never a needs-review that concealed an unmetered downstream rung.
       if (capDenialInArm) throw capDenialInArm;
+      // DC-2: a non-cap chargeFailureInArm is deliberately NOT rethrown here (unlike capDenialInArm) -
+      // see chargeFailureInArm's doc comment above for why: every rung it blocked already recorded its
+      // own honest skip/miss reason, so the request still settles as a normal (if disappointing)
+      // needs_review instead of an uncaught throw the outer catch doesn't special-case.
     }
   };
 
@@ -1474,7 +1515,13 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     };
 
     // ---- Rung 1: Go-UPC (GTIN codes only; gated in buildLadderRungs) --------------------------------
-    const runGoUpc = async (): Promise<RungOutcome> => {
+    // DC-1 fix (2026-08-13, money-leak remediation): accepts the ladder's optional RunLadderContext,
+    // same widened signature as runGpt, so `ctx.signal` threads into the shared GoUpcGate. Without this,
+    // a call still queued behind the module-level, process-wide throttle when the ladder gave up on this
+    // rung would fire unaborted once the throttle finally released it - charging nothing (the arm was
+    // already disarmed) but still performing the real billed fetch. See goUpcThrottle.ts's `run()` doc
+    // comment for the drop mechanism.
+    const runGoUpc = async (ctx?: RunLadderContext): Promise<RungOutcome> => {
       // E2E MOCK MODE: live rungs are bypassed exactly like the legacy [mockProvider] path - E2E
       // resolves only via the GPT rung's zero-network mockGptLadder fixture (or falls to Needs Review).
       if (e2eMode()) return { settled: false, reason: "Go-UPC skipped (E2E mock mode)" };
@@ -1486,11 +1533,16 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         // a billed request is about to leave. Charging here instead of before the rung is what makes a
         // negative-cache hit or a capped month cost ZERO daily slots. If the charge itself fails, the
         // lookup never happens (runLadder records the rung error) - fail closed, no unmetered spend.
+        // DC-1: `deps.gate.run` (via goUpcRung's own `deps.signal` threading) drops this call BEFORE it
+        // ever reaches here when ctx.signal is already aborted, so chargeOnEgress can never fire for an
+        // abandoned rung's stale queued turn - and a call that DOES reach here is a genuine compute that
+        // must still be charged in full, exactly as before.
         client: async (c, d) => {
           await chargeOnEgress();
-          return goUpcLookup(c, d);
+          return goUpcLookup(c, { ...d, signal: ctx?.signal });
         },
         gate: goUpcGate,
+        signal: ctx?.signal,
         // GOD ACCOUNT: unlimited Go-UPC monthly cap for the platform owner (record() still fires inside
         // the rung, so subscription usage is still tracked - only the cap gate is lifted).
         usage: god ? goUpcUsage(ladderStore, { limit: Infinity }) : goUpcUsage(ladderStore),
@@ -1694,7 +1746,10 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // supplied. Its paid arms (Firecrawl /search, the Firecrawl scrape, page verification) spend real
       // money outside the daily cap, so on this pass they are simply not wired: the optional arms are
       // omitted and the required scrape arm is a no-op miss, which resolveUnknownFast already handles.
-      const paidArms: Pick<ParallelResolveDeps, "firecrawlScrapeCheap" | "searchIdentify" | "verifyCodeOnPage"> = freeOnlyPass
+      // ENABLE_LIVE_AI_LOOKUP=false gates Plan D's PAID arms exactly like a free-only pass (deep-review
+      // 2026-08-19 finding 1: the flag turned off the paid LADDER rungs but Plan D's Firecrawl /search,
+      // cheap scrape and page-verify arms still spent real money outside the daily cap).
+      const paidArms: Pick<ParallelResolveDeps, "firecrawlScrapeCheap" | "searchIdentify" | "verifyCodeOnPage"> = freeOnlyPass || !liveAiLookupEnabled()
         ? { firecrawlScrapeCheap: async () => null }
         : {
             verifyCodeOnPage: (urls, c) => verifyCodeOnPage(urls, c),
@@ -1717,9 +1772,6 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         // is false and this fallback keeps its full original behavior, exact code included.
         lookupBarcodeDb: async () => upcItemDbResult ?? (await lookupBarcodeDb(code, { skipExact: upcItemDbExactTried })),
         retailDb: async () => (retailHit ? { name: retailHit.productName, brand: retailHit.brand } : null),
-        // Gemini grounding arm gated off with the rest of Gemini (owner order 2026-07-06); null
-        // is the arm's documented "miss" value, so Plan D consensus just proceeds without it.
-        groundIdentify: (c, opts) => (GEMINI_DECODE_DISABLED ? Promise.resolve(null) : groundIdentify(c, opts)),
         ...paidArms,
         prefixFloor: (c) => prefixFloorName(c, codeType),
       }).catch(() => null);
@@ -1761,9 +1813,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
             reasonCode: pdReasonCode,
             reasonText: pdReasonText,
             timedOut: false,
-            // groundingStatus makes a silent grounding outage (e.g. a model 503) visible in the decode
-            // debug instead of consensus quietly degrading to the two correlated DB votes.
-            debug: { providersAttempted: pdProviderNames, evidenceStrengths: pdEvidences.map((e) => e.strength), sourceCounts: pdResults.map((r) => (r.sourceUrls ?? []).length), corroborationPath: decision.corroborationPath ?? `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false, groundingStatus: getLastGroundingStatus(), retailLookup: retailLookupStatus },
+            debug: { providersAttempted: pdProviderNames, evidenceStrengths: pdEvidences.map((e) => e.strength), sourceCounts: pdResults.map((r) => (r.sourceUrls ?? []).length), corroborationPath: decision.corroborationPath ?? `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false, retailLookup: retailLookupStatus },
             sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
           };
         }
@@ -1781,7 +1831,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
           reasonCode: pdReasonCode,
           reasonText: pdReasonText,
           timedOut: false,
-          debug: { providersAttempted: pdProviderNames, evidenceStrengths: pdEvidences.map((e) => e.strength), sourceCounts: pdResults.map((r) => (r.sourceUrls ?? []).length), corroborationPath: decision.corroborationPath ?? `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false, groundingStatus: getLastGroundingStatus(), retailLookup: retailLookupStatus },
+          debug: { providersAttempted: pdProviderNames, evidenceStrengths: pdEvidences.map((e) => e.strength), sourceCounts: pdResults.map((r) => (r.sourceUrls ?? []).length), corroborationPath: decision.corroborationPath ?? `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false, retailLookup: retailLookupStatus },
           sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
         };
       }
@@ -1791,7 +1841,10 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // stale cached guess against NEW FREE knowledge, the paid half of the ladder is simply not built -
     // every branch below then sees an empty rung list and skips exactly as it does with no keys
     // configured (no charge, no provider call). Nothing else about the ladder changes.
-    const paidRungs = (): LadderRung[] => (freeOnlyPass ? [] : buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt }));
+    // ENABLE_LIVE_AI_LOOKUP=false (enforced server-side since 2026-08-19, see paidWorkPossible.ts): the
+    // paid half is not built at all, exactly like a free-only re-evaluation. Free rungs still run.
+    const paidRungs = (): LadderRung[] =>
+      freeOnlyPass || !liveAiLookupEnabled() ? [] : buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt });
 
     // wave-3 (2026-07-20 owner-ratified): annotate the fetchv2/gpt rungs with their REALISTIC budgets
     // (see DECODE_LADDER_FETCHV2_MS / DECODE_LADDER_GPT_MS above) - goupc is untouched (keeps the
@@ -1873,6 +1926,36 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       let paidRungRan = false; // true once a paid rung genuinely ran (pay-once marker, owner 2026-08-19)
       const reasonsAcc: Array<{ rung: string; reason: string }> = [...freeRun.reasons];
 
+      // CAP DENIAL KEEPS THE FREE SUGGESTION (consolidation 2026-08-19): a blown daily cap used to throw
+      // out of this branch, and the outer catch answered `cap_blocked` - discarding the free suggestion
+      // already in hand. That contradicted "free resolution always completes first and is NEVER
+      // blocked" (ORDER v3, above) and "always attach the best available identity". The cap decides
+      // only whether a PAID upgrade may be attempted; it never hides a free identity. On a denial the
+      // free suggestion stands, the skip is recorded per rung, nothing is charged, and the pay-once
+      // marker is NOT set (no paid rung ran, so the next uncapped scan may still escalate). Sticky for
+      // the rest of this branch: once the cap said no, later paid steps are skipped without re-asking.
+      let capDenied: DailyCapExceededError | null = null;
+      const paidStep = async (rung: string, rungs: LadderRung[]): Promise<LadderResult | null> => {
+        if (capDenied) {
+          reasonsAcc.push({ rung, reason: capSkipReason(capDenied.message) });
+          return null;
+        }
+        try {
+          const result = await withPaidChargeArmed(() =>
+            runLadder(code, rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
+          );
+          paidRungRan = true;
+          return result;
+        } catch (e) {
+          if (e instanceof DailyCapExceededError) {
+            capDenied = e;
+            reasonsAcc.push({ rung, reason: capSkipReason(e.message) });
+            return null;
+          }
+          throw e;
+        }
+      };
+
       // A win is "better" than the free stash when it is itself verified, or a suggestion with
       // STRICTLY higher confidence than the free suggestion's own confidence (never GPT-verified - that
       // is structurally impossible per gptResultToDecodePayload, so this check is honest for all three).
@@ -1886,11 +1969,8 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // ---- Step 1: Go-UPC only (unchanged behavior) ---------------------------------------------------
       const goUpcRungOnly = paidRungs().filter((r) => r.name === "goupc");
       const goUpcCanPay = goUpcRungOnly.length > 0 && !!process.env.GO_UPC_API_KEY;
-      if (goUpcCanPay) {
-        paidRungRan = true;
-        const goRun = await withPaidChargeArmed(() =>
-          runLadder(code, goUpcRungOnly, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
-        );
+      const goRun = goUpcCanPay ? await paidStep("goupc", goUpcRungOnly) : null;
+      if (goRun) {
         reasonsAcc.push(...goRun.reasons);
         // D6/Task 2 Step 3c (demotion ripple, CRITICAL): Go-UPC is now honestly labeled "suggested"
         // (never "verified" - see GoUpcProvider.ts), so this win-selection can no longer gate on the
@@ -1917,11 +1997,8 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         const fetchV2RungOnly = withRealisticBudgets(paidRungs().filter((r) => r.name === "fetchv2"));
         const gated = preflightTimeGate(fetchV2RungOnly, ladderDeadlineAt);
         reasonsAcc.push(...gated.skippedReasons);
-        if (fetchV2CanPay && gated.rungs.length > 0) {
-          paidRungRan = true;
-          const fv2Run = await withPaidChargeArmed(() =>
-            runLadder(code, gated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
-          );
+        const fv2Run = fetchV2CanPay && gated.rungs.length > 0 ? await paidStep("fetchv2", gated.rungs) : null;
+        if (fv2Run) {
           reasonsAcc.push(...fv2Run.reasons);
           if (isBetterThanFree(fv2Run.outcome)) {
             winningOutcome = fv2Run.outcome;
@@ -1941,11 +2018,8 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         // does. Nothing here duplicates or bypasses those checks; the preflight time gate is STRICTLY
         // additional (it fires before shouldRunGptRung ever runs, so a time-skipped GPT rung never even
         // reaches shouldRunGptRung's own budget-charging path - see preflightTimeGate's doc comment).
-        if (gated.rungs.length > 0 && !!process.env.OPENAI_API_KEY) {
-          paidRungRan = true;
-          const gptRun = await withPaidChargeArmed(() =>
-            runLadder(code, gated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) })
-          );
+        const gptRun = gated.rungs.length > 0 && !!process.env.OPENAI_API_KEY ? await paidStep("gpt", gated.rungs) : null;
+        if (gptRun) {
           reasonsAcc.push(...gptRun.reasons);
           if (isBetterThanFree(gptRun.outcome)) {
             winningOutcome = gptRun.outcome;
@@ -1957,7 +2031,9 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // PAY-ONCE MARKER: paid rungs ran on top of this free suggestion and the stash still stands.
       // The write-through records that on the row so another instance replays the suggestion instead
       // of re-buying the same misses (until the cooldown or a knowledge-version change reopens it).
-      paidEscalationExhausted = paidRungRan && winningOutcome === freeRun.outcome;
+      // Deep-review 2026-08-19 finding 2: a cap denial mid-escalation must NOT mint the marker - the
+      // denied rungs never ran, so "exhausted" would be a lie that blocks the paid retry after reset.
+      paidEscalationExhausted = paidRungRan && !capDenied && winningOutcome === freeRun.outcome;
 
       ladderRun = { settledBy: winningSettledBy, outcome: winningOutcome, reasons: reasonsAcc };
     } else if (!freeRun.outcome) {
@@ -1976,9 +2052,28 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // S5: ONE charge armed for the WHOLE paid ladder (unchanged from the single pre-ladder charge this
       // branch always did) - but it is now only spent if some rung genuinely reaches a provider. A
       // keyless/negative-cached/budget-declined run down this branch now bills zero instead of one.
-      const paidRun = paidWorkPossible(code)
-        ? await withPaidChargeArmed(runFullPaidLadder)
-        : await runFullPaidLadder();
+      let paidRun: LadderResult;
+      try {
+        // preGated.rungs.length guard (deep-review 2026-08-19 finding 3): a free-only pass builds ZERO
+        // paid rungs, and arming for an empty ladder can never charge but CAN throw the cap error -
+        // turning a $0 re-evaluation into a cap_blocked replay. No rungs, no arm.
+        paidRun = paidWorkPossible(code) && preGated.rungs.length > 0
+          ? await withPaidChargeArmed(runFullPaidLadder)
+          : await runFullPaidLadder();
+      } catch (e) {
+        // CAP DENIAL KEEPS THE PLAN D STASH (consolidation 2026-08-19, same rule as the escalation
+        // branch above): a free floor/suggestion Plan D already found must not be thrown away because
+        // the PAID ladder may not run. Only when nothing free exists does the denial propagate and the
+        // request settle as an honest cap_blocked (with the $0 prefix floor, see the outer catch).
+        // A bare prefix FLOOR ("<Brand> / product unconfirmed", source "floor") is a naming convenience,
+        // not an identity: that case still settles as cap_blocked (the outer catch carries the floor).
+        const stashHasIdentity =
+          !!planDStash &&
+          !planDStash.providerNames.includes("parallel:floor") &&
+          isUsableProductName(planDStash.results[0]?.productName ?? "");
+        if (!(e instanceof DailyCapExceededError) || !stashHasIdentity) throw e;
+        paidRun = { settledBy: undefined, outcome: undefined, reasons: [{ rung: "paid-ladder", reason: capSkipReason(e.message) }] };
+      }
       // Concatenate reasons free-phase-then-paid-phase so an unresolved response still lists every rung
       // that actually ran, honestly, in the order it ran (including any preflight-skipped rung).
       ladderRun = { settledBy: paidRun.settledBy, outcome: paidRun.outcome, reasons: [...freeRun.reasons, ...preGated.skippedReasons, ...paidRun.reasons] };

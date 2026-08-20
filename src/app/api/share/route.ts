@@ -140,16 +140,13 @@ export async function POST(request: NextRequest) {
   const now = Date.now();
   let token: string;
   try {
-    token = await mintShareToken(
-      {
-        businessId,
-        sessionId,
-        reportSnapshot,
-        createdAt: now,
-        expiresAt: now + SHARE_TTL_MS,
-      },
-      SHARE_TTL_MS,
-    );
+    token = await mintShareToken({
+      businessId,
+      sessionId,
+      reportSnapshot,
+      createdAt: now,
+      expiresAt: now + SHARE_TTL_MS,
+    });
   } catch (error) {
     // mintShareToken only throws when durable storage is required (production) and unavailable.
     // Fail loud here too: no token, no url, so the caller never gets a link that will 404 later.

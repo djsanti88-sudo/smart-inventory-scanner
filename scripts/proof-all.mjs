@@ -111,14 +111,29 @@ function run(label, cmd, args) {
   // node:test: "ℹ pass 12" / "ℹ fail 0"
   const nodePass = out.match(/^\s*.?\s*pass (\d+)$/m);
   const nodeFail = out.match(/^\s*.?\s*fail (\d+)$/m);
+  // node:test: "ℹ skipped 74" -- the local-data suites (scripts/lib/localDataSkip.mjs) skip VISIBLY
+  // when gitignored data is absent (fresh worktree, CI); surface it exactly like vitest's skips.
+  const nodeSkip = out.match(/^\s*.?\s*skipped (\d+)$/m);
 
   let detail = ok ? "ok" : `FAILED (exit ${r.status})`;
   let skipped = 0;
   if (vitest) { detail = `${vitest[1]} passed`; skipped = Number(vitest[2] ?? 0); if (skipped) detail += `, ${skipped} skipped`; }
-  else if (nodePass) { detail = `${nodePass[1]} passed`; if (nodeFail && Number(nodeFail[1]) > 0) detail += `, ${nodeFail[1]} FAILED`; }
+  else if (nodePass) {
+    detail = `${nodePass[1]} passed`;
+    if (nodeFail && Number(nodeFail[1]) > 0) detail += `, ${nodeFail[1]} FAILED`;
+    skipped = Number(nodeSkip?.[1] ?? 0);
+    if (skipped) detail += `, ${skipped} skipped (local-only data absent)`;
+  }
 
   results.push({ label, ok, detail, skipped });
-  if (!ok) process.stdout.write(out.split("\n").slice(-25).join("\n") + "\n");
+  if (!ok) {
+    // 25 tail lines was too small: with 240+ node:test subtests the single "not ok" line scrolled out
+    // and CI could fail without naming the failing test. Print the failing lines first, then the tail.
+    const lines = out.split("\n");
+    const failing = lines.filter((l) => /^not ok|AssertionError|ERR_ASSERTION|^\s*✖/.test(l)).slice(0, 40);
+    if (failing.length) process.stdout.write("--- failing lines ---\n" + failing.join("\n") + "\n");
+    process.stdout.write(lines.slice(-60).join("\n") + "\n");
+  }
   else process.stdout.write(`${detail}\n`);
   return ok;
 }
@@ -281,7 +296,7 @@ export function buildSummaryReport({ results, missing, skippedByEnv, vitestExtra
 
   lines.push("\nNOT RUN BY THIS GATE -- green above does NOT cover these:");
   for (const [name, why, cmd] of NOT_RUN) lines.push(`  - ${name}\n      ${why}; run: ${cmd}`);
-  if (totalSkipped) lines.push(`\n  ${totalSkipped} test(s) reported SKIPPED above (mostly the emulator-gated suites).`);
+  if (totalSkipped) lines.push(`\n  ${totalSkipped} test(s) reported SKIPPED above (emulator-gated vitest suites; node:test suites whose gitignored local data is absent - scripts/lib/localDataSkip.mjs).`);
 
   if (failed.length) {
     lines.push(`\nRESULT: FAILED -- ${failed.length} leg(s): ${failed.map((f) => f.label).join(", ")}`);
@@ -356,13 +371,17 @@ function main() {
   if (present.length) run(`node:test (${present.length} vitest-excluded suites, serial)`, process.execPath, ["--test", "--test-concurrency=1", ...present]);
 
   const teachSuites = discoverTestFiles(["e2e/teach"]);
-  run("teach bot suite", process.execPath, ["--test", "e2e/teach/**/*.test.mjs"]);
+  // Node 20 (the CI runner) does not expand glob patterns for --test; pass the discovered files
+  // explicitly so the leg runs identically on every Node version.
+  if (teachSuites.length) run(`teach bot suite (${teachSuites.length} files)`, process.execPath, ["--test", ...teachSuites]);
 
   // SELF-DETECTION: reconcile the real filesystem against what any runner in this file
   // actually knows about. NODE_TEST_SUITES is used in full here (not just `present`) --
   // a suite temporarily narrowed out via NODE_TEST_SKIP is still DECLARED, so it must not
   // be reported as an unknown orphan on top of being reported as narrowed.
-  const declaredNotRun = NOT_RUN.flatMap((entry) => entry[3] ?? []);
+  // VITEST_EXTRA_EXCLUDE entries are DECLARED coverage reductions (reported loudly as NARROWED and
+  // gated by PROOF_ALL_ACCEPT_NARROWED) - the orphan scan must not double-report them as unknown.
+  const declaredNotRun = [...NOT_RUN.flatMap((entry) => entry[3] ?? []), ...VITEST_EXTRA_EXCLUDE];
   const discovered = discoverTestFiles();
   const orphans = collectedByVitest === null
     ? [] // vitest's own leg already failed to produce a report; that failure alone fails the gate below -- don't pile on with a misleading "everything is an orphan" report.

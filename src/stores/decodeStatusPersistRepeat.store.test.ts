@@ -42,7 +42,7 @@ describe("scanStore - repeat-scan decode-status persistence (Codex final verdict
   it("persists the settled decodeStatus for EVERY scanFeed row sharing the code, not just the first one found", async () => {
     const target = new RecordingTarget();
     const store = createTestScanStore({ db: target, cloudBackend: true, loadBusinessData: emptyLoader });
-    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     store.getState().updateSettings({ aiLookupEnabled: true, scanContext: "any" });
     store.getState().setBusinessContext("biz1", "user1");
     await flush();

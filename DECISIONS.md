@@ -421,3 +421,47 @@ Why each choice was made. Newest decisions at the bottom of each section.
   guess) so the hard-coded confidence constants (0.85, x0.6 discount, 0.8 line) can be replaced by
   measured accuracy, and so OPEN (a) is decided from data. Cheap: the approve/decline/markWrong
   audit events already exist; what is missing is the source tier on the event and a report.
+
+## Consolidation pass: one decode mode, no Gemini in the app, a cap never hides a free identity (2026-08-19)
+
+- **Legacy `mode:"lookup"` removed from `/api/ai-lookup`.** It charged two daily-cap slots before any
+  work (a `provider:"mock"` POST paid for nothing) and was the last live paid Gemini call, against the
+  standing "Gemini is out of decode" decision. Its only client (`scanStore.lookupUnknown`) had no UI
+  caller. The route now accepts `mode:"decode"` (and the `decode-deep` alias) only; the charge
+  invariants it carried (global charge fails closed, per-account charge authoritative, pay once) are
+  pinned on the decode path in `src/server/decode/pipeline.test.ts`.
+- **A daily-cap denial keeps the free suggestion.** The cap decides whether a paid upgrade may run;
+  it never discards a free identity already in hand and never writes the pay-once marker for it.
+  `cap_blocked` only when nothing free exists. (`pipeline.ts` `paidStep`, the Plan D stash fallback.)
+- **`ENABLE_LIVE_AI_LOOKUP=false` is a server rule**, enforced in `paidWorkPossible()`; before it was
+  only a client gate and the Preview lockdown depended on removing provider keys.
+- **Turso `decode_cache` carries `source_tier`** (idempotent additive column) so "a free title never
+  overwrites a paid identity" holds in production, not only in the file backend.
+- **Metering asymmetry and Fetch V2 charge-at-egress are recorded, not changed**
+  (`docs/DECODER_ARCHITECTURE.md` section 2); both are owner money-policy calls needing measured data.
+- **Repo shape:** `refactor/pre-aws-cleanup` rebased onto master (provider seams, scripts catalog,
+  paid-script guard, proof:all in CI without a browser); dead root trees, 18 one-off scripts, the
+  unwired trusted-exact caches and the legacy Gemini modules deleted (all in git history, tag
+  `backup/pre-aws-cleanup-2026-08-19`); prefix-mining tooling grouped under `scripts/prefix-mining/`;
+  node:test suites that need gitignored local data self-skip visibly instead of throwing.
+- **Left OPEN on purpose:** retail corpus as verified truth vs high-trust suggestion; tenant approvals
+  promoting into the platform learned tier; the deep-verify multi-variant auto-apply follow-up above;
+  `tireKnowledge.generated.json` (71 MB) not LFS-tracked while the retail twin is (history rewrite on
+  master, owner-gated).
+- **Deep-review panel residuals (2026-08-19, gpt-5.6-sol + gemini-3.6-flash legs; adjudicated, recorded
+  not fixed):**
+  (a) ROUTE-LEVEL per-account cap (GC-A) still 429s an authed tenant at their account cap BEFORE the
+  free ladder runs - the one remaining place a cap hides a free identity. The pipeline already
+  enforces the account cap atomically at paid egress, so the candidate fix is an advisory precheck +
+  lazy enforcement; that changes PR #35-reviewed behavior and needs its own proof run (owner call).
+  (b) Within one shared full-ladder arm, chargeOnEgress disarms before the settlement await resolves;
+  a rung timeout can let a later rung egress while the one arm-slot settlement is still in flight -
+  consistent with the recorded one-slot-per-arm policy, but the settle-rejection window is a known
+  narrow race (pre-existing).
+  (c) `paidRungRan` counts a rung that skipped on its own negative cache / budget gate as "ran", so
+  the pay-once marker can be minted without fresh paid egress (pre-existing PR #38 semantics; the
+  cooldown re-opens it).
+  (d) Plan D's paid Firecrawl arms spend prepaid credits outside the daily cap by design (documented);
+  they are now OFF when ENABLE_LIVE_AI_LOOKUP=false.
+  (e) A thrown `window.localStorage` property access (privacy-blocked storage) in the scan recovery
+  path could drop a repeated-code count; needs its own trace + failing test (scanStore recovery).

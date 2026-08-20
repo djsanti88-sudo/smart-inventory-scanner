@@ -28,6 +28,7 @@ belong," start here before adding a new file.
 | File | Purpose |
 |---|---|
 | `ARCHITECTURE.md` | Full verified architecture map + the known traps |
+| `ARCHITECTURE_LAYERS.md` | Business logic vs. provider/infrastructure logic: the seams, the leak points, and what a provider migration would touch |
 | `COMMANDS.md` | Every script, port, env var name, PAID/LIVE warnings |
 | `DEPLOY_TRUTH.md` | Canonical deploy mechanics: Git integration, PR previews, prod gate |
 | `DECODER_ARCHITECTURE.md` | Canonical decode-pipeline doc (`runDecodePipeline`) |
@@ -40,7 +41,6 @@ belong," start here before adding a new file.
 | `RELEASE_TARGETS.md` | What "ready to ship" means per release |
 | `GO_LIVE_CHECKLIST.md` | Pre-launch checklist (see REPO_HEALTH.md tech-debt: currently stale) |
 | `BACKLOG.md` | Open backlog items |
-| `CURRENT_CONTEXT.md` | Point-in-time context snapshot |
 | `HOTFIX_FOLLOWUPS.md` | Tracked follow-ups from hotfixes |
 | `SCHEDULED_QA_BOTS.md` | Scheduled/automated QA bot runs |
 | `WEEKLY_INTEL_SETUP.md` | Weekly intel job setup |

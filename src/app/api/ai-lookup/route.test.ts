@@ -199,20 +199,40 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect((await dailyUsedNow()), "a keyless run performs no paid work and must not consume a slot").toBe(0);
   }, 20000);
 
-  it("legacy 'lookup' mode is ALSO bound by the daily cap (no bypass)", async () => {
-    process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // already at/over the cap
+  // CONSOLIDATION A1 (2026-08-19): the legacy single-provider 'lookup' mode is DELETED. It burned two
+  // daily-cap slots BEFORE doing any work (so even a mock-provider POST that paid for nothing charged
+  // the meter twice) and it was the last live paid Gemini call in the product. The endpoint now serves
+  // the decode pipeline ONLY, and anything else is refused up front - before auth, before any counter
+  // read, before any storage touch - so an unrecognised mode can never fall through into billable work.
+  it("the deleted legacy 'lookup' mode is refused with 400 unsupported_mode and charges nothing", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    const before = await dailyUsedNow();
     const res = await POST(makeRequest({ cleanCode: "111000222333", mode: "lookup" }));
-    expect(res.status).toBe(429);
-    expect((await res.json()).reasonCode).toBe("daily_cap");
+    expect(res.status).toBe(400);
+    expect((await res.json()).reasonCode).toBe("unsupported_mode");
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await dailyUsedNow()).toBe(before);
   });
 
-  it("a request with NO mode (legacy lookup default) is ALSO bound by the daily cap", async () => {
-    process.env.AI_LOOKUP_DAILY_LIMIT = "0";
+  it("a request with NO mode is refused with 400 unsupported_mode and charges nothing", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    const before = await dailyUsedNow();
     const res = await POST(makeRequest({ cleanCode: "111000222333" }));
-    expect(res.status).toBe(429);
-    expect((await res.json()).reasonCode).toBe("daily_cap");
+    expect(res.status).toBe(400);
+    expect((await res.json()).reasonCode).toBe("unsupported_mode");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await dailyUsedNow()).toBe(before);
   });
+
+  it("an unrecognised mode is refused with 400 unsupported_mode; 'decode-deep' is still accepted", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    const bad = await POST(makeRequest({ cleanCode: "111000222333", mode: "garbage" }));
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).reasonCode).toBe("unsupported_mode");
+
+    const deep = await POST(makeRequest({ cleanCode: "111000222555", mode: "decode-deep" }));
+    expect(deep.status).toBe(200);
+  }, 20000);
 
   it("GET status endpoint is rate-limited (no unthrottled scrape/flood)", async () => {
     process.env.AI_LOOKUP_GET_RATE_LIMIT = "3";
@@ -887,11 +907,10 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     });
   });
 
-  // Task 8: the status endpoint must tell the truth about the decode ladder. Gemini is permanently
-  // OUT of decode (corpus -> Go-UPC -> Fetch V2 -> GPT only); geminiConfigured/geminiEnabled/
-  // geminiModel stay in the response (Settings + refreshAiStatus read them, removal would silently
-  // disable autoDecode), but new honest fields make the real ladder order and Gemini's non-role
-  // explicit so the Settings UI can stop implying Gemini participates in decode.
+  // Task 8 + consolidation A1: the status endpoint must tell the truth about the decode ladder.
+  // Gemini is permanently OUT of decode (corpus -> Go-UPC -> Fetch V2 -> GPT only) and A1 removed every
+  // Gemini flag/model/key from the payload entirely, so the response can no longer imply Gemini
+  // participates in decode - not even as a reported-but-unused field.
   describe("GET status: decode ladder truth (Task 8)", () => {
     const mkGet = () => new Request("http://localhost/api/ai-lookup", { headers: { "x-forwarded-for": "8.8.8.8" } });
 
@@ -902,26 +921,29 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
       expect(json.decodeLadder).toEqual(["corpus", "go_upc", "fetch_v2", "gpt"]);
     });
 
-    it("reports geminiUsedForDecode: false (Gemini is enrichment only, never decode)", async () => {
-      const res = await GET(mkGet());
-      const json = await res.json();
-      expect(json.geminiUsedForDecode).toBe(false);
-    });
-
-    it("still reports geminiUsedForDecode: false even when GEMINI_API_KEY is configured", async () => {
+    it("reports NO Gemini surface at all, even when GEMINI_API_KEY is configured", async () => {
       process.env.GEMINI_API_KEY = "test-gemini-key";
       const res = await GET(mkGet());
       const json = await res.json();
-      expect(json.geminiUsedForDecode).toBe(false);
+      for (const field of [
+        "geminiUsedForDecode", "geminiConfigured", "geminiEnabled", "geminiModel", "geminiProModel",
+        "geminiSearchGrounding", "openaiEnabled", "openaiWebSearch", "openaiModel", "openaiProModel",
+        "premiumFallback", "mode",
+      ]) {
+        expect(json, `${field} must be gone from the status payload`).not.toHaveProperty(field);
+      }
+      expect(json.missingKeys).not.toContain("GEMINI_API_KEY");
+      expect(JSON.stringify(json).toLowerCase()).not.toContain("gemini");
     });
 
-    it("keeps existing fields intact alongside the new ones (no removal/rename)", async () => {
+    it("keeps the fields the client still reads (no accidental removal/rename)", async () => {
       const res = await GET(mkGet());
       const json = await res.json();
-      expect(typeof json.geminiEnabled).toBe("boolean");
-      expect(typeof json.geminiConfigured).toBe("boolean");
-      expect(typeof json.geminiModel).toBe("string");
+      expect(typeof json.liveEnabled).toBe("boolean");
+      expect(typeof json.autoDecodeOnScan).toBe("boolean");
       expect(typeof json.openaiConfigured).toBe("boolean");
+      expect(typeof json.killSwitchOn).toBe("boolean");
+      expect(Array.isArray(json.missingKeys)).toBe(true);
       // Task 1's daily counter must already be present and not duplicated by this task.
       expect(json.daily).toBeDefined();
       expect(typeof json.daily.used).toBe("number");

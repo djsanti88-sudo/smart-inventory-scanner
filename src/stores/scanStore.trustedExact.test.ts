@@ -236,7 +236,7 @@ describe("authenticated trusted-exact scan settlement", () => {
     let release!: (value: Response) => void;
     const pending = new Promise<Response>((resolve) => { release = resolve; });
     const store = createTestScanStore({ db: new MockDb(), trustedExactProbeEnabled: false });
-    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     store.getState().updateSettings({ aiLookupEnabled: true });
     globalThis.fetch = vi.fn(() => pending) as unknown as typeof fetch;
 
@@ -380,7 +380,7 @@ describe("authenticated trusted-exact scan settlement", () => {
 
   it("probes a valid GTIN through trusted exact first and stops before ordinary decode on an exact hit", async () => {
     const store = createTestScanStore({ db: new MockDb(), trustedExactProbeEnabled: true });
-    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     store.getState().updateSettings({ aiLookupEnabled: true });
     const fetchSpy = vi.fn(async () => response(VALID_GTIN));
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
@@ -397,7 +397,7 @@ describe("authenticated trusted-exact scan settlement", () => {
 
   it("falls back exactly once through ordinary decode after a valid GTIN trusted-exact miss", async () => {
     const store = createTestScanStore({ db: new MockDb(), trustedExactProbeEnabled: true });
-    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     store.getState().updateSettings({ aiLookupEnabled: true });
     const fetchSpy = vi.fn(async () => missResponse());
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
@@ -413,7 +413,7 @@ describe("authenticated trusted-exact scan settlement", () => {
 
   it("falls through to ordinary decode when a non-GTIN trusted-exact probe misses", async () => {
     const store = createTestScanStore({ db: new MockDb(), trustedExactProbeEnabled: true });
-    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     store.getState().updateSettings({ aiLookupEnabled: true });
     const fetchSpy = vi.fn(async () => missResponse());
     globalThis.fetch = fetchSpy as unknown as typeof fetch;

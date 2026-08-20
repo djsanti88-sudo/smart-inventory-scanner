@@ -39,7 +39,7 @@ function failStub() {
 
 function aggressiveStore() {
   const store = createTestScanStore({ db: new MockDb() });
-  store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+  store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
   store.getState().updateSettings({ aiLookupEnabled: true });
   return store;
 }
@@ -133,10 +133,9 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
     const store = createTestScanStore({ db: new MockDb() });
     store.getState().updateSettings({ aiLookupEnabled: true });
     store.getState().setAiStatus({
-      geminiConfigured: false,
       openaiConfigured: false,
       freeDecodeAvailable: true,
-      missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"],
+      missingKeys: ["OPENAI_API_KEY"],
     });
     const { spy, restore } = stub(VERIFIED);
     try {
@@ -153,7 +152,7 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
   it("keeps the legacy no-key client block when a stale/mocked server status does not advertise free rungs", () => {
     const store = createTestScanStore({ db: new MockDb() });
     store.getState().updateSettings({ aiLookupEnabled: true });
-    store.getState().setAiStatus({ geminiConfigured: false, openaiConfigured: false, missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"] });
+    store.getState().setAiStatus({ openaiConfigured: false, missingKeys: ["OPENAI_API_KEY"] });
     const { spy, restore } = stub(VERIFIED);
     try {
       store.getState().processScan("878106003504");
@@ -166,7 +165,7 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
 
   it("does NOT auto-decode when AI lookup is OFF (passive, with reason)", () => {
     const store = createTestScanStore({ db: new MockDb() });
-    store.getState().setAiStatus({ geminiConfigured: true });
+    store.getState().setAiStatus({ openaiConfigured: true });
     store.getState().updateSettings({ aiLookupEnabled: false });
     const { spy, restore } = stub(VERIFIED);
     try {
@@ -193,11 +192,11 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
     expect((lastReview(store).decodeNote ?? "").toLowerCase()).toMatch(/emergency|stop/);
   });
 
-  it("refreshAiStatus is server-authoritative: stale persisted off/cap-25 -> forced on + cap 200, gemini-first", async () => {
+  it("refreshAiStatus is server-authoritative: stale persisted off/cap-25 -> forced on + cap 200, openai", async () => {
     const store = createTestScanStore({ db: new MockDb() });
     // Simulate a STALE persisted client session from before AI was enabled.
-    store.getState().updateSettings({ aiLookupEnabled: false, dailyLookupLimit: 25, primaryProvider: "mock", fallbackProvider: "mock" });
-    const { restore } = stub({ liveEnabled: true, autoDecodeOnScan: true, geminiConfigured: true, openaiConfigured: true, dailyLimit: 200, missingKeys: ["FIRECRAWL_API_KEY"] });
+    store.getState().updateSettings({ aiLookupEnabled: false, dailyLookupLimit: 25 });
+    const { restore } = stub({ liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true, dailyLimit: 200, missingKeys: ["FIRECRAWL_API_KEY"] });
     try {
       await store.getState().refreshAiStatus();
     } finally {
@@ -206,14 +205,12 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
     const s = store.getState().settings;
     expect(s.aiLookupEnabled).toBe(true);    // forced on by the server confirming a key
     expect(s.dailyLookupLimit).toBe(200);    // adopts AI_LOOKUP_DAILY_LIMIT from the server
-    expect(s.primaryProvider).toBe("gemini");
-    expect(s.fallbackProvider).toBe("openai");
   });
 
   it("refreshAiStatus (Task 6) adopts the GET response's gptLadder spend/call status", async () => {
     const store = createTestScanStore({ db: new MockDb() });
     const { restore } = stub({
-      liveEnabled: true, autoDecodeOnScan: true, geminiConfigured: true, openaiConfigured: true,
+      liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true,
       dailyLimit: 200, missingKeys: [],
       gptLadder: { spentTodayUsd: 0.42, capUsd: 3, callsToday: 5, enabled: true },
     });
@@ -228,7 +225,7 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
   it("refreshAiStatus keeps the PRIOR gptLadder value when a GET response omits the field (older/mocked server)", async () => {
     const store = createTestScanStore({ db: new MockDb() });
     store.setState((s) => ({ aiStatus: { ...s.aiStatus, gptLadder: { spentTodayUsd: 1, capUsd: 3, callsToday: 2, enabled: true } } }));
-    const { restore } = stub({ liveEnabled: true, autoDecodeOnScan: true, geminiConfigured: true, openaiConfigured: true, dailyLimit: 200, missingKeys: [] });
+    const { restore } = stub({ liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true, dailyLimit: 200, missingKeys: [] });
     try {
       await store.getState().refreshAiStatus();
     } finally {
@@ -241,7 +238,7 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
   // field so Settings can warn when the SERVER (not the client emergencyStop toggle) has disabled AI.
   it("refreshAiStatus (Spec 2) adopts killSwitchOn: true from the GET response", async () => {
     const store = createTestScanStore({ db: new MockDb() });
-    const { restore } = stub({ liveEnabled: true, autoDecodeOnScan: true, geminiConfigured: true, openaiConfigured: true, dailyLimit: 200, missingKeys: [], killSwitchOn: true });
+    const { restore } = stub({ liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true, dailyLimit: 200, missingKeys: [], killSwitchOn: true });
     try {
       await store.getState().refreshAiStatus();
     } finally {
@@ -253,7 +250,7 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
   it("refreshAiStatus (Spec 2) defaults killSwitchOn to false when the GET response omits it", async () => {
     const store = createTestScanStore({ db: new MockDb() });
     store.setState((s) => ({ aiStatus: { ...s.aiStatus, killSwitchOn: true } }));
-    const { restore } = stub({ liveEnabled: true, autoDecodeOnScan: true, geminiConfigured: true, openaiConfigured: true, dailyLimit: 200, missingKeys: [] });
+    const { restore } = stub({ liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true, dailyLimit: 200, missingKeys: [] });
     try {
       await store.getState().refreshAiStatus();
     } finally {
@@ -293,7 +290,7 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
   it("refreshAiStatus clears killSwitchStatusUnknown on the next successful refresh (self-heal)", async () => {
     const store = createTestScanStore({ db: new MockDb() });
     store.setState((s) => ({ aiStatus: { ...s.aiStatus, killSwitchStatusUnknown: true } }));
-    const { restore } = stub({ liveEnabled: true, autoDecodeOnScan: true, geminiConfigured: true, openaiConfigured: true, dailyLimit: 200, missingKeys: [], killSwitchOn: false });
+    const { restore } = stub({ liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true, dailyLimit: 200, missingKeys: [], killSwitchOn: false });
     try {
       await store.getState().refreshAiStatus();
     } finally {

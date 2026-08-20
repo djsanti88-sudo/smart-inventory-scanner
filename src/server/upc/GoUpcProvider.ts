@@ -125,6 +125,14 @@ export interface GoUpcRungDeps {
   now?: () => Date;
   /** Archive-every-N counter seam (defaults to a module-level counter). */
   archiveEvery?: number;
+  /**
+   * DC-1 fix (2026-08-13): the ladder rung's AbortSignal (RunLadderContext.signal), threaded straight
+   * into `gate.run` so a call still queued behind the shared, process-wide GoUpcGate when the ladder
+   * gives up on this rung is DROPPED before it ever reaches `client` (and therefore before its charge
+   * and its real network fetch) - never fired unmetered after the ladder has already moved on. Same
+   * threading pattern as the GPT rung's `opts.signal` -> `gptFromScratch`.
+   */
+  signal?: AbortSignal;
 }
 
 // Archive-every-200 counter. A rung-level counter so a burst of hits archives a representative sample
@@ -197,6 +205,20 @@ function suggestionDecision(reason: string): DecodeDecision {
   };
 }
 
+// DC2-1 fix (2026-08-13): a 200 response with no usable identity fields (e.g. `{}`, `{"error":"..."}`
+// mistakenly answered with HTTP 200, or any provider bug that omits `product`) must not be classified
+// as a confident hit. Per the owner's instruction, this requires the PRESENCE of real identity FIELDS
+// rather than judging the name string's length/content (which risks rejecting legitimately terse but
+// real names). Any one populated identity signal is enough - name, brand, a upc/ean code, or specs.
+function hasUsableIdentity(product: GoUpcProduct): boolean {
+  if (product.name.trim() !== "") return true;
+  if (product.brand.trim() !== "") return true;
+  if (product.upc && product.upc.trim() !== "") return true;
+  if (product.ean && product.ean.trim() !== "") return true;
+  if (product.specs.length > 0) return true;
+  return false;
+}
+
 function suggestResult(product: GoUpcProduct, code: string, canonical: string): AiLookupResult {
   return { ...toResult(product, code, canonical), confidence: 0.4, needsHumanReview: true, verifiedFacts: [] };
 }
@@ -238,13 +260,29 @@ export async function goUpcRung(code: string, deps: GoUpcRungDeps): Promise<GoUp
     return { path: "goupc_unavailable", reason: "Go-UPC monthly cap reached" };
   }
 
-  // Throttled + deduped client call (2 req/s, in-flight dedup keyed by canonical GTIN).
+  // Throttled + deduped client call (2 req/s, in-flight dedup keyed by canonical GTIN). `deps.signal`
+  // (DC-1 fix) lets the gate drop this call BEFORE it fires if the ladder already abandoned this rung
+  // while the call was still waiting its turn in the shared queue.
   const apiKey = deps.apiKey;
-  const outcome = await deps.gate.run(canonical, () => deps.client(code, { apiKey }));
+  const outcome = await deps.gate.run(canonical, () => deps.client(code, { apiKey }), deps.signal);
 
   switch (outcome.kind) {
     case "hit": {
+      // A real egress happened - the provider was called and answered 200 - so it is metered
+      // regardless of how the payload classifies below (DC2-1: metering a real billed call is never
+      // skipped; only the confident-hit LABEL changes for an unusable payload).
       await deps.usage.record();
+
+      // DC2-1 fix: no usable identity fields -> this is a MISS, not a confident hit. Never
+      // negative-cached (this is provider-payload ambiguity - a 200 with junk/empty content - NOT a
+      // confirmed "not in DB" answer, so it must not poison future lookups the way a real miss does).
+      if (!hasUsableIdentity(outcome.product)) {
+        return {
+          path: "goupc_miss",
+          reason: "Go-UPC 200 response has no usable identity fields -> miss (not negative-cached)",
+        };
+      }
+
       await maybeArchive(deps.storage, code, canonical, outcome.raw, now(), archiveEvery);
 
       if (outcome.inferred) {
@@ -279,9 +317,25 @@ export async function goUpcRung(code: string, deps: GoUpcRungDeps): Promise<GoUp
     }
 
     case "miss": {
-      // Genuine not-in-DB: negative-cache it for 30 days, then fall through to the next rung.
-      const record: MissEntry = { canonical, missedAt: now().toISOString(), ttlDays: MISS_TTL_DAYS };
+      // A real egress happened either way - metered regardless of confidence (DC2-2: never let a
+      // real billed call go unmetered just because we distrust the answer).
       await deps.usage.record();
+
+      // DC2-2 fix (2026-08-13): only a CONFIDENT negative (a 404 with a well-formed JSON body - see
+      // goUpcClient.ts) gets the long-lived negative cache. `confident` undefined is treated as
+      // confident (legacy/omitted case) so existing callers keep today's behavior. An AMBIGUOUS 404
+      // (empty/non-JSON body - indistinguishable from an outage or a load-balancer error page) is NOT
+      // cached at all: rather than guess a shorter TTL, the next scan of this code simply re-checks
+      // Go-UPC normally (one real egress per genuine scan, same as any other rung - no in-request
+      // retry was added here, so this can never double-charge a single lookup per L12).
+      if (outcome.confident === false) {
+        return {
+          path: "goupc_miss",
+          reason: "Go-UPC 404 with an ambiguous/empty body -> possibly transient, not cached, fall through",
+        };
+      }
+
+      const record: MissEntry = { canonical, missedAt: now().toISOString(), ttlDays: MISS_TTL_DAYS };
       await deps.storage.writeMissCache(canonical, record);
       return { path: "goupc_miss", reason: "Go-UPC miss (negative-cached 30d) -> fall through" };
     }

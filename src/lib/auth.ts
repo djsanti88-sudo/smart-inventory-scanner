@@ -21,6 +21,7 @@ import type {
   ProvisionRequest,
   ProvisionResponse,
 } from "@/services/auth/provisioningTypes";
+import type { AuthUser, Membership, CreatableMemberRole } from "@/services/auth/authService";
 import { COLLECTIONS, type BusinessMember } from "@/services/db/types";
 import { retryingRead } from "@/services/db/firebase/boundedRead";
 
@@ -29,18 +30,18 @@ import { retryingRead } from "@/services/db/firebase/boundedRead";
 // green and is impossible in production (src/services/auth/authBypass.ts).
 
 export { isAuthBypassEnabled };
-export type AppRole = "owner" | "admin" | "counter" | "viewer";
-export type Membership = BusinessMember & { businessName: string };
-export type CreatableMemberRole = Exclude<AppRole, "owner">;
+// Re-exported from the port so existing call sites keep their import path while the definitions
+// live once, provider-neutrally, in @/services/auth/authService.
+export type { AppRole, Membership, CreatableMemberRole, AuthUser } from "@/services/auth/authService";
 
-const E2E_USER = { uid: "e2e-user", email: "e2e@test.local" } as unknown as User;
+const E2E_USER = { uid: "e2e-user", email: "e2e@test.local" } as unknown as AuthUser;
 const BUSINESS_REQUEST_PREFIX = "sis-business-create-request-v2:";
 const BUSINESS_INDEX_PREFIX = "sis-business-create-index-v2:";
 const OPAQUE_FINGERPRINT = /^[a-f0-9]{64}$/;
 const pendingBusinessRequestIds = new Map<string, string>();
 
 /** Resolves the current user once auth state settles (Firebase currentUser is null until then). */
-export async function getSession(): Promise<User | null> {
+export async function getSession(): Promise<AuthUser | null> {
   if (isAuthBypassEnabled()) return E2E_USER;
   const auth = getFirebaseAuth();
   if (auth.currentUser) return auth.currentUser;
@@ -52,7 +53,7 @@ export async function getSession(): Promise<User | null> {
   });
 }
 
-export function onAuthChange(cb: (user: User | null) => void): () => void {
+export function onAuthChange(cb: (user: AuthUser | null) => void): () => void {
   if (isAuthBypassEnabled()) return () => {};
   return onAuthStateChanged(getFirebaseAuth(), cb);
 }
@@ -179,7 +180,7 @@ export async function abandonBusinessCreation(name: string): Promise<void> {
 }
 
 async function requestProvision(
-  user: User,
+  user: AuthUser,
   input: ProvisionRequest,
 ): Promise<ProvisionResponse> {
   const idToken = await user.getIdToken();
@@ -214,7 +215,7 @@ async function requestProvision(
 }
 
 async function finishAuthentication(
-  user: User,
+  user: AuthUser,
   accountCreated: boolean,
 ): Promise<AuthFlowResult> {
   try {
@@ -331,10 +332,13 @@ export async function sendResetEmail(email: string): Promise<{ error: string | n
  *  guarded by isAuthBypassEnabled() the same way signOut is - in bypass/mock mode there is no real
  *  Firebase user to send to, so this must never attempt a live send; it returns the same
  *  success-shaped no-op result a real send would return on success. */
-export async function resendVerificationEmail(user: User): Promise<{ error: string | null }> {
+export async function resendVerificationEmail(user: AuthUser): Promise<{ error: string | null }> {
   if (isAuthBypassEnabled()) return { error: null };
   try {
-    await sendEmailVerification(user);
+    // This module is the Firebase implementation of AuthService, so the AuthUser it hands out is
+    // always a Firebase User. The SDK call needs the concrete type; the cast is confined to this
+    // one boundary line rather than leaking the vendor type back into callers.
+    await sendEmailVerification(user as unknown as User);
     return { error: null };
   } catch (e) {
     return { error: firebaseAuthErrorMessage(e) };

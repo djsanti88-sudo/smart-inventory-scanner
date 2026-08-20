@@ -31,7 +31,7 @@ describe("every scan counts synchronously, regardless of lookup state", () => {
 
   it("counts an unknown scan when OFFLINE", () => {
     const store = createTestScanStore({ db: new MockDb() });
-    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     store.getState().updateSettings({ aiLookupEnabled: true });
     store.getState().setOnline(false);
     store.getState().processScan("333333333332");
@@ -40,7 +40,7 @@ describe("every scan counts synchronously, regardless of lookup state", () => {
 
   it("counts an unknown scan when the circuit breaker is OPEN", () => {
     const store = createTestScanStore({ db: new MockDb() });
-    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, emergencyStop: true });
+    store.getState().setAiStatus({ openaiConfigured: true, emergencyStop: true });
     store.getState().updateSettings({ aiLookupEnabled: true });
     store.getState().processScan("444444444445");
     expect(totalCount(store)).toBe(1);

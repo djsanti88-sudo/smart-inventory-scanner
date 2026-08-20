@@ -1,2 +1,0 @@
-QA rows=52242 barcodes=52242 evidence={'verified_1src_strong': 21978, 'verified_db': 4793, 'verified_vendor': 25471}
-QA RESULT: PASS

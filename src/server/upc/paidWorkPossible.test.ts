@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { paidWorkPossible } from "./paidWorkPossible";
+import { paidWorkPossible, liveAiLookupEnabled } from "./paidWorkPossible";
 
 // `server-only` is aliased to a no-op stub by vitest.config.ts.
 
@@ -47,5 +47,20 @@ describe("paidWorkPossible (L6, owner-ratified 2026-07-15)", () => {
   it("defaults to process.env when no env override is passed", () => {
     // Smoke check only: must not throw when reading the real process.env.
     expect(typeof paidWorkPossible(VALID_GTIN)).toBe("boolean");
+  });
+});
+
+describe("liveAiLookupEnabled (ENABLE_LIVE_AI_LOOKUP, enforced server-side since 2026-08-19)", () => {
+  it("is on by default and for any value other than the literal \"false\"", () => {
+    expect(liveAiLookupEnabled(env({}))).toBe(true);
+    expect(liveAiLookupEnabled(env({ ENABLE_LIVE_AI_LOOKUP: "true" }))).toBe(true);
+    expect(liveAiLookupEnabled(env({ ENABLE_LIVE_AI_LOOKUP: "0" }))).toBe(true);
+  });
+
+  it("ENABLE_LIVE_AI_LOOKUP=false turns paid work OFF even with every provider key configured", () => {
+    expect(liveAiLookupEnabled(env({ ENABLE_LIVE_AI_LOOKUP: "false" }))).toBe(false);
+    expect(
+      paidWorkPossible(VALID_GTIN, env({ ENABLE_LIVE_AI_LOOKUP: "false", GO_UPC_API_KEY: "k", BRAVE_SEARCH_API_KEY: "k", OPENAI_API_KEY: "k" })),
+    ).toBe(false);
   });
 });

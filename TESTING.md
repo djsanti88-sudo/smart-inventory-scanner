@@ -50,7 +50,7 @@ counts (`describe`/`it` counts run far higher per file).
 | Universal import / reconcile | `src/services/csvImport.test.ts`, `csvImport.trustGate.test.ts`, `importSchema.test.ts`, `src/services/import/importFixtureBattery.test.ts`, `importPerf.test.ts`, `universalImport.stageB.test.ts`, `universalImportPreview.test.ts`, `src/services/reconcile/` (reconcileReport, countedByUid, importFuzzyMatcher, normalizedEditDistance, shopwareCsvAdapter, identityMatcher), `src/stores/universalImport.store.test.ts`, `universalImportGtin.store.test.ts`, E2E `e2e/reconcile.spec.ts`, `e2e/phase4-universal-import.spec.ts`, `e2e/phase4-fuzzy-reconcile.spec.ts` | `npx vitest run src/services/reconcile src/services/csvImport.test.ts` | Well covered for a Phase 3/4 area the old doc predates entirely. |
 | UI components / stores | 31 files under `src/components/**/*.test.tsx` (ScannerInput, LiveScanFeed, FinalCountTable, NeedsReviewTable, UniversalImportPanel, ReconcilePanel, CatalogReviewTable, AuthGuard, BusinessContextGate, etc.), 103 files under `src/stores/**/*.test.ts` (scanStore split across many focused `scanStore.*.test.ts` files rather than one monolith test file) | `npx vitest run` (dom project) | Deep; the store test files mirror the "grep for symbols" guidance in CLAUDE.md - each store test targets one behavior/bug class rather than the whole file. |
 | Persistence backing (#27 IndexedDB) | `src/stores/scanPersistStorage.async.test.ts` (async coalesce/fail-soft/copy-then-clear migration, 6 tests), `src/stores/scanPersistNamespace.async.test.ts` (IDB-aware getPersistedBlob / hasMeaningfulLegacyBlobAsync N2-guard / migrateLegacyBlobOnceAsync / removePersistedKeyEverywhere, 13 tests), existing `scanPersistStorage.test.ts` + `BusinessContextGate.*.test.tsx` (fallback path), E2E `e2e/persist-indexeddb.spec.ts` (real Chromium: scans survive reload via IDB, legacy localStorage blob migrates then clears) | `npx vitest run src/stores/scanPersistStorage.async.test.ts src/stores/scanPersistNamespace.async.test.ts` / `npx playwright test e2e/persist-indexeddb.spec.ts` | jsdom has NO IndexedDB, so every dom-project store test exercises the localStorage FALLBACK path (that is itself the fallback regression proof); the IDB primary path + async-rehydrate seam is proven only by the Playwright spec. The sign-in ADOPT flow against real IDB is not covered by mock E2E (no sign-in there) - manual `dev:emulator` spot-check before merge. |
-| E2E - mock (port 3100) | 57 files under `e2e/**/*.spec.ts` (scan, resolver, decode, cleanup, auto-verify, auto-decode, trust-gate-law, ledger-markwrong, csv/reconcile phase3-4, camera-scan, a11y, history, variance-report, batch-approve, goupc-ladder, gpt-ladder-burst, etc.) | `npm run test:e2e` | Broad; `IS_E2E=1` forces the AI route to mock-only per `src/eval/playwrightConfigSafety.test.ts`. |
+| E2E - mock (port 3100) | the `e2e/*.spec.ts` files `playwright.config.ts` does not `testIgnore` (`npx playwright test --list` is the count) (scan, resolver, decode, cleanup, auto-verify, auto-decode, trust-gate-law, ledger-markwrong, csv/reconcile phase3-4, camera-scan, a11y, history, variance-report, batch-approve, goupc-ladder, gpt-ladder-burst, etc.) | `npm run test:e2e` | Broad; `IS_E2E=1` forces the AI route to mock-only per `src/eval/playwrightConfigSafety.test.ts`. |
 | E2E - Firebase (port 3200) | `e2e/firebase-phase2/firebase-flow.spec.ts` | `npm run test:e2e:firebase` | Thin - only one spec file exercises the real Firebase E2E config; most Firebase proof lives in the emulator rules suite (`test:firebase`) rather than Playwright. |
 | E2E - human bots (port 3300) | `e2e/human-bots/scenarios/` (13 files: role-security-leak, export-leak, data-integrity, manager-workflow, platformOwner-tire-resolution, ux-no-training, customer-settings-plain, customer-review-persistence, customer-readable-controls, customer-clean-names, partnumber-display, performance-smoke), `e2e/human-bots/cloud/poisoned-live-account.spec.ts`, fixtures in `e2e/human-bots/fixtures/known-codes.ts` | `npm run qa:bots:*` / `npm run qa:bots:live` (cloud, owner-gated) | This is the human-bot proof gate CLAUDE.md requires before handoff for customer-facing changes; confirmed present and mapped to `docs/QA_BOTS.md`/`docs/AGENT_BOT_ROLES.md` roles. |
 | E2E - Teach Bot | `e2e/teach/` harness (`teach.mjs`, `cleanup.mjs`, `bugReport.mjs`, `pdfReport.mjs`) + `node --test "e2e/teach/**/*.test.mjs"` | `npm run teach`, `teach:test`, `teach:regression`, `teach:cleanup` | Self-learning live-app tester per PROJECT_MEMORY (`teach-bot-harness.md`); this is the coverage the old TESTING.md flagged as "never appended" - it exists but as a harness, not a fixed assertion suite, so treat its output (bug reports) as the proof artifact rather than pass/fail counts. |
@@ -67,6 +67,39 @@ Known gaps (stated plainly, not invented coverage):
 - `scripts/` test execution is split between vitest and bare `node --test`; running only `npm run test`
   silently skips the `node --test` subset (see `vitest.config.ts` exclude list) - this is intentional
   but easy to misread as full coverage.
+
+## Critical-behavior map (verified 2026-08-18, `refactor/pre-aws-cleanup`)
+
+The coverage map above is organized by AREA. This one is organized by BEHAVIOR: for each thing that
+must not break, the specific assertion that would catch the break. It exists because a
+provider/infrastructure migration is coming, and "which tests protect me while I move the storage
+layer?" is a different question from "what does this directory test?".
+
+Every row was verified by opening the named file, not inferred from a filename.
+
+| Critical behavior | The assertion that pins it | Gate |
+|---|---|---|
+| Scanner input works and keeps focus | `src/components/scanFocus.test.tsx` - "auto-focuses the scan input on page load"; `LiveScanFeedSuggestion.test.tsx` - approve/decline both assert focus RETURNS to the scan input | `npx vitest run src/components` |
+| One physical scan = one inventory count | `src/stores/countAlways.store.test.ts` - "counts an unresolved code exactly once even if invoked twice", plus the 174-code burst acceptance block | `npm run test:ledger` |
+| A scan counts even when everything else fails | `countAlways.store.test.ts` - AI OFF / OFFLINE / breaker OPEN each counted; `ledgerInvariants.store.test.ts` walks 12 paths incl. MISREAD, EXAMPLE, CAP-BLOCKED, BREAKER-OPEN, DECODE-IN-FLIGHT | `npm run test:ledger` |
+| Duplicate scans increment quantity, never duplicate the product | `countAlways.store.test.ts` - "re-scanning the same unknown code increments the SAME row (count 2, one product)"; `ledgerInvariants` - "path: UNKNOWN-repeat (same code twice, one product)" | `npm run test:ledger` |
+| Retries never double-count | `idempotencyKeyRetryStability.store.test.ts` - byte-identical id + idempotencyKey replayed across BOTH the automatic retry and the explicit `retrySync()` path | `npm run test:ledger` |
+| Barcode aliases resolve correctly | `src/services/aliasMatcher.test.ts`, `resolver.test.ts` - `known` only from an approved alias or verified identifier | `npx vitest run src/services/resolver.test.ts src/services/aliasMatcher.test.ts` |
+| UPC/EAN resolution is correct and lossless | `src/services/upc/gtin.test.ts` - UPC-A and its zero-padded EAN-13 canonicalize to the SAME key, and a case-pack GTIN-14 is NEVER collapsed into the unit GTIN | `npx vitest run src/services/upc` |
+| Unresolved items stay reviewable | `unknownEnqueue.store.test.ts` - an unknown scan enqueues SAVE_PRODUCT/SAVE_SCAN_EVENT/INCREMENT_COUNT; `reviewNeverLingersAfterResolve.store.test.ts` - a no-op or conflicting resolve leaves the row OPEN with no fabricated auto-resolved stamp | `npm run test:ledger` |
+| Fixing a wrong scan MOVES the count | `markWrongTransfer.store.test.ts`; `ledgerInvariants` - "path: POST-DELETE (quantity transferred to an Unidentified provisional, never lost)" | `npm run test:ledger` |
+| Scan sessions are preserved across refresh | `sessionPersistence.store.test.ts` - "setBusinessContext reconstructs the ACTIVE session + its finalCounts (survive-refresh)" | `npm run test:firebase` (emulator) |
+| Shops/locations preserve their inventories | `scanLocation.store.test.ts` - location rides on both ScanEvent and InventoryCount, updates mid-session, defaults to the session's | `npm run test:ledger` |
+| Users/tenants stay isolated | `src/services/db/firebase/tenantIsolation.rules.test.ts`; `app/api/account/delete/route.test.ts` - "never queries or deletes another tenant's paths"; `account/export/route.test.ts` - "returns only the member's own business docs" | `npm run test:firebase` + `npx vitest run src/app/api` |
+| Role permissions hold | `rolePermissions.rules.test.ts`; `account/delete/route.test.ts` - "rejects a viewer role with 403 and deletes nothing"; `FinalCountTable.test.tsx` - alias DB stays platformOwner-only | `npm run test:firebase` |
+| Offline loses no scans | `countAlways.store.test.ts` OFFLINE case; `useOnlineStatusSync.test.tsx` - store flips offline on a REAL browser offline event; `SyncStatusIndicator.test.tsx` - honest offline signal | `npm run test:ledger` + `npx vitest run src/components` |
+| API behavior stays compatible | 20 route suites under `src/app/api/**/*.test.ts` (ai-lookup x12, account delete/export, businesses, catalog-review, catalog-dispute, share, health, telemetry, reconcile, prefix-floor, import-mapping) | `npx vitest run src/app/api` |
+| Product/barcode data stays intact | `src/eval/goldenBaseline.test.ts` (owner-loved 100/100 slice); `src/server/tire-knowledge/corpusDrift.test.ts`, `corpusIntegrity.test.ts`; `scripts/refresh-tire-meta.test.mjs` asserts corpus counts against an INDEPENDENT hardcoded oracle | `npm run test:golden`, `npm run test:corpus-drift` |
+| Provider seams have not drifted | `src/lib/auth.contract.test.ts`, `src/services/db/repositories.contract.test.ts` - type-level conformance, enforced by `tsc --noEmit`, both verified to genuinely fail when an implementation drifts | `npm run proof:all` (typecheck leg) |
+
+**The honest gate is `npm run proof:all`, not `proof:local`.** `proof:local` cannot see the 28
+vitest-excluded `node --test` suites, and 11 `*.rules.test.ts` files self-skip without a Firestore
+emulator (they are most of the "105 skipped" in a green run). Green in `proof:local` is not green.
 
 ## Historical sections below (dated, not re-verified as current)
 
@@ -298,7 +331,7 @@ Gate run (2026-06-14): vitest 313/313, tsc clean, eslint clean, next build succe
 ## Launch MVP Phase 1: Supabase foundation (2026-06-14) - ARCHIVED
 
 > ⚠ review: the Supabase foundation was replaced by Firebase and archived to
-> `archive/supabase-foundation/`. The integration test files below no longer exist in `src/`;
+> git history (the `archive/supabase-foundation/` tree was removed from the working tree on 2026-08-19). The integration test files below no longer exist in `src/`;
 > this section is kept as the historical record of that proof run.
 
 Unit (run in `npm test`, no Docker needed):

@@ -10,15 +10,16 @@
 //      (Turso, ~50-160ms). Both firewall-checked (prefixBrandConflict).
 //   2. If the two DBs AGREE -> AUTO-COUNT in ~160ms with NO AI call and NO Firecrawl (the common food/retail
 //      path). aiCalled:false.
-//   3. Else add one free Gemini 2.5 grounding call, and CONSENSUS across the THREE free sources: AUTO-COUNT
-//      (Verified) the identity >=2 of them agree on (>=2 shared distinctive tokens). This is where the 4M DB's
-//      bad rows (coconut-oil-for-glycine) get OUTVOTED - one wrong vote never wins.
+//   3. Else add the OPTIONAL grounding leg (absent in production since consolidation A1 - see the dep's
+//      doc comment), and CONSENSUS across the free sources: AUTO-COUNT (Verified) the identity >=2 of them
+//      agree on (>=2 shared distinctive tokens). This is where the 4M DB's bad rows
+//      (coconut-oil-for-glycine) get OUTVOTED - one wrong vote never wins.
 //   4. Still no agreement -> ONE Firecrawl /search (paid, rare) adds barcode-confirmed real-page votes.
 //   5. No consensus anywhere -> the best available name is a SUGGESTION shown in Needs Review (still counted
 //      by the store's provisional-count rule), then Firecrawl-scrape, then the Plan C prefix floor, then the
 //      Fix 4 generic terminal floor. NEVER a hallucinated Verified; NEVER null for a public code.
 //
-// Cost/speed: the common path is 2 free DB lookups (~160ms, $0, no AI). Grounding (free, 1,500/day) only on
+// Cost/speed: the common path is 2 free DB lookups (~160ms, $0, no AI). The optional grounding leg only on
 // DB disagreement; Firecrawl (2 credits) only when all free sources disagree. Every win cached upstream
 // (resolved once per code). A 429 / rate-cap / error on any leg falls back GRACEFULLY (safe() -> null).
 //
@@ -68,8 +69,12 @@ export interface ParallelResolveDeps {
    *  data is mostly right but has some bad rows (e.g. coconut-oil-for-glycine) - safe here because it is only
    *  ONE consensus vote, outvoted by disagreeing sources. Null on miss/unconfigured. */
   retailDb?: (code: string) => Promise<{ name: string; brand: string } | null>;
-  /** Fast grounded identify (gemini-2.5-flash-lite). `url` switches google_search -> url_context. Null on miss. */
-  groundIdentify: (code: string, opts?: { url?: string }) => Promise<GroundingLegResult | null>;
+  /** OPTIONAL grounded-identify leg: one more independent identity vote for the consensus pool. Null on
+   *  miss. Consolidation A1 (2026-08-19): the production pipeline supplies NO grounding leg (the Gemini
+   *  flash-lite arm it used to inject was permanently disabled and is now deleted), so today this is an
+   *  absent source. The consensus rule itself is source-agnostic and unchanged; an absent leg behaves
+   *  exactly like the null-returning stub the pipeline used to pass. */
+  groundIdentify?: (code: string, opts?: { url?: string }) => Promise<GroundingLegResult | null>;
   /** 1-credit cheap Firecrawl scrape of ONE known URL (last-ditch name when no source named it). Null when unavailable. */
   firecrawlScrapeCheap: (url: string) => Promise<FirecrawlLegResult | null>;
   /** Firecrawl /search identity source: barcode-CONFIRMED product names from real result snippets. The
@@ -214,8 +219,8 @@ export async function resolveUnknownFast(
     return { name: bdName, brand: bd!.brand, verified: true, aiCalled: false, source: "barcode_db" };
   }
 
-  // 3. Add Gemini 2.5 grounding (free, <=1500/day) - only because the two DBs did not settle it.
-  const gr = await safe(() => deps.groundIdentify(code));
+  // 3. Add the optional grounding vote - only because the two DBs did not settle it. Absent by default.
+  const gr = deps.groundIdentify ? await safe(() => deps.groundIdentify!(code)) : null;
   const grName = gr && isUsable(gr.text) && !isRefusal(gr.text) ? cleanProductName(gr.text) : "";
   if (gr) {
     const u = gr.sourceUrls ?? [];

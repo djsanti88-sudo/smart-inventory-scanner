@@ -179,8 +179,10 @@ describe("scanStore - Phase 6 wrong-decode correction", () => {
     globalThis.fetch = spy;
     return { spy, restore: () => (globalThis.fetch = original) };
   }
-  function setGeminiConfigured(store: ReturnType<typeof createTestScanStore>, on: boolean) {
-    store.setState((s) => ({ aiStatus: { ...s.aiStatus, geminiConfigured: on } }));
+  // Consolidation A1: the correction recheck runs the ordinary decode pipeline (never Gemini), so its
+  // only "cannot run at all" conditions are the server kill switch and the server live-AI disable.
+  function setDecodeAvailable(store: ReturnType<typeof createTestScanStore>, on: boolean) {
+    store.setState((s) => ({ aiStatus: { ...s.aiStatus, liveEnabled: on, killSwitchOn: false } }));
   }
   // Simulate a wrong saved decode: a human linked an unknown code to a (wrong) product and counted it.
   function wrongAlias(store: ReturnType<typeof createTestScanStore>, code: string, productId: string) {
@@ -220,7 +222,7 @@ describe("scanStore - Phase 6 wrong-decode correction", () => {
 
   it("markWrong deactivates the bad alias, removes the count, reopens Needs Review, and stops future counting", async () => {
     const store = createTestScanStore({ db: new MockDb() });
-    setGeminiConfigured(store, false); // recheck unavailable -> no fetch; focus on alias/count/review
+    setDecodeAvailable(store, false); // recheck unavailable -> no fetch; focus on alias/count/review
     wrongAlias(store, "WRONGCODE1", "prod-coke");
     expect(countFor(store, "prod-coke")).toBe(1);
     expect(store.getState().aliases.some((a) => a.cleanCode === "WRONGCODE1" && a.approved)).toBe(true);
@@ -234,7 +236,6 @@ describe("scanStore - Phase 6 wrong-decode correction", () => {
     expect(review.status).toBe("open");
     expect(review.cleanCode).toBe("WRONGCODE1");
     expect(review.correctionRecheckStatus).toBe("unavailable");
-    expect(review.correctionRecheckMissingKeys).toContain("GEMINI_API_KEY");
     // future scan of the same code no longer counts the wrong product
     const ev = store.getState().processScan("WRONGCODE1");
     expect(ev?.resolverStatus).not.toBe("known");
@@ -243,7 +244,7 @@ describe("scanStore - Phase 6 wrong-decode correction", () => {
 
   it("after markWrong, relinking the code to the correct product makes future scans count the correct product", async () => {
     const store = createTestScanStore({ db: new MockDb() });
-    setGeminiConfigured(store, false);
+    setDecodeAvailable(store, false);
     wrongAlias(store, "RELINK1", "prod-coke");
     const reviewId = await store.getState().markWrong("prod-coke");
     store.getState().resolveUnknown(reviewId!, "link_existing", { productId: "prod-nokian", applyToCount: true });
@@ -256,7 +257,7 @@ describe("scanStore - Phase 6 wrong-decode correction", () => {
 
   it("correctionRecheck verified_correction recommends but never auto-saves (human still approves)", async () => {
     const store = createTestScanStore({ db: new MockDb() });
-    setGeminiConfigured(store, true);
+    setDecodeAvailable(store, true);
     const reviewId = store.getState().reopenNeedsReview("RECHECK1", "marked wrong")!;
     const { spy, restore } = stub({
       providerNames: ["gemini:pro"],
@@ -279,7 +280,7 @@ describe("scanStore - Phase 6 wrong-decode correction", () => {
 
   it("correctionRecheck insufficient_evidence keeps the code in Needs Review", async () => {
     const store = createTestScanStore({ db: new MockDb() });
-    setGeminiConfigured(store, true);
+    setDecodeAvailable(store, true);
     const reviewId = store.getState().reopenNeedsReview("RECHECK2", "marked wrong")!;
     const { restore } = stub({ providerNames: ["gemini:pro"], results: [aiResult({ productName: "Maybe", confidence: 0.4 })], decision: { status: "suggested", confidence: 0.4 } });
     try {
@@ -295,7 +296,7 @@ describe("scanStore - Phase 6 wrong-decode correction", () => {
 
   it("correctionRecheck conflict keeps the code in Needs Review with a safe conflict message", async () => {
     const store = createTestScanStore({ db: new MockDb() });
-    setGeminiConfigured(store, true);
+    setDecodeAvailable(store, true);
     const reviewId = store.getState().reopenNeedsReview("RECHECK3", "marked wrong")!;
     const { restore } = stub({ providerNames: ["gemini:pro", "openai"], results: [aiResult({ productName: "A", brand: "X", confidence: 0.5 })], decision: { status: "conflict", confidence: 0.2, crossCheck: { decision: "conflict" } } });
     try {
@@ -309,9 +310,9 @@ describe("scanStore - Phase 6 wrong-decode correction", () => {
     expect(review.reason.toLowerCase()).toContain("conflict");
   });
 
-  it("correctionRecheck is unavailable (no live call) when Gemini is not configured; reports key NAMES only", async () => {
+  it("correctionRecheck is unavailable (no live call) when the server has live AI disabled; reports key NAMES only", async () => {
     const store = createTestScanStore({ db: new MockDb() });
-    setGeminiConfigured(store, false);
+    setDecodeAvailable(store, false);
     const reviewId = store.getState().reopenNeedsReview("RECHECK4", "marked wrong")!;
     const { spy, restore } = stub({});
     try {
@@ -321,13 +322,14 @@ describe("scanStore - Phase 6 wrong-decode correction", () => {
     }
     const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
     expect(review.correctionRecheckStatus).toBe("unavailable");
-    expect(review.correctionRecheckMissingKeys).toEqual(["GEMINI_API_KEY"]);
+    // Key NAMES only, never a value, and never a Gemini key the pipeline does not use.
+    expect(review.correctionRecheckMissingKeys ?? []).not.toContain("GEMINI_API_KEY");
     expect(spy).not.toHaveBeenCalled();
   });
 
   it("cost guard: only one Pro recheck per code unless an explicit retry", async () => {
     const store = createTestScanStore({ db: new MockDb() });
-    setGeminiConfigured(store, true);
+    setDecodeAvailable(store, true);
     const reviewId = store.getState().reopenNeedsReview("RECHECK5", "marked wrong")!;
     const { spy, restore } = stub({ providerNames: ["gemini:pro"], results: [aiResult({ productName: "P" })], decision: { status: "suggested", confidence: 0.5 } });
     try {
@@ -339,65 +341,6 @@ describe("scanStore - Phase 6 wrong-decode correction", () => {
     } finally {
       restore();
     }
-  });
-});
-
-describe("scanStore - Phase 7 stronger re-decode escalation", () => {
-  function captureStub(resp: object) {
-    const original = globalThis.fetch;
-    const calls: Array<RequestInit | undefined> = [];
-    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
-      calls.push(init);
-      return { ok: true, json: async () => resp };
-    }) as unknown as typeof fetch;
-    return { calls, restore: () => (globalThis.fetch = original) };
-  }
-  const lastBody = (calls: Array<RequestInit | undefined>) => JSON.parse(String(calls[calls.length - 1]?.body ?? "{}"));
-  const DECODE_RESP = {
-    providerNames: ["gemini"],
-    results: [{ ...{ productName: "Some Product", brand: "B", category: "", specsShort: "", specsFull: "", primarySku: "", primaryBarcode: "", gtin: "", upc: "", ean: "", aliases: [], imageUrl: "", productUrl: "", sourceUrls: [], confidence: 0.5, verifiedFacts: [], guesses: [], needsHumanReview: true } }],
-    decision: { status: "suggested", confidence: 0.5 },
-  };
-
-  it("liveDecode auto-escalates to proRecheck:true for a review reopened from Mark wrong", async () => {
-    const store = createTestScanStore({ db: new MockDb() });
-    store.getState().updateSettings({ aiLookupEnabled: true, primaryProvider: "gemini" });
-    const reviewId = store.getState().reopenNeedsReview("PH7CODE1", "marked wrong - re-identify")!;
-    expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)?.reopenedFromWrong).toBe(true);
-    const { calls, restore } = captureStub(DECODE_RESP);
-    try {
-      await store.getState().liveDecode(reviewId);
-    } finally {
-      restore();
-    }
-    expect(lastBody(calls).proRecheck).toBe(true);
-  });
-
-  it("normal liveDecode does NOT send proRecheck (fast models for ordinary unknowns)", async () => {
-    const store = createTestScanStore({ db: new MockDb() });
-    store.getState().processScan("PH7CODE2"); // AI off by default -> passive review, not reopened-from-wrong
-    const reviewId = store.getState().needsReviewQueue.find((r) => r.status === "open")!.id;
-    store.getState().updateSettings({ aiLookupEnabled: true, primaryProvider: "gemini" });
-    const { calls, restore } = captureStub(DECODE_RESP);
-    try {
-      await store.getState().liveDecode(reviewId);
-    } finally {
-      restore();
-    }
-    expect(lastBody(calls).proRecheck).not.toBe(true);
-  });
-
-  it("explicit stronger re-decode (correctionRecheck retry) uses the Pro path (proRecheck:true)", async () => {
-    const store = createTestScanStore({ db: new MockDb() });
-    store.setState((s) => ({ aiStatus: { ...s.aiStatus, geminiConfigured: true } }));
-    const reviewId = store.getState().reopenNeedsReview("PH7CODE3", "marked wrong")!;
-    const { calls, restore } = captureStub({ providerNames: ["gemini:pro"], results: DECODE_RESP.results, decision: { status: "suggested", confidence: 0.6 } });
-    try {
-      await store.getState().correctionRecheck(reviewId, { retry: true });
-    } finally {
-      restore();
-    }
-    expect(lastBody(calls).proRecheck).toBe(true);
   });
 });
 
@@ -587,85 +530,6 @@ describe("scanStore - W2 discovered-alias approval", () => {
 });
 
 describe("scanStore - AI suggestions NEVER auto-save (trust boundary)", () => {
-  const HIGH_CONF = {
-    productName: "Laird Superfood Creamer",
-    brand: "Laird",
-    category: "Beverage",
-    specsShort: "",
-    specsFull: "",
-    primarySku: "",
-    primaryBarcode: "855724007602",
-    gtin: "",
-    upc: "855724007602",
-    ean: "",
-    aliases: [],
-    imageUrl: "",
-    productUrl: "",
-    sourceUrls: ["https://example.com"],
-    confidence: 0.98,
-    verifiedFacts: [],
-    guesses: ["This identity is an AI guess"],
-    needsHumanReview: false,
-  };
-
-  function stubFetch(result: object) {
-    const original = globalThis.fetch;
-    globalThis.fetch = (async () => ({
-      ok: true,
-      json: async () => ({ providerName: "gemini", result }),
-    })) as unknown as typeof fetch;
-    return () => {
-      globalThis.fetch = original;
-    };
-  }
-
-  it("does NOT create a product, alias, or count from a high-confidence AI suggestion", async () => {
-    const db = new MockDb();
-    const store = createTestScanStore({ db });
-    store.getState().processScan("855724007602");
-    const reviewId = store.getState().needsReviewQueue.find((r) => r.status === "open")!.id;
-    store.getState().updateSettings({ aiLookupEnabled: true, primaryProvider: "gemini" });
-
-    const restore = stubFetch(HIGH_CONF);
-    try {
-      await store.getState().lookupUnknown(reviewId);
-    } finally {
-      restore();
-    }
-
-    // The suggestion is recorded on the review, but the IDENTITY was never trusted/saved: no product
-    // named after the AI suggestion, no alias created. Per the owner rule "scan N = count N" (Plan A,
-    // Task 2), the scan itself already counted synchronously as an anonymous provisional row the instant
-    // it was captured -- that count is independent of, and happens before, this AI suggestion.
-    const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
-    expect(review.status).toBe("open"); // still needs human review
-    expect(review.suggestedProductName).toBe("Laird Superfood Creamer"); // shown as a suggestion
-    expect(store.getState().products.some((p) => p.name === "Laird Superfood Creamer")).toBe(false);
-    expect(store.getState().aliases.some((a) => a.cleanCode === "855724007602")).toBe(false);
-    expect(store.getState().finalCounts).toHaveLength(1); // counted synchronously as provisional (scan N = count N)
-  });
-
-  it("a re-scan after an AI suggestion still routes to Needs Review (resolverStatus), never a trusted Known identity", async () => {
-    const db = new MockDb();
-    const store = createTestScanStore({ db });
-    store.getState().processScan("855724007602");
-    const reviewId = store.getState().needsReviewQueue.find((r) => r.status === "open")!.id;
-    store.getState().updateSettings({ aiLookupEnabled: true, primaryProvider: "gemini" });
-    const restore = stubFetch(HIGH_CONF);
-    try {
-      await store.getState().lookupUnknown(reviewId);
-    } finally {
-      restore();
-    }
-    const ev = store.getState().processScan("855724007602");
-    // Plan A, Task 2 ("scan N = count N"): the first scan already counted synchronously as an
-    // anonymous provisional row, so this re-scan matches THAT provisional product (never the
-    // AI-suggested identity, which was never trusted/saved). resolverStatus stays "needs_review":
-    // the AI suggestion still did not make this code deterministically Known.
-    expect(ev?.matchedProductId).toBe(store.getState().products.find((p) => p.provisional)?.id);
-    expect(ev?.resolverStatus).toBe("needs_review");
-  });
-
   it("only a HUMAN approval creates the alias + makes future scans deterministic Known", () => {
     const db = new MockDb();
     const store = createTestScanStore({ db });
@@ -700,7 +564,7 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
   async function decode(store: ReturnType<typeof createTestScanStore>, code: string, resp: object) {
     store.getState().processScan(code);
     const reviewId = store.getState().needsReviewQueue.find((r) => r.status === "open")!.id;
-    store.getState().updateSettings({ aiLookupEnabled: true, primaryProvider: "gemini" });
+    store.getState().updateSettings({ aiLookupEnabled: true });
     const { spy, restore } = stub(resp);
     try {
       await store.getState().liveDecode(reviewId);
@@ -835,7 +699,7 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
     const store = createTestScanStore({ db });
     store.getState().processScan("049000111222");
     const reviewId = store.getState().needsReviewQueue.find((r) => r.status === "open")!.id;
-    store.getState().updateSettings({ aiLookupEnabled: true, primaryProvider: "gemini", autoAddDecodedProducts: false });
+    store.getState().updateSettings({ aiLookupEnabled: true, autoAddDecodedProducts: false });
     const { restore } = stub(
       decodeResponse(
         { status: "verified", confidence: 0.97, reason: "Verified AI Decode", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "agree" } },
@@ -1014,7 +878,7 @@ describe("scanStore - auto-apply high-trust suggestions (owner order 2026-07-10)
   async function decode(store: ReturnType<typeof createTestScanStore>, code: string, resp: object) {
     store.getState().processScan(code);
     const reviewId = store.getState().needsReviewQueue.find((r) => r.status === "open")!.id;
-    store.getState().updateSettings({ aiLookupEnabled: true, primaryProvider: "gemini" });
+    store.getState().updateSettings({ aiLookupEnabled: true });
     const { spy, restore } = stub(resp);
     try {
       await store.getState().liveDecode(reviewId);
@@ -1117,7 +981,7 @@ describe("scanStore - auto-apply high-trust suggestions (owner order 2026-07-10)
     const store = createTestScanStore({ db });
     store.getState().processScan("049000111222");
     const reviewId = store.getState().needsReviewQueue.find((r) => r.status === "open")!.id;
-    store.getState().updateSettings({ aiLookupEnabled: true, primaryProvider: "gemini", autoAddDecodedProducts: false });
+    store.getState().updateSettings({ aiLookupEnabled: true, autoAddDecodedProducts: false });
     const { restore } = stub(
       decodeResponse(
         { status: "suggested", confidence: 0.9, reason: "Suggested, strong sources.", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "agree" } },

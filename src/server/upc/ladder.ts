@@ -158,11 +158,13 @@ export async function runLadder(_code: string, rungs: LadderRung[], opts: RunLad
 
 /** The concrete rung runners the route injects (each already closed over the request + deps).
  *  `runGpt` optionally accepts the ladder's RunLadderContext (wave-3: signal threading into
- *  gptFromScratch) - widened to accept it without requiring every other runner to. */
+ *  gptFromScratch) - widened to accept it without requiring every other runner to. `runGoUpc` widened
+ *  the same way (DC-1 fix, 2026-08-13): its signal threads into the shared GoUpcGate so an abandoned
+ *  rung's still-queued call never fires unmetered after the ladder gives up on it. */
 export interface LadderRungRunners {
   runUpcItemDb: () => Promise<RungOutcome>;
   runOpenFoodFacts: () => Promise<RungOutcome>;
-  runGoUpc: () => Promise<RungOutcome>;
+  runGoUpc: (ctx?: RunLadderContext) => Promise<RungOutcome>;
   runFetchV2: () => Promise<RungOutcome>;
   runGpt: (ctx?: RunLadderContext) => Promise<RungOutcome>;
 }

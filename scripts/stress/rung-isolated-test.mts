@@ -1,10 +1,19 @@
 // Isolated rung test (owner-approved 2026-07-20, own $6 hard cap, bypasses the ladder clock):
 // for each code, run Fetch V2 alone with its FULL budget, then gptFromScratch alone (35s).
-// Usage: npx tsx scripts/stress/rung-isolated-test.mts [--skip-gpt] [--skip-fetch]
+// GATED (owner incident 2026-08-13, TL2-1 re-verification): this script had NO flag at all - a bare
+// invocation immediately spent real Firecrawl/GPT money.
+// Usage: npx tsx scripts/stress/rung-isolated-test.mts --live --yes-i-accept-cost [--skip-gpt] [--skip-fetch]
 // Reads keys from .env.local. Live PAID calls: Firecrawl credits + GPT (worst case $0.39/call,
 // hard stop when cumulative worst-case reserve would exceed $6.00).
 import fs from "node:fs";
 import path from "node:path";
+import { requireLiveApproval } from "../lib/paidScriptGuard.mjs";
+
+const CAP_USD = 6.0;
+requireLiveApproval({
+  worstCaseFloorUsd: CAP_USD,
+  describe: () => `Would run the isolated Fetch V2 + GPT rung stress test, hard-capped at $${CAP_USD}.`,
+});
 
 // Minimal .env.local loader (no dotenv dep).
 for (const line of fs.readFileSync(path.resolve(".env.local"), "utf8").split(/\r?\n/)) {
@@ -20,7 +29,6 @@ const { selectBarcodeUrls } = await import("../../src/services/ai/barcodeSources
 const { gptFromScratch, GPT_LADDER_WORST_CASE_USD } = await import("../../src/services/ai/gptFromScratch.js");
 const { firecrawlKeysFromEnv } = await import("../../src/services/ai/firecrawlProvider.js");
 
-const CAP_USD = 6.0;
 const codes: string[] = JSON.parse(fs.readFileSync(".superpowers/stress/rung-test-codes.json", "utf8"));
 const skipGpt = process.argv.includes("--skip-gpt");
 const skipFetch = process.argv.includes("--skip-fetch");

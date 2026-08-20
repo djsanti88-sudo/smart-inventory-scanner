@@ -29,7 +29,7 @@ function stub(resp: object) {
 
 function baseStore() {
   const store = createTestScanStore({ db: new MockDb() });
-  store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+  store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
   store.getState().updateSettings({ aiLookupEnabled: true, scanContext: "any" });
   return store;
 }
@@ -149,8 +149,8 @@ describe("GOD CLIENT: platformOwner bypasses client-side cap/breaker/emergency-s
 
 // FINDING 1 (adversarial review, 2026-08-07): the primary scan-time path (evaluateAutoDecode +
 // runLiveDecodeOnce's internal re-check) was bypassed for platformOwner, but two OTHER decode-execution
-// paths - the manual "Retry live decode" action (`lookupUnknown`) and the background deep-verify
-// follow-up (`backgroundVerifyDeep`) - still called the un-bypassed `evaluateAiGate` directly,
+// paths - the manual "Retry live decode" action (`liveDecode`, NeedsReviewTable) and the background
+// deep-verify follow-up (`backgroundVerifyDeep`) - still called the un-bypassed `evaluateAiGate` directly,
 // contradicting owner intent ("god account has no caps, limits, or anything"). These tests prove BOTH
 // paths now bypass cap/breaker for a platformOwner and stay enforced for a non-owner.
 
@@ -163,17 +163,17 @@ function tripBreaker(store: ReturnType<typeof baseStore>) {
   store.setState({ breaker: { state: "open", failures: 12, openedAt: FIXED_NOW_MS } });
 }
 
-describe("FINDING 1: lookupUnknown (manual retry) and backgroundVerifyDeep also bypass for platformOwner", () => {
-  it("lookupUnknown: platformOwner with an OPEN circuit breaker still attempts the fetch; a non-owner is blocked", async () => {
+describe("FINDING 1: liveDecode (manual retry) and backgroundVerifyDeep also bypass for platformOwner", () => {
+  it("liveDecode: platformOwner with an OPEN circuit breaker still attempts the fetch; a non-owner is blocked", async () => {
     const godStore = createTestScanStore({ db: new MockDb() });
     const review = openReview(godStore, "086699998551");
     setGodIdentity(godStore);
-    godStore.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    godStore.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     godStore.getState().updateSettings({ aiLookupEnabled: true });
     tripBreaker(godStore);
-    const { spy, restore } = stub({ providerName: "mock", result: { productName: "X", brand: "", sourceUrls: [], verifiedFacts: [], guesses: [], aliases: [], confidence: 0 } });
+    const { spy, restore } = stub({ providerNames: [], results: [], decision: { status: "needs_review", confidence: 0, reason: "no fixture" } });
     try {
-      await godStore.getState().lookupUnknown(review.id);
+      await godStore.getState().liveDecode(review.id);
     } finally {
       restore();
     }
@@ -182,12 +182,12 @@ describe("FINDING 1: lookupUnknown (manual retry) and backgroundVerifyDeep also 
     const custStore = createTestScanStore({ db: new MockDb() });
     const review2 = openReview(custStore, "086699998552");
     setNonGodIdentity(custStore);
-    custStore.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    custStore.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     custStore.getState().updateSettings({ aiLookupEnabled: true });
     tripBreaker(custStore);
     const { spy: spy2, restore: restore2 } = stub({});
     try {
-      await custStore.getState().lookupUnknown(review2.id);
+      await custStore.getState().liveDecode(review2.id);
     } finally {
       restore2();
     }
@@ -198,7 +198,7 @@ describe("FINDING 1: lookupUnknown (manual retry) and backgroundVerifyDeep also 
     const godStore = createTestScanStore({ db: new MockDb() });
     const review = openReview(godStore, "086699998553");
     setGodIdentity(godStore);
-    godStore.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    godStore.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     godStore.getState().updateSettings({ aiLookupEnabled: true });
     tripBreaker(godStore);
     const { spy, restore } = stub({ providerNames: [], results: [], decision: { status: "needs_review", confidence: 0, reason: "no fixture" } });
@@ -212,7 +212,7 @@ describe("FINDING 1: lookupUnknown (manual retry) and backgroundVerifyDeep also 
     const custStore = createTestScanStore({ db: new MockDb() });
     const review2 = openReview(custStore, "086699998554");
     setNonGodIdentity(custStore);
-    custStore.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    custStore.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     custStore.getState().updateSettings({ aiLookupEnabled: true });
     tripBreaker(custStore);
     const { spy: spy2, restore: restore2 } = stub({});
@@ -253,7 +253,7 @@ describe("FINDING 2: NEXT_PUBLIC_E2E_PLATFORM_OWNER never grants the gate bypass
     tripBreaker(store);
     const { spy: spy2, restore: restore2 } = stub({});
     try {
-      await store.getState().lookupUnknown(review.id);
+      await store.getState().liveDecode(review.id);
     } finally {
       restore2();
     }

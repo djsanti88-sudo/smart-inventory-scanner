@@ -54,7 +54,7 @@
 //
 // Usage: node --test scripts/tire-db-repair/10_promote_execute.test.mjs
 
-import { test } from "node:test";
+import { test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, copyFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -62,6 +62,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { skipUnlessLocalData } from "../lib/localDataSkip.mjs";
 import { createClient } from "@libsql/client";
 
 // NOTE on why 10_promote_execute.mjs is loaded via a DYNAMIC import (not a static `import {...}`
@@ -88,6 +89,9 @@ const REPO_ROOT = join(__dirname, "..", "..");
 const REAL_STAGING_DIR = process.env.PROMOTE_TEST_STAGING_SOURCE || join(
   REPO_ROOT, "backups", "claude-tire-db-handoff-2026-07-28", "repair-2026-07-28", "turso-staging"
 );
+// Self-skips (visibly) when the gitignored staging package is not in this checkout - see scripts/lib/localDataSkip.mjs.
+const SKIP = skipUnlessLocalData(REAL_STAGING_DIR, "tire-DB promotion staging package (turso-staging/)");
+const test = (name, fn) => nodeTest(name, { skip: SKIP }, fn);
 const SCRIPT_PATH = join(__dirname, "10_promote_execute.mjs");
 
 const STAGING_SQL_FILES = [

@@ -17,16 +17,10 @@
         "NEXT_PUBLIC_FIREBASE_APP_ID",
         "NEXT_PUBLIC_AUTH_MODE",
         "PLATFORM_OWNER_EMAILS",
-        "PLATFORM_OWNER_UIDS",
-        "TRUSTED_EXACT_BOSS_BUSINESS_IDS"
+        "PLATFORM_OWNER_UIDS"
       ],
       "forbidden": [],
       "optional": [
-        "GEMINI_API_KEY",
-        "GEMINI_MODEL",
-        "OPENAI_MODEL",
-        "OPENAI_FAST_MODEL",
-        "AI_PROVIDER",
         "AI_LOOKUP_DAILY_LIMIT",
         "GPT_LADDER_DAILY_USD",
         "ENABLE_LIVE_AI_LOOKUP",
@@ -69,8 +63,7 @@
         "NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID",
         "NEXT_PUBLIC_FIREBASE_APP_ID",
         "NEXT_PUBLIC_FIREBASE_BACKEND",
-        "NEXT_PUBLIC_AUTH_MODE",
-        "TRUSTED_EXACT_BOSS_BUSINESS_IDS"
+        "NEXT_PUBLIC_AUTH_MODE"
       ],
       "forbidden": [
         "NEXT_PUBLIC_FIREBASE_USE_EMULATOR",
@@ -84,11 +77,6 @@
       "_forbidden_reason": "Preview is authenticated only through the dedicated smart-inventory-preview Firebase project. The browser configuration, explicit project ID, and Base64 Preview-scoped Admin credential are required. Emulator mode, production-mode opt-in, raw service-account JSON, and platform-owner overrides are forbidden so Preview cannot silently select a local or production backend. This name-only gate cannot prove values; runtime proof must confirm NEXT_PUBLIC_FIREBASE_PROJECT_ID is smart-inventory-preview before account or scan testing.",
       "_required_client_firebase_vars_decision": "Owner decision 2026-07-27: NEXT_PUBLIC_AUTH_MODE and the 7 NEXT_PUBLIC_FIREBASE_* client vars are DELIBERATELY required (not forbidden) in Preview for preview auth testing against the dedicated smart-inventory-preview Firebase project (see FIREBASE_PROJECT_ID above). This is intentional and distinct from Production, which is untouched by this decision.",
       "optional": [
-        "GEMINI_API_KEY",
-        "GEMINI_MODEL",
-        "OPENAI_MODEL",
-        "OPENAI_FAST_MODEL",
-        "AI_PROVIDER",
         "AI_LOOKUP_DAILY_LIMIT",
         "GPT_LADDER_DAILY_USD",
         "ENABLE_LIVE_AI_LOOKUP",

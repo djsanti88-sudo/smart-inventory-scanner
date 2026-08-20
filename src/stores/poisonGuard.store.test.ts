@@ -27,7 +27,7 @@ function stub(resp: object) {
 }
 function aiStore() {
   const store = createTestScanStore({ db: new MockDb() });
-  store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+  store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
   store.getState().updateSettings({ aiLookupEnabled: true });
   return store;
 }

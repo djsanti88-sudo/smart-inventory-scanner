@@ -130,7 +130,6 @@ function globalHit(code = "029142337393") {
 beforeEach(async () => {
   process.env.NEXT_PUBLIC_AUTH_MODE = "live";
   process.env.TRUSTED_EXACT_BOSS_BUSINESS_IDS = " business-a , business-b ";
-  delete process.env.NEXT_PUBLIC_TRUSTED_EXACT_BOSS_BUSINESS_IDS;
   delete process.env.IS_E2E;
   verifyIdToken.mockReset().mockResolvedValue({ uid: "uid-a", email: "member@example.com" });
   memberGet.mockReset().mockResolvedValue({ exists: true });
@@ -146,7 +145,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  for (const key of ["NEXT_PUBLIC_AUTH_MODE", "TRUSTED_EXACT_BOSS_BUSINESS_IDS", "NEXT_PUBLIC_TRUSTED_EXACT_BOSS_BUSINESS_IDS", "IS_E2E"]) {
+  for (const key of ["NEXT_PUBLIC_AUTH_MODE", "TRUSTED_EXACT_BOSS_BUSINESS_IDS", "IS_E2E"]) {
     const value = originalEnv[key];
     if (value === undefined) delete process.env[key]; else process.env[key] = value;
   }
@@ -283,13 +282,12 @@ describe("authenticated Boss trusted-exact route", () => {
     expect(trustedExactCheck).not.toHaveBeenCalled();
   });
 
-  it("boss-for-everyone: an authed member NOT on the allowlist still reaches the server-verified corpus (auth, not the allowlist or NEXT_PUBLIC, grants access)", async () => {
+  it("boss-for-everyone: an authed member NOT on the allowlist still reaches the server-verified corpus (auth, not the allowlist, grants access)", async () => {
     // Owner 2026-08-07 (Option A full): the allowlist no longer gates access. business-a is NOT in the
     // allowlist (business-b) yet, as a verified member, it still reaches the trusted index. The server
-    // ALWAYS derives authenticatedBossCorpus:true from auth - the request body / NEXT_PUBLIC var never
-    // changes that (this proves capability is server-verified, not client-mintable, and not allowlisted).
+    // ALWAYS derives authenticatedBossCorpus:true from auth - the request body never changes that (this
+    // proves capability is server-verified, not client-mintable, and not allowlisted).
     process.env.TRUSTED_EXACT_BOSS_BUSINESS_IDS = "business-b";
-    process.env.NEXT_PUBLIC_TRUSTED_EXACT_BOSS_BUSINESS_IDS = "business-a";
     const { POST } = await import("./route");
 
     const response = await POST(request("3220017438", { authenticatedBossCorpus: false }));

@@ -55,7 +55,7 @@ function modeStub(opts?: { deepDelayMs?: number }) {
 
 function tireAiStore() {
   const store = createTestScanStore({ db: new MockDb() });
-  store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+  store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
   store.getState().updateSettings({ aiLookupEnabled: true, scanContext: "tire" });
   return store;
 }

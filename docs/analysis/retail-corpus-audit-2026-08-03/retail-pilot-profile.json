@@ -1,0 +1,147 @@
+{
+  "generated_at": "2026-08-03T08:54:41.883Z",
+  "source": "data/retail-knowledge/retail_corpus.jsonl",
+  "database": "src/server/knowledge.generated.db#retail",
+  "counts": {
+    "rows": 319,
+    "invalid_json_rows": 0,
+    "gtin_valid_rows": 319,
+    "missing_title_rows": 0,
+    "missing_brand_rows": 51,
+    "missing_category_rows": 25,
+    "exact_barcode_overlap_rows": 8,
+    "variant_overlap_rows": 28,
+    "new_barcode_rows": 283,
+    "overlap_identity_disagreement_rows": 16
+  },
+  "disagreement_examples": [
+    {
+      "input_barcode": "816346020165",
+      "matched_barcode": "0816346020165",
+      "pilot_title": "310589 Sea Salt & Vinegar Kettle Chips, 8 Oz - Pack of 12",
+      "pilot_brand": "Deep River",
+      "corpus_product_name": "Sea Salt & Vinegar Chips",
+      "corpus_brand": ""
+    },
+    {
+      "input_barcode": "816346020189",
+      "matched_barcode": "0816346020189",
+      "pilot_title": "Zesty Jalapeno Kettle Cooked Potato Chips",
+      "pilot_brand": "Deep River",
+      "corpus_product_name": "Zesty Jalapeño Flavored Kettle Cooked Potato Chips",
+      "corpus_brand": "Deep River Snacks"
+    },
+    {
+      "input_barcode": "078742236179",
+      "matched_barcode": "0078742236179",
+      "pilot_title": "Great Value Milk Chocolate Baking Chips  11.5 Oz",
+      "pilot_brand": "Great Value",
+      "corpus_product_name": "Milk Chocolate Chips",
+      "corpus_brand": "Great Value"
+    },
+    {
+      "input_barcode": "660756012711",
+      "matched_barcode": "0660756012711",
+      "pilot_title": "Buenacho Jalapeno Flavored Tortilla Chips 5.7oz - Tortillas De Maiz Con Sabor a JalapeÃƒÂ±o (Pack of 1",
+      "pilot_brand": "Blue Nachos",
+      "corpus_product_name": "Buenachos jaliskito",
+      "corpus_brand": "Bocadeli"
+    },
+    {
+      "input_barcode": "856185005053",
+      "matched_barcode": "0856185005053",
+      "pilot_title": "Carretilla Tuna 8.4 Oz. Each Pasta Salad, Case of 8",
+      "pilot_brand": "Carretilla",
+      "corpus_product_name": "Pasta Salad With Tuna",
+      "corpus_brand": "carretilla"
+    },
+    {
+      "input_barcode": "725299930592",
+      "matched_barcode": "0725299930592",
+      "pilot_title": "Lime & Coriander Authentic Steamed Basmati Rice",
+      "pilot_brand": "Tilda",
+      "corpus_product_name": "Steamed Lime & Cilantro Basmati Rice",
+      "corpus_brand": "Tilda"
+    },
+    {
+      "input_barcode": "017400110734",
+      "matched_barcode": "0017400110734",
+      "pilot_title": "Enriched Extra Long Grain Parboiled Rice",
+      "pilot_brand": "Carolina Gold",
+      "corpus_product_name": "Enriched Parboiled Rice",
+      "corpus_brand": "Carolina Gold, Carolina Rice"
+    },
+    {
+      "input_barcode": "866712000000",
+      "matched_barcode": "0866712000000",
+      "pilot_title": "Premium Gluten Free Pastry Flour  Gluten Free Donut Flour - Baking Flour for Gluten Free Challah Bread, GF Brioche Bread, GF Cinnamon Roll & Gluten Fr",
+      "pilot_brand": "Blends By Orly",
+      "corpus_product_name": "Manhattan Blend",
+      "corpus_brand": "Orly (Modern Bread And Bagel)"
+    },
+    {
+      "input_barcode": "4011800015084",
+      "matched_barcode": "4011800015084",
+      "pilot_title": "Schwartau Dessert Sauce Caramel Gastro (2kg, 1530ml)",
+      "pilot_brand": "Schwartau",
+      "corpus_product_name": "Karamell Topping",
+      "corpus_brand": "Schwartau"
+    },
+    {
+      "input_barcode": "4027400168105",
+      "matched_barcode": "4027400168105",
+      "pilot_title": "Hela  GEWÜRZ KETCHUP / LIEBLICH-WÜRZIG GEWÜRZ KETCHUP CURRY DELIKAT 800 ML  3,39 €*  4,24 EUR / L",
+      "pilot_brand": "Hela, 31.05.2024",
+      "corpus_product_name": "Curry Ketchup",
+      "corpus_brand": "Hela, Hellas"
+    },
+    {
+      "input_barcode": "015400178211",
+      "matched_barcode": "0015400178211",
+      "pilot_title": "Western Family, Real Mayonnaise",
+      "pilot_brand": "Western Family",
+      "corpus_product_name": "Real Mayonnaise",
+      "corpus_brand": "Western Family"
+    },
+    {
+      "input_barcode": "041497111350",
+      "matched_barcode": "0041497111350",
+      "pilot_title": "Light Mayonnaise",
+      "pilot_brand": "Weis Quality",
+      "corpus_product_name": "Reduced Fat Lite Real Mayonnaise",
+      "corpus_brand": "Weis Quality"
+    },
+    {
+      "input_barcode": "086600260204",
+      "matched_barcode": "0086600260204",
+      "pilot_title": "Wild Selections, Solid White Albacore Tuna in Olive Oil",
+      "pilot_brand": "Bumble Bee Foods  Llc",
+      "corpus_product_name": "Solid White Albacore Tuna in Olive Oil",
+      "corpus_brand": "Bumble Bee Foods  Llc, Wild Selections"
+    },
+    {
+      "input_barcode": "043600005105",
+      "matched_barcode": "0043600005105",
+      "pilot_title": "White House Organic Raw Unfiltered Apple Cider Vinegar with Mother  2oz  6 Count Shots",
+      "pilot_brand": "WHITEHOUSE",
+      "corpus_product_name": "Organic apple cider vinegar onthego",
+      "corpus_brand": ""
+    },
+    {
+      "input_barcode": "008295660794",
+      "matched_barcode": "0008295660794",
+      "pilot_title": "De Nigris Organic Red Wine Vinegar 16.9 Oz (Pack of 12)",
+      "pilot_brand": "De Nigris",
+      "corpus_product_name": "Organic Red Wine Vinegar",
+      "corpus_brand": "De Nigris"
+    },
+    {
+      "input_barcode": "039400012085",
+      "matched_barcode": "0039400012085",
+      "pilot_title": "Bush's Original Bean Dip, 9 Oz",
+      "pilot_brand": "Bush's Best",
+      "corpus_product_name": "Bean Dip, Original",
+      "corpus_brand": "Bush's"
+    }
+  ]
+}

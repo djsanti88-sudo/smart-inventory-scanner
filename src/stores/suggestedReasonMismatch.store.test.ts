@@ -27,7 +27,7 @@ import { MockDb } from "@/services/mockDb";
 describe("scanStore - a corpus-verified decode that cannot cleanly resolve never shows a Verified reason on a non-verified badge", () => {
   it("second same-brand/similar-name tire (identity-merge suggest_link) shows a suggested-tier reason, never the corpus verified reason, on its suggested-badged row", async () => {
     const store = createTestScanStore({ db: new MockDb() });
-    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     store.getState().updateSettings({ aiLookupEnabled: true, scanContext: "tire" });
 
     const FIRST_CODE = "029142712886"; // valid UPC-A check digit

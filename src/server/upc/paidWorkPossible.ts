@@ -17,10 +17,22 @@ import { isGtinShaped, isValidCheckDigit } from "@/services/upc/gtin";
  *  - The GPT-5.5 ladder rung needs OPENAI_API_KEY (pipeline.ts:463/470).
  */
 export function paidWorkPossible(code: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (!liveAiLookupEnabled(env)) return false;
   const goUpcCanPay = isGtinShaped(code) && isValidCheckDigit(code) && !!env.GO_UPC_API_KEY;
   const fetchV2CanPay = !!env.BRAVE_SEARCH_API_KEY || hasAnyFirecrawlKey(env);
   const gptCanPay = !!env.OPENAI_API_KEY;
   return goUpcCanPay || fetchV2CanPay || gptCanPay;
+}
+
+/**
+ * ENABLE_LIVE_AI_LOOKUP is the documented "live AI lookup" switch (reported to the client by the
+ * GET status endpoint, relied on by the Preview-environment lockdown). Until 2026-08-19 only the
+ * client honored it; a direct POST still ran paid rungs. It is now enforced here, in the one place
+ * that decides whether paid work is possible, and the pipeline builds zero paid rungs when it is
+ * off. Only the literal "false" disables (matches the GET status report).
+ */
+export function liveAiLookupEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.ENABLE_LIVE_AI_LOOKUP !== "false";
 }
 
 /** Mirrors firecrawlKeysFromEnv's rotation (FIRECRAWL_API_KEY_1..10, falling back to the legacy single key). */

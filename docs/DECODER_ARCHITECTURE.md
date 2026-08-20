@@ -38,10 +38,24 @@ fix the stale one rather than trusting it.
   3. `gpt` - GPT-5.5 ladder end.
 - Every rung that ran records its reason (miss / unavailable / transient); the route surfaces the
   full reason chain, so a Needs Review row always says honestly why each rung failed.
-- GEMINI IS NOT USED FOR DECODE (grounding bills every executed search with no cap control; see
-  LESSONS_LEARNED L11). Settings labels it "not used for decode".
+- GEMINI IS NOT USED ANYWHERE IN THE APP (grounding bills every executed search with no cap control;
+  see LESSONS_LEARNED L11). The last Gemini surface, the legacy `mode:"lookup"` route path, was removed
+  on 2026-08-19; `/api/ai-lookup` accepts only `mode:"decode"` (and its `decode-deep` alias). Gemini
+  remains only in owner-gated offline scripts (`scripts/prefix-mining/`, `polish-backfill.mts`).
 - The daily AI cap charges ONLY paid rungs, exactly once, inside the rung, after the free
   corpus/cache peek (L12). Corpus/cache hits are free and never consume cap slots.
+- **A cap denial never hides a free identity** (2026-08-19). When the cap is exhausted, the paid
+  UPGRADE is skipped and the free suggestion already in hand (free rungs or a Plan D suggestion)
+  stands, with a per-rung `skipped: daily cap reached` reason and no pay-once marker (nothing was
+  paid, so the next uncapped scan may still escalate). `cap_blocked` is the answer only when nothing
+  free exists (a bare prefix floor is a naming convenience, not an identity).
+- **`ENABLE_LIVE_AI_LOOKUP=false` is enforced on the server** (2026-08-19): `paidWorkPossible()` is
+  false and the pipeline builds zero paid rungs; free rungs still run. `AI_LOOKUP_KILL_SWITCH` is the
+  separate emergency stop that refuses every decode POST.
+- **Metering policy, recorded as a decision, not changed:** a total free miss arms ONE cap slot for the
+  whole paid ladder (Go-UPC -> Fetch V2 -> GPT may all egress for that one slot), while escalation past
+  a free suggestion arms one slot PER paid rung; Fetch V2 charges at egress before it knows whether a
+  paid discovery door will be used. Changing either is an owner call with measured data.
 - The model's own `exactCodeEvidence` claim is never trusted. The app independently verifies the exact
   code in real evidence via `EvidenceVerifier` (strength ladder: none < url_only < snippet <
   grounding_chunk < fetched_source; url_only trusted only from an allowlisted host).
@@ -60,7 +74,10 @@ fix the stale one rather than trusting it.
   instances. Two row kinds: `result` (a decode with an identity) and `no_result_receipt` (the ladder
   ran and settled on nothing). No schema change was needed for the cooldown work: every row's payload
   carries its stamp inside `payload.debug.cache` via `withCacheStamp` / `readCacheStamp`, holding
-  `knowledgeVersion` and, when applicable, `paidEscalationExhausted: true`.
+  `knowledgeVersion` and, when applicable, `paidEscalationExhausted: true`. The row's `source_tier`
+  column (added 2026-08-19 by an idempotent ALTER; the file backend always had it as a JSON property)
+  says which PAID stage produced a `result` and is what lets the write rules refuse to replace a paid
+  identity with a bare free title.
 - **Cooldown.** `decodeNegativeTtlMs()` (`DECODE_NEGATIVE_TTL_MS`, default 7 days) is how long a stored
   "no result", and a stored guess that paid rungs already failed to beat, stays authoritative. It is a
   tuning value, not a product rule.

@@ -6,7 +6,7 @@ doctrine and the owner's current instructions.
 ## 2026-06-14 - A/B/C batch
 
 - **Files inspected:** `ENGINEERING_DOCTRINE.md` (global), `CLAUDE.md`, `AGENTS.md`, `PROGRESS.md`,
-  `DECISIONS.md`, `TESTING.md`, `plans/2026-06-decode-speed-and-pagefetch.md`, plus the source files
+  `DECISIONS.md`, `TESTING.md`, `docs/archive/superpowers/plans/2026-06-decode-speed-and-pagefetch.md`, plus the source files
   for the three features (`decode.ts`, `scanStore.ts`, `route.ts`, `settings/page.tsx`, `csvExport.ts`,
   `types.ts`).
 - **Instruction files found:** CLAUDE.md (project rules), AGENTS.md (Next 16 caveat), the doctrine, prior

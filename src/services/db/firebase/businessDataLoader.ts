@@ -10,9 +10,6 @@ import { retryingRead, READ_ATTEMPT_TIMEOUT_MS, READ_MAX_ATTEMPTS, READ_RETRY_BA
 // `storeMappers.ts` (no client Firebase SDK) so they can also be used by the server API route without
 // bundling firebase/firestore into the serverless function. RLS scopes reads to members of `businessId`.
 
-// Re-exported for back-compat with existing importers; the canonical home is ./storeMappers.
-export { toStoreProduct, toStoreAlias, toStoreSession, toStoreCount, toStoreScanEvent } from "./storeMappers";
-
 export interface LoadedBusinessData {
   products: Product[];
   aliases: Alias[];
@@ -33,7 +30,6 @@ export interface LoadedBusinessData {
 export {
   READ_ATTEMPT_TIMEOUT_MS as LOAD_ATTEMPT_TIMEOUT_MS,
   READ_MAX_ATTEMPTS as LOAD_MAX_ATTEMPTS,
-  READ_RETRY_BACKOFF_MS as LOAD_RETRY_BACKOFF_MS,
 } from "./boundedRead";
 
 /**

@@ -1,0 +1,231 @@
+{
+  "generated_at": "2026-08-03T08:52:12Z",
+  "source": "data/retail-knowledge/retail_off.jsonl",
+  "source_bytes": 2132484390,
+  "counts": {
+    "excluded_missing_or_short_name_rows": 325806,
+    "excluded_name_rows_with_brand": 84407,
+    "excluded_name_rows_with_brand_and_category": 40996,
+    "excluded_name_rows_with_english_category": 72751,
+    "excluded_name_rows_with_local_category": 72784,
+    "included_name_rows": 4047273,
+    "included_rows_local_category_rescue": 181,
+    "included_rows_missing_brand": 1263769,
+    "included_rows_missing_english_category": 2337160,
+    "rows": 4373079,
+    "rows_with_countries_en": 4351236,
+    "rows_with_image_small_url": 3278433,
+    "rows_with_image_url": 3278432,
+    "rows_with_quantity": 1369083
+  },
+  "source_values": {
+    "openfoodfacts": 4373079
+  },
+  "examples": {
+    "missing_name_with_brand_and_category": [
+      {
+        "barcode": "00000703",
+        "brand": "Likör",
+        "category": "Beverages"
+      },
+      {
+        "barcode": "00000802",
+        "brand": "Vermouth",
+        "category": "Beverages"
+      },
+      {
+        "barcode": "00000901",
+        "brand": "Weinbrand",
+        "category": "Beverages"
+      },
+      {
+        "barcode": "0000112407490",
+        "brand": "Liebig",
+        "category": "Canned vegetable soups"
+      },
+      {
+        "barcode": "00002554",
+        "brand": "Herbalife",
+        "category": "Dietary supplements"
+      },
+      {
+        "barcode": "00003513",
+        "brand": "Marks & Spencer",
+        "category": "Steak-pie"
+      },
+      {
+        "barcode": "0000496004056",
+        "brand": "Lay's",
+        "category": "fr:chips-a-l-ancienne-nature"
+      },
+      {
+        "barcode": "00004985",
+        "brand": "Dr. Oetker",
+        "category": "Cocoa powders"
+      },
+      {
+        "barcode": "0000560044445",
+        "brand": "Aldi",
+        "category": "Bread rolls"
+      },
+      {
+        "barcode": "00006118",
+        "brand": "Marks & Spencer",
+        "category": "Duck-wrap"
+      },
+      {
+        "barcode": "00006316",
+        "brand": "Marks & Spencer",
+        "category": "Green olives"
+      },
+      {
+        "barcode": "0000969312169",
+        "brand": "OVERVIEW",
+        "category": "78"
+      },
+      {
+        "barcode": "0000999228553",
+        "brand": "Si-bel",
+        "category": "Cheeses"
+      },
+      {
+        "barcode": "0001177005874",
+        "brand": "Brets",
+        "category": "B"
+      },
+      {
+        "barcode": "0001234557445",
+        "brand": "Rotwein",
+        "category": "Beverages"
+      },
+      {
+        "barcode": "0001336743371",
+        "brand": "Moser Roth",
+        "category": "Filled chocolates"
+      },
+      {
+        "barcode": "00013727",
+        "brand": "Pringles",
+        "category": "Stacked extruded potato crisps"
+      },
+      {
+        "barcode": "0001500005892",
+        "brand": "Lipton",
+        "category": "ro:suc-de-piersică"
+      },
+      {
+        "barcode": "0002000003586",
+        "brand": "Monoprix",
+        "category": "Chicken thighs"
+      },
+      {
+        "barcode": "0002000006112",
+        "brand": "Comté",
+        "category": "Cheeses"
+      }
+    ],
+    "missing_english_category_with_local_category": [
+      {
+        "barcode": "0041167098066",
+        "product_name": "act restoring mouth wash",
+        "category_local": "Non food products"
+      },
+      {
+        "barcode": "0045106111571",
+        "product_name": "Dettol",
+        "category_local": "Non food products"
+      },
+      {
+        "barcode": "0045106298487",
+        "product_name": "Dettol",
+        "category_local": "Non food products"
+      },
+      {
+        "barcode": "0078742044545",
+        "product_name": "Clear forks",
+        "category_local": "Non food products"
+      },
+      {
+        "barcode": "0293420005995",
+        "product_name": "Dettol Handwash cool 200ml",
+        "category_local": "Non food products"
+      },
+      {
+        "barcode": "0309973234000",
+        "product_name": "women mitchum triple odor defense",
+        "category_local": "Non food products"
+      },
+      {
+        "barcode": "0310742011012",
+        "product_name": "rohto eye drops",
+        "category_local": "Non food products"
+      },
+      {
+        "barcode": "0681131296236",
+        "product_name": "Cherry Zinc Lozenge",
+        "category_local": "Non food products"
+      },
+      {
+        "barcode": "10122112",
+        "product_name": "ISO+",
+        "category_local": "Open Food Facts"
+      },
+      {
+        "barcode": "1040118006210",
+        "product_name": "Dettol 2LTR",
+        "category_local": "Non food products"
+      },
+      {
+        "barcode": "20991326",
+        "product_name": "Gefrierbeutel",
+        "category_local": "Productos no alimenticios"
+      },
+      {
+        "barcode": "2200281553938",
+        "product_name": "Aveo cremeseife",
+        "category_local": "Non food products"
+      },
+      {
+        "barcode": "22171009",
+        "product_name": "Müllbeutel 50 Liter",
+        "category_local": "Incorrect product type"
+      },
+      {
+        "barcode": "2403635175439",
+        "product_name": "PayPal ist unnötig",
+        "category_local": "Non-Food-Produkte"
+      },
+      {
+        "barcode": "2718691100005",
+        "product_name": "Schraube",
+        "category_local": "Non-Food-Produkte"
+      },
+      {
+        "barcode": "3270190191070",
+        "product_name": "servi.ultra mince normal féminin",
+        "category_local": "Non food products"
+      },
+      {
+        "barcode": "3574661192857",
+        "product_name": "ACEITE TAN&PROTECT 30",
+        "category_local": "Non food products"
+      },
+      {
+        "barcode": "3574661624884",
+        "product_name": "o.b",
+        "category_local": "Non-Food-Produkte"
+      },
+      {
+        "barcode": "4002448092889",
+        "product_name": "Desinfektion reiniger",
+        "category_local": "Non food products"
+      },
+      {
+        "barcode": "4002448134749",
+        "product_name": "Dettol Flüssigseife",
+        "category_local": "Non food products"
+      }
+    ]
+  },
+  "elapsed_seconds": 34.32
+}

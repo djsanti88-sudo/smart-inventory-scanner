@@ -127,6 +127,7 @@ const realSpendGuard = vi.hoisted(() => ({
   recordGptLadderCall: undefined as unknown as typeof import("@/services/security/aiSpendGuard").recordGptLadderCall,
   chargeDailySlotForAccount: undefined as unknown as typeof import("@/services/security/aiSpendGuard").chargeDailySlotForAccount,
   chargeDailySlotForAccountConditional: undefined as unknown as typeof import("@/services/security/aiSpendGuard").chargeDailySlotForAccountConditional,
+  chargeDailySlotConditional: undefined as unknown as typeof import("@/services/security/aiSpendGuard").chargeDailySlotConditional,
 }));
 vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
@@ -134,6 +135,7 @@ vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
   realSpendGuard.recordGptLadderCall = actual.recordGptLadderCall;
   realSpendGuard.chargeDailySlotForAccount = actual.chargeDailySlotForAccount;
   realSpendGuard.chargeDailySlotForAccountConditional = actual.chargeDailySlotForAccountConditional;
+  realSpendGuard.chargeDailySlotConditional = actual.chargeDailySlotConditional;
   return {
     ...actual,
     recordGptLadderSpend: vi.fn(actual.recordGptLadderSpend),
@@ -144,12 +146,17 @@ vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
     // one is spied too - it now carries the S4 fail-open path for tenants.
     chargeDailySlotForAccount: vi.fn(actual.chargeDailySlotForAccount),
     chargeDailySlotForAccountConditional: vi.fn(actual.chargeDailySlotForAccountConditional),
+    // DC money-leak repro (2026-08-13): spied so one test can make the GLOBAL charge itself reject with
+    // a NON-cap (e.g. simulated storage/network) error - the case settlePaidCharge does NOT S4 fail-open
+    // for (only the per-account half above gets that treatment; see settlePaidCharge's doc comment in
+    // pipeline.ts). Real implementation passes through by default.
+    chargeDailySlotConditional: vi.fn(actual.chargeDailySlotConditional),
   };
 });
 
 import { runDecodePipeline, DailyCapExceededError, classifySourceTier, classifyGptFailureDetail } from "@/server/decode/pipeline";
 import { detectCodeType } from "@/services/codeTypeDetector";
-import { __resetForTest, readDailyUsed, readDailyUsedForAccount, recordGptLadderSpend, recordGptLadderCall, chargeDailySlotForAccount, chargeDailySlotForAccountConditional, chargeDailySlot } from "@/services/security/aiSpendGuard";
+import { __resetForTest, readDailyUsed, readDailyUsedForAccount, recordGptLadderSpend, recordGptLadderCall, chargeDailySlotForAccount, chargeDailySlotForAccountConditional, chargeDailySlotConditional, chargeDailySlot } from "@/services/security/aiSpendGuard";
 import { ladderStorage } from "@/server/upc/storage";
 import * as decodeCacheModule from "@/services/ai/decodeCache";
 import { clearDecodeCache } from "@/services/ai/decodeCache";
@@ -203,7 +210,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
   // wave-3: DECODE_LADDER_TOTAL_MS added so a test that overrides it (the wave-3 preflight/budget
   // suite) never leaks into a later test in the same file (test-isolation fix, found live while
   // writing the wave-3 non_public_code_type test below).
-  const keys = ["IS_E2E", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "GO_UPC_API_KEY", "BRAVE_SEARCH_API_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DECODE_CACHE_FILE", "LEARNED_PRODUCTS_FILE", "DECODE_LADDER_TOTAL_MS", "DECODE_NEGATIVE_TTL_MS", "DECODE_MISS_TTL_MS"];
+  const keys = ["IS_E2E", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "GO_UPC_API_KEY", "BRAVE_SEARCH_API_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DECODE_CACHE_FILE", "LEARNED_PRODUCTS_FILE", "DECODE_LADDER_TOTAL_MS", "DECODE_NEGATIVE_TTL_MS", "DECODE_MISS_TTL_MS", "ENABLE_LIVE_AI_LOOKUP"];
   let fetchSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -221,6 +228,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     vi.mocked(recordGptLadderCall).mockReset().mockImplementation(realSpendGuard.recordGptLadderCall);
     vi.mocked(chargeDailySlotForAccount).mockReset().mockImplementation(realSpendGuard.chargeDailySlotForAccount);
     vi.mocked(chargeDailySlotForAccountConditional).mockReset().mockImplementation(realSpendGuard.chargeDailySlotForAccountConditional);
+    vi.mocked(chargeDailySlotConditional).mockReset().mockImplementation(realSpendGuard.chargeDailySlotConditional);
     // Sync Truth Task 4: default every test to a safe instant miss; the dedicated describe block below
     // overrides with mockResolvedValueOnce for a verified/suggestion hit.
     vi.mocked(lookupMasterCatalog).mockReset().mockResolvedValue({ kind: "miss" });
@@ -245,7 +253,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     process.env.DECODE_CACHE_FILE = decodeCacheTestFile();
     process.env.LEARNED_PRODUCTS_FILE = learnedProductsTestFile();
     // Any stray outbound fetch resolves to a benign 404 - proves no live provider is required.
-    fetchSpy = vi.fn(async () => new Response("not found", { status: 404 }));
+    fetchSpy = vi.fn(async () => new Response(JSON.stringify({ error: "not found" }), { status: 404 }));
     vi.stubGlobal("fetch", fetchSpy);
   });
 
@@ -588,7 +596,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       if (url.includes(OFF_HOST)) {
         return new Response(JSON.stringify({ status: 0 }), { status: 200 }); // genuine miss
       }
-      return new Response("not found", { status: 404 });
+      return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
     });
     vi.stubGlobal("fetch", fetchSpy);
   }
@@ -799,7 +807,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             { status: 200 }
           );
         }
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
     }
@@ -807,8 +815,8 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     function stubGoUpcGenuineMiss() {
       fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes(GOUPC_HOST)) return new Response("not found", { status: 404 }); // genuine miss
-        return new Response("not found", { status: 404 });
+        if (url.includes(GOUPC_HOST)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 }); // genuine miss
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
     }
@@ -868,7 +876,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             { status: 200 },
           );
         }
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
     }
@@ -905,7 +913,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       const secondFetchSpy = vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.includes("go-upc.com/api")) throw new Error("go-upc must NOT be re-invoked on a repeat scan of a cached code");
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", secondFetchSpy);
 
@@ -954,9 +962,9 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
               { status: 200 }
             );
           }
-          return new Response("not found", { status: 404 }); // Go-UPC genuine miss
+          return new Response(JSON.stringify({ error: "not found" }), { status: 404 }); // Go-UPC genuine miss
         }
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
     }
@@ -1035,17 +1043,101 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect(await readDailyUsed(await ladderStorage())).toBe(1);
     });
 
-    it("ESCALATION cap-blocked: an exhausted cap blocks the Go-UPC escalation, free suggestion still stands, zero charge", async () => {
+    it("ESCALATION cap-blocked: an exhausted cap skips the Go-UPC escalation, the free suggestion STILL STANDS (never cap_blocked), zero charge, no Go-UPC call", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // cap already exhausted
       process.env.GO_UPC_API_KEY = "test-key";
       stubUpcSuggestionThenGoupc({ goupcVerified: true });
 
       const out = await runDecodePipeline(makeReq(VALID_GTIN));
 
-      // The cap gate throws before the paid Go-UPC escalation runs -> route turns it into a cap block.
-      expect(out.kind).toBe("cap_blocked");
-      if (out.kind !== "cap_blocked") throw new Error("unreachable");
-      expect(out.message).toMatch(/cap/i);
+      // The cap decides only whether a PAID upgrade may be attempted. The free UPCitemdb suggestion
+      // already in hand is the answer - a cap block must never hide an identity the free rungs found.
+      expect(out.kind).toBe("computed");
+      if (out.kind !== "computed") throw new Error("unreachable");
+      expect(out.payload.providerNames).toContain("upcitemdb");
+      expect(out.payload.results[0]?.brand).toBe("Falken");
+      // The skip is recorded honestly per paid rung, and Go-UPC was never called (no charge, no egress).
+      const reasons = out.payload.debug.ladderReasons as Array<{ rung: string; reason: string }>;
+      expect(reasons.some((r) => r.rung === "goupc" && /daily cap/i.test(r.reason))).toBe(true);
+      expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes(GOUPC_HOST))).toBe(false);
+      expect(await readDailyUsed(await ladderStorage())).toBe(0);
+    });
+
+    it("ESCALATION cap-blocked: the pay-once marker is NOT set (no paid rung ran), so the next uncapped scan may still escalate", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "0";
+      process.env.GO_UPC_API_KEY = "test-key";
+      stubUpcSuggestionThenGoupc({ goupcVerified: true });
+
+      const first = await runDecodePipeline(makeReq(VALID_GTIN));
+      expect(first.kind).toBe("computed");
+
+      // Cap opens up: a forced retry escalates to Go-UPC and the paid answer wins.
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const second = await runDecodePipeline({ ...makeReq(VALID_GTIN), forceRetry: true });
+      expect(second.kind).toBe("computed");
+      if (second.kind !== "computed") throw new Error("unreachable");
+      expect(second.payload.results[0]?.brand).toBe("Continental");
+      expect(await readDailyUsed(await ladderStorage())).toBe(1);
+    });
+
+    it("TOTAL-MISS cap-blocked: a Plan D SUGGESTION (padded-variant UPCitemdb hit) survives an exhausted cap instead of a cap_blocked answer", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // cap exhausted
+      process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // paid work genuinely possible -> a real cap denial
+      // Rung-0 (exact code) misses; Plan D's zero-pad fallback hits the 13-digit variant -> a free suggestion.
+      fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(UPCITEMDB_HOST)) {
+          if (url.includes(`upc=0${VALID_GTIN}`)) {
+            return new Response(JSON.stringify({ code: "OK", items: [{ title: "Falken Wildpeak A/T3W 265/70R17", brand: "Falken" }] }), { status: 200 });
+          }
+          return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
+        }
+        if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(out.kind).toBe("computed");
+      if (out.kind !== "computed") throw new Error("unreachable");
+      expect(JSON.stringify(out.payload.results)).toMatch(/Falken/);
+      expect(out.payload.decision.status).not.toBe("verified");
+      const reasons = out.payload.debug.ladderReasons as Array<{ rung: string; reason: string }>;
+      expect(reasons.some((r) => r.rung === "paid-ladder" && /daily cap/i.test(r.reason))).toBe(true);
+      expect(await readDailyUsed(await ladderStorage())).toBe(0);
+    });
+
+    it("ENABLE_LIVE_AI_LOOKUP=false also stubs Plan D's PAID arms: zero Firecrawl/Brave calls even with keys configured (deep-review 2026-08-19 finding 1)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.FIRECRAWL_API_KEY = "test-firecrawl-key";
+      process.env.BRAVE_SEARCH_API_KEY = "test-brave-key";
+      process.env.ENABLE_LIVE_AI_LOOKUP = "false";
+      // Free rungs produce a lone suggestion (no consensus), which is exactly when Plan D would
+      // reach for its paid Firecrawl /search tiebreaker.
+      stubUpcSuggestionThenGoupc({ goupcVerified: false });
+
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(out.kind).toBe("computed");
+      const paidHosts = ["firecrawl", "search.brave.com"];
+      expect(fetchSpy.mock.calls.some(([u]) => paidHosts.some((h) => String(u).includes(h)))).toBe(false);
+      expect(await readDailyUsed(await ladderStorage())).toBe(0);
+    });
+
+    it("ENABLE_LIVE_AI_LOOKUP=false: no paid rung is built or charged (free suggestion stands, zero Go-UPC calls, zero slots)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      process.env.ENABLE_LIVE_AI_LOOKUP = "false";
+      stubUpcSuggestionThenGoupc({ goupcVerified: true });
+
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(out.kind).toBe("computed");
+      if (out.kind !== "computed") throw new Error("unreachable");
+      expect(out.payload.results[0]?.brand).toBe("Falken"); // the free suggestion, not the paid Go-UPC answer
+      expect(ladderRungsOf(out)).not.toContain("goupc");
+      expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes(GOUPC_HOST))).toBe(false);
       expect(await readDailyUsed(await ladderStorage())).toBe(0);
     });
 
@@ -1057,7 +1149,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         const url = String(input);
         if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
         if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
 
@@ -1716,7 +1808,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       const goUpcSpy = fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.includes("go-upc.com")) throw new Error("goupc must never be called for a retail-rung settle");
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", goUpcSpy);
 
@@ -1764,8 +1856,8 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       mockRetailHit({ productName: "Search For:10000007", brand: "" });
       const fetchStub = vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("go-upc.com")) return new Response("not found", { status: 404 }); // reached, genuine miss
-        return new Response("not found", { status: 404 });
+        if (url.includes("go-upc.com")) return new Response(JSON.stringify({ error: "not found" }), { status: 404 }); // reached, genuine miss
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchStub);
 
@@ -2247,7 +2339,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         }
         if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
         if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
 
@@ -2299,7 +2391,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         if (url.includes(OFF_HOST)) {
           return new Response(JSON.stringify({ status: 1, product: { product_name: "Fabricated Example Product", brands: "FabricatedBrand" } }), { status: 200 });
         }
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
     }
@@ -2367,7 +2459,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             { status: 200 },
           );
         }
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
 
@@ -2394,8 +2486,8 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         const url = String(input);
         if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
         if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-        if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 }); // genuine miss, but the CALL happened
-        return new Response("not found", { status: 404 });
+        if (url.includes(GOUPC_API)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 }); // genuine miss, but the CALL happened
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
 
@@ -2423,7 +2515,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         const url = String(input);
         if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
         if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-        if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 });
+        if (url.includes(GOUPC_API)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
         if (url.includes("api.openai.com/v1/responses")) {
           const body = {
             output: [{
@@ -2441,7 +2533,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
           };
           return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
         }
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
     }
@@ -2533,8 +2625,8 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         const url = String(input);
         if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
         if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-        if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 });
-        return new Response("not found", { status: 404 });
+        if (url.includes(GOUPC_API)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
 
@@ -2562,11 +2654,11 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             );
           }
           if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-          if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 }); // goupc genuine miss (never wins)
+          if (url.includes(GOUPC_API)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 }); // goupc genuine miss (never wins)
           if (opts.fetchv2Confidence && opts.fetchv2Confidence !== "none" && url.includes("brocade")) {
             // brocade structured door is exercised via the fetchV2 module mock below instead.
           }
-          return new Response("not found", { status: 404 });
+          return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
         });
         vi.stubGlobal("fetch", fetchSpy);
       }
@@ -2632,7 +2724,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             );
           }
           if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-          if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 });
+          if (url.includes(GOUPC_API)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
           if (url.includes("api.openai.com/v1/responses")) {
             const body = {
               output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({
@@ -2643,7 +2735,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             };
             return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
           }
-          return new Response("not found", { status: 404 });
+          return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
         });
         vi.stubGlobal("fetch", fetchSpy);
 
@@ -2693,7 +2785,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             );
           }
           if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-          if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 });
+          if (url.includes(GOUPC_API)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
           if (url.includes("api.openai.com/v1/responses")) {
             const body = {
               output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({
@@ -2704,7 +2796,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             };
             return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
           }
-          return new Response("not found", { status: 404 });
+          return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
         });
         vi.stubGlobal("fetch", fetchSpy);
 
@@ -2816,6 +2908,37 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
           expect(await readDailyUsed(store)).toBe(1);
           expect(await readDailyUsedForAccount(store, "tenant-s4")).toBe(0);
         });
+
+        // DC-2 money-leak claim (Codex xhigh review, 2026-08-13): chargeOnEgress() consumes
+        // `paidChargeArmed` BEFORE awaiting settlePaidCharge() (so a re-entrant egress can never double-
+        // charge), but pre-fix only a DailyCapExceededError was made sticky (`capDenialInArm`) for the
+        // rest of the arm. A NON-cap settlePaidCharge() rejection - e.g. the GLOBAL chargeDailySlotConditional
+        // write itself throwing (a Turso/storage hiccup; unlike the per-account half, this call has no S4
+        // fail-open wrapper - see settlePaidCharge's doc comment) - left the arm silently "spent" with
+        // ZERO successful charge behind it. In the SHARED full-ladder arm (goupc -> fetchv2 -> gpt all
+        // arm together, pipeline.ts ~1901-1903, reached here because both free rungs miss on the default
+        // 404 stub), a LATER rung's own chargeOnEgress() then saw `!paidChargeArmed` and silently no-op'd
+        // instead of denying - letting it proceed straight to REAL PAID EGRESS with nothing charged.
+        it("(e) a non-cap GLOBAL charge failure is STICKY for the rest of the shared full-ladder arm - fetchv2 must NOT egress unmetered after goupc's failed charge attempt", async () => {
+          process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+          process.env.GO_UPC_API_KEY = "test-key";
+          process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // makes fetchV2CanPay true (genuine paid rung)
+          try { fs.unlinkSync(missCacheFile()); } catch {}
+          // Default fetchSpy (set in the outer beforeEach) 404s everything, so both free rungs
+          // (upcitemdb/openfoodfacts) genuinely miss -> this reaches the TOTAL-FREE-MISS branch, where
+          // ONE charge arm is shared across goupc -> fetchv2 -> gpt (the only branch this bug can bite).
+          vi.mocked(chargeDailySlotConditional).mockRejectedValueOnce(new Error("simulated Turso write failure"));
+
+          await runDecodePipeline(makeReq(VALID_GTIN));
+
+          // THE MONEY ASSERTION: fetchV2 (the paid engine, module-mocked) must never be invoked once the
+          // shared arm's charge attempt already failed for a non-cap reason - proving the sticky block
+          // now covers every failure reason, not just a cap denial.
+          expect(fetchV2).not.toHaveBeenCalled();
+          // And genuinely zero slots were charged for this request - the failed attempt never counted,
+          // and nothing downstream snuck in an unmetered, charge-free egress either.
+          expect(await readDailyUsed(await ladderStorage())).toBe(0);
+        });
       });
     });
 
@@ -2827,14 +2950,14 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         const url = String(input);
         if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
         if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-        if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 });
+        if (url.includes(GOUPC_API)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
         if (url.includes("api.openai.com/v1/responses")) {
           openAiSignal = init?.signal ?? undefined;
           // Never resolves on its own - only the ladder's own abort (or the test's manual check below)
           // ends this promise. Proves the OpenAI call genuinely received a signal it can act on.
           return new Promise<Response>(() => {});
         }
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
 
@@ -2882,9 +3005,9 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         const url = String(input);
         if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
         if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
-        if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 });
+        if (url.includes(GOUPC_API)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
         if (url.includes("api.openai.com/v1/responses")) return openAiHandler();
-        return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       });
       vi.stubGlobal("fetch", fetchSpy);
     }
@@ -3096,6 +3219,33 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect(payload.debug.cache?.knowledgeVersion).toBe(getDecodeKnowledgeVersion());
     }, 30000);
 
+    it("PAY-ONCE MARKER is NOT minted when the cap denied part of the escalation (deep-review 2026-08-19 finding 2)", async () => {
+      // Go-UPC key + Brave key configured, but the cap allows only ONE slot: Go-UPC genuinely runs
+      // (and misses), then the Fetch V2 step is cap-denied. "Exhausted" would be a lie - Fetch V2/GPT
+      // never ran - so the persisted suggestion must NOT carry the marker.
+      process.env.AI_LOOKUP_DAILY_LIMIT = "1";
+      process.env.GO_UPC_API_KEY = "test-key";
+      process.env.BRAVE_SEARCH_API_KEY = "test-brave-key";
+      fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [{ title: "Falken Wildpeak A/T3W 265/70R17", brand: "Falken", category: "Tire" }] }), { status: 200 });
+        if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+
+      const out = await runDecodePipeline(makeReq("900000000362"));
+      expect(out.kind).toBe("computed");
+      expect(fetchSpy.mock.calls.some(([u]) => String(u).includes(GOUPC_API))).toBe(true); // slot 1 spent on Go-UPC
+      if (out.kind !== "computed") throw new Error("unreachable");
+      const reasons = out.payload.debug.ladderReasons as Array<{ rung: string; reason: string }>;
+      expect(reasons.some((r) => r.rung === "fetchv2" && /daily cap/i.test(r.reason))).toBe(true);
+
+      const row = await getPersistedDecode("00900000000362");
+      const payload = row ? (JSON.parse(row.payload) as { debug: { cache?: { paidEscalationExhausted?: boolean } } }) : null;
+      expect(payload?.debug.cache?.paidEscalationExhausted ?? false).toBe(false);
+    }, 30000);
+
     it("PAY-ONCE MARKER: a free suggestion that paid rungs failed to beat is persisted, and the next scan replays it with ZERO paid calls", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "100";
       process.env.GO_UPC_API_KEY = "test-key";
@@ -3240,6 +3390,21 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
 
     // F8: the cap catch returned "cap_blocked" BEFORE the stale-row fallback could run, so a guess the
     // shop had already been shown regressed to Unidentified the moment the daily cap ran out.
+    it("a FREE-ONLY pass with the cap exhausted is never stamped cap_blocked - zero paid rungs means no arm, no cap check (deep-review 2026-08-19 finding 3)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // cap exhausted - must be irrelevant to a $0 pass
+      process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // keys configured, but the pass is free-only
+      // Version moved, cooldown NOT lapsed -> freeOnlyPass. Free re-evaluation misses everywhere.
+      stubNoPaidCalls();
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(suggestionRow("00900000000416", { version: "stale-version" }));
+
+      const out = await runDecodePipeline(makeReq("900000000416"));
+
+      expect(out.kind).toBe("persisted");
+      if (out.kind !== "persisted") throw new Error("unreachable");
+      expect((out.body.debug as { cacheReevaluated?: string }).cacheReevaluated).toBe("free_rungs_only");
+      expect(await readDailyUsed(await ladderStorage())).toBe(0);
+    }, 30000);
+
     it("a cap-blocked full re-evaluation still replays the old guess instead of regressing to cap_blocked", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // cap exhausted: the paid half throws
       process.env.DECODE_NEGATIVE_TTL_MS = "1000"; // the 1h-old row is COOLED DOWN: a full pass is due

@@ -1,0 +1,16 @@
+{
+  "schema_version": 2,
+  "source": "openfoodfacts",
+  "source_sha256": "f72687ee8bc6522054fe69dbfda6b91902c16af1ec2e043cde27bc6c29ad8176",
+  "header_sha256": "b6a2fb7c380613994c38dbef746ec1f99ba3db0b4e01c42250aa4d82470e5a3f",
+  "raw_rows_scanned": 4532767,
+  "malformed_rows": 2,
+  "invalid_gtin_rows": 159638,
+  "checksum_valid_observations": 4373127,
+  "unique_retained_gtins": 4373077,
+  "identical_duplicates": 0,
+  "conflicting_duplicates": 45,
+  "output_rows": 4373077,
+  "output_sha256": "3f214993914c35404132b6872cc6ccca57b4326c85524c7e3c7b2f5786ddb3d4",
+  "output_compression": "gzip"
+}

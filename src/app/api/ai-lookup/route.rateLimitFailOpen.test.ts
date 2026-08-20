@@ -12,6 +12,15 @@ import path from "node:path";
 
 vi.mock("server-only", () => ({}));
 
+// Never let this suite construct a REAL Admin SDK client: on a keyless CI runner the gRPC stub's
+// async credential fetch rejects AFTER the test finishes ("Could not load the default credentials")
+// and vitest fails the whole run on the unhandled rejection. These tests never authenticate, so the
+// admin surface is a plain stub.
+vi.mock("@/lib/firebaseAdmin", () => ({
+  getAdminAuth: () => ({ verifyIdToken: vi.fn(async () => { throw new Error("no auth in this suite"); }) }),
+  getAdminDb: () => ({ doc: () => ({ get: async () => ({ exists: false }) }) }),
+}));
+
 vi.mock("@/server/catalog/masterAppend", () => ({
   buildMasterCatalogEntry: () => null,
   appendMasterCatalogEntry: async () => "skipped_human" as const,
@@ -89,7 +98,7 @@ describe("/api/ai-lookup rate-limit fail-open on storage init failure (Finding C
 
   it("POST: a storage init throw at the rate-limit site does NOT 500 - the request proceeds (fails open)", async () => {
     failNextStorageInit = true; // the POST rate-limit ladderStorage() throws
-    const res = await POST(makeRequest({ cleanCode: "111000222333", mode: "lookup" }));
+    const res = await POST(makeRequest({ cleanCode: "111000222333", mode: "decode" }));
     // Pre-fix: raw 500 (unhandled throw from the unguarded rate-limit site). Post-fix: fails open,
     // proceeds, and returns a normal (non-500) response.
     expect(res.status).not.toBe(500);

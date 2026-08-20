@@ -6,29 +6,46 @@ name: CI
 # bots - those stay in their own dedicated workflows/local runs (they need emulators / real backends /
 # owner-gated live keys). This is the fast, always-green-or-honestly-red correctness gate.
 #
-# CORPUS DB NOTE (unit-tests job): src/server/knowledge.generated.db (the SQLite corpus DB, built by
+# THE unit-tests JOB RUNS `npm run proof:all` (scripts/proof-all.mjs) -- the same "honest gate" command
+# a developer runs locally. Before 2026-08-13 this job hand-rolled its own weaker `vitest run` +
+# `test:refresh-tire-meta` invocation, which covered only 1 of the 10 node:test-only suites proof-all.mjs
+# was built to run (the other 9, including all six tire-db-repair suites, could break and still merge
+# through green required checks -- docs/superpowers/reports/2026-08-13-loop2-tooling.md, finding TL2-2).
+# There is now ONE definition of "the tests pass" (scripts/proof-all.mjs); this workflow only adds two
+# narrow, explicit, env-var-driven exclusions for data this runner cannot supply (see below) rather than
+# re-implementing a second list that can drift from the first.
+#
+# CORPUS DB NOTE: src/server/knowledge.generated.db (the SQLite corpus DB, built by
 # `npm run build:knowledge-db` from tireKnowledge.generated.json + the Git-LFS retail JSON) is NOT
 # built in this workflow. The codebase is deliberately designed so JSON is the CI/Vercel source of
 # truth: src/server/knowledgeDb.ts's getKnowledgeDb() returns null gracefully when no DB file is
 # present, and every corpus-touching test either mocks getKnowledgeDb() to null and asserts the JSON
 # fallback path (tireKnowledgeIndex.jsonfallback.test.ts, decode-corpus.test.ts, retailKnowledgeIndex.test.ts),
-# or reads the committed JSON directly (corpusDrift.test.ts). The one exception is
-# dtHarvestIntegration.test.ts, which asserts against a locally-built DB with harvest-added rows not
-# guaranteed to exist in the committed JSON seed - it is excluded below rather than silently allowed to
-# flake red in a clean-checkout CI environment. Building the full DB in CI (LFS pull of the 247MB retail
-# JSON + a multi-minute better-sqlite3 batch insert) was evaluated and rejected as unnecessary recurring
-# CI cost for a local-dev-only performance optimization; rebuild it locally via
-# `npm run build:knowledge-db` (or `node scripts/provision-worktree.mjs` to copy from a known-good
-# checkout) if you need to exercise the DB path.
+# or reads the committed JSON directly (corpusDrift.test.ts / retailCorpusDrift.test.ts, the latter
+# self-skipping its size check when it detects a Git-LFS pointer stub instead of pulled content -- this
+# workflow does not run `git lfs pull`, so that self-skip is the intended CI behavior, not a gap). The
+# one exception is dtHarvestIntegration.test.ts, which asserts against a locally-built DB with
+# harvest-added rows not guaranteed to exist in the committed JSON seed - it is excluded below (via
+# VITEST_EXTRA_EXCLUDE) rather than silently allowed to flake red in a clean-checkout CI environment.
+# Building the full DB in CI (LFS pull of the 247MB retail JSON + a multi-minute better-sqlite3 batch
+# insert) was evaluated and rejected as unnecessary recurring CI cost for a local-dev-only performance
+# optimization; rebuild it locally via `npm run build:knowledge-db` (or `node scripts/provision-worktree.mjs`
+# to copy from a known-good checkout) if you need to exercise the DB path.
 #
-# STRESS FIXTURES NOTE (unit-tests job): src/components/UniversalImportPanel.fixtures.test.tsx reads
-# real CSV fixtures from .superpowers/stress/fixtures/, which is entirely gitignored (see .gitignore:
-# "Agent/session scratch") and has no build-time generator in this repo - scripts/provision-worktree.mjs
-# only copies it from a known-good LOCAL checkout path (C:/Users/djsan/inventory), which does not exist
-# in a clean CI runner. Verified locally: on a fresh worktree checkout this file fails all 6 tests with
-# ENOENT (ADR verified 2026-07-27 at commit e5f0157). Excluded below rather than left to flake red on
-# every CI run; the same coverage intent (CSV parsing edge cases, mapping inference, error surfacing) is
-# still exercised by non-fixture-dependent tests elsewhere in the import test suite.
+# STRESS FIXTURES NOTE: src/components/UniversalImportPanel.fixtures.test.tsx reads real CSV fixtures
+# from .superpowers/stress/fixtures/, which is entirely gitignored (see .gitignore: "Agent/session
+# scratch") and has no build-time generator in this repo - scripts/provision-worktree.mjs only copies it
+# from a known-good LOCAL checkout path (C:/Users/djsan/inventory), which does not exist in a clean CI
+# runner. Verified locally: on a fresh worktree checkout this file fails all 6 tests with ENOENT (ADR
+# verified 2026-07-27 at commit e5f0157). Excluded below (via VITEST_EXTRA_EXCLUDE) rather than left to
+# flake red on every CI run; the same coverage intent (CSV parsing edge cases, mapping inference, error
+# surfacing) is still exercised by non-fixture-dependent tests elsewhere in the import test suite.
+#
+# LOCAL-BACKUP-DATA NOTE (node:test leg): the tire-db-repair and boss-override suites read gitignored
+# local data under /backups/ (.gitignore). Since 2026-08-19 they self-skip VISIBLY when that data is
+# absent (scripts/lib/localDataSkip.mjs) and proof-all.mjs reports the skip count, so this job needs no
+# NODE_TEST_SKIP knob for them. Reproduce the full leg locally with `npm run proof:all` on a machine
+# that has /backups/.
 
 on:
   push:
@@ -63,7 +80,19 @@ jobs:
   unit-tests:
     name: unit-tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    # See the CORPUS DB / STRESS FIXTURES notes at the top of this file for exactly
+    # why each of these two suites is excluded and why that is safe (self-contained CI knobs added to
+    # scripts/proof-all.mjs; local `npm run proof:all` with no env vars set still runs all of them).
+    env:
+      VITEST_EXTRA_EXCLUDE: "src/server/tire-knowledge/dtHarvestIntegration.test.ts,src/components/UniversalImportPanel.fixtures.test.tsx"
+      # proof-all.mjs exits non-zero on a narrowed run unless this is set (2026-08-16 clean-room
+      # review, HIGH: a narrowed run used to exit 0 and be reported as "all local legs green" with
+      # no distinguishable failure signal). Setting it here makes CI's narrowing -- already fully
+      # explained by the CORPUS DB / STRESS FIXTURES notes above -- a deliberate,
+      # visible acknowledgment rather than a silent default; a NEW, unexplained narrowing anywhere
+      # else still fails the gate.
+      PROOF_ALL_ACCEPT_NARROWED: "1"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -79,19 +108,15 @@ jobs:
       # test that launches a real Chromium (scripts/__tests__/render-report-pdf.test.mjs) runs in the
       # Playwright E2E workflow, which already installs the browser, and self-skips here when no
       # Chromium binary exists, so a Chromium CDN stall can never block the unit gate again (it cost
-      # a 20-minute timeout on PR #38). Note: vitest CLI --exclude does not reach per-project
-      # includes, which is why the skip lives in the test itself.
-      # See the corpus-DB and stress-fixtures notes at the top of this file: the real
-      # knowledge.generated.db is not built in CI, and .superpowers/stress/fixtures/ is gitignored
-      # local-only scratch data with no CI-reachable generator.
-      - name: Run unit + dom tests (excluding local-only DB/fixture-dependent suites)
-        run: >
-          npx vitest run
-          --exclude "src/server/tire-knowledge/dtHarvestIntegration.test.ts"
-          --exclude "src/components/UniversalImportPanel.fixtures.test.tsx"
+      # a 20-minute timeout on PR #38).
 
-      - name: Verify tire metadata refresh preserves the generated payload
-        run: npm run test:refresh-tire-meta
+      # THE honest gate: typecheck + vitest (unit+dom, minus the two CI-unreachable-data suites above)
+      # + all vitest-excluded node:test suites (local-data suites self-skip visibly) + the
+      # teach-bot node:test suite. scripts/proof-all.mjs prints an explicit NOT RUN section for anything
+      # it does not cover (Firestore emulator suites, mock Playwright E2E, human-bot proof, production
+      # build) -- those stay in their own dedicated workflows/local runs, unchanged by this job.
+      - name: Run the honest local gate (npm run proof:all)
+        run: npm run proof:all
 
   build:
     name: build

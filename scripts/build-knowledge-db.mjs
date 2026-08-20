@@ -12,20 +12,61 @@
 // If the retail JSON is a Git LFS pointer (Vercel without LFS enabled), the retail table is
 // skipped gracefully — tire lookups still work. Enable Git LFS on Vercel for retail coverage.
 
-import { readFileSync, existsSync, unlinkSync, statSync, createReadStream, createWriteStream } from "node:fs";
+import { readFileSync, existsSync, unlinkSync, statSync, createReadStream, createWriteStream, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createGzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
+import { createHash } from "node:crypto";
 import Database from "better-sqlite3";
 
 const ROOT = process.cwd();
 const TIRE_JSON = join(ROOT, "src", "server", "tire-knowledge", "tireKnowledge.generated.json");
 const RETAIL_JSON = join(ROOT, "src", "server", "retail-knowledge", "retailKnowledge.generated.json");
 const DB_PATH = join(ROOT, "src", "server", "knowledge.generated.db");
+const GZ_PATH = DB_PATH + ".gz";
+// Generation manifest (DT2-1, 2026-08-13): a small, committed sibling recording sha256
+// fingerprints of the finalized .db and .db.gz so a consumer (src/server/knowledgeDb.ts) can
+// detect the two paired outputs describing DIFFERENT corpus generations -- e.g. a crash between
+// the two renameSync calls below leaving one swapped and the other stale -- instead of silently
+// serving whichever one it happens to pick.
+const MANIFEST_PATH = join(ROOT, "src", "server", "knowledge.generated.manifest.json");
+// Build into throwaway paths and swap them into place only after the output-sanity guard
+// (DT-1, below) passes -- the prior committed DB must never be unlinked before the
+// replacement is known sane.
+const TMP_DB_PATH = DB_PATH + ".tmp";
+const TMP_GZ_PATH = GZ_PATH + ".tmp";
+const TMP_MANIFEST_PATH = MANIFEST_PATH + ".tmp";
+
+function sha256(buf) {
+  return createHash("sha256").update(buf).digest("hex");
+}
 const BATCH_SIZE = 50_000;
+// Output-sanity guard (DT-1, 2026-08-13, ported from build-tire-knowledge.mjs's F1 fix,
+// 2026-08-12): refuse a rebuild whose tire or retail row count is less than this fraction
+// of the existing DB's row count. --force overrides, for a deliberate corpus replacement.
+const MIN_RETAINED_FRACTION = 0.9;
+const FORCE = process.argv.includes("--force");
 
 function elapsed(start) {
   return ((performance.now() - start) / 1000).toFixed(1) + "s";
+}
+
+/** Row counts of the DB already on disk, or {tires:null, retail:null} when there is none. */
+function priorRowCounts(path) {
+  if (!existsSync(path)) return { tires: null, retail: null };
+  let db;
+  try {
+    db = new Database(path, { readonly: true, fileMustExist: true });
+    const count = (table) => {
+      try { return db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get().c; } catch { return null; }
+    };
+    return { tires: count("tires"), retail: count("retail") };
+  } catch {
+    // Unreadable/corrupt prior DB: treat as absent rather than blocking a rebuild.
+    return { tires: null, retail: null };
+  } finally {
+    db?.close();
+  }
 }
 
 /** Detect Git LFS pointer files (~130 bytes, starts with "version https://git-lfs"). */
@@ -63,13 +104,19 @@ function safeReadJson(path, label) {
 console.log("[knowledge-db] Building SQLite knowledge database...");
 const t0 = performance.now();
 
-if (existsSync(DB_PATH)) unlinkSync(DB_PATH);
+// Clean up any stale tmp files left by a prior crashed/interrupted run. The COMMITTED
+// DB_PATH/GZ_PATH are never touched here -- only the throwaway tmp paths.
+for (const p of [TMP_DB_PATH, TMP_GZ_PATH, TMP_MANIFEST_PATH]) { if (existsSync(p)) unlinkSync(p); }
 
-const db = new Database(DB_PATH);
+const db = new Database(TMP_DB_PATH);
 db.pragma("journal_mode = WAL");
 db.pragma("synchronous = OFF");
 db.pragma("page_size = 8192");
 db.pragma("cache_size = -64000");
+
+// Row counts actually inserted into the new (tmp) DB, tracked for the output-sanity guard.
+let newTireCount = 0;
+let newRetailCount = 0;
 
 // ---------------------------------------------------------------------------
 // 2. Tire index
@@ -169,6 +216,7 @@ if (tireData) {
   db.exec("CREATE INDEX idx_tire_uid ON tires(canonical_product_uid)");
 
   console.log(`[knowledge-db] Tire: ${barcodeEntries.length} rows in ${elapsed(t1)}`);
+  newTireCount = barcodeEntries.length;
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +265,7 @@ if (retailData) {
   db.exec("CREATE INDEX idx_retail_barcode ON retail(barcode)");
 
   console.log(`[knowledge-db] Retail: ${retailEntries.length} rows in ${elapsed(t2)}`);
+  newRetailCount = retailEntries.length;
 }
 
 // ---------------------------------------------------------------------------
@@ -229,16 +278,68 @@ console.log("[knowledge-db] Running VACUUM...");
 db.exec("VACUUM");
 db.close();
 
-const dbSize = statSync(DB_PATH).size;
+// OUTPUT-SANITY GUARD (DT-1, 2026-08-13). Everything above validated the INPUT JSON files
+// (LFS-pointer detection, parse errors); nothing validated the RESULT before it replaced
+// the committed runtime DB. A truncated or stale tireKnowledge.generated.json /
+// retailKnowledge.generated.json would build cleanly and this script would previously
+// unlinkSync the real DB_PATH up front, then atomically overwrite it with a near-empty
+// database while reporting success -- destroying the runtime DB every decode rung depends
+// on, worse than the sibling tire generator's pre-fix bug because it deletes before it
+// validates. Building into TMP_DB_PATH (never DB_PATH) until this guard passes means the
+// prior committed DB is untouched on refusal. Refuse to shrink.
+const prior = priorRowCounts(DB_PATH);
+const shrunkTires = prior.tires !== null && newTireCount < prior.tires * MIN_RETAINED_FRACTION;
+const shrunkRetail = prior.retail !== null && newRetailCount < prior.retail * MIN_RETAINED_FRACTION;
+if ((shrunkTires || shrunkRetail) && !FORCE) {
+  for (const p of [TMP_DB_PATH, TMP_GZ_PATH, TMP_MANIFEST_PATH]) { if (existsSync(p)) unlinkSync(p); }
+  console.error(
+    `[knowledge-db] FAIL-CLOSED: refusing to shrink the runtime DB: ` +
+    `tires existing=${prior.tires ?? "n/a"} rebuild=${newTireCount}, ` +
+    `retail existing=${prior.retail ?? "n/a"} rebuild=${newRetailCount} ` +
+    `(below ${Math.round(MIN_RETAINED_FRACTION * 100)}% of existing on at least one table). ` +
+    `This usually means tireKnowledge.generated.json or retailKnowledge.generated.json is truncated, ` +
+    `missing, or an LFS pointer. Pass --force only if you intend to replace the corpus. ` +
+    `The prior ${DB_PATH} was left untouched.`,
+  );
+  process.exit(1);
+}
+
+const dbSize = statSync(TMP_DB_PATH).size;
 console.log(`[knowledge-db] DB size: ${(dbSize / 1024 / 1024).toFixed(1)} MB`);
 
 // Gzip the DB for the Vercel function bundle (342MB -> ~125MB compressed).
 // At runtime, the function decompresses to /tmp on the first cold start.
-const GZ_PATH = DB_PATH + ".gz";
+// Slow/risky work (gzip) happens BEFORE any rename (DT2-1, 2026-08-13) so the crash window
+// between the renames below is as small as possible -- three back-to-back rename() syscalls,
+// nothing else in between.
 console.log("[knowledge-db] Compressing DB with gzip...");
-await pipeline(createReadStream(DB_PATH), createGzip({ level: 6 }), createWriteStream(GZ_PATH));
-const gzSize = statSync(GZ_PATH).size;
+await pipeline(createReadStream(TMP_DB_PATH), createGzip({ level: 6 }), createWriteStream(TMP_GZ_PATH));
+const gzSize = statSync(TMP_GZ_PATH).size;
 console.log(`[knowledge-db] Compressed: ${(gzSize / 1024 / 1024).toFixed(1)} MB (${Math.round((1 - gzSize / dbSize) * 100)}% reduction)`);
+
+// Generation manifest (DT2-1): fingerprint the FINAL bytes of both outputs, computed after
+// VACUUM/gzip so the hashes reflect exactly what is about to be swapped into place. A consumer
+// can hash whichever file it opens and compare it to db_sha256 (decompressed .gz content is
+// byte-identical to the uncompressed .db, so the same field verifies either path) to detect a
+// generation mismatch instead of silently trusting whichever file happens to be on disk.
+const manifest = {
+  generated_at: new Date().toISOString(),
+  db_sha256: sha256(readFileSync(TMP_DB_PATH)),
+  gz_sha256: sha256(readFileSync(TMP_GZ_PATH)),
+  tire_row_count: newTireCount,
+  retail_row_count: newRetailCount,
+};
+writeFileSync(TMP_MANIFEST_PATH, JSON.stringify(manifest, null, 2) + "\n");
+
+// Swap into place only now that the guard above has proven the replacement sane. Back-to-back
+// with nothing else running between them -- the manifest is renamed LAST so a crash during any
+// of the three still leaves a self-consistent pair: either nothing changed yet (manifest still
+// describes the OLD db+gz, both untouched), or the manifest lags whichever of db/gz DID get
+// swapped, which the consumer's fingerprint check (src/server/knowledgeDb.ts) will detect and
+// refuse to silently serve.
+renameSync(TMP_DB_PATH, DB_PATH);
+renameSync(TMP_GZ_PATH, GZ_PATH);
+renameSync(TMP_MANIFEST_PATH, MANIFEST_PATH);
 
 console.log(`[knowledge-db] Done in ${elapsed(t0)}.`);
 console.log(`[knowledge-db] Output: ${DB_PATH} (${(dbSize / 1024 / 1024).toFixed(0)} MB) + ${GZ_PATH} (${(gzSize / 1024 / 1024).toFixed(0)} MB)`);

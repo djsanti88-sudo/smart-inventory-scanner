@@ -39,7 +39,7 @@ const callCount = (spy: unknown) => (spy as { mock: { calls: unknown[] } }).mock
 function storeWithRetail(lookup: (codes: string[]) => Promise<CatalogEntry | null> = retailLookup) {
   const store = createTestScanStore({ db: new MockDb(), lookupGlobalCatalog: lookup });
   store.setState({ online: true });
-  store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+  store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
   store.getState().updateSettings({ aiLookupEnabled: true });
   return store;
 }

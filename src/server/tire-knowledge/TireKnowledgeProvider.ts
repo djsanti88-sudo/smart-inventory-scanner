@@ -150,15 +150,6 @@ export async function resolveTrustedExactBarcodeDecision(
   return { kind: "hit", result: decoded, sourceScope: exact.sourceScope };
 }
 
-/** Compatibility wrapper for callers that only need a successful trusted-exact decode. */
-export async function resolveTrustedExactBarcode(
-  code: string,
-  access: { authenticatedBossCorpus: boolean },
-): Promise<CorpusDecodeResult | null> {
-  const decision = await resolveTrustedExactBarcodeDecision(code, access);
-  return decision.kind === "hit" ? decision.result : null;
-}
-
 // RC4 (owner-ratified, pilot PN recall): "if only the distributor affix differs and the digits are
 // identical, approve" - a part-number identity match is high-trust. 0.85 when the scanned PN matches
 // the corpus's manufacturer_part_number exactly (modulo space/hyphen normalization only); 0.8 when

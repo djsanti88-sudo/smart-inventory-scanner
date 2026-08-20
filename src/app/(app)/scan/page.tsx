@@ -8,6 +8,7 @@ import { CameraScanButton } from "@/components/CameraScanButton";
 import { LiveScanFeed } from "@/components/LiveScanFeed";
 import { FinalCountTable } from "@/components/FinalCountTable";
 import { SyncStatusBar } from "@/components/SyncStatusBar";
+import { SyncStatusIndicator } from "@/components/SyncStatusIndicator";
 import { ExportMenu } from "@/components/ExportMenu";
 import { VarianceReport } from "@/components/VarianceReport";
 import { SessionLockControl } from "@/components/SessionLockControl";
@@ -81,7 +82,7 @@ export default function ScanPage() {
     ensureAutoSession();
   }, [businessContextReady, businessDataLoaded, ensureAutoSession]);
 
-  const hasKey = aiStatus.geminiConfigured || aiStatus.openaiConfigured;
+  const hasKey = aiStatus.openaiConfigured;
   const isPlatform = useIsPlatformOwner(); // AI/provider status is platformOwner-only on the scan page
   // P4: keep the scan box the single hero - collapse the secondary controls by default for real users.
   // Stay expanded under E2E (the auth-bypass flag is set only in the Playwright webServers, never in prod)
@@ -106,6 +107,7 @@ export default function ScanPage() {
       <h1 className="sr-only">Scan</h1>
       <BusinessContextGate>
       <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4">
+        <SyncStatusIndicator />
         {SHOW_CATEGORY && categoryWarning && (
           <div
             data-testid="category-warning"

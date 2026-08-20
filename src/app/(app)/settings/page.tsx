@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { User } from "firebase/auth";
+import type { AuthUser } from "@/services/auth/authService";
 import { useScanStore } from "@/stores/scanStore";
 import { useReconcileStore } from "@/stores/reconcileStore";
 import { DECODE_BUDGET_MIN_MS, DECODE_BUDGET_MAX_MS, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
@@ -10,7 +10,6 @@ import { ExportMenu } from "@/components/ExportMenu";
 import { CleanupRecommendations } from "@/components/CleanupRecommendations";
 import { OwnerPinSettings } from "@/components/OwnerPinSettings";
 import { GptLadderPanel } from "@/components/GptLadderPanel";
-import { GeminiStatusRow } from "@/components/GeminiStatusRow";
 import { KillSwitchBanner } from "@/components/KillSwitchBanner";
 import { requiresOwnerPin } from "@/services/security/destructiveGuard";
 import { getSession, onAuthChange } from "@/lib/auth";
@@ -46,7 +45,7 @@ export default function SettingsPage() {
   const verifiedCatalogCount = catalog.filter((e) => e.verificationStatus === "verified").length;
   const pendingCatalogCount = catalog.filter((e) => e.verificationStatus === "pending").length;
 
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   useEffect(() => {
     let active = true;
     getSession().then((s) => {
@@ -201,18 +200,6 @@ export default function SettingsPage() {
           testid="setting-ai-enabled"
           onChange={(v) => update({ aiLookupEnabled: v })}
         />
-        <Row label="AI service">
-          <select
-            value={settings.primaryProvider}
-            onChange={(e) => update({ primaryProvider: e.target.value as "mock" | "gemini" | "openai" })}
-            className="rounded border border-zinc-300 px-2 py-1 text-sm"
-            data-testid="setting-provider"
-          >
-            <option value="mock">Test mode (free, no key needed)</option>
-            <option value="gemini">Fast AI (requires server key)</option>
-            <option value="openai">Backup AI (requires server key)</option>
-          </select>
-        </Row>
         <Row label="Daily lookup limit">
           <input
             type="number"
@@ -274,25 +261,13 @@ export default function SettingsPage() {
       </Section>
 
       <Section title="Live AI status">
-        <Row label="Mode">
-          <span className="text-sm text-zinc-700" data-testid="ai-mode">{aiStatus.mode}</span>
-        </Row>
         <Row label="Auto decode on scan">
           <span className="text-sm">{aiStatus.autoDecodeOnScan ? "On" : "Off"}</span>
         </Row>
-        <Row label="Fast AI lookup">
-          <GeminiStatusRow
-            geminiConfigured={aiStatus.geminiConfigured}
-            geminiUsedForDecode={aiStatus.geminiUsedForDecode}
-          />
-        </Row>
-        <Row label="Backup AI lookup">
+        <Row label="AI lookup">
           <span className={`text-sm ${aiStatus.openaiConfigured ? "text-green-700" : "text-red-700"}`} data-testid="openai-status">
             {aiStatus.openaiConfigured ? "Connected (key configured)" : "Not connected (key missing)"}
           </span>
-        </Row>
-        <Row label="Thorough lookup mode">
-          <span className="text-sm">{aiStatus.premiumFallback ? "On" : "Off"}</span>
         </Row>
         <GptLadderPanel gptLadder={aiStatus.gptLadder} />
         <Row label="Daily lookup count">

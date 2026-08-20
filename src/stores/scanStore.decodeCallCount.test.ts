@@ -89,7 +89,7 @@ describe("decode dispatch call count (audit-6 finding 5)", () => {
   it("a scan settled by a non-boss trusted-exact corpus hit fires exactly ONE /api/ai-lookup POST total", async () => {
     const code = "036000291452";
     const store = createTestScanStore({ db: new MockDb(), trustedExactProbeEnabled: true });
-    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     store.getState().updateSettings({ aiLookupEnabled: true });
     const fetchSpy = vi.fn(async () => globalCorpusVerifiedResponse(code));
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
@@ -114,7 +114,7 @@ describe("decode dispatch call count (audit-6 finding 5)", () => {
   it("a genuine trusted-exact miss still continues into exactly ONE ordinary follow-up (2 total)", async () => {
     const code = "036000291452";
     const store = createTestScanStore({ db: new MockDb(), trustedExactProbeEnabled: true });
-    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     store.getState().updateSettings({ aiLookupEnabled: true });
     const fetchSpy = vi.fn(async () => missResponse());
     globalThis.fetch = fetchSpy as unknown as typeof fetch;

@@ -1,0 +1,118 @@
+{
+  "$comment": "Machine-readable section map for Scanbin. Created 2026-08-12. Sections are REVIEW UNITS, not folders - see docs/CODEMAP.md for why the filesystem is deliberately not reorganized to match. Consumed by scripts/check-section.mjs (npm run check:section <id>). Keep in sync with docs/CODEMAP.md.",
+  "version": 1,
+  "sections": [
+    {
+      "id": "scan-core",
+      "title": "Scan core and count ledger",
+      "owns": "Scan intake, the count ledger, resolution, optimistic state, persistence, sync queue.",
+      "globs": [
+        "src/stores/**",
+        "src/services/inventory.ts",
+        "src/services/inventory.replay.ts",
+        "src/services/resolver.ts",
+        "src/services/scanCleaner.ts",
+        "src/services/aliasMatcher.ts",
+        "src/services/idempotency.ts"
+      ],
+      "gates": ["npm run proof:all", "npm run test:ledger"],
+      "invariants": [
+        "TOP-LEVEL LAW: every scan appears in the feed and counts. Scan 10 = count 10.",
+        "ensureProvisionalCount runs synchronously before any await. That ORDERING is the enforcement; there is no named guard.",
+        "markWrong is a quantity TRANSFER, never a delete.",
+        "idempotencyKey assigned once at scan time, reused on retry, never regenerated inside a retry branch.",
+        "Barcodes and part numbers are TEXT. No numeric coercion at any layer."
+      ],
+      "traps": [
+        "scanStore.ts is ~8,800 lines. Grep for symbols; never read top to bottom.",
+        "Audited 2026-08-12: this file largely EARNS its size. Density here is documented history, not bloat."
+      ]
+    },
+    {
+      "id": "decode",
+      "title": "Decode ladder, AI, and spend",
+      "owns": "The cost-ordered decode ladder, providers, evidence verification, the daily cap and breaker.",
+      "globs": [
+        "src/server/decode/**",
+        "src/server/upc/**",
+        "src/services/ai/**",
+        "src/services/fetchV2/**",
+        "src/services/polish/**",
+        "src/services/upc/**",
+        "src/services/security/aiSpendGuard.ts",
+        "src/app/api/ai-lookup/**"
+      ],
+      "gates": ["npm run proof:all", "npx vitest run src/server/decode src/app/api/ai-lookup"],
+      "invariants": [
+        "Cheapest-first, pay-once: a rung that answered is never re-paid.",
+        "The daily cap charges ONLY paid rungs, exactly once per genuine compute (L12: never two paths of one request).",
+        "Gemini is permanently out of decode (GEMINI_DECODE_DISABLED, a hardcoded literal, not an env var).",
+        "A code not in the index continues through the ladder in EVERY environment; probes never dead-end (L16).",
+        "Evidence truth is decided by the app, never a provider self-claim.",
+        "Decode attaches identity only. It never blocks or hides a counted row."
+      ],
+      "traps": [
+        "services/ai/decodeOrchestrator.ts is DEPRECATED (types only). The real orchestrator is server/decode/pipeline.ts.",
+        "Tests must never call live providers. IS_E2E=1 forces mock-only."
+      ]
+    },
+    {
+      "id": "ui",
+      "title": "UI and app shell",
+      "owns": "Client components, App Router pages, auth surface.",
+      "globs": ["src/components/**", "src/app/(app)/**", "src/app/login/**", "src/lib/auth.ts"],
+      "gates": ["npm run proof:all", "npm run test:e2e", "npm run qa:bots"],
+      "invariants": [
+        "The scan input is focused by default; Enter submits; focus returns after every scan.",
+        "Dangerous actions stay away from the scanner focus flow.",
+        "No em dash or en dash in user-facing copy.",
+        "Client code never reads process.env.*_API_KEY (guarded transitively)."
+      ],
+      "traps": ["Unit tests are NOT sufficient for customer-facing changes. Human-bot proof is required."]
+    },
+    {
+      "id": "data",
+      "title": "Data, catalog, sync, knowledge",
+      "owns": "Firestore sync and tenancy, catalog and reconcile, CSV import/export, the tire and retail corpora.",
+      "globs": [
+        "src/services/db/**",
+        "src/services/catalog/**",
+        "src/services/reconcile/**",
+        "src/services/csvImport.ts",
+        "src/services/csvExport.ts",
+        "src/services/columnIntelligence.ts",
+        "src/services/sessions/**",
+        "src/server/business/**",
+        "src/server/share/**",
+        "src/server/tire-knowledge/**",
+        "src/server/retail-knowledge/**"
+      ],
+      "gates": ["npm run proof:all", "npm run test:firebase", "npm run test:corpus-drift", "npm run test:golden"],
+      "invariants": [
+        "Every record is scoped by businessId. Firestore rules derive the tenant from the document path.",
+        "Generated corpus artifacts are never hand-edited. Change the generator and rebuild.",
+        "Duplicate scans increment quantity; they never create duplicate product rows."
+      ],
+      "traps": [
+        "11 *.rules.test.ts files SELF-SKIP without a Firestore emulator. They are most of the '105 skipped' in a green run. A symbol used only by them LOOKS dead and is not.",
+        "build-tire-knowledge.mjs falls through to a 2-row bootstrap seed with no harvester snapshot. Guarded since 2026-08-12 (MIN_RETAINED_FRACTION); do not remove that guard.",
+        "Corpus meta is refreshed by npm run refresh:tire-meta, NOT by rerunning the generator."
+      ]
+    },
+    {
+      "id": "tooling",
+      "title": "Scripts, gates, and docs",
+      "owns": "Build and ingest scripts, the proof gates, project documentation.",
+      "globs": ["scripts/**", "docs/**", "*.md", "package.json", "vitest.config.ts", ".github/**"],
+      "gates": ["npm run proof:all"],
+      "invariants": [
+        "npm run proof:all is the honest gate. proof:local is BLIND to the node:test suites.",
+        "A new test file must be reachable by a runner. Adding it to vitest's exclude list without a node:test entry orphans it silently."
+      ],
+      "traps": [
+        "10 test files are vitest-excluded. 9 of them had NO runner at all until 2026-08-12.",
+        "The node:test leg runs with --test-concurrency=1 deliberately; the tire-db-repair suites flake under parallel load."
+      ]
+    }
+  ]
+}

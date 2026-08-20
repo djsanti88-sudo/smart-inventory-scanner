@@ -8,7 +8,9 @@
 // same company, wrongly flagged as a wrong-brand conflict. A curated family table is the
 // evidence-gated fix: ONLY groups we can point to concrete same-company evidence for.
 //
-// Pure, no imports. Each line carries the evidence for WHY those brands are one company.
+// Each line carries the evidence for WHY those brands are one company.
+
+import { normalizeBrand } from "@/services/catalog/brandPrefixGeneral";
 
 // Dunlop is deliberately in NO family below. Goodyear held the Dunlop tire trademark for North
 // America/Europe/Oceania for decades, but Sumitomo Rubber Industries REPURCHASED that trademark
@@ -73,20 +75,10 @@ const FAMILIES: readonly string[][] = [
   ["taskmaster", "provider", "diamondback"],
 ];
 
-/** Same brand-normalization as the firewall so lookups line up (lowercase, strip punctuation + noise). */
-function norm(b: string): string {
-  return (b || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\b(tire|tires|tyre|tyres|inc|llc|co|company)\b/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 // Precompute a normalized brand -> family-index map for O(1) lookup.
 const BRAND_TO_FAMILY = new Map<string, number>();
 FAMILIES.forEach((family, i) => {
-  for (const brand of family) BRAND_TO_FAMILY.set(norm(brand), i);
+  for (const brand of family) BRAND_TO_FAMILY.set(normalizeBrand(brand), i);
 });
 
 /**
@@ -95,8 +87,8 @@ FAMILIES.forEach((family, i) => {
  * unless they normalize identically - absence of family data must NOT invent a relationship.
  */
 export function sameBrandFamily(a: string, b: string): boolean {
-  const na = norm(a);
-  const nb = norm(b);
+  const na = normalizeBrand(a);
+  const nb = normalizeBrand(b);
   if (!na || !nb) return false;
   if (na === nb) return true;
   const fa = BRAND_TO_FAMILY.get(na);
@@ -114,11 +106,11 @@ function titleCaseLeader(leader: string): string {
  * P5 (Task 8) - "never fully unknown" family annotation for the prefix floor. Returns the family label
  * "<Leader> family" for a NON-LEADER member of a curated group (the leader is the FIRST entry of its
  * FAMILIES group), or null for a leader, an independent brand (in no group), or empty input. Reuses
- * this module's own norm() so lookups line up with the family table. Pure, no imports.
+ * `normalizeBrand` so lookups line up with the family table.
  * Examples: "BFGoodrich" -> "Michelin family"; "Cooper" -> "Goodyear family"; "Michelin" -> null.
  */
 export function familyLabelFor(brand: string): string | null {
-  const b = norm(brand);
+  const b = normalizeBrand(brand);
   if (!b) return null;
   for (const family of FAMILIES) {
     const leader = family[0];

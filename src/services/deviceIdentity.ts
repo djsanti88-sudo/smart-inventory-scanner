@@ -13,11 +13,30 @@
 export const DEVICE_ID_KEY = "sis-device-id";
 export const WINDOW_ID_KEY = "sis-window-id";
 
+// FINDING 1 (Codex clean-room review, 2026-08-16, CRITICAL): a real browser Storage object can throw
+// synchronously on getItem or setItem - Safari private mode, blocked cookies, a full quota. This
+// function sits ahead of processScan's outer Layer C try/catch (scanStore.ts ensureAutoSession runs
+// before that boundary), so an uncaught throw here silently dropped the scan with no feed row, no
+// count, and no log: the exact TOP-LEVEL LAW violation Layer C exists to prevent. Fail-soft instead:
+// on either call throwing, fall back to a fresh ephemeral (session-only, not persisted) id rather than
+// ever propagating the error. Losing device-id persistence for that one call degrades a
+// nice-to-have (idempotent auto-session keys); throwing degrades the TOP-LEVEL LAW itself.
 function getOrCreate(storage: Storage, key: string, idFactory?: () => string): string {
-  const existing = storage.getItem(key);
+  const mintFresh = () => (idFactory ? idFactory() : crypto.randomUUID());
+  let existing: string | null = null;
+  try {
+    existing = storage.getItem(key);
+  } catch (err) {
+    console.error(`[deviceIdentity] storage.getItem('${key}') threw; using an ephemeral id for this call.`, err);
+    return mintFresh();
+  }
   if (existing) return existing;
-  const fresh = idFactory ? idFactory() : crypto.randomUUID();
-  storage.setItem(key, fresh);
+  const fresh = mintFresh();
+  try {
+    storage.setItem(key, fresh);
+  } catch (err) {
+    console.error(`[deviceIdentity] storage.setItem('${key}') threw; continuing with an ephemeral (unpersisted) id.`, err);
+  }
   return fresh;
 }
 

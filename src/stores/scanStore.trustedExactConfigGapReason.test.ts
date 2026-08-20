@@ -89,7 +89,6 @@ function configureTrustedExactStore() {
   const store = createTestScanStore({ db: new MockDb(), trustedExactProbeEnabled: true });
   store.getState().updateSettings({ aiLookupEnabled: true });
   store.getState().setAiStatus({
-    geminiConfigured: true,
     openaiConfigured: true,
     freeDecodeAvailable: true,
     missingKeys: [],

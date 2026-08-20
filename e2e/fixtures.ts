@@ -17,8 +17,6 @@ const PERSIST_VERSION = 7;
 const GENERIC_SETTINGS = {
   businessId: "demo-business",
   aiLookupEnabled: false,
-  primaryProvider: "mock",
-  fallbackProvider: "mock",
   dailyLookupLimit: 25,
   dailyLookupCount: 0,
   lastResetDate: "1970-01-01",

@@ -49,7 +49,7 @@ function seedTenantProduct(store: ReturnType<typeof createTestScanStore>, name: 
 function storeWithMaster(lookup: (codes: string[]) => Promise<CatalogEntry | null>) {
   const store = createTestScanStore({ db: new MockDb(), lookupGlobalCatalog: lookup });
   store.setState({ online: true });
-  store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+  store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
   // AI lookup stays OFF: these tests drive cloudCatalogResolve directly and must never race against
   // the store's own auto-triggered liveDecode overwriting the scanFeed row this test asserts on.
   store.getState().updateSettings({ aiLookupEnabled: false });

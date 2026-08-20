@@ -14,11 +14,12 @@
 // dependency-light (node:test + better-sqlite3), so it never needs the app's own compiled
 // knowledge.generated.db (a separate, larger build artifact this task does not touch).
 
-import { test, before, after } from "node:test";
+import { test as nodeTest, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+import { skipUnlessLocalData } from "../lib/localDataSkip.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..");
@@ -26,14 +27,19 @@ const WORKING_DB_PATH = join(
   REPO_ROOT, "backups", "claude-tire-db-handoff-2026-07-28", "repair-2026-07-28", "REPAIRED_TIRE_DATABASE.db",
 );
 
+// Self-skips (visibly) when the gitignored repair package is not in this checkout - see scripts/lib/localDataSkip.mjs.
+const SKIP = skipUnlessLocalData(WORKING_DB_PATH, "tire-DB repair package (REPAIRED_TIRE_DATABASE.db)");
+const test = (name, fn) => nodeTest(name, { skip: SKIP }, fn);
+
 let db;
 
 before(() => {
+  if (SKIP) return;
   db = new Database(WORKING_DB_PATH, { readonly: true });
 });
 
 after(() => {
-  db.close();
+  db?.close();
 });
 
 // --- Runtime semantics mirrored exactly from tireKnowledgeIndex.ts --------------------------

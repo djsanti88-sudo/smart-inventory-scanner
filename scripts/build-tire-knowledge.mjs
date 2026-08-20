@@ -26,6 +26,10 @@ const OUT_META = join(OUT_DIR, "tireKnowledge.generated.meta.json");
 const STATUS = join(ROOT, "coordination", "RAG_KNOWLEDGE_STATUS.json");
 const SCHEMA_VERSION = "1.0.0";
 const GENERATOR_VERSION = "1.0.0";
+// Output-sanity guard (F1): refuse a rebuild that retains less than this fraction of the
+// existing index's barcodes. --force overrides, for a deliberate corpus replacement.
+const MIN_RETAINED_FRACTION = 0.9;
+const FORCE = process.argv.includes("--force");
 
 function gitInfo() {
   const git = (args) => execFileSync("git", args, { cwd: ROOT }).toString().trim();
@@ -38,6 +42,25 @@ function sha256(buf) { return createHash("sha256").update(buf).digest("hex"); }
 function writeStatus(obj) {
   mkdirSync(join(ROOT, "coordination"), { recursive: true });
   writeFileSync(STATUS, JSON.stringify({ branch: gitInfo().git_branch, generator_path: "scripts/build-tire-knowledge.mjs", generated_index_path: "src/server/tire-knowledge/tireKnowledge.generated.json", generated_meta_path: "src/server/tire-knowledge/tireKnowledge.generated.meta.json", data_folder_written: false, pushed: false, merged: false, deployed: false, ...obj }, null, 2) + "\n");
+}
+
+/**
+ * Barcode count of the index already on disk, or null when there is none (bootstrap).
+ * Prefers the tiny meta file over parsing the ~72MB index. Note that meta drifts behind
+ * patch-style corpus commits (F2), so this can UNDERSTATE the real count -- which only
+ * makes the guard more permissive, never less safe, and still catches a collapse.
+ */
+function priorBarcodeCount() {
+  try {
+    if (existsSync(OUT_META)) {
+      const n = JSON.parse(readFileSync(OUT_META, "utf8")).barcode_index_count;
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  } catch { /* fall through to the index itself */ }
+  try {
+    if (existsSync(OUT_JSON)) return Object.keys(JSON.parse(readFileSync(OUT_JSON, "utf8")).barcodeIndex ?? {}).length;
+  } catch { /* unreadable prior index: treat as absent */ }
+  return null;
 }
 
 function fail(reason, extra = {}) {
@@ -145,6 +168,22 @@ function main() {
     ...gitInfo(),
   };
   const index = { schema_version: SCHEMA_VERSION, generated_at, barcodeIndex, partNumberIndex, identityIndex };
+
+  // OUTPUT-SANITY GUARD (F1, 2026-08-12). Every check above validates the INPUT; none
+  // validated the result. Snapshot precedence ends at the 2-row bootstrap seed, so on a
+  // fresh clone, CI, or any box without harvester snapshots this generator would parse
+  // that seed cleanly, pass every validation, and atomically overwrite the real
+  // 79,108-barcode corpus with 2 records while reporting success. Refuse to shrink.
+  const prior = priorBarcodeCount();
+  if (prior !== null && meta.barcode_index_count < prior * MIN_RETAINED_FRACTION && !FORCE) {
+    fail(
+      `refusing to shrink the tire index: existing=${prior} barcodes, rebuild=${meta.barcode_index_count} ` +
+      `(below ${Math.round(MIN_RETAINED_FRACTION * 100)}% of existing). Snapshot label was "${snap.label}". ` +
+      `This usually means no harvester snapshot is present and the build fell through to the bootstrap seed. ` +
+      `Pass --force only if you intend to replace the corpus.`,
+      { source_snapshot_path: snap.path, snapshot_label: snap.label, existing_barcode_count: prior, rebuilt_barcode_count: meta.barcode_index_count },
+    );
+  }
 
   const tmpJson = OUT_JSON + ".tmp"; const tmpMeta = OUT_META + ".tmp";
   writeFileSync(tmpJson, JSON.stringify(index)); writeFileSync(tmpMeta, JSON.stringify(meta, null, 2) + "\n");

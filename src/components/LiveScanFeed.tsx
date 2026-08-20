@@ -4,21 +4,18 @@ import { useEffect, useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { DecodeStatusBadge, MatchBadge, StatusBadge, SyncBadge } from "@/components/badges";
-import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
+import { prettifyBrand, prettifyProductName, resolvedCanonicalSize } from "@/services/format/productDisplay";
 import { getIdentityConfidenceBand, getReviewIdentityBand, identityBandLabel } from "@/services/ai/identityConfidenceBand";
 import { canOneTapApproveIdentity } from "@/stores/scanGates";
-import { matchTireSize } from "@/services/tire/tireSizeNormalizer";
 import { canonicalTireSize } from "@/services/catalog/tireListingNormalizer";
 import type { Product, UnknownCodeReview } from "@/types";
 
-// Size column: same structured-size source FinalCountTable already uses (product.specsShort via
-// matchTireSize), falling back to a deterministic parse of the row's own display name when the
-// linked product has no parseable structured size yet (e.g. still-provisional rows). Never guesses;
-// "-" when neither source yields a confident size.
+// Size column: the same structured-size source the count tables use (resolvedCanonicalSize), falling
+// back to a deterministic parse of the row's own display name when the linked product has no parseable
+// structured size yet (e.g. still-provisional rows). Never guesses; "-" when neither source yields a
+// confident size.
 function resolvedFeedSize(product: Product | undefined, displayName: string): string {
-  const fromProduct = product ? matchTireSize(product.specsShort)?.canonical.split(" ")[0] : undefined;
-  if (fromProduct) return fromProduct;
-  return canonicalTireSize(displayName) || "-";
+  return resolvedCanonicalSize(product) ?? (canonicalTireSize(displayName) || "-");
 }
 
 // DEFECT #29/#37 residual (live-reproduced 2026-08-05/06, canelo round 2): after the Map-lookup fix
@@ -486,7 +483,16 @@ export function LiveScanFeed() {
                     <td className="px-4 py-3 font-mono text-sm" data-testid={`feed-part-number-${e.id}`}>
                       {displaySku}
                     </td>
-                    <td className="px-4 py-3 tabular-nums">{e.status === "known" ? e.quantityAfterScan : "-"}</td>
+                    {/* UI-1 FIX (2026-08-13, loop1-ui.md): a resolved row (identity settled via Needs
+                        Review) has ALREADY counted - ensureProvisionalCount counted it synchronously at
+                        scan time, per the TOP-LEVEL LAW - and resolveUnknown keeps quantityAfterScan in
+                        sync with the finalCounts ledger through resolution (including orphan merges into
+                        an existing product). Gating the display on status === "known" alone hid that real,
+                        ledger-correct quantity behind a blank "-" the moment a code moved to "resolved",
+                        which reads as "this didn't count" to a shop owner even though it did. */}
+                    <td className="px-4 py-3 tabular-nums" data-testid={`feed-qty-${e.id}`}>
+                      {e.status === "known" || e.status === "resolved" ? e.quantityAfterScan : "-"}
+                    </td>
                     <td className="px-4 py-3">
                       {e.decodeStatus && e.decodeStatus !== "none" ? (
                         <DecodeStatusBadge status={e.decodeStatus} provenance={e.provenance} />

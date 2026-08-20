@@ -12,7 +12,7 @@
 // substitute for this script -- that rebuilds the payload from an OLDER
 // source snapshot and would DISCARD later enrichment (shrinking the corpus
 // 78,437 -> ~76,173 barcode keys). Pattern: read/transform/verify/write,
-// like scripts/tmp-fix-source-count.mjs, but this one touches ONLY the meta.
+// like the retired scripts/tmp-fix-source-count.mjs (removed 2026-08-19), but this one touches ONLY the meta.
 //
 // Lineage rule (do not conflate -- see 04-corpus-provenance.md):
 //   - payload_sha256 / payload_barcode_count / payload_generated_at describe

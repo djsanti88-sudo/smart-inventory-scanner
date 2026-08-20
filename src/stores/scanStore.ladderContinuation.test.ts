@@ -68,7 +68,6 @@ function configureTrustedExactStore() {
   const store = createTestScanStore({ db: new MockDb(), trustedExactProbeEnabled: true });
   store.getState().updateSettings({ aiLookupEnabled: true });
   store.getState().setAiStatus({
-    geminiConfigured: true,
     openaiConfigured: true,
     freeDecodeAvailable: true,
     missingKeys: [],
@@ -228,7 +227,6 @@ describe("trusted-exact ladder continuation", () => {
     const store = createTestScanStore({ db: new MockDb() });
     store.getState().updateSettings({ aiLookupEnabled: true });
     store.getState().setAiStatus({
-      geminiConfigured: true,
       openaiConfigured: true,
       freeDecodeAvailable: true,
       missingKeys: [],

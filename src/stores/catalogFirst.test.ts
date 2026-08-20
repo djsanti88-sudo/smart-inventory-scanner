@@ -25,7 +25,7 @@ function stub(resp: object) {
 }
 function aiOnStore() {
   const store = createTestScanStore({ db: new MockDb() });
-  store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+  store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
   store.getState().updateSettings({ aiLookupEnabled: true });
   return store;
 }
@@ -198,7 +198,7 @@ describe("cloud global catalog lookup (Option 1 wiring)", () => {
     const lookupGlobalCatalog = vi.fn(async () =>null);
     const store = createTestScanStore({ db: new MockDb(), lookupGlobalCatalog });
     store.setState({ online: true });
-    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().setAiStatus({ openaiConfigured: true, missingKeys: [] });
     store.getState().updateSettings({ aiLookupEnabled: true });
 
     const { spy, restore } = stub(SUGGESTED);

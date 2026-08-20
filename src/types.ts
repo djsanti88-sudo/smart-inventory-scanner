@@ -410,8 +410,6 @@ export interface Settings {
    *  requires this to be set; unlocking verifies the entered PIN against it. See services/security/pinLock. */
   ownerPinHash: string;
   aiLookupEnabled: boolean;
-  primaryProvider: "mock" | "gemini" | "openai";
-  fallbackProvider: "mock" | "gemini" | "openai";
   dailyLookupLimit: number;
   dailyLookupCount: number;
   lastResetDate: string;
@@ -587,14 +585,9 @@ export type FeedDecodeStatus =
 export interface AiStatus {
   liveEnabled: boolean; // ENABLE_LIVE_AI_LOOKUP
   autoDecodeOnScan: boolean; // ENABLE_AUTO_DECODE_ON_SCAN
-  geminiEnabled: boolean; // ENABLE_GEMINI_LOOKUP
-  openaiEnabled: boolean; // ENABLE_OPENAI_LOOKUP
-  geminiConfigured: boolean; // GEMINI_API_KEY present (server-side)
   openaiConfigured: boolean; // OPENAI_API_KEY present (server-side)
   /** Server says decode has a free/local rung (corpus/cache/prefix) before paid provider gates. */
   freeDecodeAvailable?: boolean;
-  premiumFallback: boolean; // ENABLE_PREMIUM_MODEL_FALLBACK
-  mode: string; // AI_LOOKUP_MODE
   dailyLimit: number; // AI_LOOKUP_DAILY_LIMIT
   missingKeys: string[];
   emergencyStop: boolean;
@@ -613,9 +606,6 @@ export interface AiStatus {
    *  corpus -> Go-UPC -> Fetch V2 -> GPT only. Optional because it is a newer server field; a stale
    *  GET response without it is still valid. */
   decodeLadder?: string[];
-  /** Task 8: always false. Gemini fields above (geminiEnabled/geminiConfigured/geminiModel) stay for
-   *  Settings + refreshAiStatus's gate, but Gemini is permanently out of decode (enrichment only). */
-  geminiUsedForDecode?: boolean;
   /** Spec 2 (M1): SERVER kill switch (AI_LOOKUP_KILL_SWITCH env var). Distinct from `emergencyStop`
    *  above, which is a CLIENT preference the shop owner toggles locally - this one reflects a server
    *  operator's total-stop that the shop owner cannot turn off themselves. */

@@ -28,12 +28,25 @@ export function blobContainsCodeToken(blob: string | undefined, codes: Array<str
   return tokens.some((t) => wanted.has(t));
 }
 
-/** Extract a code from a leading "UPC <code> - " / "GTIN <code> -" / "EAN <code> -" / "Barcode <code> -"
- *  name prefix, for the backfill helper. Returns the raw code string or null if the name has no such prefix.
- *  Only matches a code-shaped token (>= MIN_CODE_LEN alphanumerics) so ordinary names are left untouched. */
-export function codeFromNamePrefix(name: string | undefined): string | null {
-  const m = /^\s*(?:UPC|EAN|GTIN|BARCODE)\s*[:#]?\s*([A-Za-z0-9][A-Za-z0-9-]*)\s*-\s+/i.exec(name ?? "");
+/** THE one matcher for the legacy "UPC <code> - <name>" identifier prefix ("UPC|EAN|GTIN|Barcode",
+ *  optional ":"/"#", a code-shaped token, then a hyphen / en dash / em dash separator). Until 2026-08-19
+ *  displayName.ts (render) and this module (dedup/backfill) each had their own regex and they disagreed
+ *  on the separator: a name like "UPC 086699205636 – Defender" rendered clean but was invisible to the
+ *  identifier backfill. Imported data may carry any dash; both consumers now share this split. */
+const LEGACY_IDENTIFIER_PREFIX_RE = /^\s*(?:UPC|EAN|GTIN|BARCODE)\s*[:#]?\s*([A-Za-z0-9][A-Za-z0-9-]*?)\s*[-–—]\s+(.*)$/i;
+
+/** Split a legacy identifier-prefixed name into { code, rest }, or null when the name has no such prefix
+ *  or the token is not code-shaped (>= MIN_CODE_LEN alphanumerics), so ordinary names are left untouched. */
+export function splitLegacyIdentifierPrefix(name: string | undefined): { code: string; rest: string } | null {
+  const m = LEGACY_IDENTIFIER_PREFIX_RE.exec(name ?? "");
   if (!m) return null;
   const code = m[1];
-  return normCodeToken(code).length >= MIN_CODE_LEN ? code : null;
+  if (normCodeToken(code).length < MIN_CODE_LEN) return null;
+  return { code, rest: m[2] };
+}
+
+/** Extract a code from a leading "UPC <code> - " / "GTIN <code> -" / "EAN <code> -" / "Barcode <code> -"
+ *  name prefix, for the backfill helper. Returns the raw code string or null if the name has no such prefix. */
+export function codeFromNamePrefix(name: string | undefined): string | null {
+  return splitLegacyIdentifierPrefix(name)?.code ?? null;
 }

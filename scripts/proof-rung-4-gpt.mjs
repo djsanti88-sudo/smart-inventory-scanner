@@ -17,18 +17,28 @@
 // gptFromScratch() directly -- so the app's evidence-gate/decision wiring is exercised for real,
 // not bypassed.
 //
+// GATED (owner incident 2026-08-13, TL2-1 re-verification): --live alone used to be enough to spend
+// real OpenAI money. scripts/lib/paidScriptGuard.mjs now also requires --yes-i-accept-cost, matching
+// every other Lane 1 paid script. Reading .env.local here is legitimate (launching the actual app).
+//
 // Usage:
-//   node scripts/proof-rung-4-gpt.mjs --dry-run                          validates guard math, $0
-//   node scripts/proof-rung-4-gpt.mjs --live --codes=CODE1,CODE2,... --port=3108   SPENDS OpenAI $ (owner-gated)
+//   node scripts/proof-rung-4-gpt.mjs --dry-run                                                        validates guard math, $0
+//   node scripts/proof-rung-4-gpt.mjs --live --yes-i-accept-cost --codes=CODE1,CODE2,... --port=3108    SPENDS OpenAI $ (owner-gated)
 import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { requireLiveApproval } from "./lib/paidScriptGuard.mjs";
 
 const DRY_RUN = process.argv.includes("--dry-run");
-const LIVE = process.argv.includes("--live");
+const LIVE_REQUESTED = process.argv.includes("--live");
 const PORT = Number(process.argv.find((a) => a.startsWith("--port="))?.slice(7) ?? 3108);
 const EXTERNAL_BASE = process.argv.find((a) => a.startsWith("--base-url="))?.slice(11) ?? null;
 const BASE_URL = EXTERNAL_BASE ?? `http://localhost:${PORT}`;
 const CODES = process.argv.find((a) => a.startsWith("--codes="))?.slice(8).split(",").map((s) => s.trim()).filter(Boolean) ?? [];
+// --dry-run already gives a full $0 guard-math-validation path; only gate the ACTUAL --live spend path.
+const LIVE = LIVE_REQUESTED && requireLiveApproval({
+  worstCaseFloorUsd: 1.5, // this rung's reserved slice of the phase's $3.00 GPT-5.5 cap (HARD_CAP below)
+  describe: () => `Would spawn a real "next dev" server with REAL .env.local keys and run ${CODES.length || "the configured"} hard-tail codes through the live GPT-5.5 rung, spending real OpenAI money.`,
+}).live;
 
 // Reserved worst-case-per-call from the probe-parity shape (copied from tmp-gpt-goupc-misses.mts,
 // same $0.39/call figure measured at 18s / 5 searches probe parity). HARD_CAP is this rung's

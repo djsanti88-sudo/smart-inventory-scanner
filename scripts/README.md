@@ -1,46 +1,59 @@
 # scripts/
 
-One line per living script. Everything else that lived directly in `scripts/tmp-*` has been
-archived (see bottom of this file).
+Operational tooling for Scanbin. One line per living entry, grouped by domain. Full command reference,
+ports, env vars and PAID/LIVE warnings: `docs/COMMANDS.md`. Paid scripts import
+`lib/paidScriptGuard.mjs` (`--live --yes-i-accept-cost` + dev-tooling key); `paidScriptGuard.enforcement.test.mjs`
+walks this whole folder and fails on any unguarded billed call.
 
-- `dev.mjs` — backend-safe dev launcher; picks mock/emulator/production Firebase before
-  `next dev` starts and prints a banner so `npm run dev` never silently writes to prod.
-- `build-knowledge-db.mjs` — converts tire + retail JSON indexes into the SQLite knowledge DB
-  (`src/server/knowledge.generated.db`) for microsecond barcode lookups.
-- `build-tire-knowledge.mjs` — generates the committed, versioned tire-knowledge index from the
-  Tire Barcode Harvester's stable snapshot; fails closed (never overwrites on validation failure).
-- `build-retail-knowledge.mjs` — generates the committed retail barcode index from the Open Food
-  Facts JSONL dataset for instant local resolution without AI.
-- `build-prefix-index.mjs` — offline derivation of the GS1 prefix-confidence map used by the
-  anti-hallucination brand-prefix firewall; statistical evidence, not official GS1 truth.
-- `cloud-smoke.mjs` — Cloud Loop 8 smoke test: real Firebase Auth + tenant-isolation/role/audit
-  proof against the real Firebase project (not the emulator); self-cleaning and idempotent.
-- `corpus-purge.mjs` — CLI to quarantine corpus rows learned from a paid decode source
-  (Go-UPC / GPT / Fetch V2); thin wrapper over the unit-tested `purgeBySource` library.
-- `eval-decode.ts` — decode eval harness CLI entry; mock baseline by default, `--live` opt-in
-  only for a small manual run against the running dev server.
-- `benchmark-decodes.ts` — Phase 1 decode benchmark runner; hits the running dev server's
-  `/api/ai-lookup` route to exercise the real fast path, fallback, cache, and diagnostics.
-- `weekly-report.mjs` — merged weekly report (QA proof bots + product-intelligence pipeline)
-  producing one HTML+PDF report, emailed.
-- `weekly-intel.mjs` — weekly intelligence pipeline: live tire decode scan on fresh codes
-  (speed/accuracy/cost) plus a tire-focused report, PDF, and email.
-- `release-sentinel.mjs` — deterministic, read-only deploy-safety gate extending
-  `release-hygiene.mjs`; never calls Vercel/Firebase/GitHub and never deploys.
-- `patch-jwks-rsa.cjs` — postinstall patch so `jwks-rsa`'s top-level `require('jose')` doesn't
-  crash `/api/resolve-scan` on Vercel's Turbopack external loader (jose v6 is ESM-only).
-- `email-report.mjs` — sends the weekly report via Gmail SMTP; degrades gracefully with no
-  credentials configured.
-- `create-god-account.mjs` — provisions an owner ("god") account on the real cloud Firebase
-  project via the public Auth/Firestore REST APIs (no Admin SDK, no service account); idempotent.
-- `backfill-missing-tires.mjs` — owner-gated, paid decode of tire codes missing from both local
-  SQLite and Turso corpus; writes a review JSON only, never upserts directly.
-- `barcode-harvester/` — the Tire Barcode Harvester subsystem (owns `data/tire-knowledge`).
-- `dt-harvest/` — the weekly DT (Discount Tire) harvest job subsystem.
+## Gates, dev, release (wired into package.json)
 
-## Archived tmp scripts
+- `proof-all.mjs` - THE honest local gate (`npm run proof:all`): tsc + vitest + the vitest-excluded node:test suites + teach suite + orphan-test self-detection. Node:test suites that need gitignored local data self-skip visibly (`lib/localDataSkip.mjs`).
+- `dev.mjs` + `dev-environment.mjs` - backend-safe dev launcher (mock / emulator / prod banner).
+- `release-hygiene.mjs`, `release-sentinel.mjs` (`release:check`, `deploy:card`) - read-only uncommitted/unpushed/undeployed checks.
+- `deploy-preview.mjs` - the only sanctioned emergency preview-deploy path; runs `check-fix-lineage.mjs`, `check-env-parity.mjs` (+ `env-manifest.json`, var NAMES only) and `smoke-fingerprint.mjs` (+ `smoke-expected.json`; also run by `.github/workflows/post-deploy-smoke.yml`).
+- `vercel-ignore-build.mjs` - Vercel `ignoreCommand` (see `vercel.json`).
+- `patch-jwks-rsa.cjs` - postinstall patch (jose v6 ESM) for the Admin SDK on Vercel.
+- `provision-worktree.mjs` - copies the generated corpus DB and stress fixtures into a fresh worktree.
+- `check-section.mjs` - `npm run check:section`: review the project one `codemap.json` section at a time.
+- `hooks/` - Fable 5 review-engine Claude Code hooks.
 
-`archive-tmp-2026-07/` holds ~78 one-off `tmp-*` probe/benchmark/report artifacts (scripts and
-their JSON/PDF outputs) that were live working files during the decode-ladder + Go-UPC benchmark
-work in July 2026. They are frozen history, not part of any active workflow, and safe to delete
-on owner order.
+## Knowledge corpus (tire + retail)
+
+- `build-tire-knowledge.mjs` (+ `corpusRules.mjs`) - canonical generator of the committed tire index; output-sanity shrink guard.
+- `refresh-tire-meta.mjs` - metadata-only refresh of the tire index meta (`npm run refresh:tire-meta`).
+- `build-tire-exact-index.mjs` - read-only projection of the approved corpus + boss reconciliation into the exact-index shards.
+- `build-retail-knowledge.mjs`, `retailImportGuard.mjs`, `import-retail-turso.mjs`, `retail-quality.mjs` - retail index generation, import guard, Turso import, quality checks.
+- `build-knowledge-db.mjs` - tire + retail JSON -> SQLite `knowledge.generated.db` (`npm run build:knowledge-db`).
+- `import-tires-turso.mjs`, `pilot-apply-turso.mjs`, `pilot-backfill-worklist.mjs` - Turso tire import and the Point S pilot tooling.
+- `tire-db-repair/` - the numbered repair/reconcile/promote pipeline (runbook inside).
+- `prefix-mining/` - GS1 prefix -> brand derivation tooling and its CSV inputs (`data/tire-knowledge/prefixes/`).
+- `kkm-catalog/`, `distributor-catalog/` - distributor catalog ingestion.
+- `barcode-harvester/` (generic Playwright scraper) and `dt-harvest/` (the weekly Discount Tire harvest job, cron-registered).
+- `corpus-purge.mjs` - quarantine corpus rows learned from a paid source; `purge-*-examples.mjs` - remove textbook GS1 example rows.
+- `decode-cache-backup.mjs`, `decode-outcomes-report.mjs` - dump/restore the paid decode cache; offline outcome rollup.
+
+## Boss barcode certification
+
+- `certify-boss-barcodes.mjs` (direct mode), `boss-workbook-reconcile-dryrun.mjs`, `boss-override-2026-08-05.mjs`, `assert-tire-exact-index-trace.mjs`. UI-mode harnesses live in `e2e/boss-barcode-corpus/` and `e2e/boss-barcode-preview/`.
+
+## Decode proofs and benchmarks (mostly PAID; all guarded)
+
+- `eval-decode.ts`, `benchmark-decodes.ts`, `live-decode-smoke.ts`, `scan-matrix.mjs`, `build-golden-baseline.mjs` (regenerates `benchmarks/golden/`).
+- `proof-full-ladder.mjs`, `proof-rung-{corpus,goupc,3-fetchv2,4-gpt}.mjs`, `gpt-ladder-live-proof.mts`, `model-bakeoff.mjs` (the guard's reference pattern).
+- `fetchv2-benchmark.mts`, `fetchv2-discovery-shootout.mts`, `fetchv2-forensic.mts`, `fetchv2-db-sample*.mjs`, `fetchv2-ladder-handoff.mjs`.
+- `polish-backfill.mts`, `polish-eval.mts` - deterministic structurer backfill and eval.
+- `stress/` - decode-ladder stress harness and Vercel env key sync.
+- `archive-tmp-2026-07/` - frozen July-2026 tmp probes; named in the guard test's exclusion list, safe to delete on owner order.
+
+## Cloud, accounts, data
+
+- `cloud-smoke.mjs` (`test:firebase:cloud-smoke`), `create-god-account.mjs`, `repair-god-alias.mjs`, `seed-business-catalog.ts`, `seed-tires-from-corpus.ts`, `verify-live-scans.ts`, `backfill-missing-tires.mjs` (owner-gated paid).
+
+## Weekly intelligence
+
+- `weekly-report.mjs` (`npm run weekly-report`, merged QA bots + intel; `weekly-report.workflow.js` is its judgment-fleet workflow), `weekly-intel.mjs` (`intel:now`), `weekly-tire-scan.ts`, `weekly-accuracy.ts`, `build-report-html.mjs`, `render-report-pdf.mjs`, `email-report.mjs`, `register-weekly-task.ps1`, `validate-agents.mjs`, `build-oracle-codes.mjs` (Teach Bot oracle).
+
+## Shared
+
+- `lib/` - `paidScriptGuard.mjs`, `localDataSkip.mjs`, `load-env.mjs`, `cost-ledger.mjs`, `prefix-miner.mjs`, `publish-gap.mjs`, `report-render.mjs`.
+- `__tests__/` - vitest specs for the report/prefix/validate helpers.

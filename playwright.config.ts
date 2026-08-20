@@ -6,7 +6,7 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   // The Firebase-backed specs live in e2e/firebase-phase2 and run via playwright.firebase.config.ts
-  // (real Firebase backend + emulator). Keep them OUT of the mock run so the 11 mock specs stay isolated.
+  // (real Firebase backend + emulator). Keep them OUT of the mock run so the mock specs stay isolated.
   // household-decode-test.spec.ts hardcodes a live external URL (a real Vercel preview deployment) and
   // waits on real AI decode latency - it never uses this config's localhost/IS_E2E mock webServer at
   // all. It is a manual live-probe script, not part of the automated mocked suite (TEST SAFETY:
@@ -14,7 +14,21 @@ export default defineConfig({
   // MANUAL_LIVE_TEST.md). Excluded here so `npx playwright test` never depends on network/live-AI state.
   // **/seed.spec.ts is the Playwright test-agents scaffold (created by `playwright init-agents`);
   // it lives in ./e2e for the agents but must never run in this mock proof suite.
-  testIgnore: ["**/firebase-phase2/**", "**/human-bots/**", "**/household-decode-test.spec.ts", "**/seed.spec.ts"],
+  // **/boss-barcode-preview/** certifies a LIVE Vercel Preview deployment: its config.mjs REQUIRES
+  // BOSS_PREVIEW_URL + BOSS_PREVIEW_DEPLOYMENT_URL + BOSS_PREVIEW_DEPLOYMENT_METADATA_JSON and throws
+  // at collection time without them, so every one of its 21 tests FAILED in this mock run. It has its
+  // own config (playwright.boss-preview.config.mts) and belongs only there.
+  testIgnore: [
+    "**/firebase-phase2/**",
+    "**/human-bots/**",
+    "**/boss-barcode-preview/**",
+    "**/household-decode-test.spec.ts",
+    "**/seed.spec.ts",
+    // Requires NEXT_PUBLIC_E2E_AUTH_BYPASS to be OFF (a real, non-bypass /scan load) to prove anything -
+    // this config's webServer always sets it to "1", which would make the spec's RED-proof assertions
+    // fail here for the wrong reason (bypass on, not the defect). Run via playwright.no-bypass.config.ts.
+    "**/scan-sync-visibility.spec.ts",
+  ],
   fullyParallel: false,
   workers: 1,
   reporter: [["list"], ["html", { open: "never" }]],
@@ -36,7 +50,7 @@ export default defineConfig({
     // Pin the LOCAL/mock backend explicitly so this suite is independent of whatever .env.local holds
     // (e.g. a real-cloud god-account config). Otherwise the scan page renders the Firebase
     // business-context gate instead of the scanner input.
-    // NEXT_PUBLIC_E2E_PLATFORM_OWNER=1: the legacy 11 mock specs exercise the FULL platformOwner view
+    // NEXT_PUBLIC_E2E_PLATFORM_OWNER=1: the mock specs exercise the FULL platformOwner view
     // (raw codes, AI status, all exports). The human-bot suite does NOT set this, so it runs as a customer.
     env: {
       ...process.env,
