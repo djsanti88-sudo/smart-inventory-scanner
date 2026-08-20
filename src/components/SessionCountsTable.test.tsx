@@ -204,6 +204,65 @@ describe("countsFromTimeline product join", () => {
     expect(rowsOut[0]?.product?.name).toBe("Michelin Defender LTX M/S");
   });
 
+  it("counts unresolved historical events by their latest quantityAfterScan", () => {
+    const getProduct = () => undefined;
+
+    const rowsOut = countsFromTimeline(
+      [
+        knownEvent({
+          id: "unknown-old",
+          cleanCode: "UNKNOWN-ROW",
+          status: "unknown",
+          resolverStatus: "unknown",
+          matchedProductId: null,
+          quantityAfterScan: 1,
+          createdAt: "2026-07-22T10:00:00.000Z",
+        }),
+        knownEvent({
+          id: "unknown-latest",
+          cleanCode: "UNKNOWN-ROW",
+          status: "unknown",
+          resolverStatus: "unknown",
+          matchedProductId: null,
+          quantityAfterScan: 3,
+          createdAt: "2026-07-22T10:01:00.000Z",
+        }),
+        knownEvent({
+          id: "needs-review",
+          cleanCode: "NEEDS-REVIEW-ROW",
+          status: "needs_review",
+          resolverStatus: "unknown",
+          matchedProductId: null,
+          quantityAfterScan: 4,
+        }),
+        knownEvent({
+          id: "suggested-inline",
+          cleanCode: "SUGGESTED-ROW",
+          status: "needs_review",
+          resolverStatus: "unknown",
+          decodeStatus: "suggested",
+          suggestion: { productName: "Suggested item", brand: "Suggested", confidence: 0.72, status: "pending" },
+          matchedProductId: null,
+          quantityAfterScan: 2,
+        }),
+        knownEvent({
+          id: "missing-product",
+          cleanCode: "MISSING-PRODUCT-ROW",
+          matchedProductId: "p-missing",
+          quantityAfterScan: 7,
+        }),
+      ],
+      getProduct,
+    );
+
+    expect(rowsOut).toHaveLength(4);
+    expect(rowsOut.find((r) => r.id === "UNKNOWN-ROW")?.quantity).toBe(3);
+    expect(rowsOut.find((r) => r.id === "NEEDS-REVIEW-ROW")?.quantity).toBe(4);
+    expect(rowsOut.find((r) => r.id === "SUGGESTED-ROW")?.quantity).toBe(2);
+    expect(rowsOut.find((r) => r.id === "p-missing")?.quantity).toBe(7);
+    expect(rowsOut.find((r) => r.id === "p-missing")?.product).toBeUndefined();
+  });
+
   it("rendering timeline-derived rows shows the resolved product name and the cleanCode fallback for the unresolved one", () => {
     const storeProduct = makeProduct({ id: "p1" });
     const getProduct = (id: string | null) => (id === "p1" ? storeProduct : undefined);

@@ -11,7 +11,6 @@ export function countsFromTimeline(
 ): SessionCountRow[] {
   const byKey = new Map<string, ScanEvent>();
   for (const event of events) {
-    if (event.status !== "known" && event.status !== "resolved") continue;
     const key = event.matchedProductId ?? event.cleanCode;
     const prior = byKey.get(key);
     if (!prior || new Date(event.createdAt).getTime() >= new Date(prior.createdAt).getTime()) {
