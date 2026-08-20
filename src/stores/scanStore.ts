@@ -1445,6 +1445,42 @@ function idForReview(r: UnknownCodeReview): string {
   return parts[2] ?? r.id;
 }
 
+function mergeReloadedProductsAndAliases(params: {
+  businessId: string;
+  localProducts: Product[];
+  remoteProducts: Product[];
+  localAliases: Alias[];
+  remoteAliases: Alias[];
+  pendingSyncQueue: PendingSyncItem[];
+}): { products: Product[]; aliases: Alias[] } {
+  const tenantPendingQueue = params.pendingSyncQueue.filter((it) => it.businessId === params.businessId);
+  const pendingProductIds = new Set(
+    tenantPendingQueue.filter((it) => it.operation === "SAVE_PRODUCT").map((it) => it.entityId),
+  );
+  const pendingAliasIds = new Set(
+    tenantPendingQueue.filter((it) => it.operation === "RESOLVE_ALIAS").map((it) => it.entityId),
+  );
+
+  const productsById = new Map(params.localProducts.map((p) => [p.id, p]));
+  for (const remote of params.remoteProducts) {
+    const local = productsById.get(remote.id);
+    if (pendingProductIds.has(remote.id)) continue;
+    if (local?.status === "archived" && remote.status !== "archived") continue;
+    productsById.set(remote.id, remote);
+  }
+
+  const aliasesById = new Map(params.localAliases.map((a) => [a.id, a]));
+  for (const remote of params.remoteAliases) {
+    if (pendingAliasIds.has(remote.id)) continue;
+    aliasesById.set(remote.id, remote);
+  }
+
+  return {
+    products: [...productsById.values()],
+    aliases: [...aliasesById.values()],
+  };
+}
+
 // The ONE prefix-rewrite rule for every idempotencyKey-shaped string in this store: rewrite only the
 // leading businessId segment (buildIdempotencyKey joins businessId:sessionId:...:operation with ":"),
 // leaving every other segment byte-identical so retries of the exact same event keep deduping against
@@ -2435,11 +2471,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }
         const loader = deps.loadBusinessData;
         if (cloudBackend && loader) {
-          // Load THIS business's products/aliases from Firestore (replace, never merge another tenant's
-          // data), then drain anything queued. Failure is surfaced, not fatal to the local UI. The
-          // pending-aware finalCounts merge below keeps this device's unsynced increments authoritative,
-          // so no pre-drain is needed: a local row still referenced by an unsynced INCREMENT_COUNT queue
-          // item wins over the remote snapshot until it syncs (proven by refreshWipe tests a3/a4).
+          // Load THIS business's products/aliases from Firestore (pending-aware and never across
+          // tenant switches), then drain anything queued. Failure is surfaced, not fatal to the local
+          // UI. The pending-aware finalCounts merge below keeps this device's unsynced increments
+          // authoritative, so no pre-drain is needed: a local row still referenced by an unsynced
+          // INCREMENT_COUNT queue item wins over the remote snapshot until it syncs.
           void (async () => {
             try {
               const data = await loader(businessId, userId);
@@ -2458,7 +2494,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               const sessions = [...data.sessions].sort(byStartedAtDesc);
               const restored = sessions.find((s) => s.status === "active") ?? sessions[0] ?? null;
               set((cur) => {
-                const next: Partial<ScanState> = { products: data.products, aliases: data.aliases, businessDataLoaded: true };
+                const mergedIdentities = mergeReloadedProductsAndAliases({
+                  businessId,
+                  localProducts: cur.products,
+                  remoteProducts: data.products,
+                  localAliases: cur.aliases,
+                  remoteAliases: data.aliases,
+                  pendingSyncQueue: cur.pendingSyncQueue,
+                });
+                const next: Partial<ScanState> = {
+                  products: mergedIdentities.products,
+                  aliases: mergedIdentities.aliases,
+                  businessDataLoaded: true,
+                };
                 if (restored) {
                   // Same-tenant refresh guard (part 2): the synchronous guard above preserves the local
                   // feed/counts, so this restore must not quietly re-introduce the wipe by REPLACING
@@ -3078,31 +3126,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           return;
         }
         set((cur) => {
-          // Products/aliases: upsert by id over the existing arrays (additive - a product this
-          // device does not know about yet is ADDED; an existing id is refreshed to the remote's
-          // version, since products/aliases are not counted-quantity state and always safe to take
-          // the server's word for, matching the trust model everywhere else in this app) - EXCEPT a
-          // product this device still has a pending (unsynced) SAVE_PRODUCT edit for. Mirrors the
-          // finalCounts pending-queue exclusion below: an unsynced local edit is authoritative until it
-          // syncs, otherwise refreshFromCloud would clobber a human's correctProduct edit with the stale
-          // remote value that has not seen it yet (Task 1 refresh-race guard).
           const tenantPendingQueue = cur.pendingSyncQueue.filter((it) => it.businessId === businessId);
-          const pendingProductIds = new Set(
-            tenantPendingQueue.filter((it) => it.operation === "SAVE_PRODUCT").map((it) => it.entityId),
-          );
-          const productsById = new Map(cur.products.map((p) => [p.id, p]));
-          for (const p of data.products) {
-            if (pendingProductIds.has(p.id)) continue; // guard: unsynced local edit wins
-            // Delete guard (reviewed defect 2026-07-22): a locally-ARCHIVED product is a delete this
-            // device performed; a remote snapshot loaded before the archive op drained still says
-            // "active". Taking the server's word here would silently resurrect the deleted product
-            // (and defeat the archived-count exclusion below). Deletes are local-authoritative; the
-            // only un-archive path is this device's own undoDeleteProduct.
-            if (productsById.get(p.id)?.status === "archived" && p.status !== "archived") continue;
-            productsById.set(p.id, p);
-          }
-          const aliasesById = new Map(cur.aliases.map((a) => [a.id, a]));
-          for (const a of data.aliases) aliasesById.set(a.id, a);
+          // Products/aliases: one shared pending-aware reload policy with setBusinessContext.
+          // Remote rows replace non-pending local rows and add remote-only rows, but this device's
+          // still-unsynced SAVE_PRODUCT / RESOLVE_ALIAS rows remain authoritative until they drain.
+          // A locally archived product also stays archived against stale active remote snapshots.
+          const mergedIdentities = mergeReloadedProductsAndAliases({
+            businessId,
+            localProducts: cur.products,
+            remoteProducts: data.products,
+            localAliases: cur.aliases,
+            remoteAliases: data.aliases,
+            pendingSyncQueue: cur.pendingSyncQueue,
+          });
           const sessionsById = new Map(cur.sessions.map((s) => [s.id, s]));
           // Preserve previously refreshed history and fold in the current session before applying
           // the remote list, so a refresh never silently drops this device's own active session.
@@ -3140,7 +3176,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 (pendingCountEntityIds.has(local.id) ||
                   pendingCountEntityIds.has(`${local.sessionId}_${local.productId}`)));
             if (localIsPending) continue; // guard: unsynced local wins
-            if (productsById.get(remote.productId)?.status === "archived") {
+            if (mergedIdentities.products.find((p) => p.id === remote.productId)?.status === "archived") {
               // Delete-transfer guard (reviewed defect 2026-07-22): a remote count row keyed to a
               // LOCALLY-archived product is the backend's not-yet-transferred (or stale-snapshot)
               // copy of a product THIS device deleted. deleteProductsInternal already repointed
@@ -3158,8 +3194,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           }
 
           return {
-            products: [...productsById.values()],
-            aliases: [...aliasesById.values()],
+            products: mergedIdentities.products,
+            aliases: mergedIdentities.aliases,
             sessions: [...sessionsById.values()],
             finalCounts: [...countsByKey.values()],
             lastSyncError: null,
@@ -8903,7 +8939,7 @@ export function sanitizePersistedScanShape(persisted: unknown): Record<string, u
       // nested field can never throw and silently take the scan-drop path.
       if (shape.kind === "array-of-objects" && shape.nestedArrayFields && shape.nestedArrayFields.length > 0) {
         let nestedFixed = 0;
-        nextArray = nextArray.map((member) => {
+        const mappedArray = nextArray.map((member) => {
           if (!isPlainObject(member)) return member;
           let patched: Record<string, unknown> | null = null;
           for (const nestedField of shape.nestedArrayFields!) {
@@ -8917,6 +8953,7 @@ export function sanitizePersistedScanShape(persisted: unknown): Record<string, u
           return patched ?? member;
         });
         if (nestedFixed > 0) {
+          nextArray = mappedArray;
           console.warn(
             `[scanStore] Persisted '${field}' contained ${nestedFixed} malformed nested array ` +
               `field(s) (e.g. scanEventIds/aliasesSeen expected to be arrays); normalizing ` +
