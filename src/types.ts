@@ -402,6 +402,12 @@ export interface PendingSyncItem {
   updatedAt: string;
   idempotencyKey: string;
   scanEventId: string | null;
+  /**
+   * Optional cloud-drain scheduling hint. Omitted means preserve full queue order.
+   * Only standalone product upserts that do not belong to count/correction/delete
+   * bundles may opt into the bounded product lane.
+   */
+  syncLane?: "independent_product";
 }
 
 export interface Settings {

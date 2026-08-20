@@ -1106,6 +1106,7 @@ function makeQueueItem(params: {
   payload: unknown;
   idempotencyKey: string;
   scanEventId: string | null;
+  syncLane?: PendingSyncItem["syncLane"];
 }): PendingSyncItem {
   return {
     id: params.idFactory(),
@@ -1122,6 +1123,7 @@ function makeQueueItem(params: {
     updatedAt: params.now(),
     idempotencyKey: params.idempotencyKey,
     scanEventId: params.scanEventId,
+    syncLane: params.syncLane,
   };
 }
 
@@ -2244,8 +2246,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         return res.ok ? "applied" : "failed";
       };
 
-      const productItems = batch.filter((item) => item.operation === "SAVE_PRODUCT");
-      const nonProductItems = batch.filter((item) => item.operation !== "SAVE_PRODUCT");
+      const productItems = batch.filter(
+        (item) => item.operation === "SAVE_PRODUCT" && item.syncLane === "independent_product",
+      );
+      const productItemRefs = new Set(productItems);
+      const nonProductItems = batch.filter((item) => !productItemRefs.has(item));
       if (productItems.length > 0) {
         const PRODUCT_DRAIN_CONCURRENCY = 4;
         const groups = new Map<string, PendingSyncItem[]>();
@@ -8245,6 +8250,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               entityType: "Product", entityId: p.id, operation: "SAVE_PRODUCT", payload: p,
               idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, p.id, "SAVE_PRODUCT"),
               scanEventId: null,
+              syncLane: "independent_product",
             }));
           }
           for (const a of plan.aliases) {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
 import type { SyncTarget } from "@/services/db/syncTarget";
 import type { SyncResult } from "@/services/mockDb";
-import type { PendingSyncItem, SyncOperation } from "@/types";
+import type { Alias, PendingSyncItem, Product, SyncOperation } from "@/types";
 
 const BIZ = "biz-product-priority";
 const USER = "user-product-priority";
@@ -36,9 +36,9 @@ class ControlledTarget implements SyncTarget {
     });
   }
 
-  resolve(entityId: string, result?: SyncResult) {
-    const apply = this.started.find((entry) => entry.item.entityId === entityId);
-    expect(apply, `${entityId} has started`).toBeDefined();
+  resolveById(id: string, result?: SyncResult) {
+    const apply = this.started.find((entry) => entry.item.id === id);
+    expect(apply, `${id} has started`).toBeDefined();
     apply!.resolve(result);
   }
 
@@ -71,6 +71,66 @@ class AutoResolvingTarget implements SyncTarget {
 
   setFailure() {}
   reset() {}
+}
+
+function seedKnown(store: ReturnType<typeof createTestScanStore>, code: string) {
+  const state = store.getState();
+  const productId = "known-markwrong-product";
+  store.setState((previous) => ({
+    products: [
+      ...previous.products,
+      {
+        id: productId,
+        businessId: state.businessId,
+        name: "Wrong Durable Product",
+        brand: "Acme",
+        category: "general",
+        specsShort: "",
+        specsFull: "",
+        primarySku: "",
+        primaryBarcode: code,
+        gtin: "",
+        upc: "",
+        ean: "",
+        vendorCodes: [],
+        aliases: [code],
+        imageUrl: "",
+        productUrl: "",
+        location: "",
+        notes: "",
+        status: "active",
+        source: "manual",
+        confidence: 1,
+        verified: true,
+        createdAt: "2026-08-20T00:00:00.000Z",
+        updatedAt: "2026-08-20T00:00:00.000Z",
+        createdBy: "test",
+        updatedBy: "test",
+      } as Product,
+    ],
+    aliases: [
+      ...previous.aliases,
+      {
+        id: "known-markwrong-alias",
+        businessId: state.businessId,
+        productId,
+        rawCodeExample: code,
+        cleanCode: code,
+        normalizedCode: code,
+        aliasType: "barcode",
+        source: "manual",
+        confidence: 1,
+        approved: true,
+        createdAt: "2026-08-20T00:00:00.000Z",
+        updatedAt: "2026-08-20T00:00:00.000Z",
+        createdBy: "test",
+        lastSeenAt: "2026-08-20T00:00:00.000Z",
+        syncStatus: "synced",
+        idempotencyKey: "known-markwrong-alias-key",
+      } as Alias,
+    ],
+  }));
+  return productId;
 }
 
 const flush = async (ticks = 20) => {
@@ -111,6 +171,7 @@ function item(operation: SyncOperation, entityId: string, extra?: Partial<Pendin
     updatedAt: "2026-08-20T00:00:00.000Z",
     idempotencyKey: `${BIZ}:${SESSION}:${entityId}:${operation}`,
     scanEventId: operation === "SAVE_SCAN_EVENT" || operation === "INCREMENT_COUNT" ? entityId : null,
+    syncLane: operation === "SAVE_PRODUCT" ? "independent_product" : undefined,
     ...extra,
   };
 }
@@ -146,7 +207,7 @@ describe("product-priority cloud drain", () => {
     ]);
     expect(target.maxActive).toBe(4);
 
-    target.resolve("product-1");
+    target.resolveById("q-product-1-SAVE_PRODUCT");
     await waitForStarts(target, 5);
     expect(target.started[4].item.entityId).toBe("product-5");
     expect(target.maxActive).toBe(4);
@@ -169,7 +230,7 @@ describe("product-priority cloud drain", () => {
     await waitForStarts(target, 2);
     expect(target.started.map((entry) => entry.item.id)).toEqual(["q-same-product-first", "q-other-product-SAVE_PRODUCT"]);
 
-    target.resolve("same-product");
+    target.resolveById("q-same-product-first");
     await waitForStarts(target, 3);
     expect(target.started[2].item.id).toBe("q-same-product-second");
 
@@ -192,7 +253,7 @@ describe("product-priority cloud drain", () => {
       error: "first product write failed",
       retryable: true,
     });
-    target.resolve("healthy-product");
+    target.resolveById("q-healthy-product-SAVE_PRODUCT");
     await flush();
 
     expect(target.started.map((entry) => entry.item.id)).not.toContain("q-fragile-second");
@@ -233,11 +294,11 @@ describe("product-priority cloud drain", () => {
     ]);
 
     await waitForStarts(target, 4);
-    target.resolve("context-product-1");
+    target.resolveById("q-context-product-1-SAVE_PRODUCT");
     store.getState().setBusinessContext("biz-other", "user-other");
-    target.resolve("context-product-2");
-    target.resolve("context-product-3");
-    target.resolve("context-product-4");
+    target.resolveById("q-context-product-2-SAVE_PRODUCT");
+    target.resolveById("q-context-product-3-SAVE_PRODUCT");
+    target.resolveById("q-context-product-4-SAVE_PRODUCT");
     await flush();
 
     expect(target.started.map((entry) => entry.item.entityId)).not.toContain("context-product-5");
@@ -262,5 +323,28 @@ describe("product-priority cloud drain", () => {
 
     expect(target.maxActive).toBe(4);
     expect(store.getState().pendingSyncQueue).toHaveLength(0);
+  });
+
+  it("keeps a real markWrong correction bundle serial so product writes stay adjacent to transfer ops", async () => {
+    const target = new AutoResolvingTarget();
+    const store = createTestScanStore({ db: target, cloudBackend: true });
+    store.getState().setBusinessContext(BIZ, USER);
+    store.getState().updateSettings({ aiLookupEnabled: false });
+    store.setState({ online: false, sessionId: SESSION });
+    const productId = seedKnown(store, "049000006399");
+
+    const event = store.getState().processScan("049000006399");
+    expect(event, "known scan creates a counted feed event").toBeTruthy();
+    await store.getState().markWrong(productId, { reason: "scheduler regression" });
+
+    const queuedBeforeDrain = store.getState().pendingSyncQueue;
+    expect(queuedBeforeDrain.some((entry) => entry.operation === "SAVE_PRODUCT")).toBe(true);
+    expect(queuedBeforeDrain.some((entry) => entry.operation === "INCREMENT_COUNT")).toBe(true);
+
+    store.getState().setOnline(true);
+    for (let i = 0; i < 40 && target.started.length < queuedBeforeDrain.length; i += 1) await flush(1);
+
+    expect(target.started.map((entry) => entry.id)).toEqual(queuedBeforeDrain.map((entry) => entry.id));
+    expect(target.maxActive).toBe(1);
   });
 });
