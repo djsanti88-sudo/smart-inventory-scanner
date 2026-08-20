@@ -52,6 +52,16 @@ export function mergeReloadedReviews(params: {
   );
   for (const remote of params.remoteReviews) {
     if (remote.businessId !== params.businessId || pendingReviewIds.has(remote.id)) continue;
+    const local = reviewsById.get(remote.id);
+    if (local) {
+      const localDecisionAt = local.decisionUpdatedAt ??
+        ((local.status === "resolved" || local.status === "ignored") ? local.resolvedAt ?? "" : "");
+      const remoteDecisionAt = remote.decisionUpdatedAt ??
+        ((remote.status === "resolved" || remote.status === "ignored") ? remote.resolvedAt ?? "" : "");
+      // Legacy/stale open snapshots have no decision clock. They can never erase a known terminal
+      // decision; a genuine later reopen carries decisionUpdatedAt and wins by normal ordering.
+      if (localDecisionAt && (!remoteDecisionAt || localDecisionAt > remoteDecisionAt)) continue;
+    }
     reviewsById.set(remote.id, remote);
   }
   return [...reviewsById.values()];

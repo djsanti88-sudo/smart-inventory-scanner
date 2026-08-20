@@ -94,4 +94,50 @@ describe("reload merge policy", () => {
       { id: "remote-review", reason: "remote current" },
     ]);
   });
+
+  it("does not resurrect a terminal local decision from a stale remote open snapshot", () => {
+    const local = {
+      ...review("terminal-review", "ignored here"),
+      status: "ignored",
+      resolvedAt: "2026-08-20T12:00:00.000Z",
+      decisionUpdatedAt: "2026-08-20T12:00:00.000Z",
+    } as UnknownCodeReview;
+    const staleRemote = {
+      ...review("terminal-review", "stale cloud open"),
+      status: "open",
+      createdAt: "2026-08-20T11:00:00.000Z",
+      resolvedAt: null,
+    } as UnknownCodeReview;
+
+    const result = mergeReloadedReviews({
+      businessId: BUSINESS_ID,
+      localReviews: [local],
+      remoteReviews: [staleRemote],
+      pendingSyncQueue: [],
+    });
+
+    expect(result).toEqual([local]);
+  });
+
+  it("accepts a later durable reopen over an older terminal decision", () => {
+    const local = {
+      ...review("reopened-review", "resolved here"),
+      status: "resolved",
+      resolvedAt: "2026-08-20T12:00:00.000Z",
+      decisionUpdatedAt: "2026-08-20T12:00:00.000Z",
+    } as UnknownCodeReview;
+    const remote = {
+      ...review("reopened-review", "reopened elsewhere"),
+      status: "open",
+      resolvedAt: null,
+      decisionUpdatedAt: "2026-08-20T12:05:00.000Z",
+    } as UnknownCodeReview;
+
+    expect(mergeReloadedReviews({
+      businessId: BUSINESS_ID,
+      localReviews: [local],
+      remoteReviews: [remote],
+      pendingSyncQueue: [],
+    })).toEqual([remote]);
+  });
 });

@@ -229,6 +229,7 @@ export function toStoreUnknownCodeReview(
     resolvedAt: time(data.resolvedAt) || null,
     resolvedBy: typeof data.resolvedBy === "string" ? data.resolvedBy : null,
     resolutionAction: (data.resolutionAction as UnknownCodeReview["resolutionAction"]) ?? null,
+    decisionUpdatedAt: time(data.decisionUpdatedAt) || undefined,
     syncStatus: "synced",
     idempotencyKey: str(data.idempotencyKey),
     correctionRecheckStatus: data.correctionRecheckStatus as UnknownCodeReview["correctionRecheckStatus"],

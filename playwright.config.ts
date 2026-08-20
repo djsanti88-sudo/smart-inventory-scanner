@@ -42,7 +42,7 @@ export default defineConfig({
   webServer: {
     command: "npm run dev -- --port 3100",
     url: "http://localhost:3100",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 180_000,
     stdout: "pipe",
     // TEST SAFETY: force the AI route to mock-only so E2E can never call live Gemini/OpenAI.

@@ -73,6 +73,41 @@ class AutoResolvingTarget implements SyncTarget {
   reset() {}
 }
 
+class LogicalTimeoutTarget implements SyncTarget {
+  readonly started: PendingSyncItem[] = [];
+  readonly physicallySettled: PendingSyncItem[] = [];
+  private readonly settleById = new Map<string, () => void>();
+
+  async apply(item: PendingSyncItem): Promise<SyncResult> {
+    let settle!: () => void;
+    const physicalSettlement = new Promise<void>((resolve) => {
+      settle = () => {
+        this.physicallySettled.push(item);
+        resolve();
+      };
+    });
+    this.started.push(item);
+    this.settleById.set(item.id, settle);
+    return {
+      ok: false,
+      alreadyApplied: false,
+      error: "logical transaction timeout",
+      retryable: true,
+      physicalSettlement,
+    } as SyncResult;
+  }
+
+  settle(id: string) {
+    const settle = this.settleById.get(id);
+    expect(settle, `${id} has physical ownership`).toBeDefined();
+    this.settleById.delete(id);
+    settle!();
+  }
+
+  setFailure() {}
+  reset() {}
+}
+
 function seedKnown(store: ReturnType<typeof createTestScanStore>, code: string) {
   const state = store.getState();
   const productId = "known-markwrong-product";
@@ -460,6 +495,95 @@ describe("product-priority cloud drain", () => {
 
       expect(target.started[4].item.id).toBe("q-same-second");
       expect(target.maxActive).toBe(4);
+
+      target.resolveAll();
+      await vi.runAllTimersAsync();
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps slots and same-product FIFO owned until a logically timed-out transaction physically settles", async () => {
+    const target = new LogicalTimeoutTarget();
+    const store = startStore(target, [
+      item("SAVE_PRODUCT", "same-product", { id: "q-physical-same-first", idempotencyKey: "physical:same:first" }),
+      item("SAVE_PRODUCT", "product-2", { id: "q-physical-2" }),
+      item("SAVE_PRODUCT", "product-3", { id: "q-physical-3" }),
+      item("SAVE_PRODUCT", "product-4", { id: "q-physical-4" }),
+    ]);
+
+    await flush();
+    expect(target.started.map((entry) => entry.id)).toEqual([
+      "q-physical-same-first",
+      "q-physical-2",
+      "q-physical-3",
+      "q-physical-4",
+    ]);
+
+    store.setState({
+      pendingSyncQueue: [
+        item("SAVE_PRODUCT", "same-product", { id: "q-physical-same-second", idempotencyKey: "physical:same:second" }),
+        item("SAVE_PRODUCT", "product-5", { id: "q-physical-5" }),
+      ],
+    });
+    store.getState().retrySync();
+    await flush();
+
+    expect(target.started).toHaveLength(4);
+
+    target.settle("q-physical-2");
+    await flush();
+    expect(target.started.map((entry) => entry.id)).toContain("q-physical-5");
+    expect(target.started.map((entry) => entry.id)).not.toContain("q-physical-same-second");
+
+    target.settle("q-physical-same-first");
+    await flush();
+    expect(target.started.map((entry) => entry.id)).toContain("q-physical-same-second");
+  });
+
+  it("scopes same-product physical ownership by business while preserving the global four-slot cap", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const target = new ControlledTarget();
+      const store = startStore(target, [
+        item("SAVE_PRODUCT", "shared-product", { id: "q-a-shared", idempotencyKey: "a:shared" }),
+        item("SAVE_PRODUCT", "a-product-2", { id: "q-a-2" }),
+        item("SAVE_PRODUCT", "a-product-3", { id: "q-a-3" }),
+        item("SAVE_PRODUCT", "a-product-4", { id: "q-a-4" }),
+      ]);
+      for (let i = 0; i < 40 && target.started.length < 4; i += 1) await Promise.resolve();
+      expect(target.started).toHaveLength(4);
+
+      const businessB = "biz-product-priority-b";
+      const sessionB = "session-product-priority-b";
+      const businessBItem = item("SAVE_PRODUCT", "shared-product", {
+        id: "q-b-shared",
+        businessId: businessB,
+        sessionId: sessionB,
+        payload: { id: "shared-product", businessId: businessB, sessionId: sessionB },
+        idempotencyKey: "b:shared",
+      });
+      store.getState().setBusinessContext(businessB, "user-product-priority-b");
+      store.setState((state) => ({
+        pendingSyncQueue: [...state.pendingSyncQueue, businessBItem],
+        sessionId: sessionB,
+        online: true,
+      }));
+      store.getState().retrySync();
+
+      // Let A's logical waits time out so the B drain pass can observe the still-owned physical slots.
+      await vi.advanceTimersByTimeAsync(60_001);
+      for (let i = 0; i < 80; i += 1) await Promise.resolve();
+      expect(target.started).toHaveLength(4);
+
+      target.resolveById("q-a-2");
+      for (let i = 0; i < 80 && target.started.length < 5; i += 1) await Promise.resolve();
+
+      expect(target.started.map((entry) => entry.item.id)).toContain("q-b-shared");
+      expect(target.maxActive).toBe(4);
+      expect(target.finished.map((entry) => entry.id)).not.toContain("q-a-shared");
 
       target.resolveAll();
       await vi.runAllTimersAsync();

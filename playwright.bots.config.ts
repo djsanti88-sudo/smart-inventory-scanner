@@ -25,7 +25,7 @@ export default defineConfig({
   webServer: {
     command: "npm run dev -- --port 3300",
     url: "http://localhost:3300",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 180_000,
     stdout: "pipe",
     // Mock/local backend, AI route forced to mock, auth bypass on. Pinned so .env.local (a real-cloud

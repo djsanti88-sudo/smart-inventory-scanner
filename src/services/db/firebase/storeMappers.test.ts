@@ -142,6 +142,7 @@ describe("toStoreUnknownCodeReview", () => {
       evidenceStrength: "none",
       reason: "Tenant marker",
       createdAt: { seconds: 1_700_000_000, nanoseconds: 0 },
+      decisionUpdatedAt: { seconds: 1_700_000_100, nanoseconds: 0 },
     }, BIZ);
 
     expect(review).toMatchObject({
@@ -156,5 +157,6 @@ describe("toStoreUnknownCodeReview", () => {
       syncStatus: "synced",
     });
     expect(review.createdAt).toBe("2023-11-14T22:13:20.000Z");
+    expect(review.decisionUpdatedAt).toBe("2023-11-14T22:15:00.000Z");
   });
 });

@@ -115,6 +115,7 @@ export class FirebaseSyncTarget implements SyncTarget {
 
     const sub = (name: string, id: string) => doc(this.db, COLLECTIONS.businesses, bid, name, id);
 
+    let physicalSettlement: Promise<void> | undefined;
     try {
       const keyId = await appliedKeyDocumentId(item.idempotencyKey);
       const payloadHash = await canonicalPayloadHash(item.payload);
@@ -136,7 +137,7 @@ export class FirebaseSyncTarget implements SyncTarget {
         payloadHash,
       };
       const keyRef = doc(this.db, COLLECTIONS.businesses, bid, APPLIED_KEYS, keyId);
-      const result = await withTimeout(runTransaction(this.db, async (tx) => {
+      const transaction = runTransaction(this.db, async (tx) => {
         // ----- ALL READS FIRST (Firestore transaction rule) -----
         const keySnap = await tx.get(keyRef);
         if (keySnap.exists()) {
@@ -236,7 +237,9 @@ export class FirebaseSyncTarget implements SyncTarget {
         }
 
         return { ok: true, alreadyApplied: false } as FirebaseSyncResult;
-      }), FIREBASE_TRANSACTION_TIMEOUT_MS, "Firestore sync transaction");
+      });
+      physicalSettlement = transaction.then(() => undefined, () => undefined);
+      const result = await withTimeout(transaction, FIREBASE_TRANSACTION_TIMEOUT_MS, "Firestore sync transaction");
       return result;
     } catch (e) {
       // A rules denial cannot become successful by replaying the identical queue item. In particular,
@@ -254,6 +257,7 @@ export class FirebaseSyncTarget implements SyncTarget {
         errorCode: permissionDenied ? "permission_denied" : "firestore_transaction_failed",
         error: e instanceof Error ? e.message : String(e),
         retryable: !permissionDenied,
+        physicalSettlement,
       };
     }
   }

@@ -11,6 +11,14 @@ const configs = [
 ] as const;
 
 describe("local Playwright web-server safety", () => {
+  it.each([
+    ["mock E2E", mockConfig],
+    ["QA bots", botsConfig],
+  ] as const)("%s never reuses an unidentified pre-existing browser server", (_, config) => {
+    const webServer = Array.isArray(config.webServer) ? config.webServer[0] : config.webServer;
+    expect(webServer?.reuseExistingServer).toBe(false);
+  });
+
   it("scrubs inherited alternate Turso/libsql connection names before spawning a child server", () => {
     const env = localE2EWebServerEnv(
       "contract",
