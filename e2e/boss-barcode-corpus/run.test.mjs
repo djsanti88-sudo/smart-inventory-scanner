@@ -15,7 +15,10 @@ test("entrypoint comparison uses a normalized absolute file URL", () => {
   assert.equal(isCliEntrypoint(import.meta.url, fileURLToPath(import.meta.url)), true);
   assert.equal(isCliEntrypoint(import.meta.url, "not-the-runner.mjs"), false);
 });
-test("Windows runner actually launches its JS CLI entrypoint with no shell", () => {
+// Windows-only by construction: main() resolves the JS entrypoint only on win32 and would spawn the
+// literal FIREBASE_BIN (.cmd) elsewhere. Skips visibly on the Linux CI runner (proof:all runs this
+// leg there since 2026-08-19; before that it only ever executed on the Windows dev box).
+test("Windows runner actually launches its JS CLI entrypoint with no shell", { skip: process.platform !== "win32" && "Windows launcher mechanics; win32 only" }, () => {
   const dir = mkdtempSync(join(tmpdir(), "boss-runner-"));
   try {
     const source = join(dir, "source.csv"); const sentinel = join(dir, "firebase.js");
