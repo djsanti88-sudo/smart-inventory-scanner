@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { toStoreProduct, toStoreAlias, toStoreSession, toStoreCount, toStoreScanEvent } from "./storeMappers";
+import {
+  toStoreProduct,
+  toStoreAlias,
+  toStoreSession,
+  toStoreCount,
+  toStoreScanEvent,
+  toStoreUnknownCodeReview,
+} from "./storeMappers";
 
 const BIZ = "biz-1";
 
@@ -120,5 +127,34 @@ describe("toStoreScanEvent", () => {
     }, BIZ);
 
     expect(event.createdAt).toBe("2023-11-14T22:13:19.000Z");
+  });
+});
+
+describe("toStoreUnknownCodeReview", () => {
+  it("maps a tenant review into the durable store shape and normalizes legacy decode status", () => {
+    const review = toStoreUnknownCodeReview("review-1", {
+      countSessionId: "session-1",
+      rawCode: "A-review-marker",
+      cleanCode: "A-review-marker",
+      normalizedCode: "A-review-marker",
+      status: "open",
+      decodeStatus: "unidentified",
+      evidenceStrength: "none",
+      reason: "Tenant marker",
+      createdAt: { seconds: 1_700_000_000, nanoseconds: 0 },
+    }, BIZ);
+
+    expect(review).toMatchObject({
+      id: "review-1",
+      businessId: BIZ,
+      sessionId: "session-1",
+      cleanCode: "A-review-marker",
+      normalizedCandidates: ["A-review-marker"],
+      status: "open",
+      decodeStatus: "needs_review",
+      reason: "Tenant marker",
+      syncStatus: "synced",
+    });
+    expect(review.createdAt).toBe("2023-11-14T22:13:20.000Z");
   });
 });

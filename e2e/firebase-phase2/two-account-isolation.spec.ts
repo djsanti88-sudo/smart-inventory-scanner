@@ -34,8 +34,23 @@ type PersistSnapshot = {
 const persistKeyForUid = (uid: string) => `sis-scan-${uid}`;
 const persistStampKey = (key: string) => `${key}::stamp`;
 
+async function waitForLoginHydration(page: Page) {
+  // A cold Next dev compile can expose the server-rendered form before React owns its submit handler.
+  // Prove a harmless client state transition first so clicking Sign in can never fall through to a
+  // native GET /login? submission.
+  await expect(async () => {
+    if (await page.getByText("Sign in to your account.", { exact: true }).isVisible()) {
+      await page.getByRole("button", { name: "Need an account? Sign up" }).click();
+    }
+    await expect(page.getByText("Create an account.", { exact: true })).toBeVisible();
+  }).toPass({ timeout: 30_000 });
+  await page.getByRole("button", { name: "Have an account? Sign in" }).click();
+  await expect(page.getByText("Sign in to your account.", { exact: true })).toBeVisible();
+}
+
 async function signIn(page: Page, fixture: AccountTenantFixture) {
   await page.goto("/login");
+  await waitForLoginHydration(page);
   await page.getByTestId("login-email").fill(fixture.email);
   await page.getByTestId("login-password").fill(fixture.password);
   await page.getByTestId("login-button").click();
@@ -60,6 +75,23 @@ async function scan(page: Page, code: string) {
 
 async function waitDrained(page: Page) {
   await expect(page.getByTestId("pending-count")).toContainText("Waiting to save: 0", { timeout: 45_000 });
+}
+
+async function waitForBusinessReady(page: Page, businessId: string) {
+  await expect.poll(
+    () => page.evaluate((expectedBusinessId) => {
+      const store = (window as unknown as {
+        __scanStore?: { getState: () => { businessId: string; businessContextReady: boolean; businessDataLoaded: boolean } };
+      }).__scanStore;
+      const state = store?.getState();
+      return Boolean(
+        state?.businessContextReady &&
+        state.businessDataLoaded &&
+        state.businessId === expectedBusinessId,
+      );
+    }, businessId),
+    { timeout: 45_000 },
+  ).toBe(true);
 }
 
 async function expectActiveTenantOnly(
@@ -118,6 +150,35 @@ async function expectActiveTenantOnly(
   expect(state.countProductIds).toContain(active.productId);
   expect(state.countProductIds).not.toContain(foreign.productId);
   expect(state.reviewCodes).not.toContain(`${foreign.label}-review-marker`);
+}
+
+async function expectVisibleHistoryAndReviewTenantOnly(
+  page: Page,
+  active: AccountTenantFixture,
+  foreign: AccountTenantFixture,
+  expectedQuantity: number,
+) {
+  await page.getByRole("link", { name: "History" }).click();
+  await page.waitForURL("**/history");
+  await waitForBusinessReady(page, active.businessId);
+  const activeHistoryRow = page.getByTestId(`history-row-${active.sessionId}`);
+  await expect(activeHistoryRow).toBeVisible();
+  await expect(page.getByTestId(`history-row-${foreign.sessionId}`)).toHaveCount(0);
+  await expect(page.getByTestId(`history-units-${active.sessionId}`)).toHaveText(String(expectedQuantity));
+
+  await activeHistoryRow.click();
+  await page.waitForURL(`**/sessions/${active.sessionId}`);
+  await expect(page.getByTestId(`timeline-row-${active.seededEventId}`)).toBeVisible();
+  await expect(page.locator("main")).toContainText(active.markerBarcode);
+  await expect(page.locator("main")).not.toContainText(foreign.markerBarcode);
+
+  await page.getByRole("link", { name: "Review" }).click();
+  await page.waitForURL("**/review");
+  await waitForBusinessReady(page, active.businessId);
+  await expect(page.getByTestId(`review-row-${active.label}-review-marker`)).toBeVisible();
+  await expect(page.getByTestId(`review-row-${foreign.label}-review-marker`)).toHaveCount(0);
+  await expect(page.getByTestId("review-body")).toContainText(`${active.label}-review-marker`);
+  await expect(page.getByTestId("review-body")).not.toContainText(`${foreign.label}-review-marker`);
 }
 
 async function readPersistSnapshot(page: Page): Promise<PersistSnapshot> {
@@ -368,6 +429,63 @@ async function expectEmulatorTenantScoped(
   expect(foreignEvents.docs.every((d) => d.data().businessId === foreign.businessId)).toBe(true);
 }
 
+const TENANT_SURFACES = [
+  "products",
+  "countSessions",
+  "unknownCodeReviews",
+  "scanEvents",
+  "inventoryCounts",
+  "_appliedKeys",
+] as const;
+
+async function expectAllEmulatorSurfacesIsolated() {
+  const db = adminDb();
+  for (const [owner, foreign] of [
+    [TWO_ACCOUNT_A, TWO_ACCOUNT_B],
+    [TWO_ACCOUNT_B, TWO_ACCOUNT_A],
+  ] as const) {
+    const snapshots = await Promise.all(
+      TENANT_SURFACES.map(async (surface) => {
+        const snap = await db.collection(`businesses/${owner.businessId}/${surface}`).get();
+        return [surface, snap.docs.map((doc) => ({ id: doc.id, data: doc.data() }))] as const;
+      }),
+    );
+    const bySurface = Object.fromEntries(snapshots) as Record<
+      (typeof TENANT_SURFACES)[number],
+      Array<{ id: string; data: FirebaseFirestore.DocumentData }>
+    >;
+
+    for (const surface of TENANT_SURFACES) {
+      expect(bySurface[surface].length, `${owner.label} ${surface} should be seeded or written`).toBeGreaterThan(0);
+      expect(
+        bySurface[surface].every((doc) => doc.data.businessId === owner.businessId),
+        `${owner.label} ${surface} documents stay owner-scoped`,
+      ).toBe(true);
+    }
+
+    expect(bySurface.products.map((doc) => doc.id)).toContain(owner.productId);
+    expect(bySurface.countSessions.map((doc) => doc.id)).toContain(owner.sessionId);
+    expect(bySurface.unknownCodeReviews.map((doc) => doc.id)).toContain(owner.seededReviewId);
+    expect(bySurface.scanEvents.map((doc) => doc.id)).toContain(owner.seededEventId);
+    expect(bySurface.inventoryCounts.some((doc) => doc.data.productId === owner.productId)).toBe(true);
+
+    const ownerBlob = JSON.stringify(bySurface);
+    for (const foreignMarker of [
+      foreign.businessId,
+      foreign.productId,
+      foreign.productName,
+      foreign.markerBarcode,
+      foreign.scanBarcode,
+      foreign.sessionId,
+      foreign.seededEventId,
+      foreign.seededReviewId,
+      `${foreign.label}-review-marker`,
+    ]) {
+      expect(ownerBlob, `${owner.label} surfaces exclude foreign marker ${foreignMarker}`).not.toContain(foreignMarker);
+    }
+  }
+}
+
 test("same browser sign-in A to B to A never leaks selected business, store state, or tenant data", async ({ page }) => {
   // Seed a stale selected business for B before A logs in. Login/provisioning may use it as a hint, but
   // the scan page must fail closed to A's verified membership and overwrite the shared selected key.
@@ -384,6 +502,7 @@ test("same browser sign-in A to B to A never leaks selected business, store stat
   await expectActiveTenantOnly(page, TWO_ACCOUNT_A, TWO_ACCOUNT_B, "2");
   await expectPersistenceTenantOnly(page, TWO_ACCOUNT_A, TWO_ACCOUNT_B);
   await expectEmulatorTenantScoped(TWO_ACCOUNT_A, TWO_ACCOUNT_B, 2);
+  await expectVisibleHistoryAndReviewTenantOnly(page, TWO_ACCOUNT_A, TWO_ACCOUNT_B, 2);
 
   await signOutVisibly(page);
   await expect(page.locator("body")).not.toContainText(TWO_ACCOUNT_A.productName);
@@ -395,6 +514,7 @@ test("same browser sign-in A to B to A never leaks selected business, store stat
   await expectActiveTenantOnly(page, TWO_ACCOUNT_B, TWO_ACCOUNT_A, "2");
   await expectPersistenceTenantOnly(page, TWO_ACCOUNT_B, TWO_ACCOUNT_A);
   await expectEmulatorTenantScoped(TWO_ACCOUNT_B, TWO_ACCOUNT_A, 2);
+  await expectVisibleHistoryAndReviewTenantOnly(page, TWO_ACCOUNT_B, TWO_ACCOUNT_A, 2);
 
   await signOutVisibly(page);
   await expect(page.locator("body")).not.toContainText(TWO_ACCOUNT_B.productName);
@@ -403,4 +523,6 @@ test("same browser sign-in A to B to A never leaks selected business, store stat
   await expectActiveTenantOnly(page, TWO_ACCOUNT_A, TWO_ACCOUNT_B, "2");
   await expectPersistenceTenantOnly(page, TWO_ACCOUNT_A, TWO_ACCOUNT_B);
   await expectEmulatorTenantScoped(TWO_ACCOUNT_A, TWO_ACCOUNT_B, 2);
+  await expectVisibleHistoryAndReviewTenantOnly(page, TWO_ACCOUNT_A, TWO_ACCOUNT_B, 2);
+  await expectAllEmulatorSurfacesIsolated();
 });

@@ -4,7 +4,11 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import Link from "next/link";
 import { useScanStore } from "@/stores/scanStore";
 import { getSession, listMemberships } from "@/lib/auth";
-import { getSelectedBusinessId, isFirebaseBackend } from "@/lib/selectedBusiness";
+import {
+  getSelectedBusinessId,
+  isFirebaseBackend,
+  SELECTED_BUSINESS_CHANGED_EVENT,
+} from "@/lib/selectedBusiness";
 import { isLiveAuth } from "@/services/auth/authMode";
 import { hasMeaningfulLegacyBlobAsync, hasPersistedBlobAsync, persistKeyForUid } from "@/stores/scanPersistNamespace";
 
@@ -15,7 +19,6 @@ import { hasMeaningfulLegacyBlobAsync, hasPersistedBlobAsync, persistKeyForUid }
 // gate's call site only; getSession/listMemberships keep their existing contract for every other
 // caller (notably AuthGuard).
 const AUTH_BOOTSTRAP_TIMEOUT_MS = 15_000;
-const SELECTED_BUSINESS_CHANGED_EVENT = "sis:selected-business-changed";
 
 type BusinessContextStatus = "resolving" | "no-user" | "no-business" | "adopt-choice" | "ready" | "error";
 type PendingBusinessContext = { businessId: string; uid: string };

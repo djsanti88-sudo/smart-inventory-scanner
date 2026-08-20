@@ -30,6 +30,7 @@ let routePushHandler: ((href: string) => void) | null = null;
 
 vi.mock("@/services/auth/authMode", () => ({ isLiveAuth: () => true }));
 vi.mock("@/lib/selectedBusiness", () => ({
+  SELECTED_BUSINESS_CHANGED_EVENT: "sis:selected-business-changed",
   getSelectedBusinessId: () => mocks.getSelectedBusinessId(),
   setSelectedBusinessId: (...args: unknown[]) => mocks.setSelectedBusinessId(...args),
   isFirebaseBackend: () => true,

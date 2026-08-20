@@ -5,6 +5,7 @@ import { render, screen, cleanup } from "@testing-library/react";
 const isLiveAuth = vi.fn();
 vi.mock("@/services/auth/authMode", () => ({ isLiveAuth: () => isLiveAuth() }));
 vi.mock("@/lib/selectedBusiness", () => ({
+  SELECTED_BUSINESS_CHANGED_EVENT: "sis:selected-business-changed",
   getSelectedBusinessId: () => null,
   isFirebaseBackend: () => true,
 }));

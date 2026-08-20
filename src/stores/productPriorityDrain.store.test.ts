@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
 import type { SyncTarget } from "@/services/db/syncTarget";
 import type { SyncResult } from "@/services/mockDb";
@@ -238,6 +238,106 @@ describe("product-priority cloud drain", () => {
     await flush();
   });
 
+  it("keeps a serial SAVE_PRODUCT and a later marked write for the same product in original FIFO order", async () => {
+    const target = new ControlledTarget();
+    startStore(target, [
+      item("SAVE_PRODUCT", "mixed-product", {
+        id: "q-mixed-serial-first",
+        idempotencyKey: "mixed:serial-first",
+        syncLane: undefined,
+      }),
+      item("SAVE_PRODUCT", "mixed-product", {
+        id: "q-mixed-marked-second",
+        idempotencyKey: "mixed:marked-second",
+      }),
+      item("SAVE_PRODUCT", "independent-neighbor"),
+    ]);
+
+    await waitForStarts(target, 1);
+    expect(target.started.map((entry) => entry.item.id)).toEqual([
+      "q-independent-neighbor-SAVE_PRODUCT",
+    ]);
+
+    target.resolveById("q-independent-neighbor-SAVE_PRODUCT");
+    await waitForStarts(target, 2);
+    expect(target.started[1].item.id).toBe("q-mixed-serial-first");
+
+    target.resolveById("q-mixed-serial-first");
+    await waitForStarts(target, 3);
+    expect(target.started[2].item.id).toBe("q-mixed-marked-second");
+
+    target.resolveAll();
+    await flush();
+  });
+
+  it("keeps a marked SAVE_PRODUCT and a later serial write for the same product in original FIFO order", async () => {
+    const target = new ControlledTarget();
+    startStore(target, [
+      item("SAVE_PRODUCT", "mixed-product", {
+        id: "q-mixed-marked-first",
+        idempotencyKey: "mixed:marked-first",
+      }),
+      item("SAVE_PRODUCT", "mixed-product", {
+        id: "q-mixed-serial-second",
+        idempotencyKey: "mixed:serial-second",
+        syncLane: undefined,
+      }),
+      item("SAVE_PRODUCT", "independent-neighbor"),
+    ]);
+
+    await waitForStarts(target, 1);
+    expect(target.started.map((entry) => entry.item.id)).toEqual([
+      "q-independent-neighbor-SAVE_PRODUCT",
+    ]);
+
+    target.resolveById("q-independent-neighbor-SAVE_PRODUCT");
+    await waitForStarts(target, 2);
+    expect(target.started[1].item.id).toBe("q-mixed-marked-first");
+
+    target.resolveById("q-mixed-marked-first");
+    await waitForStarts(target, 3);
+    expect(target.started[2].item.id).toBe("q-mixed-serial-second");
+
+    target.resolveAll();
+    await flush();
+  });
+
+  it("does not start a later mixed-lane write for the same product after the earlier serial write fails", async () => {
+    const target = new ControlledTarget();
+    const store = startStore(target, [
+      item("SAVE_PRODUCT", "mixed-fragile", {
+        id: "q-mixed-fragile-first",
+        idempotencyKey: "mixed-fragile:first",
+        syncLane: undefined,
+      }),
+      item("SAVE_PRODUCT", "mixed-fragile", {
+        id: "q-mixed-fragile-second",
+        idempotencyKey: "mixed-fragile:second",
+      }),
+    ]);
+
+    await waitForStarts(target, 1);
+    expect(target.started[0].item.id).toBe("q-mixed-fragile-first");
+    target.started[0].resolve({
+      ok: false,
+      alreadyApplied: false,
+      error: "mixed first write failed",
+      retryable: true,
+    });
+    await flush();
+
+    expect(target.started.map((entry) => entry.item.id)).not.toContain("q-mixed-fragile-second");
+    expect(store.getState().pendingSyncQueue.map((entry) => entry.id)).toEqual([
+      "q-mixed-fragile-first",
+      "q-mixed-fragile-second",
+    ]);
+    expect(store.getState().pendingSyncQueue[0]).toMatchObject({
+      status: "error",
+      retryCount: 1,
+      lastError: "mixed first write failed",
+    });
+  });
+
   it("blocks later writes for the same product for the current pass after the first write fails", async () => {
     const target = new ControlledTarget();
     const store = startStore(target, [
@@ -323,6 +423,50 @@ describe("product-priority cloud drain", () => {
 
     expect(target.maxActive).toBe(4);
     expect(store.getState().pendingSyncQueue).toHaveLength(0);
+  });
+
+  it("holds physical product slots across logical timeouts and replacement drain passes", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const target = new ControlledTarget();
+      const store = startStore(target, [
+        item("SAVE_PRODUCT", "same-product", { id: "q-same-first", idempotencyKey: "same:first" }),
+        item("SAVE_PRODUCT", "same-product", { id: "q-same-second", idempotencyKey: "same:second" }),
+        item("SAVE_PRODUCT", "product-2"),
+        item("SAVE_PRODUCT", "product-3"),
+        item("SAVE_PRODUCT", "product-4"),
+      ]);
+
+      for (let i = 0; i < 20 && target.started.length < 4; i += 1) await Promise.resolve();
+      expect(target.started.map((entry) => entry.item.id)).toEqual([
+        "q-same-first",
+        "q-product-2-SAVE_PRODUCT",
+        "q-product-3-SAVE_PRODUCT",
+        "q-product-4-SAVE_PRODUCT",
+      ]);
+
+      await vi.advanceTimersByTimeAsync(60_001);
+      for (let i = 0; i < 40; i += 1) await Promise.resolve();
+      store.getState().retrySync();
+      for (let i = 0; i < 40; i += 1) await Promise.resolve();
+
+      expect(target.started).toHaveLength(4);
+      expect(target.maxActive).toBe(4);
+      expect(target.started.map((entry) => entry.item.id)).not.toContain("q-same-second");
+
+      target.resolveById("q-same-first");
+      for (let i = 0; i < 40 && target.started.length < 5; i += 1) await Promise.resolve();
+
+      expect(target.started[4].item.id).toBe("q-same-second");
+      expect(target.maxActive).toBe(4);
+
+      target.resolveAll();
+      await vi.runAllTimersAsync();
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("keeps a real markWrong correction bundle serial so product writes stay adjacent to transfer ops", async () => {

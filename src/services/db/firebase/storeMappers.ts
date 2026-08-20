@@ -1,4 +1,4 @@
-import type { Product, Alias, InventorySession, InventoryCount, ScanEvent } from "@/types";
+import type { Product, Alias, InventorySession, InventoryCount, ScanEvent, UnknownCodeReview } from "@/types";
 
 // PURE Firestore-doc -> store-shape mappers. Deliberately dependency-free: NO `firebase/firestore` (or any
 // client Firebase SDK) runtime import, so these can be safely pulled into a server/serverless API route
@@ -31,6 +31,21 @@ function time(v: unknown): string {
     return Number.isNaN(d.getTime()) ? "" : d.toISOString();
   }
   return "";
+}
+
+function reviewDecodeStatus(v: unknown): UnknownCodeReview["decodeStatus"] {
+  switch (v) {
+    case "none":
+    case "decoding":
+    case "verified":
+    case "suggested":
+    case "conflict":
+    case "needs_review":
+    case "vendor_label":
+      return v;
+    default:
+      return "needs_review";
+  }
 }
 
 export function toStoreProduct(id: string, data: Record<string, unknown>, businessId: string): Product {
@@ -155,5 +170,75 @@ export function toStoreScanEvent(id: string, data: Record<string, unknown>, busi
     idempotencyKey: str(data.idempotencyKey),
     deviceId: typeof data.deviceId === "string" ? data.deviceId : undefined,
     location: typeof data.location === "string" ? data.location : undefined,
+  };
+}
+
+export function toStoreUnknownCodeReview(
+  id: string,
+  data: Record<string, unknown>,
+  businessId: string,
+): UnknownCodeReview {
+  const status: UnknownCodeReview["status"] =
+    data.status === "suggested" || data.status === "resolved" || data.status === "ignored"
+      ? data.status
+      : "open";
+  return {
+    id,
+    businessId,
+    sessionId: str(data.sessionId, str(data.countSessionId)),
+    rawCode: str(data.rawCode),
+    cleanCode: str(data.cleanCode, str(data.rawCode)),
+    normalizedCandidates: strings(data.normalizedCandidates ?? data.normalizedCode),
+    suggestedProductName: str(data.suggestedProductName),
+    suggestedBrand: str(data.suggestedBrand),
+    suggestedCategory: str(data.suggestedCategory),
+    suggestedSpecsShort: str(data.suggestedSpecsShort),
+    suggestedSpecsFull: str(data.suggestedSpecsFull),
+    suggestedPrimarySku: str(data.suggestedPrimarySku),
+    suggestedPrimaryBarcode: str(data.suggestedPrimaryBarcode),
+    suggestedGtin: str(data.suggestedGtin),
+    suggestedUpc: str(data.suggestedUpc),
+    suggestedEan: str(data.suggestedEan),
+    suggestedImageUrl: str(data.suggestedImageUrl),
+    suggestedProductUrl: str(data.suggestedProductUrl),
+    suggestedAliases: strings(data.suggestedAliases),
+    sourceUrls: strings(data.sourceUrls),
+    verifiedFacts: strings(data.verifiedFacts),
+    guesses: strings(data.guesses),
+    reason: str(data.reason),
+    decodeNote: typeof data.decodeNote === "string" ? data.decodeNote : undefined,
+    providerName: str(data.providerName),
+    confidence: num(data.confidence),
+    hasSuggestion: data.hasSuggestion === true,
+    decodeStatus: reviewDecodeStatus(data.decodeStatus),
+    evidenceStrength: (data.evidenceStrength as UnknownCodeReview["evidenceStrength"]) ?? "none",
+    exactCodeEvidenceVerifiedByApp: data.exactCodeEvidenceVerifiedByApp === true,
+    identityBand: data.identityBand as UnknownCodeReview["identityBand"],
+    crossCheckDecision: str(data.crossCheckDecision),
+    decodeProviderSummaries: Array.isArray(data.decodeProviderSummaries)
+      ? (data.decodeProviderSummaries as UnknownCodeReview["decodeProviderSummaries"])
+      : undefined,
+    prefixHint: typeof data.prefixHint === "string" ? data.prefixHint : undefined,
+    prefixConflictReason: typeof data.prefixConflictReason === "string" ? data.prefixConflictReason : undefined,
+    reverseUpcConflictNote: typeof data.reverseUpcConflictNote === "string" ? data.reverseUpcConflictNote : undefined,
+    suggestedLinkProductId: typeof data.suggestedLinkProductId === "string" ? data.suggestedLinkProductId : undefined,
+    autoVerifyScore: typeof data.autoVerifyScore === "number" ? data.autoVerifyScore : undefined,
+    blockingReasons: Array.isArray(data.blockingReasons) ? strings(data.blockingReasons) : undefined,
+    status,
+    createdAt: time(data.createdAt),
+    resolvedAt: time(data.resolvedAt) || null,
+    resolvedBy: typeof data.resolvedBy === "string" ? data.resolvedBy : null,
+    resolutionAction: (data.resolutionAction as UnknownCodeReview["resolutionAction"]) ?? null,
+    syncStatus: "synced",
+    idempotencyKey: str(data.idempotencyKey),
+    correctionRecheckStatus: data.correctionRecheckStatus as UnknownCodeReview["correctionRecheckStatus"],
+    correctionRecheckedAt: time(data.correctionRecheckedAt) || null,
+    correctionRecheckMissingKeys: Array.isArray(data.correctionRecheckMissingKeys)
+      ? strings(data.correctionRecheckMissingKeys)
+      : undefined,
+    reopenedFromWrong: data.reopenedFromWrong === true ? true : undefined,
+    provisionalProductId:
+      typeof data.provisionalProductId === "string" ? data.provisionalProductId : data.provisionalProductId === null ? null : undefined,
+    importQuantity: typeof data.importQuantity === "number" ? data.importQuantity : undefined,
   };
 }

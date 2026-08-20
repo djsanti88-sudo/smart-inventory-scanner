@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { localE2EWebServerEnv } from "./e2e/localWebServerEnv";
 
 // Firebase-backed E2E proof (Loop 7). SEPARATE from the 11 mock specs (playwright.config.ts) - this runs
 // the app against the Firebase EMULATOR with the real Firebase backend + real Auth emulator sign-in.
@@ -31,8 +32,7 @@ export default defineConfig({
     timeout: 180_000,
     stdout: "pipe",
     stderr: "pipe",
-    env: {
-      ...process.env,
+    env: localE2EWebServerEnv("firebase-3200", {
       // Real Firebase backend against the emulator. Auth bypass is intentionally NOT set, so the spec
       // exercises the real login UI and Firestore writes carry a real request.auth.
       NEXT_PUBLIC_FIREBASE_BACKEND: "1",
@@ -49,8 +49,8 @@ export default defineConfig({
       // customer browser, so the owner workflow must run with platform access). The customer restriction
       // is proven separately by the SecurityLeakBot (business view) + the resolveScanServer contract test.
       NEXT_PUBLIC_E2E_PLATFORM_OWNER: "1",
-      // Keep AI mock-only so the run can never call live providers.
-      IS_E2E: "1",
-    },
+      // Keep AI mock-only so the run can never call live providers. The shared environment builder
+      // pins IS_E2E and scrubs every inherited Turso/libsql URL or token.
+    }),
   },
 });

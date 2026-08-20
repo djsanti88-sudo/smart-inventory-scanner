@@ -10,11 +10,9 @@ import {
   signOut,
   type Membership,
 } from "@/lib/auth";
-import { setSelectedBusinessId } from "@/lib/selectedBusiness";
+import { SELECTED_BUSINESS_CHANGED_EVENT, setSelectedBusinessId } from "@/lib/selectedBusiness";
 import { useRouter } from "next/navigation";
 import { useScanStore } from "@/stores/scanStore";
-
-const SELECTED_BUSINESS_CHANGED_EVENT = "sis:selected-business-changed";
 
 // Business-creation + membership flow. A signed-in user sees the businesses they belong to (with their
 // admin/counter role) and can create a new business (becoming its admin via the hardened RPC). This is

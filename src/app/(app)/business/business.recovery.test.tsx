@@ -17,7 +17,10 @@ vi.mock("@/lib/auth", () => ({
   listMemberships: (...args: unknown[]) => mocks.listMemberships(...args),
   signOut: vi.fn(),
 }));
-vi.mock("@/lib/selectedBusiness", () => ({ setSelectedBusinessId: vi.fn() }));
+vi.mock("@/lib/selectedBusiness", () => ({
+  SELECTED_BUSINESS_CHANGED_EVENT: "sis:selected-business-changed",
+  setSelectedBusinessId: vi.fn(),
+}));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: mocks.replace, push: mocks.push }),
 }));

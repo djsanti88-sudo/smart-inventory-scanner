@@ -35,7 +35,7 @@ import type { DatabaseService } from "@/services/db/databaseService";
 import { resolveScanToProductTiered } from "@/services/aliasMatcher";
 import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/services/productDedup";
 import { incrementInventoryCount } from "@/services/inventory";
-import { buildIdempotencyKey } from "@/services/idempotency";
+import { buildIdempotencyKey, stableIdempotencyFingerprint } from "@/services/idempotency";
 import { MockDb, getMockDb, type IncrementPayload, type SyncResult } from "@/services/mockDb";
 import { FirebaseSyncTarget } from "@/services/db/firebase/firebaseSyncTarget";
 import { loadBusinessData } from "@/services/db/firebase/businessDataLoader";
@@ -106,6 +106,8 @@ import {
 import { getOrCreateDeviceId } from "@/services/deviceIdentity";
 import { shouldReuseSession, buildAutoSessionName } from "@/services/sessions/autoSession";
 import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
+import { planSyncBatch } from "@/services/syncBatchPlanner";
+import { mergeReloadedProductsAndAliases, mergeReloadedReviews } from "@/services/reloadMergePolicy";
 import { safeStructuredFieldsFor } from "@/services/polish/structuredFields";
 import { backfillProducts } from "@/services/polish/backfillProducts";
 import type { AiStatus } from "@/types";
@@ -1447,42 +1449,6 @@ function idForReview(r: UnknownCodeReview): string {
   return parts[2] ?? r.id;
 }
 
-function mergeReloadedProductsAndAliases(params: {
-  businessId: string;
-  localProducts: Product[];
-  remoteProducts: Product[];
-  localAliases: Alias[];
-  remoteAliases: Alias[];
-  pendingSyncQueue: PendingSyncItem[];
-}): { products: Product[]; aliases: Alias[] } {
-  const tenantPendingQueue = params.pendingSyncQueue.filter((it) => it.businessId === params.businessId);
-  const pendingProductIds = new Set(
-    tenantPendingQueue.filter((it) => it.operation === "SAVE_PRODUCT").map((it) => it.entityId),
-  );
-  const pendingAliasIds = new Set(
-    tenantPendingQueue.filter((it) => it.operation === "RESOLVE_ALIAS").map((it) => it.entityId),
-  );
-
-  const productsById = new Map(params.localProducts.map((p) => [p.id, p]));
-  for (const remote of params.remoteProducts) {
-    const local = productsById.get(remote.id);
-    if (pendingProductIds.has(remote.id)) continue;
-    if (local?.status === "archived" && remote.status !== "archived") continue;
-    productsById.set(remote.id, remote);
-  }
-
-  const aliasesById = new Map(params.localAliases.map((a) => [a.id, a]));
-  for (const remote of params.remoteAliases) {
-    if (pendingAliasIds.has(remote.id)) continue;
-    aliasesById.set(remote.id, remote);
-  }
-
-  return {
-    products: [...productsById.values()],
-    aliases: [...aliasesById.values()],
-  };
-}
-
 // The ONE prefix-rewrite rule for every idempotencyKey-shaped string in this store: rewrite only the
 // leading businessId segment (buildIdempotencyKey joins businessId:sessionId:...:operation with ":"),
 // leaving every other segment byte-identical so retries of the exact same event keep deduping against
@@ -2071,6 +2037,63 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
     let businessLoadGeneration = 0;
     const queueItemIdentity = (item: PendingSyncItem) =>
       `${item.businessId}\u0000${item.id}\u0000${item.idempotencyKey}`;
+    const PRODUCT_DRAIN_CONCURRENCY = 4;
+    const PHYSICAL_PRODUCT_APPLY_STOPPED = Symbol("physical-product-apply-stopped");
+    type PhysicalProductApply = {
+      entityId: string;
+      promise: Promise<SyncResult>;
+    };
+    // Logical timeouts and watchdog supersession cannot cancel a Firestore transaction already handed
+    // to db.apply. Keep physical ownership in this store closure so every drain pass observes the same
+    // four-slot ceiling, and so retries join/wait for an unresolved same-item/same-product write instead
+    // of overtaking it. Entries leave these registries only when the underlying promise truly settles.
+    const physicalProductApplies = new Map<string, PhysicalProductApply>();
+    const physicalProductApplyByEntity = new Map<string, PhysicalProductApply>();
+    const settled = (promise: Promise<SyncResult>) => promise.then(
+      () => undefined,
+      () => undefined,
+    );
+    const applyIndependentProductPhysically = async (
+      item: PendingSyncItem,
+      canStart: () => boolean,
+    ): Promise<SyncResult | typeof PHYSICAL_PRODUCT_APPLY_STOPPED> => {
+      const identity = queueItemIdentity(item);
+      while (true) {
+        const sameItem = physicalProductApplies.get(identity);
+        if (sameItem) return sameItem.promise;
+
+        const sameProduct = physicalProductApplyByEntity.get(item.entityId);
+        if (sameProduct) {
+          await settled(sameProduct.promise);
+          if (!canStart()) return PHYSICAL_PRODUCT_APPLY_STOPPED;
+          continue;
+        }
+
+        if (physicalProductApplies.size >= PRODUCT_DRAIN_CONCURRENCY) {
+          await Promise.race([...physicalProductApplies.values()].map((entry) => settled(entry.promise)));
+          if (!canStart()) return PHYSICAL_PRODUCT_APPLY_STOPPED;
+          continue;
+        }
+
+        if (!canStart()) return PHYSICAL_PRODUCT_APPLY_STOPPED;
+        let entry!: PhysicalProductApply;
+        const promise = Promise.resolve()
+          .then(() => db.apply(item))
+          .finally(() => {
+            if (physicalProductApplies.get(identity) === entry) physicalProductApplies.delete(identity);
+            if (physicalProductApplyByEntity.get(item.entityId) === entry) {
+              physicalProductApplyByEntity.delete(item.entityId);
+            }
+          });
+        entry = { entityId: item.entityId, promise };
+        physicalProductApplies.set(identity, entry);
+        physicalProductApplyByEntity.set(item.entityId, entry);
+        // A logical timeout may stop awaiting this promise. Keep a rejection observer attached so a
+        // later physical failure is never reported as an unhandled rejection while cleanup still runs.
+        void promise.catch(() => {});
+        return promise;
+      }
+    };
     const syncPendingCloud = (force: boolean): Promise<void> => {
       const state = get();
       if (
@@ -2194,22 +2217,32 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         );
       };
 
-      const applySyncItem = async (item: PendingSyncItem): Promise<"applied" | "failed" | "stopped"> => {
+      const applySyncItem = async (
+        item: PendingSyncItem,
+        independentProductLane = false,
+      ): Promise<"applied" | "failed" | "stopped"> => {
         // Token mismatch stops SENDING new applies; whatever already succeeded is saved by the flush
         // below regardless (see flushProgress comment).
         if (!contextStillActive()) return "stopped";
         const itemIdentity = queueItemIdentity(item);
         let res;
+        let logicalAttemptOpen = true;
         try {
           let timeoutId: ReturnType<typeof setTimeout> | undefined;
           try {
             res = await Promise.race([
-              db.apply(item),
+              independentProductLane
+                ? applyIndependentProductPhysically(
+                    item,
+                    () => logicalAttemptOpen && contextStillActive(),
+                  )
+                : db.apply(item),
               new Promise<never>((_, reject) => {
                 timeoutId = setTimeout(() => reject(new Error(`cloud sync apply timed out after ${CLOUD_APPLY_TIMEOUT_MS}ms`)), CLOUD_APPLY_TIMEOUT_MS);
               }),
             ]);
           } finally {
+            logicalAttemptOpen = false;
             if (timeoutId !== undefined) clearTimeout(timeoutId);
           }
         } catch (e) {
@@ -2220,6 +2253,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             retryable: true,
           };
         }
+        if (res === PHYSICAL_PRODUCT_APPLY_STOPPED) return "stopped";
         if (res.ok) {
           // A genuine successful apply is forward progress: the wedged-pass watchdog must not fire
           // regardless of total pass age as long as items keep actually landing. An error/timeout is NOT
@@ -2247,42 +2281,35 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         return res.ok ? "applied" : "failed";
       };
 
-      const productItems = batch.filter(
-        (item) => item.operation === "SAVE_PRODUCT" && item.syncLane === "independent_product",
-      );
-      const productItemRefs = new Set(productItems);
-      const nonProductItems = batch.filter((item) => !productItemRefs.has(item));
-      if (productItems.length > 0) {
-        const PRODUCT_DRAIN_CONCURRENCY = 4;
-        const groups = new Map<string, PendingSyncItem[]>();
-        for (const item of productItems) {
-          const group = groups.get(item.entityId);
-          if (group) group.push(item);
-          else groups.set(item.entityId, [item]);
-        }
-        const productGroups = [...groups.values()];
+      const { independentProductGroups, serialItems } = planSyncBatch(batch);
+      if (independentProductGroups.length > 0) {
         let nextGroupIndex = 0;
         const runProductWorker = async () => {
           while (contextStillActive()) {
-            const group = productGroups[nextGroupIndex];
+            const group = independentProductGroups[nextGroupIndex];
             nextGroupIndex += 1;
             if (!group) return;
             for (const item of group) {
-              const result = await applySyncItem(item);
+              const result = await applySyncItem(item, true);
               if (result !== "applied") break;
             }
           }
         };
         await Promise.all(
-          Array.from({ length: Math.min(PRODUCT_DRAIN_CONCURRENCY, productGroups.length) }, () =>
+          Array.from({ length: Math.min(PRODUCT_DRAIN_CONCURRENCY, independentProductGroups.length) }, () =>
             runProductWorker(),
           ),
         );
       }
 
-      for (const item of nonProductItems) {
+      const blockedSerialProductIds = new Set<string>();
+      for (const item of serialItems) {
+        if (item.operation === "SAVE_PRODUCT" && blockedSerialProductIds.has(item.entityId)) continue;
         const result = await applySyncItem(item);
         if (result === "stopped") break;
+        if (result === "failed" && item.operation === "SAVE_PRODUCT") {
+          blockedSerialProductIds.add(item.entityId);
+        }
       }
       flushProgress();
     };
@@ -2359,10 +2386,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // REFRESH GUARD (data-loss fix): a page refresh re-resolves the SAME (businessId, userId)
         // this store already holds and calls setBusinessContext again (BusinessContextGate runs on
         // every mount). That is NOT a tenant switch, so it must never wipe scanFeed/finalCounts/
-        // needsReviewQueue/settings/firstScanAt/recentLocations - loadBusinessData can never restore
-        // scanFeed/needsReviewQueue (Firestore has no collections for them), so wiping here loses
-        // unsynced scans and open reviews on every reload. Only an ACTUAL tenant/user change (the
-        // isolation law below) replaces tenant state.
+        // needsReviewQueue/settings/firstScanAt/recentLocations. The cloud loader can restore durable
+        // feed/review rows, but it cannot restore this device's unsynced local work, so wiping first
+        // would still lose scans and open reviews on reload. Only an ACTUAL tenant/user change (the
+        // isolation law below) replaces tenant state before loading the new tenant.
         const contextState = get();
         const sameTenant = contextState.businessId === businessId && contextState.userId === userId;
         // Bug #41 (data-loss race): a scan processed while THIS session still held the placeholder
@@ -2469,9 +2496,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           });
         } else {
           clearTrustedExactProbes();
-          // Isolation: settings/needsReviewQueue/scanFeed are NOT returned by loadBusinessData and
-          // finalCounts linger when no session restores, so a context switch must REPLACE all four or
-          // the previous tenant's rows bleed through (two users OR one user with two businesses).
+          // Isolation: every tenant-owned local surface must be cleared synchronously before the async
+          // loader restores the selected tenant. Otherwise the prior tenant is briefly visible, and
+          // settings or a surface absent from the remote result can linger indefinitely.
           const cleared = emptyTenantState();
           set({
             businessId,
@@ -2549,6 +2576,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 const next: Partial<ScanState> = {
                   products: mergedIdentities.products,
                   aliases: mergedIdentities.aliases,
+                  needsReviewQueue: Array.isArray(data.reviews)
+                    ? mergeReloadedReviews({
+                        businessId,
+                        localReviews: cur.needsReviewQueue,
+                        remoteReviews: data.reviews,
+                        pendingSyncQueue: cur.pendingSyncQueue,
+                      })
+                    : cur.needsReviewQueue,
                   businessDataLoaded: true,
                 };
                 if (restored) {
@@ -3207,6 +3242,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // local delete from one performed on another device (see the archived branch below).
           const locallyArchivedIds = new Set(cur.products.filter((p) => p.status === "archived").map((p) => p.id));
           const countsByKey = new Map(cur.finalCounts.map((c) => [`${c.sessionId}|${c.productId}`, c]));
+          const mergedProductsById = new Map(mergedIdentities.products.map((product) => [product.id, product]));
           for (const remote of data.counts) {
             const key = `${remote.sessionId}|${remote.productId}`;
             const local = countsByKey.get(key);
@@ -3220,7 +3256,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 (pendingCountEntityIds.has(local.id) ||
                   pendingCountEntityIds.has(`${local.sessionId}_${local.productId}`)));
             if (localIsPending) continue; // guard: unsynced local wins
-            if (mergedIdentities.products.find((p) => p.id === remote.productId)?.status === "archived") {
+            if (mergedProductsById.get(remote.productId)?.status === "archived") {
               // Delete-transfer guard (reviewed defect 2026-07-22): a remote count row keyed to a
               // LOCALLY-archived product is the backend's not-yet-transferred (or stale-snapshot)
               // copy of a product THIS device deleted. deleteProductsInternal already repointed
@@ -3240,6 +3276,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           return {
             products: mergedIdentities.products,
             aliases: mergedIdentities.aliases,
+            needsReviewQueue: Array.isArray(data.reviews)
+              ? mergeReloadedReviews({
+                  businessId,
+                  localReviews: cur.needsReviewQueue,
+                  remoteReviews: data.reviews,
+                  pendingSyncQueue: cur.pendingSyncQueue,
+                })
+              : cur.needsReviewQueue,
             sessions: [...sessionsById.values()],
             finalCounts: [...countsByKey.values()],
             lastSyncError: null,
@@ -8254,14 +8298,21 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // Queue idempotent SAVE_PRODUCT (each new product) BEFORE its aliases, then RESOLVE_ALIAS, so a
           // reloaded alias always references a persisted product. Same durable path Loop 4 proved.
           // QA Task 7: a refreshed (existing-barcode) product is ALSO queued as SAVE_PRODUCT with the
-          // SAME id (idempotency key is id-based, so it upserts) - never a quantity change, only the
-          // descriptive fields buildProductImport already refreshed on plan.refreshedProducts.
+          // SAME entity id so it upserts. Its key includes an exact stable payload fingerprint so a
+          // later import with changed content cannot collide with the earlier durable write. The key is
+          // minted once here and retained on PendingSyncItem for every retry.
           const items: PendingSyncItem[] = [];
           for (const p of [...plan.products, ...plan.refreshedProducts]) {
+            const productVersion = stableIdempotencyFingerprint(p);
             items.push(makeQueueItem({
               idFactory, now, businessId: state.businessId, sessionId: state.sessionId,
               entityType: "Product", entityId: p.id, operation: "SAVE_PRODUCT", payload: p,
-              idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, p.id, "SAVE_PRODUCT"),
+              idempotencyKey: buildIdempotencyKey(
+                state.businessId,
+                state.sessionId,
+                `${p.id}:${productVersion}`,
+                "SAVE_PRODUCT",
+              ),
               scanEventId: null,
               syncLane: "independent_product",
             }));

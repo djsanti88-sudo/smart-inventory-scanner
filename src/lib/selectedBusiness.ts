@@ -5,6 +5,7 @@
 // scan page re-verifies before calling setBusinessContext. We NEVER fabricate a businessId here.
 
 const KEY = "sis-selected-business-v1";
+export const SELECTED_BUSINESS_CHANGED_EVENT = "sis:selected-business-changed";
 
 export function getSelectedBusinessId(): string | null {
   if (typeof window === "undefined" || !window.localStorage) return null;

@@ -1,7 +1,14 @@
 import { type Firestore, collection, getDocs, orderBy, query, where } from "firebase/firestore";
-import type { Product, Alias, InventorySession, InventoryCount, ScanEvent } from "@/types";
+import type { Product, Alias, InventorySession, InventoryCount, ScanEvent, UnknownCodeReview } from "@/types";
 import { COLLECTIONS } from "@/services/db/types";
-import { toStoreProduct, toStoreAlias, toStoreSession, toStoreCount, toStoreScanEvent } from "./storeMappers";
+import {
+  toStoreProduct,
+  toStoreAlias,
+  toStoreSession,
+  toStoreCount,
+  toStoreScanEvent,
+  toStoreUnknownCodeReview,
+} from "./storeMappers";
 import { retryingRead, READ_ATTEMPT_TIMEOUT_MS, READ_MAX_ATTEMPTS, READ_RETRY_BACKOFF_MS } from "./boundedRead";
 
 // Loads a business's persisted data from Firestore into the shapes the local store uses, so the
@@ -16,6 +23,7 @@ export interface LoadedBusinessData {
   sessions: InventorySession[];
   counts: InventoryCount[];
   scanEvents: ScanEvent[];
+  reviews: UnknownCodeReview[];
 }
 
 // One-shot getDocs() reads have NO built-in retry (unlike onSnapshot, which keeps listening after a
@@ -33,9 +41,9 @@ export {
 } from "./boundedRead";
 
 /**
- * Read a business's products, aliases, count sessions, and count lines from Firestore, mapped to the
- * local store shapes. The store uses sessions/counts to reconstruct the active session + finalCounts
- * after a refresh (survive-refresh). RLS scopes every read to members of `businessId`.
+ * Read a business's products, aliases, count sessions, count lines, and review queue from Firestore,
+ * mapped to the local store shapes. The store uses sessions/counts/events to reconstruct the active
+ * session and its visible history after a refresh. RLS scopes every read to members of `businessId`.
  *
  * Every getDocs() read is wrapped in a bounded-attempt retry (LOAD_ATTEMPT_TIMEOUT_MS per attempt, up
  * to LOAD_MAX_ATTEMPTS) so a stuck transport channel rejects instead of hanging forever - see the retry
@@ -43,7 +51,7 @@ export {
  * surfaces that as `lastSyncError` and unblocks `businessDataLoaded`.
  */
 export async function loadBusinessData(db: Firestore, businessId: string): Promise<LoadedBusinessData> {
-  const [psnap, asnap, ssnap, csnap] = await Promise.all([
+  const [psnap, asnap, ssnap, csnap, rsnap] = await Promise.all([
     retryingRead("products", () => getDocs(collection(db, COLLECTIONS.businesses, businessId, COLLECTIONS.products))),
     retryingRead("aliases", () => getDocs(collection(db, COLLECTIONS.businesses, businessId, COLLECTIONS.aliases))),
     retryingRead("count sessions", () =>
@@ -51,6 +59,9 @@ export async function loadBusinessData(db: Firestore, businessId: string): Promi
     ),
     retryingRead("inventory counts", () =>
       getDocs(collection(db, COLLECTIONS.businesses, businessId, COLLECTIONS.inventoryCounts)),
+    ),
+    retryingRead("unknown code reviews", () =>
+      getDocs(collection(db, COLLECTIONS.businesses, businessId, COLLECTIONS.unknownCodeReviews)),
     ),
   ]);
   const sessions = ssnap.docs.map((d) => toStoreSession(d.id, d.data() as Record<string, unknown>, businessId));
@@ -74,5 +85,6 @@ export async function loadBusinessData(db: Firestore, businessId: string): Promi
     sessions,
     counts: csnap.docs.map((d) => toStoreCount(d.id, d.data() as Record<string, unknown>, businessId)),
     scanEvents: esnap?.docs.map((d) => toStoreScanEvent(d.id, d.data() as Record<string, unknown>, businessId)) ?? [],
+    reviews: rsnap.docs.map((d) => toStoreUnknownCodeReview(d.id, d.data() as Record<string, unknown>, businessId)),
   };
 }
