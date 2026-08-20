@@ -21,7 +21,8 @@ Why each choice was made. Newest decisions at the bottom of each section.
   localStorage. We rehydrate in a mount effect and gate persisted-state UI until hydrated.
 - Store module is `"use client"` and never imported by a server component (would pull
   `localStorage` into the server bundle).
-- **IndexedDB** is the documented next upgrade if localStorage limits are hit.
+- **IndexedDB** shipped 2026-08-09 (#27, PR #32): it is now the primary persist backing with a
+  localStorage fallback and a copy-then-clear migration; the ~5MB quota wall is gone.
 
 ## IDs and idempotency
 - **`crypto.randomUUID()`** for ScanEvent ids and keys - native in Node 24 and the browser on
@@ -45,6 +46,9 @@ Why each choice was made. Newest decisions at the bottom of each section.
   to `e2e/proof/`. One-time `npx playwright install chromium` required before first E2E run.
 
 ## AI
+> ⚠ superseded (2026-07-08 / 2026-08-19): decode is now the cost-ordered ladder (see "Decode ladder
+> v2" below) and Gemini is deleted from the app entirely (see "Consolidation pass" at the bottom).
+> Kept as the historical record of the first AI design.
 - **Mock provider by default.** Real Gemini (primary) / OpenAI (fallback) are STUBS that only
   activate with env keys + explicit opt-in, and run **server-side only** in `/api/ai-lookup`.
 - AI runs only for **unknown** codes, after the deterministic sanitizer, behind a **daily-cap

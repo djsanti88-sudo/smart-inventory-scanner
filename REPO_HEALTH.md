@@ -1,207 +1,97 @@
-# Repo Health — sync truth
+# Repo Health - sync truth
 
-Regenerate, don't hand-drift. Last updated: 2026-08-19
+Regenerate from real git output, don't hand-drift. Last updated: 2026-08-19 (root-docs refresh;
+every count below from `git branch`, `git rev-list --left-right --count`, `git worktree list` run
+that day). Older branch-sweep history (the 2026-07-29 and 2026-08-09 deletion passes, the 44-branch
+table) lives in this file's git history and in
+`docs/archive/PROGRESS_HISTORY_2026-07_2026-08.md`.
 
-## Branch truth 2026-08-19 evening (consolidation session; verified with git, not memory)
+## Branch truth 2026-08-19
 
-- `origin/master` = 6f65039c (PR #39); local `master` == origin/master.
-- `chore/consolidation-2026-08-19` (worktree `C:/tmp/wt-consolidation`): `refactor/pre-aws-cleanup`
-  REBASED onto master (32 commits; the pre-squash originals of PR #35 dropped; the 17 MB
-  `review.jsonl.gz` blob excised from the branch history before any push) plus the consolidation
-  work (see `docs/superpowers/plans/2026-08-19-consolidation-map.md` and DECISIONS.md 2026-08-19).
-  The old branch tip is preserved at tag `backup/pre-aws-cleanup-2026-08-19`; the WIP stash was
-  applied and committed (corpus 2026-08-17 regeneration + Teach Bot app-knowledge), original kept
-  at tag `backup/stash0-pre-aws-wip-2026-08-19`.
-- `feat/best-guess-identity-cache`: MERGED (PR #38). `feat/post-pr38-consolidation`: MERGED (PR #39).
-- Worktree sweep 2026-08-19: obsolete/merged worktrees removed after salvaging every dirty diff and
-  untracked file to `C:/tmp/worktree-salvage-2026-08-19/<name>/` (tracked-changes.patch +
-  untracked/). Kept: the parked `benchmark-tire-db-automation` branch (no worktree), and the
-  unmerged-content worktrees pending owner triage listed below.
+- `origin/master` = `2150c17a` (PR #41); local `master` == origin/master. Master merges
+  auto-deploy production (owner-gated, `docs/DEPLOY_TRUTH.md`).
+- Merged and deleted this era: `feat/best-guess-identity-cache` (PR #38),
+  `feat/post-pr38-consolidation` (PR #39), `chore/consolidation-2026-08-19` (PR #40),
+  `test/harden-review-reason-wait` (PR #41). Pre-rebase originals preserved at tags
+  `backup/pre-aws-cleanup-2026-08-19` and `backup/stash0-pre-aws-wip-2026-08-19`.
 
 ## CRITICAL callouts
 
-1. **RESOLVED 2026-08-07: `audit-fixes` was fully merged into `master`, not stuck
-   local-only.** Re-verified with `git rev-list --left-right --count master...audit-fixes`
-   -> `100  0` (100 commits behind master, 0 ahead) — every commit on `audit-fixes`
-   (tip `9a2a9030`) is already reachable from `master` (PR #30, merge commit
-   `d80a34c5`). The prior "LOCAL-ONLY, 22 ahead, needs push/PR" callout below was stale
-   from 2026-07-29, before that PR landed. The branch was deleted locally
-   (`git branch -d audit-fixes`) on 2026-08-07 now that it is a strict subset of master.
-2. **`benchmark-tire-db-automation` is PARKED. Do NOT delete or merge.** It is 1,112
-   commits behind master and 6 ahead; merging it would delete ~152k lines including
-   the poison guard, per standing owner order. Leave it exactly as is.
+1. **`benchmark-tire-db-automation` is PARKED. Do NOT delete or merge.** 6 ahead / 1,336 behind;
+   merging would delete ~152k lines including the poison guard. Standing owner order.
+2. `audit-fixes` false alarm resolved 2026-08-07: it was fully merged via PR #30 and deleted.
+   (Kept as a reminder: verify ahead/behind with git before declaring work stranded.)
 
-## Current branch truth (2026-08-09)
+## Local branches (20 + master, verified 2026-08-19)
 
-`feat/tier3-hardening` (the 2026-08-07 tier-3 trio — IndexedDB #27 persist migration, F-08
-restore drill closure + weekly backup schedule, auth hardening trio) shipped via **PR #32,
-merged into `master` at merge commit `bed1b6f6`, and auto-deployed to prod (verified
-healthy)** on 2026-08-09. Local `master` fast-forwarded `d80a34c5..bed1b6f6` (23 commits).
-The branch was verified as a strict ancestor of `master`
-(`git merge-base --is-ancestor feat/tier3-hardening master`) and deleted both locally
-(`git branch -d`) and on `origin` (owner-approved remote deletion).
+Ahead/behind = commits unique to the branch / commits it is missing vs `master`. Proposals only;
+no deletion or push without per-branch owner approval.
 
-New in-flight branch: **`fix/delete-limiter-firestore`**, tip `bed1b6f6` (based on the
-just-merged master), being worked in worktree `C:/tmp/wt-delete-limiter` by another agent —
-left untouched, not evaluated for removal.
+| Branch | Ahead / Behind | Category / proposal |
+|---|---|---|
+| master | base | tip `2150c17a` |
+| chore/root-docs-refresh | this branch | the root-docs refresh (this commit) |
+| benchmark-tire-db-automation | +6 / 1336 | PARKED, never delete or merge (CRITICAL #1) |
+| chore/lint-scripts-debt | +3 / 333 | valuable-unpushed; review + push/PR |
+| codex/vercel-release-hardening | +2 / 264 | valuable-unpushed; upstream gone, review + re-push |
+| docs/post-cutover-hygiene | +2 / 345 | valuable-unpushed; review + push/PR |
+| fix/rate-limit-route-scopes | +3 / 322 | review; core fix was ported to master 2026-08-09, likely superseded |
+| proof/git-deploy-e2e | +2 / 333 | valuable-unpushed; review + push/PR |
+| feat/teach-bot-build | +5 / 631 | review; possible duplicate of feat/teach-bot-clean |
+| feat/teach-bot-clean | +13 / 635 | review; possible duplicate of feat/teach-bot-build |
+| audit/product-readiness-20260810 | +1 / 74 | review (2026-08-10 audit snapshot) |
+| chore/tree-triage-2026-08-12 | +25 / 77 | review (tree-triage work, unmerged) |
+| codex/boss-alias-normalization | +246 / 172 | review; boss-era Codex line, decide keep/extract/drop |
+| codex/boss-barcode-fastpath | +6 / 172 | review; boss-era Codex line |
+| codex/boss-barcode-fastpath-v2 | +38 / 172 | review; boss-era Codex line |
+| codex/local-tire-demo | +236 / 172 | review; demo line |
+| pr27-review-head | +157 / 172 | review artifact of the PR #27 era; likely deletable |
+| add-claude-github-actions-1784520958618 | +3 / 1122 | dead-stale; likely superseded by shipped CI |
+| feat/reverse-upc-heads-up | +1 / 1216 | dead-stale; delete if abandoned |
+| fix/qa-report-2026-07-15 | +10 / 875 | dead-stale; delete if abandoned |
+| strategy-bots-track2 | +1 / 1328 | dead-stale; delete if abandoned |
 
-2026-08-09 worktree/branch sweep (owner-approved, report-first): checked every worktree
-under `C:/tmp` plus the remaining `.claude/worktrees/agent-a47380b0deaa5e8d2` entry for
-(a) ancestor-of-`origin/master` status and (b) working-tree cleanliness. **Removed (11
-worktrees + 8 branches, all ancestor-verified + clean):** `af-01-scan-ledger` through
-`af-07-platform-tooling` (branches `af/01-scan-ledger`..`af/07-platform-tooling`, all fully
-merged into `master`), `scanbin-boss-fastpath-safe` (branch
-`codex/boss-barcode-fastpath-safe`), `wt-postcert` and `wt-tier3-gate` (both detached HEAD,
-ancestors of `origin/master`, no branch to delete). `.claude/worktrees/agent-a47380b0deaa5e8d2`
-(branch `worktree-agent-a47380b0deaa5e8d2`) was force-removed per explicit instruction: its
-uncommitted rate-limit fix to `catalog-dispute`/`catalog-review`/`ai-lookup` routes was
-verified already ported into `master` (`CATALOG_DISPUTE:` prefix present in
-`src/app/api/catalog-dispute/route.ts`), so its diff is superseded.
+## Worktrees (9 registered, verified 2026-08-19)
 
-**Skipped (report-only, no action) — 12 `C:/tmp` worktrees:** `boss-alias-normalization`,
-`identity-root-final-build-6b2075fa`, `inv-hotfix`, `inventory-demo`,
-`inventory-local-tire-demo`, `inventory-release-repair`, `inventory-verify-ded61be7`,
-`scanbin-boss-fastpath-proof`, `scanbin-boss-fastpath-v2`, `scanbin-boss-preview`,
-`scanbin-fix-diagnostic`, `wt-argus-fix`, `wt-dochygiene`, `wt-lintdebt`, `wt-proofpr`,
-`wt-ratelimit`, `wt-rescue-teach`, `wt-teach`, `wt-teach-clean`, `wt-vercel-hardening` — each
-either has unmerged commits (not an ancestor of `origin/master`) or meaningful-looking
-uncommitted work (e.g. `wt-rescue-teach` has 30 modified `e2e/*.spec.ts` + modified
-`testing/app-knowledge/*`; `inventory-stabilization` and `scanbin-fix-diagnostic` and
-`wt-argus-fix`, though ancestor-clean, carry untracked files that are not obviously
-worthless and were left for owner review per the "if in doubt, skip" rule). `wt-delete-limiter`
-was excluded on sight (another agent actively working there). `benchmark-tire-db-automation`
-has no worktree currently checked out and remains parked per CRITICAL #2.
-`inventory-wt-diag` (`fix/rung-trust-and-resolve-stamp`) and the AppData temp `pr27wt`
-worktree were out of the stated scope (`C:/tmp` + the named `.claude/worktrees` entry) and
-were not evaluated this pass.
+Main tree plus: `C:/tmp/boss-alias-normalization`, `C:/tmp/inventory-local-tire-demo`,
+`C:/tmp/inventory-release-repair` (feat/reverse-upc-heads-up), `C:/tmp/scanbin-boss-fastpath-v2`,
+`C:/tmp/scanbin-boss-preview` (codex/boss-barcode-fastpath),
+`C:/tmp/scanbin-product-readiness-20260810`, `C:/tmp/wt-lintdebt`, `C:/tmp/wt-teach-clean`.
+Each pins its branch (a checked-out branch cannot be deleted). Triage the branch first, then
+`git worktree remove`. The 2026-08-19 sweep already salvaged dirty diffs to
+`C:/tmp/worktree-salvage-2026-08-19/<name>/`.
 
-## Branch inventory (44 local branches, propose-only — no deletion or push without
+## Known issues / tech debt - fix, don't build on top
 
-per-branch owner approval)
-
-| Branch | Category | Last commit | Ahead/Behind master | Recommended action (proposal only) |
-|---|---|---|---|---|
-| master | active | 2026-08-09 | — | base branch, tracks `origin/master`, tip `bed1b6f6` |
-| audit-fixes | **DELETED 2026-08-07** | 2026-07-29 | 0 / -100 (re-verified) | fully merged into master via PR #30 (see CRITICAL #1); `git branch -d` |
-| feat/tier3-hardening | **MERGED + DELETED 2026-08-09** | 2026-08-07 | 0 / — | merged via PR #32 (merge commit `bed1b6f6`), auto-deployed to prod; deleted local + remote |
-| fix/delete-limiter-firestore | active (in progress) | 2026-08-09 | current | new branch off post-merge master, worked in `C:/tmp/wt-delete-limiter` by another agent |
-| chore/docs-consolidation | active | 2026-07-29 | current | this doc-consolidation branch |
-| af/01-scan-ledger | **REMOVED 2026-08-09** | 2026-07-29 | +3 / -0 | worktree removed (clean, ancestor of origin/master), branch deleted |
-| af/02-api-auth | **REMOVED 2026-08-09** | 2026-07-29 | +3 / -0 | worktree removed (clean, ancestor of origin/master), branch deleted |
-| af/03-turso-promote | **REMOVED 2026-08-09** | 2026-07-29 | +2 / -0 | worktree removed (clean, ancestor of origin/master), branch deleted |
-| af/04-corpus-provenance | **REMOVED 2026-08-09** | 2026-07-29 | +2 / -0 | worktree removed (clean, ancestor of origin/master), branch deleted |
-| af/05-firestore-infra | **REMOVED 2026-08-09** | 2026-07-29 | +2 / -0 | worktree removed (clean, ancestor of origin/master), branch deleted |
-| af/06-release-ci | **REMOVED 2026-08-09** | 2026-07-29 | +2 / -0 | worktree removed (clean, ancestor of origin/master), branch deleted |
-| af/07-platform-tooling | **REMOVED 2026-08-09** | 2026-07-29 | +2 / -0 | worktree removed (clean, ancestor of origin/master), branch deleted |
-| docs/github-deploy-truth | **REMOVED 2026-07-29** | 2026-07-27 | +0 / -45 | worktree `wt-ci` removed (clean), 0 unique commits, deleted |
-| feat/camera-scan | **REMOVED 2026-07-29** | — | merged | worktree `wt-camera` removed (clean), 0 unique commits, deleted |
-| feat/csv-import | **REMOVED 2026-07-29** | — | merged | worktree `wt-csv` removed (clean), 0 unique commits, deleted |
-| feat/decode-gpt-54-mini | **REMOVED 2026-07-29** | — | merged | worktree `wt-54mini` removed (clean), 0 unique commits, deleted |
-| feat/free-rungs | **REMOVED 2026-07-29** | — | merged | worktree `wt-rungs` removed (clean), 0 unique commits, deleted |
-| feat/variance-report | **REMOVED 2026-07-29** | — | merged | worktree `wt-variance` removed (clean), 0 unique commits, deleted |
-| fix/deploy-tooling-hardening | **REMOVED 2026-07-29** | — | merged | worktree `wt-master-cert` removed (clean), 0 unique commits, deleted |
-| fix/redo-round | **REMOVED 2026-07-29** | — | merged | worktree `wt-round2` removed (clean), 0 unique commits, deleted |
-| fix/release-stabilization | merged (master) | — | merged | worktree `inventory-stabilization` DIRTY (untracked `.powercells/`, `e2e/qa-powercell.spec.ts`, `scripts/antigravity-qa-runner.mjs`, `scripts/qa-runner.mjs`) — SKIPPED, held |
-| fix/rung-trust-and-resolve-stamp | merged (master) | — | merged | worktree `inventory-wt-diag` DIRTY (`M .superpowers/sdd/progress.md`) — SKIPPED, held |
-| flip/vercel-git-enable | **REMOVED 2026-07-29** | — | merged | worktree `wt-flip` removed (clean, required `git worktree prune`), 0 unique commits, deleted |
-| rescue/argus-cp1252 | merged (master) | — | merged | worktree `wt-argus-fix` DIRTY (untracked `dev/`) — SKIPPED, held |
-| rescue/phase3-followups | **REMOVED 2026-07-29** | — | merged | worktree `wt-p3-follow` removed (clean), 0 unique commits, deleted |
-| rescue/qafix | **REMOVED 2026-07-29** | — | merged | worktree `wt-qafix` removed (clean), 0 unique commits, deleted |
-| rescue/teach-bot | merged (master) | — | merged | worktree `wt-rescue-teach` DIRTY (30 modified `e2e/*.spec.ts` + `testing/app-knowledge/*`) — SKIPPED, held |
-| worktree-agent-a47380b0deaa5e8d2 | **REMOVED 2026-08-09** | — | merged | worktree force-removed; its uncommitted rate-limit fix verified already ported into master (`CATALOG_DISPUTE:` present), diff superseded, branch deleted |
-| chore/lint-scripts-debt | valuable-unpushed | 2026-07-27 | +3 / -109 | review + push/PR |
-| codex/vercel-release-hardening | valuable-unpushed | 2026-07-28 | +2 / -63 | upstream `[gone]`; review + re-push/PR |
-| docs/post-cutover-hygiene | valuable-unpushed | 2026-07-27 | +2 / -121 | review + push/PR |
-| feat/teach-bot-build | valuable-unpushed | 2026-07-22 | +5 / -407 | review; possible duplicate of `feat/teach-bot-clean` |
-| feat/teach-bot-clean | valuable-unpushed | 2026-07-22 | +13 / -411 | review; possible duplicate of `feat/teach-bot-build` |
-| fix/argus-cp1252 | valuable-unpushed | 2026-07-20 | +3 / -496 | review; `rescue/argus-cp1252` already merged — may be superseded |
-| fix/phase3-followups | valuable-unpushed | 2026-07-21 | +1 / -421 | review; `rescue/phase3-followups` already merged — may be superseded |
-| fix/rate-limit-route-scopes | valuable-unpushed | 2026-07-27 | +3 / -98 | review + push/PR |
-| hotfix/decode-auth | valuable-unpushed | 2026-07-26 | +1 / -137 | review + push/PR |
-| proof/git-deploy-e2e | valuable-unpushed | 2026-07-27 | +2 / -109 | review + push/PR |
-| add-claude-github-actions-1784520958618 | dead-stale | 2026-07-19 | +3 / -898 | review, likely superseded by shipped CI actions; delete if confirmed |
-| benchmark-tire-db-automation | dead-stale (PARKED) | 2026-06-15 | +6 / -1112 | DO NOT delete or merge (see CRITICAL #2) |
-| demo-readiness-vercel-partnumber | dead-stale | 2026-06-15 | +1 / -1097 | worktree `inventory-demo` DIRTY (staged/untracked `reports/*` proof artifacts) — SKIPPED, held |
-| feat/reverse-upc-heads-up | dead-stale | 2026-06-29 | +1 / -992 | review; delete if abandoned |
-| fix/exact-code-evidence-verification | **REMOVED 2026-07-29** | 2026-06-21 | +1 / -1067 | 0 unique commits vs master, no worktree — deleted (`git branch -D`) |
-| fix/qa-report-2026-07-15 | dead-stale | 2026-07-15 | +10 / -651 | review; delete if abandoned |
-| strategy-bots-track2 | dead-stale | 2026-06-15 | +1 / -1104 | review; delete if abandoned |
-| test | **REMOVED 2026-07-29** | 2026-06-30 | +9 / -979 | 0 unique commits vs master, no worktree — deleted (`git branch -D`) |
-
-Category counts (as of 2026-07-29 follow-up pass): 3 active, 13 merged (6 into
-master still held on dirty worktrees + 7 into `audit-fixes`, all HELD — see below),
-10 valuable-unpushed, 6 dead-stale remaining (1 of those, `demo-readiness-vercel-partnumber`,
-held on a dirty worktree; `benchmark-tire-db-automation` parked/excluded), 13 removed.
-
-**2026-07-29 deletion pass (owner-approved, local-only, no push):** Of the ~19
-SAFE-DELETE branches identified in
-`docs/superpowers/reports/2026-07-29-branch-deletion-evidence.md`, only 2 were
-actually eligible at execution time — `fix/exact-code-evidence-verification` and
-`test` — because every other SAFE-DELETE branch (all 16 merged-into-master branches
-plus `demo-readiness-vercel-partnumber`) had an active worktree checked out
-(`C:/tmp/wt-*`, `C:/tmp/inventory-*`, `.claude/worktrees/agent-a47380b0deaa5e8d2`)
-and the standing rule forbids deleting a branch checked out in a worktree.
-
-**2026-07-29 follow-up pass (Agent F8b, owner-approved, local-only, no push):**
-Processed the 17 branches held above. For each: located its worktree, ran a dirty
-check (`git status --porcelain`), and only removed the worktree + deleted the branch
-if the worktree was completely clean. Result — **11 removed, 6 skipped-dirty**:
-
-Removed (worktree clean, `git worktree remove` then re-verified 0 unique commits
-then `git branch -D`): `docs/github-deploy-truth`, `feat/camera-scan`,
-`feat/csv-import`, `feat/decode-gpt-54-mini`, `feat/free-rungs`,
-`feat/variance-report`, `fix/deploy-tooling-hardening`, `fix/redo-round`,
-`flip/vercel-git-enable`, `rescue/phase3-followups`, `rescue/qafix`. (Two worktrees,
-`wt-csv`/`wt-rungs`/`wt-variance`/`wt-p3-follow`, failed `git worktree remove`'s
-directory delete step with `Invalid argument` on Windows; the worktree was still
-unregistered from `git worktree list`, so the leftover directory was removed manually
-with `rm -rf` and confirmed gone. `wt-flip` needed an explicit `git worktree prune`
-before its branch could be deleted.)
-
-Skipped-dirty (worktree left untouched, branch held): `fix/release-stabilization`
-(`inventory-stabilization`: untracked `.powercells/`, `e2e/qa-powercell.spec.ts`,
-`scripts/antigravity-qa-runner.mjs`, `scripts/qa-runner.mjs`),
-`fix/rung-trust-and-resolve-stamp` (`inventory-wt-diag`: modified
-`.superpowers/sdd/progress.md`), `rescue/argus-cp1252` (`wt-argus-fix`: untracked
-`dev/`), `rescue/teach-bot` (`wt-rescue-teach`: 30 modified `e2e/*.spec.ts` +
-`testing/app-knowledge/*`), `worktree-agent-a47380b0deaa5e8d2`
-(`.claude/worktrees/agent-a47380b0deaa5e8d2`: modified `src/app/api/*` routes +
-`aiSpendGuard.test.ts`), `demo-readiness-vercel-partnumber` (`inventory-demo`:
-staged/untracked QA-bot proof artifacts under `reports/*`). These need owner review
-of the uncommitted content (commit, discard, or move it) before their worktrees can
-be safely removed and the branches deleted.
-
-The 7 `af/01`-`af/07` branches remain held — they land only after `audit-fixes`
-itself is pushed/PR'd/merged (CRITICAL #1); deleting them now would leave no ref for
-that work if `audit-fixes` is reworked. The 4 REVIEW branches
-(`add-claude-github-actions-1784520958618`, `feat/reverse-upc-heads-up`,
-`fix/qa-report-2026-07-15`, `strategy-bots-track2`) were never in scope — they carry
-unique unmerged commits and need manual review, not deletion.
-
-`git worktree prune` was run at the end of the follow-up pass; remaining registered
-worktrees are unchanged apart from the 11 removed above.
-
-## Known issues / tech debt — fix, don't build on top
-
-- `GO_LIVE_CHECKLIST.md` is stale vs live truth (predates the PR #21/#24 cutover).
-- A BOM character was found in the `NEXT_PUBLIC_AUTH_MODE` Vercel env value —
-  strip it before it causes a string-comparison bug in auth-mode branching.
-- `post-deploy-smoke.yml` still needs `ref: github.sha` hardening (pending).
-- Backup/recovery: VERIFIED 2026-08-07. The Firestore restore drill passed end to end
-  (PITR-window export -> import into scratch DB `drill-20260807`, 78,979 docs, spot-checked
-  vs live source, cleaned up) and a weekly scheduled backup is now live on `(default)`
-  (Sunday, 28-day retention). Root cause of the prior block: Firestore service agent missing
-  `roles/datastore.importExportAdmin` (now granted, retained). See `docs/RECOVERY.md` (F-08 CLOSED).
-- F-01/F-07 rules/indexes redeploy is pending, owner-gated (Firestore security rules
-  and composite indexes not yet pushed live).
-- ~30 local worktrees exist under `C:/tmp/*` and `.claude/worktrees/*`, one per
-  in-flight or already-merged branch (see `git worktree list`). Several point at
-  branches already merged into master — those worktrees are reclaimable disk/clutter
-  once the branch is deleted (`git worktree remove`), propose-only, no action taken.
-- `src/eval/eval.test.ts` still writes its mock-eval table to the deleted `docs/decode/eval-baseline.md` path (try/catch-wrapped, harmless, but will resurrect the file untracked) - retarget the output path in a code round.
-- `src/services/decode/{index.ts,contract.ts,README.md}` comments cite the deleted `docs/decode/ARCHITECTURE.md` - repoint to `docs/DECODER_ARCHITECTURE.md` in a code round.
-- health `/api/health` rate-limit key from `x-forwarded-for` is client-spoofable; each allowed hit does a real Firestore+Turso read (low cost, follow-up hardening) - L3 minor.
-- `computeDollarVariance` drops reconcile lines whose `unitCost` is keyed by name-only identity (not partNumber) from the dollar total - documented degradation, revisit.
-- scan feedback panel omits running quantity during `isDecoding` ("Looking up...") - cosmetic.
-- `npm audit`: next 16.2.12 applied (7 CVEs closed); remaining majors need planned upgrades - sharp, exceljs (downgrade suggested - do NOT take blindly), firebase-admin storage chain (unused, grep-confirmed). See `docs/superpowers/reports/2026-07-29-npm-audit-triage.md`.
-- backfill `--execute` against PRODUCTION is owner-gated and not yet run - legacy docs may still carry `disputedBy`/`auditLog` on public parents until it runs.
+- **ODbL license obligation is untracked (High, from the retired risk register):** the ~4M-row
+  retail corpus incorporates Open Food Facts data (ODbL: attribution + share-alike). No in-app
+  attribution exists and no legal review has confirmed compatibility with a paid product. Needed
+  before any paid go-live that exposes this corpus.
+- **Master-catalog global trust has no revocation path:** one bad strong write replays globally to
+  every tenant; dispute/tombstone is designed, not built. Owner decision + build approval needed.
+- Old Vercel deployments stay publicly reachable at their unique URLs indefinitely; purge/expire
+  policy undecided.
+- `docs/GO_LIVE_CHECKLIST.md` is stale vs live truth (predates the PR #21/#24 cutover).
+- A BOM character was found in the `NEXT_PUBLIC_AUTH_MODE` Vercel env value; strip it before it
+  causes a string-comparison bug in auth-mode branching.
+- `post-deploy-smoke.yml` still needs `ref: github.sha` hardening.
+- Backup/recovery: VERIFIED 2026-08-07 (restore drill passed; weekly Sunday backup live, 28-day
+  retention; see `docs/RECOVERY.md`, F-08 CLOSED).
+- F-01/F-07 Firestore rules/indexes redeploy pending, owner-gated.
+- `src/eval/eval.test.ts` still writes its mock-eval table to the deleted
+  `docs/decode/eval-baseline.md` path (harmless, resurrects the file untracked); retarget in a code
+  round.
+- `src/services/decode/{index.ts,contract.ts,README.md}` comments cite the deleted
+  `docs/decode/ARCHITECTURE.md`; repoint to `docs/DECODER_ARCHITECTURE.md` in a code round.
+- `/api/health` rate-limit key from `x-forwarded-for` is client-spoofable; each allowed hit does a
+  real Firestore+Turso read (low cost, follow-up hardening).
+- `computeDollarVariance` drops reconcile lines whose `unitCost` is keyed by name-only identity
+  from the dollar total; documented degradation, revisit.
+- Scan feedback panel omits running quantity during "Looking up..."; cosmetic.
+- `npm audit`: next 16.2.12 applied (7 CVEs closed); remaining majors need planned upgrades (sharp,
+  exceljs - do NOT take the suggested downgrade blindly, firebase-admin storage chain, unused).
+  See `docs/superpowers/reports/2026-07-29-npm-audit-triage.md`.
+- backfill `--execute` against PRODUCTION is owner-gated and not yet run; legacy docs may still
+  carry `disputedBy`/`auditLog` on public parents until it runs.
+- `tireKnowledge.generated.json` (71 MB) is not LFS-tracked while the retail twin is; fixing it is
+  a history rewrite on master, owner-gated.

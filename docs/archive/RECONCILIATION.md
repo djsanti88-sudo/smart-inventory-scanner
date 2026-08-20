@@ -1,3 +1,6 @@
+> FROZEN ARCHIVE (2026-08-19). Historical log; cites the retired ENGINEERING_DOCTRINE.md. Living
+> risks now live in REPO_HEALTH.md (Known issues); decisions in DECISIONS.md.
+
 # Instruction Reconciliation
 
 Per `ENGINEERING_DOCTRINE.md`. Records when old project instructions were reconciled against the

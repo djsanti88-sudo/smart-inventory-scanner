@@ -1,57 +1,53 @@
-# Manual Live AI Decode Test
+# Manual Live Decode Test
 
-Automated tests NEVER call live Gemini/OpenAI (they mock the provider routes; the Playwright
-webServer runs with `IS_E2E=1`). Use this checklist to do ONE controlled real decode by hand.
+Automated tests NEVER call live providers (the Playwright webServer runs `IS_E2E=1`, which forces
+the AI route to mock-only). Use this checklist to do ONE controlled real decode by hand. Live
+provider calls are owner-gated: run this only with the owner's explicit OK in the moment.
+
+The decode ladder is cost-ordered (`src/server/decode/pipeline.ts`): free rungs first (local tire +
+retail corpus, decode cache, learned tier, UPCitemdb, Open Food Facts), then daily-cap-gated paid
+rungs (Go-UPC for valid GTINs, Fetch V2, GPT). The first settled rung stops the ladder. Gemini is
+not used anywhere in the app.
 
 ## 1. Configure keys (server-side only)
-Edit `.env.local` (gitignored, never committed). At minimum set one provider key:
+
+Edit `.env.local` (gitignored, never committed). Names only, per rung:
 
 ```
-GEMINI_API_KEY=your_real_gemini_key
-# optional second provider for true cross-checking:
-OPENAI_API_KEY=your_real_openai_key
+OPENAI_API_KEY=...        # GPT ladder rung
+GO_UPC_API_KEY=...        # Go-UPC rung (GTIN-shaped codes only)
 
-# aggressive dev defaults (already the defaults if unset):
-ENABLE_LIVE_AI_LOOKUP=true
-ENABLE_AUTO_DECODE_ON_SCAN=true
-ENABLE_GEMINI_LOOKUP=true
-ENABLE_OPENAI_LOOKUP=true
-ENABLE_PREMIUM_MODEL_FALLBACK=true
-AI_LOOKUP_MODE=aggressive
-AI_LOOKUP_DAILY_LIMIT=100
-
-# only needed if you later add a test that may call live providers:
-LIVE_AI_TEST=1
+ENABLE_LIVE_AI_LOOKUP=true   # server-enforced master switch for paid rungs
+AI_LOOKUP_DAILY_LIMIT=100    # daily paid-rung cap (only paid rungs charge it)
 ```
 
-Restart the dev server after editing env: stop it, then `npm run dev`.
+`ENABLE_LIVE_AI_LOOKUP=false` disables every paid rung server-side; `AI_LOOKUP_KILL_SWITCH` stops
+every decode entirely (see `src/server/upc/paidWorkPossible.ts`). Restart the dev server after
+editing env. Full env reference: `docs/COMMANDS.md`.
 
 ## 2. Verify the app sees the keys
-1. Open http://localhost:3000 and log in.
-2. Go to **Settings -> Live AI status**. Confirm:
-   - Gemini live lookup: **On (key configured)** (and/or OpenAI).
-   - Mode: **aggressive**, Auto decode on scan: **On**.
-   - If it says "Missing GEMINI_API_KEY", the key didn't load - check `.env.local` and restart, then
-     click **Refresh status**.
-3. Turn **Enable AI lookup for unknown codes** = On (top of the AI lookup section).
 
-## 3. Run the live decode on 878106003504
-1. Go to **Scan**. Confirm the header shows **Auto decode on scan: On**.
-2. Click the scan box and type or scan: `878106003504` then Enter.
-3. Watch the **Live Scan Feed** row:
-   - It first shows **Decoding with AI...**
-   - Then it updates to **Verified AI Decode**, **Suggested**, **Conflict**, or **Needs review**
-     (after the attempt) - never stuck on a passive "Unknown".
-4. Open **Needs Review** for that code and confirm it shows:
-   - Gemini / OpenAI (and premium, if it escalated) under Provider.
-   - The suggested product, Source URLs, Evidence strength, and `app-verified: yes/no`.
-   - The reason, and an **Approve suggestion** / **Link** button.
-5. If you approve it, the alias is saved. Re-scan `878106003504` - it now counts instantly and
-   makes **zero** AI calls (deterministic local alias).
+1. Open http://localhost:3000.
+2. Settings shows the ladder status and the daily paid-rung counter. Confirm live lookup is on and
+   the counter is below the cap.
+
+## 3. Run one live decode
+
+1. Go to Scan and scan or type a code that is NOT in the local corpus, then Enter.
+2. The row appears and counts IMMEDIATELY (top-level law), then updates with the decode result:
+   verified, suggested (with a confidence band and Approve/Edit), or unidentified with an honest
+   reason - never a silent failure.
+3. Settings' daily counter increments ONLY if a paid rung actually fired; corpus/cache hits are
+   free.
+4. If you Approve a suggestion, a tenant alias is saved. Re-scan the same code: it resolves
+   instantly and deterministically with ZERO provider calls (shared decode cache + alias).
 
 ## 4. Safety
-- Keys are read server-side only (proven by `src/services/keySafety.test.ts`); they never reach the
-  browser bundle.
-- The daily cap, circuit breaker, and the **Emergency stop** toggle (Settings -> Live AI status) all
-  block calls with a clear reason. Use Emergency stop to halt all AI instantly.
-- Do not run uncontrolled live loops. One scan = at most: Gemini x2, OpenAI x2, premium x1.
+
+- Keys are read server-side only (`src/services/keySafety.test.ts` proves they never reach the
+  browser bundle).
+- The daily cap gates paid upgrades only; it never hides or discards a free identity already in
+  hand, and a cap-blocked scan shows its real reason.
+- A researched code is paid for once: the shared decode cache replays it for $0 afterward
+  (`docs/DECODER_ARCHITECTURE.md` section 2b).
+- Do not run uncontrolled live loops; one manual scan is the intended scope of this checklist.

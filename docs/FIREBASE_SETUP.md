@@ -52,8 +52,8 @@ NEXT_PUBLIC_FIREBASE_APP_ID=demo-app-id
 
 ## Connecting a REAL cloud project (Phase 2, with owner approval)
 The real production project already exists: id `smart-inventory-scanner-app` (aliased `prod` in
-`.firebaserc`; confirmed by `scripts/cloud-smoke.mjs`, the `EXPECTED_PROJECT` guard in the seed/import
-scripts, and `coordination/PROD_CLEANUP_PLAN.md`).
+`.firebaserc`; confirmed by `scripts/cloud-smoke.mjs` and the `EXPECTED_PROJECT` guard in the
+seed/import scripts).
 1. Project `smart-inventory-scanner-app` already exists in the Firebase console; do not recreate it.
    (If ever starting a brand-new project instead, use `firebase projects:create`.)
 2. Add a Web App; copy its config into the `NEXT_PUBLIC_FIREBASE_*` vars and set
