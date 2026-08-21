@@ -153,6 +153,22 @@ export class FirebaseSyncTarget implements SyncTarget {
           } as FirebaseSyncResult;
         }
 
+        // Decision clock (retry-reordering guard): a review-decision write that transiently failed and
+        // retries on a LATER drain pass must never overwrite a newer decision that already landed. The
+        // client-side merge (mergeReloadedReviews) only protects THIS device's local rows; the server
+        // doc is what every other device reloads, so the recency check has to live in this transaction.
+        // A stale item still settles (marker written, ok:true) so the queue never wedges on it.
+        let staleReviewDecision = false;
+        if (item.operation === "SAVE_UNKNOWN_SCAN") {
+          const incoming = item.payload as UnknownCodeReview;
+          const reviewSnap = await tx.get(sub(COLLECTIONS.unknownCodeReviews, incoming.id));
+          if (reviewSnap.exists()) {
+            const existingAt = (reviewSnap.data() as { decisionUpdatedAt?: string }).decisionUpdatedAt ?? "";
+            const incomingAt = incoming.decisionUpdatedAt ?? "";
+            staleReviewDecision = existingAt > incomingAt;
+          }
+        }
+
         let countRef: ReturnType<typeof sub> | null = null;
         let prevQty = 0;
         let prevScanIds: string[] = [];
@@ -182,6 +198,7 @@ export class FirebaseSyncTarget implements SyncTarget {
             break;
           }
           case "SAVE_UNKNOWN_SCAN": {
+            if (staleReviewDecision) break; // stale retry: settle the item, keep the newer decision
             const r = item.payload as UnknownCodeReview;
             tx.set(sub(COLLECTIONS.unknownCodeReviews, r.id), withoutUndefined({ ...r, businessId: bid, createdAt: serverTimestamp() }));
             break;
