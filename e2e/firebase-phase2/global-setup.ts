@@ -91,7 +91,11 @@ async function seedTwoAccountTenant(db: Firestore, fixture: AccountTenantFixture
     source: "manual",
   });
 
-  const nowIso = `2026-08-20T12:00:0${fixture.label === "A" ? "1" : "2"}.000Z`;
+  // Relative to the run clock, NOT a fixed literal: the scan page's auto-session only adopts an
+  // active session within its 30-minute inactivity window. A hardcoded startedAt made this seed
+  // (and every spec asserting the seeded session's counts) pass only within ~30 minutes of that
+  // literal wall-clock time and fail deterministically forever after.
+  const nowIso = new Date(Date.now() - (fixture.label === "A" ? 2000 : 1000)).toISOString();
   await db.doc(`businesses/${fixture.businessId}/countSessions/${fixture.sessionId}`).set({
     id: fixture.sessionId,
     businessId: fixture.businessId,

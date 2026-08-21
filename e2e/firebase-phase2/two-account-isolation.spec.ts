@@ -58,6 +58,10 @@ async function signIn(page: Page, fixture: AccountTenantFixture) {
   await expect(page.getByTestId("business-context-banner")).toHaveCount(0);
   await expect(page.getByTestId("business-loading")).toHaveCount(0);
   await expect(page.getByTestId("scanner-input")).toBeVisible();
+  // The scanner input renders before loadBusinessData resolves; on a slow machine the seeded tenant
+  // rows hydrate after the assertions' default 5s timeout. Gate on businessDataLoaded so the first
+  // tenant assertion never races cloud hydration.
+  await waitForBusinessReady(page, fixture.businessId);
 }
 
 async function signOutVisibly(page: Page) {
