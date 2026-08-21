@@ -136,6 +136,7 @@ export interface UnknownCodeReview {
   reviewedBy?: string;
   createdAt?: unknown;
   reviewedAt?: unknown;
+  decisionUpdatedAt?: unknown;
 }
 
 export interface Settings {

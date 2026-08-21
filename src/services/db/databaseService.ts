@@ -16,7 +16,7 @@
 // data, cannot audit, and has no shared catalog degrades - it does not fail.
 
 import type { SyncTarget } from "@/services/db/syncTarget";
-import type { Product, Alias, InventorySession, InventoryCount, ScanEvent } from "@/types";
+import type { Product, Alias, InventorySession, InventoryCount, ScanEvent, UnknownCodeReview } from "@/types";
 import type { CatalogEntry } from "@/services/catalog/catalogTypes";
 import type { AuditEventInput } from "@/services/audit/audit";
 
@@ -27,6 +27,7 @@ export interface LoadedBusinessData {
   sessions: InventorySession[];
   counts: InventoryCount[];
   scanEvents?: ScanEvent[];
+  reviews?: UnknownCodeReview[];
 }
 
 export interface DatabaseService {

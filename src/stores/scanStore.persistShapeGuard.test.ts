@@ -60,6 +60,44 @@ describe("LAYER A: sanitizePersistedScanShape coerces wrong-shape collections to
     expect(sanitized.aliases).toEqual([{ id: "a1" }]);
   });
 
+  it("keeps exact top-level array references when valid nested-array fields need no repair", () => {
+    const products = [{ id: "p1", vendorCodes: ["v1"], aliases: ["a1"] }];
+    const scanFeed = [{ id: "e1", normalizedCandidates: [] }];
+    const finalCounts = [{ id: "c1", scanEventIds: [], aliasesSeen: [], appliedIdempotencyKeys: [] }];
+    const needsReviewQueue = [{
+      id: "r1",
+      normalizedCandidates: [],
+      suggestedAliases: [],
+      sourceUrls: [],
+      verifiedFacts: [],
+      guesses: [],
+    }];
+
+    const sanitized = sanitizePersistedScanShape({ products, scanFeed, finalCounts, needsReviewQueue });
+
+    expect(sanitized.products).toBe(products);
+    expect(sanitized.scanFeed).toBe(scanFeed);
+    expect(sanitized.finalCounts).toBe(finalCounts);
+    expect(sanitized.needsReviewQueue).toBe(needsReviewQueue);
+  });
+
+  it("does not log a live wrong-shape repair for a valid store during processScan", () => {
+    useScanStore.setState({
+      products: [],
+      aliases: [],
+      scanFeed: [],
+      finalCounts: [],
+      needsReviewQueue: [],
+      pendingSyncQueue: [],
+      settings: DEFAULT_SETTINGS,
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    useScanStore.getState().processScan("049000028905");
+
+    expect(error.mock.calls.some((call) => String(call[0]).includes("wrong-shape field(s)"))).toBe(false);
+  });
+
   it("tolerates a non-object input (never throws)", () => {
     expect(() => sanitizePersistedScanShape(null)).not.toThrow();
     expect(() => sanitizePersistedScanShape("garbage")).not.toThrow();

@@ -143,6 +143,108 @@ describe("scanStore Firebase backend wiring (Loop 2)", () => {
     expect(ev?.matchedProductId).toBe("p-loaded");
   });
 
+  it("setBusinessContext keeps same-tenant pending products and aliases when the remote snapshot is stale", async () => {
+    const pendingProduct = {
+      id: "pending-product", businessId: "biz-real", name: "Pending Local Product", brand: "", category: "", specsShort: "", specsFull: "",
+      primarySku: "", primaryBarcode: "111111111111", gtin: "", upc: "111111111111", ean: "", vendorCodes: [], aliases: ["111111111111"], imageUrl: "",
+      productUrl: "", location: "", notes: "", status: "active", source: "human_review", confidence: 1, verified: true,
+      createdAt: "t", updatedAt: "t-local", createdBy: "human", updatedBy: "human",
+    } as Product;
+    const pendingAlias = {
+      id: "pending-alias", businessId: "biz-real", productId: "pending-product", rawCodeExample: "111111111111",
+      cleanCode: "111111111111", normalizedCode: "111111111111", aliasType: "upc", source: "human_review",
+      confidence: 1, approved: true, createdAt: "t", updatedAt: "t-local", createdBy: "human", lastSeenAt: "t",
+      syncStatus: "pending", idempotencyKey: "k-pending-alias",
+    } as Alias;
+    const remoteProduct = {
+      ...pendingProduct,
+      id: "remote-product",
+      name: "Remote Product",
+      primaryBarcode: "222222222222",
+      upc: "222222222222",
+      aliases: ["222222222222"],
+      updatedAt: "t-remote",
+      syncStatus: "synced",
+    } as Product;
+    const remoteAlias = {
+      ...pendingAlias,
+      id: "remote-alias",
+      productId: "remote-product",
+      rawCodeExample: "222222222222",
+      cleanCode: "222222222222",
+      normalizedCode: "222222222222",
+      syncStatus: "synced",
+      idempotencyKey: "k-remote-alias",
+    } as Alias;
+
+    const store = createTestScanStore({
+      db: new FakeAsyncTarget(),
+      cloudBackend: true,
+      loadBusinessData: async () => ({ products: [remoteProduct], aliases: [remoteAlias], sessions: [], counts: [] }),
+    });
+    store.setState({
+      businessId: "biz-real",
+      userId: "user-real",
+      businessContextReady: true,
+      businessDataLoaded: true,
+      products: [pendingProduct],
+      aliases: [pendingAlias],
+      pendingSyncQueue: [
+        { id: "q-product", businessId: "biz-real", sessionId: "session-1", entityType: "Product", entityId: "pending-product", operation: "SAVE_PRODUCT", payload: pendingProduct, idempotencyKey: "k-pending-product", retryCount: 0, lastError: null, createdAt: "t", updatedAt: "t", scanEventId: null, status: "pending" } as never,
+        { id: "q-alias", businessId: "biz-real", sessionId: "session-1", entityType: "Alias", entityId: "pending-alias", operation: "RESOLVE_ALIAS", payload: pendingAlias, idempotencyKey: "k-pending-alias", retryCount: 0, lastError: null, createdAt: "t", updatedAt: "t", scanEventId: null, status: "pending" } as never,
+      ],
+    });
+
+    store.getState().setBusinessContext("biz-real", "user-real");
+    await flush();
+
+    expect(store.getState().products.map((p) => p.id).sort()).toEqual(["pending-product", "remote-product"]);
+    expect(store.getState().aliases.map((a) => a.id).sort()).toEqual(["pending-alias", "remote-alias"]);
+    expect(store.getState().products.find((p) => p.id === "pending-product")?.name).toBe("Pending Local Product");
+    expect(store.getState().aliases.find((a) => a.id === "pending-alias")?.productId).toBe("pending-product");
+  });
+
+  it("setBusinessContext never merges the prior tenant's pending products or aliases into a real tenant switch", async () => {
+    const oldProduct = {
+      id: "old-product", businessId: "biz-old", name: "Old Tenant Product", brand: "", category: "", specsShort: "", specsFull: "",
+      primarySku: "", primaryBarcode: "333333333333", gtin: "", upc: "333333333333", ean: "", vendorCodes: [], aliases: ["333333333333"], imageUrl: "",
+      productUrl: "", location: "", notes: "", status: "active", source: "human_review", confidence: 1, verified: true,
+      createdAt: "t", updatedAt: "t", createdBy: "human", updatedBy: "human",
+    } as Product;
+    const oldAlias = {
+      id: "old-alias", businessId: "biz-old", productId: "old-product", rawCodeExample: "333333333333",
+      cleanCode: "333333333333", normalizedCode: "333333333333", aliasType: "upc", source: "human_review",
+      confidence: 1, approved: true, createdAt: "t", updatedAt: "t", createdBy: "human", lastSeenAt: "t",
+      syncStatus: "pending", idempotencyKey: "k-old-alias",
+    } as Alias;
+    const newProduct = { ...oldProduct, id: "new-product", businessId: "biz-real", name: "New Tenant Product" } as Product;
+    const newAlias = { ...oldAlias, id: "new-alias", businessId: "biz-real", productId: "new-product" } as Alias;
+
+    const store = createTestScanStore({
+      db: new FakeAsyncTarget(),
+      cloudBackend: true,
+      loadBusinessData: async () => ({ products: [newProduct], aliases: [newAlias], sessions: [], counts: [] }),
+    });
+    store.setState({
+      businessId: "biz-old",
+      userId: "user-old",
+      businessContextReady: true,
+      businessDataLoaded: true,
+      products: [oldProduct],
+      aliases: [oldAlias],
+      pendingSyncQueue: [
+        { id: "q-old-product", businessId: "biz-old", sessionId: "session-1", entityType: "Product", entityId: "old-product", operation: "SAVE_PRODUCT", payload: oldProduct, idempotencyKey: "k-old-product", retryCount: 0, lastError: null, createdAt: "t", updatedAt: "t", scanEventId: null, status: "pending" } as never,
+        { id: "q-old-alias", businessId: "biz-old", sessionId: "session-1", entityType: "Alias", entityId: "old-alias", operation: "RESOLVE_ALIAS", payload: oldAlias, idempotencyKey: "k-old-alias", retryCount: 0, lastError: null, createdAt: "t", updatedAt: "t", scanEventId: null, status: "pending" } as never,
+      ],
+    });
+
+    store.getState().setBusinessContext("biz-real", "user-real");
+    await flush();
+
+    expect(store.getState().products.map((p) => p.id)).toEqual(["new-product"]);
+    expect(store.getState().aliases.map((a) => a.id)).toEqual(["new-alias"]);
+  });
+
   it("the mock/local path is unchanged: synchronous drain, no business context required", () => {
     const store = createTestScanStore(); // default mock, cloudBackend false
     expect(store.getState().businessContextReady).toBe(true);

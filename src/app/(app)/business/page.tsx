@@ -10,7 +10,7 @@ import {
   signOut,
   type Membership,
 } from "@/lib/auth";
-import { setSelectedBusinessId } from "@/lib/selectedBusiness";
+import { SELECTED_BUSINESS_CHANGED_EVENT, setSelectedBusinessId } from "@/lib/selectedBusiness";
 import { useRouter } from "next/navigation";
 import { useScanStore } from "@/stores/scanStore";
 
@@ -192,7 +192,13 @@ export default function BusinessPage() {
               <button
                 type="button"
                 data-testid={`select-business-${m.businessId}`}
-                onClick={() => { setSelectedBusinessId(m.businessId); router.push("/scan"); }}
+                onClick={() => {
+                  setSelectedBusinessId(m.businessId);
+                  window.dispatchEvent(
+                    new CustomEvent(SELECTED_BUSINESS_CHANGED_EVENT, { detail: { businessId: m.businessId } }),
+                  );
+                  router.push("/scan");
+                }}
                 className="rounded bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700"
               >
                 Select

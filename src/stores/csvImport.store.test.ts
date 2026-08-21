@@ -20,7 +20,42 @@ class RecordingTarget implements SyncTarget {
   reset() {}
 }
 
+class StrictIdempotencyTarget implements SyncTarget {
+  readonly applied: PendingSyncItem[] = [];
+  readonly products = new Map<string, Record<string, unknown>>();
+  private readonly payloadByKey = new Map<string, string>();
+
+  async apply(item: PendingSyncItem): Promise<SyncResult> {
+    this.applied.push(item);
+    const payload = JSON.stringify(item.payload);
+    const previous = this.payloadByKey.get(item.idempotencyKey);
+    if (previous !== undefined) {
+      if (previous === payload) return { ok: true, alreadyApplied: true };
+      return {
+        ok: false,
+        alreadyApplied: false,
+        error: "idempotency_conflict",
+        errorCode: "idempotency_conflict",
+        retryable: false,
+      };
+    }
+    this.payloadByKey.set(item.idempotencyKey, payload);
+    if (item.operation === "SAVE_PRODUCT") {
+      const product = item.payload as Record<string, unknown>;
+      this.products.set(item.entityId, { ...product });
+    }
+    return { ok: true, alreadyApplied: false };
+  }
+
+  setFailure() {}
+  reset() {}
+}
+
 const flush = async () => { await new Promise((r) => setTimeout(r, 0)); };
+const waitForQueueToDrain = async (store: ReturnType<typeof createTestScanStore>) => {
+  for (let i = 0; i < 50 && store.getState().pendingSyncQueue.length > 0; i += 1) await flush();
+  expect(store.getState().pendingSyncQueue).toHaveLength(0);
+};
 const emptyLoader = async () => ({ products: [], aliases: [], sessions: [] as InventorySession[], counts: [] as InventoryCount[] });
 
 describe("Loop 5 CSV import (store)", () => {
@@ -73,6 +108,33 @@ describe("Loop 5 CSV import (store)", () => {
     const products = store.getState().products;
     expect(products).toHaveLength(1); // still exactly one product for this barcode, not two
     expect(products[0].name).toBe("B"); // descriptive field refreshed from the re-import row
+  });
+
+  it("versions refreshed SAVE_PRODUCT keys by payload so changed CSV content reaches a strict durable target", async () => {
+    const target = new StrictIdempotencyTarget();
+    const store = createTestScanStore({ db: target, cloudBackend: true, loadBusinessData: emptyLoader, audit: () => {} });
+    store.getState().setBusinessContext("biz-real", "user-real");
+    await flush();
+
+    store.getState().importProductsCsv("name,brand,barcode\nOriginal Name,Original Brand,111222333");
+    await waitForQueueToDrain(store);
+    const productId = store.getState().products[0].id;
+    const firstWrite = target.applied.find((entry) => entry.operation === "SAVE_PRODUCT" && entry.entityId === productId);
+    expect(firstWrite).toBeDefined();
+    expect(target.products.get(productId)?.name).toBe("Original Name");
+
+    store.getState().importProductsCsv("name,brand,barcode\nRefreshed Name,Refreshed Brand,111222333");
+    await waitForQueueToDrain(store);
+
+    const productWrites = target.applied.filter(
+      (entry) => entry.operation === "SAVE_PRODUCT" && entry.entityId === productId,
+    );
+    expect(productWrites).toHaveLength(2);
+    expect(productWrites[1].idempotencyKey).not.toBe(firstWrite!.idempotencyKey);
+    expect(target.products.get(productId)).toMatchObject({
+      name: "Refreshed Name",
+      brand: "Refreshed Brand",
+    });
   });
 
   it("reports a genuine conflict when the row's sku points at a DIFFERENT existing product than the barcode owner", async () => {

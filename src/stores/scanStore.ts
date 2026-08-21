@@ -35,7 +35,8 @@ import type { DatabaseService } from "@/services/db/databaseService";
 import { resolveScanToProductTiered } from "@/services/aliasMatcher";
 import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/services/productDedup";
 import { incrementInventoryCount } from "@/services/inventory";
-import { buildIdempotencyKey } from "@/services/idempotency";
+import { buildIdempotencyKey, stableIdempotencyFingerprint } from "@/services/idempotency";
+import { versionReviewDecision } from "@/services/reviewDecisionVersion";
 import { MockDb, getMockDb, type IncrementPayload, type SyncResult } from "@/services/mockDb";
 import { FirebaseSyncTarget } from "@/services/db/firebase/firebaseSyncTarget";
 import { loadBusinessData } from "@/services/db/firebase/businessDataLoader";
@@ -106,6 +107,8 @@ import {
 import { getOrCreateDeviceId } from "@/services/deviceIdentity";
 import { shouldReuseSession, buildAutoSessionName } from "@/services/sessions/autoSession";
 import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
+import { planSyncBatch } from "@/services/syncBatchPlanner";
+import { mergeReloadedProductsAndAliases, mergeReloadedReviews } from "@/services/reloadMergePolicy";
 import { safeStructuredFieldsFor } from "@/services/polish/structuredFields";
 import { backfillProducts } from "@/services/polish/backfillProducts";
 import type { AiStatus } from "@/types";
@@ -1106,6 +1109,7 @@ function makeQueueItem(params: {
   payload: unknown;
   idempotencyKey: string;
   scanEventId: string | null;
+  syncLane?: PendingSyncItem["syncLane"];
 }): PendingSyncItem {
   return {
     id: params.idFactory(),
@@ -1122,6 +1126,7 @@ function makeQueueItem(params: {
     updatedAt: params.now(),
     idempotencyKey: params.idempotencyKey,
     scanEventId: params.scanEventId,
+    syncLane: params.syncLane,
   };
 }
 
@@ -1689,6 +1694,44 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       get().syncPending();
     };
 
+    const nextReviewDecisionAt = (review: UnknownCodeReview, proposedAt: string) => {
+      if (!review.decisionUpdatedAt || proposedAt > review.decisionUpdatedAt) return proposedAt;
+      const previousMs = Date.parse(review.decisionUpdatedAt);
+      return Number.isFinite(previousMs) ? new Date(previousMs + 1).toISOString() : proposedAt;
+    };
+
+    const buildReviewDecisionWrite = (review: UnknownCodeReview, decisionAt: string) => {
+      const versioned = versionReviewDecision(review, decisionAt);
+      return {
+        review: versioned,
+        item: makeQueueItem({
+          idFactory,
+          now,
+          businessId: versioned.businessId,
+          sessionId: versioned.sessionId,
+          entityType: "UnknownCodeReview",
+          entityId: versioned.id,
+          operation: "SAVE_UNKNOWN_SCAN",
+          payload: versioned,
+          idempotencyKey: versioned.idempotencyKey,
+          scanEventId: null,
+        }),
+      };
+    };
+
+    const persistReviewDecision = (reviewId: string, decisionAt?: string, allowOpen = false) => {
+      const current = get().needsReviewQueue.find((review) => review.id === reviewId);
+      if (!current || (!allowOpen && current.status !== "resolved" && current.status !== "ignored")) return;
+      const at = decisionAt ?? current.decisionUpdatedAt ?? current.resolvedAt ?? now();
+      const write = buildReviewDecisionWrite(current, at);
+      set((state) => ({
+        needsReviewQueue: state.needsReviewQueue.map((review) => review.id === reviewId ? write.review : review),
+      }));
+      if (!get().pendingSyncQueue.some((item) => item.idempotencyKey === write.item.idempotencyKey)) {
+        enqueueAndSync([write.item]);
+      }
+    };
+
     // Live decode is tenant-scoped. Mock/E2E mode remains token-free.
     const aiRequestAuth = async (businessId: string): Promise<{ idToken?: string; businessId?: string }> => {
       if (!cloudBackend) return {};
@@ -1703,7 +1746,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
     const syncDecodedState = (reviewId: string) => {
       if (!cloudBackend) return;
       const state = get();
-      const review = state.needsReviewQueue.find((item) => item.id === reviewId);
+      let review = state.needsReviewQueue.find((item) => item.id === reviewId);
       if (!review || !state.businessContextReady || !state.sessionId) return;
       // CLASS FIX (Codex final verdict finding 2, 2026-08-04): a repeat scan of the SAME unknown code
       // while its first scan's decode is still in flight reuses the still-open review (scanStore.ts:
@@ -1713,10 +1756,22 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       // otherwise a sibling's decoded status never reaches the backend, and a reload/rehydrate (e.g. the
       // session timeline reading fresh ScanEvents via getScanEventsBySession) resurrects its stale
       // "decoding" badge even though the local count was always correct.
+      const reviewSessionId = review.sessionId;
+      const reviewCleanCode = review.cleanCode;
       const events = state.scanFeed.filter(
-        (item) => item.sessionId === review.sessionId && item.cleanCode === review.cleanCode,
+        (item) => item.sessionId === reviewSessionId && item.cleanCode === reviewCleanCode,
       );
       const items: PendingSyncItem[] = [];
+      if (review.status === "resolved" || review.status === "ignored") {
+        const write = buildReviewDecisionWrite(review, review.decisionUpdatedAt ?? review.resolvedAt ?? now());
+        review = write.review;
+        set((current) => ({
+          needsReviewQueue: current.needsReviewQueue.map((item) => item.id === reviewId ? write.review : item),
+        }));
+        if (!state.pendingSyncQueue.some((item) => item.idempotencyKey === write.item.idempotencyKey)) {
+          items.push(write.item);
+        }
+      }
       const syncedProductIds = new Set<string>();
       for (const event of events) {
         const product = state.products.find((item) => item.id === event.matchedProductId);
@@ -1731,6 +1786,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
               entityType: "Product", entityId: product.id, operation: "SAVE_PRODUCT", payload: product,
               idempotencyKey: buildIdempotencyKey(state.businessId, event.sessionId, `${product.id}:decode:${productVersion}`, "SAVE_PRODUCT"), scanEventId: null,
+              syncLane: "independent_product",
             }),
           );
         }
@@ -1783,12 +1839,6 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       const target = existingCanonical ?? provisional;
       const targetId = target.id;
       const settledAt = now();
-      const reviewKey = buildIdempotencyKey(
-        state.businessId,
-        review.sessionId,
-        `${review.id}:trusted-exact:${canonicalId}`,
-        "SAVE_UNKNOWN_SCAN",
-      );
       const settledProduct: Product = {
         ...target,
         name: result.productName?.trim() || target.name,
@@ -1835,7 +1885,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             }
           : event,
       );
-      const settledReview: UnknownCodeReview = {
+      const settledReview = versionReviewDecision({
         ...review,
         suggestedProductName: settledProduct.name,
         suggestedBrand: settledProduct.brand,
@@ -1866,8 +1916,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         resolvedBy: "system:trusted_exact",
         resolutionAction: "trusted_exact",
         syncStatus: "pending",
-        idempotencyKey: reviewKey,
-      };
+        idempotencyKey: review.idempotencyKey,
+      }, settledAt);
 
       let finalCounts = state.finalCounts;
       const transferOps = provisionalId !== targetId
@@ -1934,7 +1984,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         persistOps.push(makeQueueItem({
           idFactory, now, businessId: state.businessId, sessionId: review.sessionId,
           entityType: "UnknownCodeReview", entityId: review.id, operation: "SAVE_UNKNOWN_SCAN", payload: settledReview,
-          idempotencyKey: reviewKey, scanEventId: matchingEvent?.id ?? null,
+          idempotencyKey: settledReview.idempotencyKey, scanEventId: matchingEvent?.id ?? null,
         }));
       }
       persistOps.push(...settledEventOps);
@@ -2032,6 +2082,63 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
     let businessLoadGeneration = 0;
     const queueItemIdentity = (item: PendingSyncItem) =>
       `${item.businessId}\u0000${item.id}\u0000${item.idempotencyKey}`;
+    const PRODUCT_DRAIN_CONCURRENCY = 4;
+    const PHYSICAL_PRODUCT_APPLY_STOPPED = Symbol("physical-product-apply-stopped");
+    type PhysicalProductApply = {
+      result: Promise<SyncResult>;
+      settlement: Promise<void>;
+    };
+    // Logical timeouts and watchdog supersession cannot cancel a Firestore transaction already handed
+    // to db.apply. Keep physical ownership in this store closure so every drain pass observes the same
+    // four-slot ceiling, and so retries join/wait for an unresolved same-item/same-product write instead
+    // of overtaking it. Entries leave these registries only when the underlying promise truly settles.
+    const physicalProductApplies = new Map<string, PhysicalProductApply>();
+    const physicalProductApplyByEntity = new Map<string, PhysicalProductApply>();
+    const physicalProductKey = (item: PendingSyncItem) => `${item.businessId}\u0000${item.entityId}`;
+    const applyIndependentProductPhysically = async (
+      item: PendingSyncItem,
+      canStart: () => boolean,
+    ): Promise<SyncResult | typeof PHYSICAL_PRODUCT_APPLY_STOPPED> => {
+      const identity = queueItemIdentity(item);
+      const productKey = physicalProductKey(item);
+      while (true) {
+        const sameItem = physicalProductApplies.get(identity);
+        if (sameItem) return sameItem.result;
+
+        const sameProduct = physicalProductApplyByEntity.get(productKey);
+        if (sameProduct) {
+          await sameProduct.settlement;
+          if (!canStart()) return PHYSICAL_PRODUCT_APPLY_STOPPED;
+          continue;
+        }
+
+        if (physicalProductApplies.size >= PRODUCT_DRAIN_CONCURRENCY) {
+          await Promise.race([...physicalProductApplies.values()].map((entry) => entry.settlement));
+          if (!canStart()) return PHYSICAL_PRODUCT_APPLY_STOPPED;
+          continue;
+        }
+
+        if (!canStart()) return PHYSICAL_PRODUCT_APPLY_STOPPED;
+        const result = Promise.resolve().then(() => db.apply(item));
+        const settlement = result
+          .then((logicalResult) => logicalResult.physicalSettlement)
+          .then(() => undefined, () => undefined)
+          .finally(() => {
+            if (physicalProductApplies.get(identity)?.result === result) physicalProductApplies.delete(identity);
+            if (physicalProductApplyByEntity.get(productKey)?.result === result) {
+              physicalProductApplyByEntity.delete(productKey);
+            }
+          });
+        const entry: PhysicalProductApply = { result, settlement };
+        physicalProductApplies.set(identity, entry);
+        physicalProductApplyByEntity.set(productKey, entry);
+        // A logical timeout may stop awaiting this promise. Keep a rejection observer attached so a
+        // later physical failure is never reported as an unhandled rejection while cleanup still runs.
+        void result.catch(() => {});
+        void settlement.catch(() => {});
+        return result;
+      }
+    };
     const syncPendingCloud = (force: boolean): Promise<void> => {
       const state = get();
       if (
@@ -2145,30 +2252,42 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         unflushedCount = 0;
       };
 
-      for (const item of batch) {
+      const contextStillActive = () => {
+        if (activeDrainToken !== token) return false;
+        const live = get();
+        return (
+          live.businessContextReady &&
+          live.businessId === activeBusinessId &&
+          live.userId === activeUserId
+        );
+      };
+
+      const applySyncItem = async (
+        item: PendingSyncItem,
+        independentProductLane = false,
+      ): Promise<"applied" | "failed" | "stopped"> => {
         // Token mismatch stops SENDING new applies; whatever already succeeded is saved by the flush
         // below regardless (see flushProgress comment).
-        if (activeDrainToken !== token) break;
-        const live = get();
-        if (
-          !live.businessContextReady ||
-          live.businessId !== activeBusinessId ||
-          live.userId !== activeUserId
-        ) {
-          break;
-        }
+        if (!contextStillActive()) return "stopped";
         const itemIdentity = queueItemIdentity(item);
         let res;
+        let logicalAttemptOpen = true;
         try {
           let timeoutId: ReturnType<typeof setTimeout> | undefined;
           try {
             res = await Promise.race([
-              db.apply(item),
+              independentProductLane
+                ? applyIndependentProductPhysically(
+                    item,
+                    () => logicalAttemptOpen && contextStillActive(),
+                  )
+                : db.apply(item),
               new Promise<never>((_, reject) => {
                 timeoutId = setTimeout(() => reject(new Error(`cloud sync apply timed out after ${CLOUD_APPLY_TIMEOUT_MS}ms`)), CLOUD_APPLY_TIMEOUT_MS);
               }),
             ]);
           } finally {
+            logicalAttemptOpen = false;
             if (timeoutId !== undefined) clearTimeout(timeoutId);
           }
         } catch (e) {
@@ -2179,6 +2298,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             retryable: true,
           };
         }
+        if (res === PHYSICAL_PRODUCT_APPLY_STOPPED) return "stopped";
         if (res.ok) {
           // A genuine successful apply is forward progress: the wedged-pass watchdog must not fire
           // regardless of total pass age as long as items keep actually landing. An error/timeout is NOT
@@ -2203,6 +2323,38 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }
         unflushedCount += 1;
         if (unflushedCount >= PROGRESS_FLUSH_CHUNK) flushProgress();
+        return res.ok ? "applied" : "failed";
+      };
+
+      const { independentProductGroups, serialItems } = planSyncBatch(batch);
+      if (independentProductGroups.length > 0) {
+        let nextGroupIndex = 0;
+        const runProductWorker = async () => {
+          while (contextStillActive()) {
+            const group = independentProductGroups[nextGroupIndex];
+            nextGroupIndex += 1;
+            if (!group) return;
+            for (const item of group) {
+              const result = await applySyncItem(item, true);
+              if (result !== "applied") break;
+            }
+          }
+        };
+        await Promise.all(
+          Array.from({ length: Math.min(PRODUCT_DRAIN_CONCURRENCY, independentProductGroups.length) }, () =>
+            runProductWorker(),
+          ),
+        );
+      }
+
+      const blockedSerialProductIds = new Set<string>();
+      for (const item of serialItems) {
+        if (item.operation === "SAVE_PRODUCT" && blockedSerialProductIds.has(item.entityId)) continue;
+        const result = await applySyncItem(item);
+        if (result === "stopped") break;
+        if (result === "failed" && item.operation === "SAVE_PRODUCT") {
+          blockedSerialProductIds.add(item.entityId);
+        }
       }
       flushProgress();
     };
@@ -2279,10 +2431,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // REFRESH GUARD (data-loss fix): a page refresh re-resolves the SAME (businessId, userId)
         // this store already holds and calls setBusinessContext again (BusinessContextGate runs on
         // every mount). That is NOT a tenant switch, so it must never wipe scanFeed/finalCounts/
-        // needsReviewQueue/settings/firstScanAt/recentLocations - loadBusinessData can never restore
-        // scanFeed/needsReviewQueue (Firestore has no collections for them), so wiping here loses
-        // unsynced scans and open reviews on every reload. Only an ACTUAL tenant/user change (the
-        // isolation law below) replaces tenant state.
+        // needsReviewQueue/settings/firstScanAt/recentLocations. The cloud loader can restore durable
+        // feed/review rows, but it cannot restore this device's unsynced local work, so wiping first
+        // would still lose scans and open reviews on reload. Only an ACTUAL tenant/user change (the
+        // isolation law below) replaces tenant state before loading the new tenant.
         const contextState = get();
         const sameTenant = contextState.businessId === businessId && contextState.userId === userId;
         // Bug #41 (data-loss race): a scan processed while THIS session still held the placeholder
@@ -2389,9 +2541,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           });
         } else {
           clearTrustedExactProbes();
-          // Isolation: settings/needsReviewQueue/scanFeed are NOT returned by loadBusinessData and
-          // finalCounts linger when no session restores, so a context switch must REPLACE all four or
-          // the previous tenant's rows bleed through (two users OR one user with two businesses).
+          // Isolation: every tenant-owned local surface must be cleared synchronously before the async
+          // loader restores the selected tenant. Otherwise the prior tenant is briefly visible, and
+          // settings or a surface absent from the remote result can linger indefinitely.
           const cleared = emptyTenantState();
           set({
             businessId,
@@ -2435,11 +2587,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }
         const loader = deps.loadBusinessData;
         if (cloudBackend && loader) {
-          // Load THIS business's products/aliases from Firestore (replace, never merge another tenant's
-          // data), then drain anything queued. Failure is surfaced, not fatal to the local UI. The
-          // pending-aware finalCounts merge below keeps this device's unsynced increments authoritative,
-          // so no pre-drain is needed: a local row still referenced by an unsynced INCREMENT_COUNT queue
-          // item wins over the remote snapshot until it syncs (proven by refreshWipe tests a3/a4).
+          // Load THIS business's products/aliases from Firestore (pending-aware and never across
+          // tenant switches), then drain anything queued. Failure is surfaced, not fatal to the local
+          // UI. The pending-aware finalCounts merge below keeps this device's unsynced increments
+          // authoritative, so no pre-drain is needed: a local row still referenced by an unsynced
+          // INCREMENT_COUNT queue item wins over the remote snapshot until it syncs.
           void (async () => {
             try {
               const data = await loader(businessId, userId);
@@ -2458,7 +2610,27 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               const sessions = [...data.sessions].sort(byStartedAtDesc);
               const restored = sessions.find((s) => s.status === "active") ?? sessions[0] ?? null;
               set((cur) => {
-                const next: Partial<ScanState> = { products: data.products, aliases: data.aliases, businessDataLoaded: true };
+                const mergedIdentities = mergeReloadedProductsAndAliases({
+                  businessId,
+                  localProducts: cur.products,
+                  remoteProducts: data.products,
+                  localAliases: cur.aliases,
+                  remoteAliases: data.aliases,
+                  pendingSyncQueue: cur.pendingSyncQueue,
+                });
+                const next: Partial<ScanState> = {
+                  products: mergedIdentities.products,
+                  aliases: mergedIdentities.aliases,
+                  needsReviewQueue: Array.isArray(data.reviews)
+                    ? mergeReloadedReviews({
+                        businessId,
+                        localReviews: cur.needsReviewQueue,
+                        remoteReviews: data.reviews,
+                        pendingSyncQueue: cur.pendingSyncQueue,
+                      })
+                    : cur.needsReviewQueue,
+                  businessDataLoaded: true,
+                };
                 if (restored) {
                   // Same-tenant refresh guard (part 2): the synchronous guard above preserves the local
                   // feed/counts, so this restore must not quietly re-introduce the wipe by REPLACING
@@ -3078,31 +3250,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           return;
         }
         set((cur) => {
-          // Products/aliases: upsert by id over the existing arrays (additive - a product this
-          // device does not know about yet is ADDED; an existing id is refreshed to the remote's
-          // version, since products/aliases are not counted-quantity state and always safe to take
-          // the server's word for, matching the trust model everywhere else in this app) - EXCEPT a
-          // product this device still has a pending (unsynced) SAVE_PRODUCT edit for. Mirrors the
-          // finalCounts pending-queue exclusion below: an unsynced local edit is authoritative until it
-          // syncs, otherwise refreshFromCloud would clobber a human's correctProduct edit with the stale
-          // remote value that has not seen it yet (Task 1 refresh-race guard).
           const tenantPendingQueue = cur.pendingSyncQueue.filter((it) => it.businessId === businessId);
-          const pendingProductIds = new Set(
-            tenantPendingQueue.filter((it) => it.operation === "SAVE_PRODUCT").map((it) => it.entityId),
-          );
-          const productsById = new Map(cur.products.map((p) => [p.id, p]));
-          for (const p of data.products) {
-            if (pendingProductIds.has(p.id)) continue; // guard: unsynced local edit wins
-            // Delete guard (reviewed defect 2026-07-22): a locally-ARCHIVED product is a delete this
-            // device performed; a remote snapshot loaded before the archive op drained still says
-            // "active". Taking the server's word here would silently resurrect the deleted product
-            // (and defeat the archived-count exclusion below). Deletes are local-authoritative; the
-            // only un-archive path is this device's own undoDeleteProduct.
-            if (productsById.get(p.id)?.status === "archived" && p.status !== "archived") continue;
-            productsById.set(p.id, p);
-          }
-          const aliasesById = new Map(cur.aliases.map((a) => [a.id, a]));
-          for (const a of data.aliases) aliasesById.set(a.id, a);
+          // Products/aliases: one shared pending-aware reload policy with setBusinessContext.
+          // Remote rows replace non-pending local rows and add remote-only rows, but this device's
+          // still-unsynced SAVE_PRODUCT / RESOLVE_ALIAS rows remain authoritative until they drain.
+          // A locally archived product also stays archived against stale active remote snapshots.
+          const mergedIdentities = mergeReloadedProductsAndAliases({
+            businessId,
+            localProducts: cur.products,
+            remoteProducts: data.products,
+            localAliases: cur.aliases,
+            remoteAliases: data.aliases,
+            pendingSyncQueue: cur.pendingSyncQueue,
+          });
           const sessionsById = new Map(cur.sessions.map((s) => [s.id, s]));
           // Preserve previously refreshed history and fold in the current session before applying
           // the remote list, so a refresh never silently drops this device's own active session.
@@ -3127,6 +3287,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // local delete from one performed on another device (see the archived branch below).
           const locallyArchivedIds = new Set(cur.products.filter((p) => p.status === "archived").map((p) => p.id));
           const countsByKey = new Map(cur.finalCounts.map((c) => [`${c.sessionId}|${c.productId}`, c]));
+          const mergedProductsById = new Map(mergedIdentities.products.map((product) => [product.id, product]));
           for (const remote of data.counts) {
             const key = `${remote.sessionId}|${remote.productId}`;
             const local = countsByKey.get(key);
@@ -3140,7 +3301,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 (pendingCountEntityIds.has(local.id) ||
                   pendingCountEntityIds.has(`${local.sessionId}_${local.productId}`)));
             if (localIsPending) continue; // guard: unsynced local wins
-            if (productsById.get(remote.productId)?.status === "archived") {
+            if (mergedProductsById.get(remote.productId)?.status === "archived") {
               // Delete-transfer guard (reviewed defect 2026-07-22): a remote count row keyed to a
               // LOCALLY-archived product is the backend's not-yet-transferred (or stale-snapshot)
               // copy of a product THIS device deleted. deleteProductsInternal already repointed
@@ -3158,8 +3319,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           }
 
           return {
-            products: [...productsById.values()],
-            aliases: [...aliasesById.values()],
+            products: mergedIdentities.products,
+            aliases: mergedIdentities.aliases,
+            needsReviewQueue: Array.isArray(data.reviews)
+              ? mergeReloadedReviews({
+                  businessId,
+                  localReviews: cur.needsReviewQueue,
+                  remoteReviews: data.reviews,
+                  pendingSyncQueue: cur.pendingSyncQueue,
+                })
+              : cur.needsReviewQueue,
             sessions: [...sessionsById.values()],
             finalCounts: [...countsByKey.values()],
             lastSyncError: null,
@@ -4916,6 +5085,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 }));
               }
             }
+            persistReviewDecision(reviewId);
             // Task 9: an app-verified off-category decode counts, but flag the row so the feed shows the
             // "Off-category item" tag (the product is not a tire, even though it cleared the firewall).
             if (offCategory) {
@@ -5287,6 +5457,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     : r,
                 ),
               }));
+              persistReviewDecision(reviewId);
             }
 
             // Tasks 5+6: CLIENT-ORCHESTRATED BACKGROUND VERIFY. The fast hot path (mode:"decode") did
@@ -5736,7 +5907,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // never reach the backend. Suffix `:provisional` so the first (placeholder) write and any
             // later distinct write to this id mint different keys; the key is still minted once here and
             // reused verbatim on every retry of THIS item, so retry dedupe is unaffected.
-            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "Product", entityId: provId, operation: "SAVE_PRODUCT", payload: provProduct, idempotencyKey: buildIdempotencyKey(bId, sId, `${provId}:provisional`, "SAVE_PRODUCT"), scanEventId: null }),
+            makeQueueItem({
+              idFactory,
+              now,
+              businessId: bId,
+              sessionId: sId,
+              entityType: "Product",
+              entityId: provId,
+              operation: "SAVE_PRODUCT",
+              payload: provProduct,
+              idempotencyKey: buildIdempotencyKey(bId, sId, `${provId}:provisional`, "SAVE_PRODUCT"),
+              scanEventId: null,
+              syncLane: freshTransferKeys ? undefined : "independent_product",
+            }),
             makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "ScanEvent", entityId: countedEvent.id, operation: "SAVE_SCAN_EVENT", payload: countedEvent, idempotencyKey: saveScanEventKey, scanEventId: countedEvent.id }),
             makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "InventoryCount", entityId: countId, operation: "INCREMENT_COUNT", payload: incPayload, idempotencyKey: countedEvent.idempotencyKey, scanEventId: countedEvent.id }),
           ]);
@@ -6282,6 +6465,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // usable name/confidence < 0.8 and not app-verified-exact). The fast pass already left an
           // accurate review row; we leave it for the human (never count a blocked result).
         }
+        persistReviewDecision(reviewId);
       },
 
       resolveUnknown: (reviewId, action, payload) => {
@@ -6297,13 +6481,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (!review || (review.status !== "open" && review.status !== "suggested")) return;
 
         if (action === "ignore") {
+          const decidedAt = nextReviewDecisionAt(review, now());
+          const write = buildReviewDecisionWrite({
+            ...review,
+            status: "ignored",
+            resolvedAt: decidedAt,
+            resolvedBy: "human",
+            resolutionAction: "ignore",
+          }, decidedAt);
           set({
             needsReviewQueue: state.needsReviewQueue.map((r) =>
-              r.id === reviewId
-                ? { ...r, status: "ignored", resolvedAt: now(), resolutionAction: "ignore" }
-                : r,
+              r.id === reviewId ? write.review : r,
             ),
           });
+          enqueueAndSync([write.item]);
           get().recordFeedback("product_rejected", { code: review.cleanCode });
           emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "alias_rejected", metadata: { code: review.cleanCode } });
           return;
@@ -6790,18 +6981,18 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         );
         const aliases = aliasExists ? state.aliases : [...state.aliases, newAlias];
 
+        const resolvedAt = nextReviewDecisionAt(review, now());
+        const reviewWrite = buildReviewDecisionWrite({
+          ...review,
+          status: "resolved" as const,
+          resolvedAt,
+          resolvedBy: "human",
+          resolutionAction: (action === "create_new" ? "create_new" : "link_existing") as
+            | "create_new"
+            | "link_existing",
+        }, resolvedAt);
         const needsReviewQueue = state.needsReviewQueue.map((r) =>
-          r.id === reviewId
-            ? {
-                ...r,
-                status: "resolved" as const,
-                resolvedAt: now(),
-                resolvedBy: "human",
-                resolutionAction: (action === "create_new" ? "create_new" : "link_existing") as
-                  | "create_new"
-                  | "link_existing",
-              }
-            : r,
+          r.id === reviewId ? reviewWrite.review : r,
         );
 
         // UI-1 FIX (2026-08-13, docs/superpowers/reports/2026-08-13-loop1-ui.md): quantityAfterScan on
@@ -6947,6 +7138,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             }),
           );
         }
+        // Settle the review only after its resolved product, alias, and feed rows are queued. The queue
+        // is serial for these operations, so cloud readers never observe a terminal review before the
+        // identity it points at is durable.
+        queued.push(reviewWrite.item);
         if (queued.length > 0) {
           set((s) => ({ pendingSyncQueue: [...s.pendingSyncQueue, ...queued] }));
         }
@@ -7217,6 +7412,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 // and the row's dead inline controls are dropped (the review-derived "(suggested)" tag
                 // takes over, exactly the pre-9b display for an open suggestion-bearing review).
                 if (after && after.status === "suggested") {
+                  const reopenedAt = nextReviewDecisionAt(after, now());
                   set((st) => ({
                     needsReviewQueue: st.needsReviewQueue.map((r) =>
                       r.id === reviewId && r.status === "suggested" ? { ...r, status: "open" as const } : r,
@@ -7225,6 +7421,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                       pendingRowIds.includes(e.id) ? { ...e, suggestion: undefined } : e,
                     ),
                   }));
+                  persistReviewDecision(reviewId, reopenedAt, true);
                 }
                 failed.push({ id: reviewId, reason: "Could not resolve automatically - needs manual review" });
               }
@@ -7286,6 +7483,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // Stale click: another path already verified this product, so there is nothing left to
             // confirm - never fall through to the blank-reopen fallback on a settled review.
             if (st.products.find((p) => p.id === autoApplied.provisionalProductId)?.verified) return;
+            const reopenedAt = nextReviewDecisionAt(autoApplied, now());
             set((s2) => ({
               needsReviewQueue: s2.needsReviewQueue.map((r) =>
                 r.id === autoApplied.id
@@ -7293,6 +7491,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   : r,
               ),
             }));
+            persistReviewDecision(autoApplied.id, reopenedAt, true);
             review = get().needsReviewQueue.find((r) => r.id === autoApplied.id);
           }
         }
@@ -7586,29 +7785,29 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (!code) return null;
         const existing = state.needsReviewQueue.find((r) => r.cleanCode === code);
         if (existing) {
+          const reopenedAt = nextReviewDecisionAt(existing, now());
+          const write = buildReviewDecisionWrite({
+            ...existing, status: "open", reason, resolvedAt: null, resolvedBy: null, resolutionAction: null,
+            hasSuggestion: Boolean(importContext?.suggestion), suggestedProductName: importContext?.suggestion?.name ?? "",
+            suggestedBrand: importContext?.suggestion?.brand ?? "", suggestedCategory: importContext?.suggestion?.category ?? "",
+            suggestedSpecsShort: importContext?.suggestion?.specsShort ?? "", suggestedSpecsFull: "",
+            suggestedPrimarySku: importContext?.suggestion?.primarySku ?? "", suggestedPrimaryBarcode: importContext?.suggestion?.primaryBarcode ?? "",
+            suggestedGtin: "", suggestedUpc: "", suggestedEan: "", suggestedImageUrl: "", suggestedProductUrl: "",
+            suggestedAliases: [], sourceUrls: [], verifiedFacts: [], guesses: [], confidence: 0, providerName: "",
+            decodeStatus: "needs_review", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheckDecision: "",
+            correctionRecheckStatus: undefined, correctionRecheckedAt: null, correctionRecheckMissingKeys: undefined,
+            reopenedFromWrong: true,
+            importQuantity: importContext?.importQuantity,
+          }, reopenedAt);
           set((s) => ({
-            needsReviewQueue: s.needsReviewQueue.map((r) =>
-              r.id === existing.id
-                ? {
-                    ...r, status: "open", reason, resolvedAt: null, resolvedBy: null, resolutionAction: null,
-                    hasSuggestion: Boolean(importContext?.suggestion), suggestedProductName: importContext?.suggestion?.name ?? "",
-                    suggestedBrand: importContext?.suggestion?.brand ?? "", suggestedCategory: importContext?.suggestion?.category ?? "",
-                    suggestedSpecsShort: importContext?.suggestion?.specsShort ?? "", suggestedSpecsFull: "",
-                    suggestedPrimarySku: importContext?.suggestion?.primarySku ?? "", suggestedPrimaryBarcode: importContext?.suggestion?.primaryBarcode ?? "",
-                    suggestedGtin: "", suggestedUpc: "", suggestedEan: "", suggestedImageUrl: "", suggestedProductUrl: "",
-                    suggestedAliases: [], sourceUrls: [], verifiedFacts: [], guesses: [], confidence: 0, providerName: "",
-                    decodeStatus: "needs_review", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheckDecision: "",
-                    correctionRecheckStatus: undefined, correctionRecheckedAt: null, correctionRecheckMissingKeys: undefined,
-                    reopenedFromWrong: true,
-                    importQuantity: importContext?.importQuantity,
-                  }
-                : r,
-            ),
+            needsReviewQueue: s.needsReviewQueue.map((r) => r.id === existing.id ? write.review : r),
           }));
+          enqueueAndSync([write.item]);
           return existing.id;
         }
         const id = idFactory();
-        const review: UnknownCodeReview = {
+        const reopenedAt = now();
+        const baseReview: UnknownCodeReview = {
           id, businessId: state.businessId, sessionId: state.sessionId, rawCode: code, cleanCode: code,
           normalizedCandidates: normalizeCode(code).searchVariants ?? [code],
           suggestedProductName: importContext?.suggestion?.name ?? "", suggestedBrand: importContext?.suggestion?.brand ?? "",
@@ -7618,14 +7817,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           suggestedImageUrl: "", suggestedProductUrl: "", suggestedAliases: [], sourceUrls: [], verifiedFacts: [], guesses: [],
           reason, providerName: "", confidence: 0, hasSuggestion: Boolean(importContext?.suggestion), decodeStatus: "needs_review",
           evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheckDecision: "", reopenedFromWrong: true,
-          status: "open", createdAt: now(), resolvedAt: null, resolvedBy: null, resolutionAction: null,
+          status: "open", createdAt: reopenedAt, resolvedAt: null, resolvedBy: null, resolutionAction: null,
           syncStatus: "pending", idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, id, "SAVE_UNKNOWN_SCAN"),
           importQuantity: importContext?.importQuantity,
         };
+        const write = buildReviewDecisionWrite(baseReview, reopenedAt);
+        const review = write.review;
         set((s) => ({ needsReviewQueue: [...s.needsReviewQueue, review] }));
-        enqueueAndSync([
-          makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "UnknownCodeReview", entityId: id, operation: "SAVE_UNKNOWN_SCAN", payload: review, idempotencyKey: review.idempotencyKey, scanEventId: null }),
-        ]);
+        enqueueAndSync([write.item]);
         return id;
       },
 
@@ -8162,15 +8361,23 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // Queue idempotent SAVE_PRODUCT (each new product) BEFORE its aliases, then RESOLVE_ALIAS, so a
           // reloaded alias always references a persisted product. Same durable path Loop 4 proved.
           // QA Task 7: a refreshed (existing-barcode) product is ALSO queued as SAVE_PRODUCT with the
-          // SAME id (idempotency key is id-based, so it upserts) - never a quantity change, only the
-          // descriptive fields buildProductImport already refreshed on plan.refreshedProducts.
+          // SAME entity id so it upserts. Its key includes an exact stable payload fingerprint so a
+          // later import with changed content cannot collide with the earlier durable write. The key is
+          // minted once here and retained on PendingSyncItem for every retry.
           const items: PendingSyncItem[] = [];
           for (const p of [...plan.products, ...plan.refreshedProducts]) {
+            const productVersion = stableIdempotencyFingerprint(p);
             items.push(makeQueueItem({
               idFactory, now, businessId: state.businessId, sessionId: state.sessionId,
               entityType: "Product", entityId: p.id, operation: "SAVE_PRODUCT", payload: p,
-              idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, p.id, "SAVE_PRODUCT"),
+              idempotencyKey: buildIdempotencyKey(
+                state.businessId,
+                state.sessionId,
+                `${p.id}:${productVersion}`,
+                "SAVE_PRODUCT",
+              ),
               scanEventId: null,
+              syncLane: "independent_product",
             }));
           }
           for (const a of plan.aliases) {
@@ -8903,7 +9110,7 @@ export function sanitizePersistedScanShape(persisted: unknown): Record<string, u
       // nested field can never throw and silently take the scan-drop path.
       if (shape.kind === "array-of-objects" && shape.nestedArrayFields && shape.nestedArrayFields.length > 0) {
         let nestedFixed = 0;
-        nextArray = nextArray.map((member) => {
+        const mappedArray = nextArray.map((member) => {
           if (!isPlainObject(member)) return member;
           let patched: Record<string, unknown> | null = null;
           for (const nestedField of shape.nestedArrayFields!) {
@@ -8917,6 +9124,7 @@ export function sanitizePersistedScanShape(persisted: unknown): Record<string, u
           return patched ?? member;
         });
         if (nestedFixed > 0) {
+          nextArray = mappedArray;
           console.warn(
             `[scanStore] Persisted '${field}' contained ${nestedFixed} malformed nested array ` +
               `field(s) (e.g. scanEventIds/aliasesSeen expected to be arrays); normalizing ` +
