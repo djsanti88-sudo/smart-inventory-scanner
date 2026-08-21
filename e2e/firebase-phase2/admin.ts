@@ -19,6 +19,56 @@ export const KNOWN_BARCODE = "1111111111";
 export const ALIAS_CODE = "2222222222";
 export const UNKNOWN_CODE = "9999999999";
 
+export type AccountTenantFixture = {
+  label: "A" | "B";
+  uid: string;
+  email: string;
+  password: string;
+  businessId: string;
+  businessName: string;
+  productId: string;
+  productName: string;
+  markerBarcode: string;
+  scanBarcode: string;
+  sessionId: string;
+  seededEventId: string;
+  seededReviewId: string;
+};
+
+export const TWO_ACCOUNT_A: AccountTenantFixture = {
+  label: "A",
+  uid: "e2e-two-account-user-a",
+  email: "two-account-a@test.local",
+  password: "twoAccountA123",
+  businessId: "biz-e2e-two-account-a",
+  businessName: "Tenant Isolation A Shop",
+  productId: "prod-two-account-a-marker",
+  productName: "Tenant A Marker Wiper",
+  markerBarcode: "710000000001",
+  scanBarcode: "710000000101",
+  sessionId: "session-two-account-a-active",
+  seededEventId: "event-two-account-a-seeded",
+  seededReviewId: "review-two-account-a-marker",
+};
+
+export const TWO_ACCOUNT_B: AccountTenantFixture = {
+  label: "B",
+  uid: "e2e-two-account-user-b",
+  email: "two-account-b@test.local",
+  password: "twoAccountB123",
+  businessId: "biz-e2e-two-account-b",
+  businessName: "Tenant Isolation B Shop",
+  productId: "prod-two-account-b-marker",
+  productName: "Tenant B Marker Filter",
+  markerBarcode: "720000000002",
+  scanBarcode: "720000000202",
+  sessionId: "session-two-account-b-active",
+  seededEventId: "event-two-account-b-seeded",
+  seededReviewId: "review-two-account-b-marker",
+};
+
+export const TWO_ACCOUNT_FIXTURES = [TWO_ACCOUNT_A, TWO_ACCOUNT_B] as const;
+
 function adminApp(): App {
   const existing = getApps().find((a) => a.name === "e2e-fb-admin");
   if (existing) return existing;

@@ -84,8 +84,8 @@ export function SyncBadge({ status }: { status: SyncStatus }) {
   };
   const label: Record<SyncStatus, string> = {
     synced: "Saved",
-    pending: "Not saved yet",
-    error: "Save error",
+    pending: "Saved on this device, waiting to sync",
+    error: "Saved on this device, sync failed",
   };
   return (
     <span className={`rounded-md px-2 py-1 text-sm font-medium ${map[status]}`} data-testid="sync-badge">

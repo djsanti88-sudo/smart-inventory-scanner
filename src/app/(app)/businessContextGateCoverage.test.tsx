@@ -21,6 +21,7 @@ import { DEMO_BUSINESS_ID } from "@/seed/seedData";
 
 vi.mock("@/services/auth/authMode", () => ({ isLiveAuth: () => true }));
 vi.mock("@/lib/selectedBusiness", () => ({
+  SELECTED_BUSINESS_CHANGED_EVENT: "sis:selected-business-changed",
   getSelectedBusinessId: () => "biz-real",
   isFirebaseBackend: () => true,
 }));

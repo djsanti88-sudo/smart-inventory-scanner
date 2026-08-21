@@ -33,14 +33,14 @@ async function createEmulatorUser() {
   return { uid: body.localId, idToken: body.idToken };
 }
 
-function provisionRequest(idToken: string): Request {
+function provisionRequest(idToken: string, body: unknown = { mode: "ensure_default" }): Request {
   return new Request("http://localhost/api/businesses/provision", {
     method: "POST",
     headers: {
       authorization: `Bearer ${idToken}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ mode: "ensure_default" }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -170,6 +170,48 @@ describe.skipIf(!ready)("provisioning route against Auth + Firestore emulators",
     expect((await db.doc(`${COLLECTIONS.businesses}/${first.businessId}`).get()).data()).toMatchObject({
       createdBy: uid,
     });
+  });
+
+  it("ignores a stale selected business from another account when the user has one valid membership", async () => {
+    const { uid, idToken } = await createEmulatorUser();
+    const db = getAdminDb();
+    const ownedBusinessId = `owned-${crypto.randomUUID()}`;
+    const staleBusinessId = `stale-${crypto.randomUUID()}`;
+    createdBusinessIds.add(ownedBusinessId);
+    createdBusinessIds.add(staleBusinessId);
+    await Promise.all([
+      db.doc(`${COLLECTIONS.businesses}/${ownedBusinessId}`).set({
+        name: "Owned workspace",
+        createdBy: uid,
+      }),
+      db.doc(`${COLLECTIONS.businessMembers}/${memberDocId(ownedBusinessId, uid)}`).set({
+        businessId: ownedBusinessId,
+        userId: uid,
+        role: "owner",
+      }),
+      db.doc(`${COLLECTIONS.businesses}/${staleBusinessId}`).set({
+        name: "Stale workspace",
+        createdBy: "different-user",
+      }),
+    ]);
+
+    const response = await provisionPOST(provisionRequest(idToken, {
+      mode: "ensure_default",
+      preferredBusinessId: staleBusinessId,
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      status: "existing",
+      businessId: ownedBusinessId,
+    });
+    expect(
+      (
+        await db.doc(
+          `${COLLECTIONS.businessMembers}/${memberDocId(staleBusinessId, uid)}`,
+        ).get()
+      ).exists,
+    ).toBe(false);
   });
 
   it("owner-created users are real Firebase Auth users that can sign in and keep their membership", async () => {

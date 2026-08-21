@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { localE2EWebServerEnv } from "./e2e/localWebServerEnv";
 
 // E2E proof config. Pins port 3100 so the dev server and Playwright never disagree
 // (the #1 source of Windows flakiness). Proof screenshots are written explicitly by the
@@ -41,7 +42,7 @@ export default defineConfig({
   webServer: {
     command: "npm run dev -- --port 3100",
     url: "http://localhost:3100",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 180_000,
     stdout: "pipe",
     // TEST SAFETY: force the AI route to mock-only so E2E can never call live Gemini/OpenAI.
@@ -52,18 +53,11 @@ export default defineConfig({
     // business-context gate instead of the scanner input.
     // NEXT_PUBLIC_E2E_PLATFORM_OWNER=1: the mock specs exercise the FULL platformOwner view
     // (raw codes, AI status, all exports). The human-bot suite does NOT set this, so it runs as a customer.
-    env: {
-      ...process.env,
-      IS_E2E: "1",
+    env: localE2EWebServerEnv("mock-3100", {
       NEXT_PUBLIC_E2E_AUTH_BYPASS: "1",
       NEXT_PUBLIC_FIREBASE_BACKEND: "0",
       NEXT_PUBLIC_FIREBASE_USE_EMULATOR: "0",
       NEXT_PUBLIC_E2E_PLATFORM_OWNER: "1",
-      // Playwright merges this map over process.env, and Next preserves already-defined values
-      // instead of replacing them from .env.local. Empty strings therefore fail closed to the
-      // local file adapters and prevent mock E2E from opening a live Turso connection.
-      TURSO_DATABASE_URL: "",
-      TURSO_AUTH_TOKEN: "",
-    },
+    }),
   },
 });

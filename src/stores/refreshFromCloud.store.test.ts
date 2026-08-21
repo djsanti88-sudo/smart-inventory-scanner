@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import type { Product, InventoryCount, InventorySession } from "@/types";
+import type { Product, InventoryCount, InventorySession, Alias } from "@/types";
 
 function product(id: string, name: string): Product {
   return {
@@ -17,6 +17,14 @@ function count(sessionId: string, productId: string, quantity: number): Inventor
     lastScannedAt: "t", aliasesSeen: [], scanEventIds: [], createdAt: "t", updatedAt: "t",
     syncStatus: "synced", syncError: null, appliedIdempotencyKeys: [],
   };
+}
+
+function alias(id: string, productId: string, cleanCode: string): Alias {
+  return {
+    id, businessId: "biz1", productId, rawCodeExample: cleanCode, cleanCode, normalizedCode: cleanCode,
+    aliasType: "upc", source: "human_review", confidence: 1, approved: true, createdAt: "t",
+    updatedAt: "t", createdBy: "u", lastSeenAt: "t", syncStatus: "synced", idempotencyKey: `k-${id}`,
+  } as Alias;
 }
 
 describe("refreshFromCloud", () => {
@@ -109,6 +117,46 @@ describe("refreshFromCloud", () => {
     await store.getState().refreshFromCloud();
     // The local, not-yet-synced edit MUST survive - refreshing must never regress it to the stale remote name.
     expect(store.getState().products.find((p) => p.id === "p-edited")?.name).toBe("Locally Corrected Name");
+  });
+
+  it("keeps pending local products and aliases when a stale remote snapshot omits them, while adding remote-only rows", async () => {
+    const pendingProduct = { ...product("pending-product", "Pending Local Product"), primaryBarcode: "111111111111", upc: "111111111111", aliases: ["111111111111"] };
+    const pendingAlias = { ...alias("pending-alias", "pending-product", "111111111111"), syncStatus: "pending" as const };
+    const remoteProduct = { ...product("remote-product", "Remote Product"), primaryBarcode: "222222222222", upc: "222222222222", aliases: ["222222222222"] };
+    const remoteAlias = alias("remote-alias", "remote-product", "222222222222");
+    const loadBusinessData = vi.fn().mockResolvedValue({
+      products: [remoteProduct],
+      aliases: [remoteAlias],
+      sessions: [],
+      counts: [],
+    });
+    const store = createTestScanStore({ cloudBackend: true, loadBusinessData });
+    store.setState({
+      businessContextReady: true,
+      businessDataLoaded: true,
+      businessId: "biz1",
+      userId: "u1",
+      sessionId: "s1",
+      products: [pendingProduct],
+      aliases: [pendingAlias],
+      pendingSyncQueue: [
+        {
+          id: "pend-prod", businessId: "biz1", sessionId: "s1", entityType: "Product", entityId: "pending-product",
+          operation: "SAVE_PRODUCT", payload: pendingProduct, status: "pending",
+          retryCount: 0, lastError: null, createdAt: "t", updatedAt: "t", idempotencyKey: "k-prod", scanEventId: null,
+        },
+        {
+          id: "pend-alias", businessId: "biz1", sessionId: "s1", entityType: "Alias", entityId: "pending-alias",
+          operation: "RESOLVE_ALIAS", payload: pendingAlias, status: "pending",
+          retryCount: 0, lastError: null, createdAt: "t", updatedAt: "t", idempotencyKey: "k-alias", scanEventId: null,
+        },
+      ],
+    });
+
+    await store.getState().refreshFromCloud();
+
+    expect(store.getState().products.map((p) => p.id).sort()).toEqual(["pending-product", "remote-product"]);
+    expect(store.getState().aliases.map((a) => a.id).sort()).toEqual(["pending-alias", "remote-alias"]);
   });
 
   it("NEVER double-counts a DELETED product: the backend's stale count row is not re-added alongside the repointed provisional (reviewed defect 2026-07-22)", async () => {

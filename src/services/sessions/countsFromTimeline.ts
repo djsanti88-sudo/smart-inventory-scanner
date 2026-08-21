@@ -11,7 +11,12 @@ export function countsFromTimeline(
 ): SessionCountRow[] {
   const byKey = new Map<string, ScanEvent>();
   for (const event of events) {
-    if (event.status !== "known" && event.status !== "resolved") continue;
+    // "conflict" rows are excluded because the alias-conflict orphan machinery transfers their full
+    // quantity onto the chosen product's own events - rendering them here would double-count. Events
+    // without a finite quantityAfterScan cannot assert a running total (stale pre-ledger docs), so
+    // they must neither emit a row nor override a real one. Unknown/needs_review events DO count.
+    if (event.status === "conflict" || event.status === "ignored") continue;
+    if (!Number.isFinite(event.quantityAfterScan)) continue;
     const key = event.matchedProductId ?? event.cleanCode;
     const prior = byKey.get(key);
     if (!prior || new Date(event.createdAt).getTime() >= new Date(prior.createdAt).getTime()) {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildIdempotencyKey, newId } from "@/services/idempotency";
+import { buildIdempotencyKey, newId, stableIdempotencyFingerprint } from "@/services/idempotency";
 
 describe("buildIdempotencyKey", () => {
   it("includes business, session, event, and operation", () => {
@@ -18,6 +18,17 @@ describe("buildIdempotencyKey", () => {
     expect(buildIdempotencyKey("b", "s", "e", "SAVE_SCAN_EVENT")).not.toBe(
       buildIdempotencyKey("b", "s", "e", "INCREMENT_COUNT"),
     );
+  });
+});
+
+describe("stableIdempotencyFingerprint", () => {
+  it("is key-order independent while changing when nested payload content changes", () => {
+    const first = stableIdempotencyFingerprint({ name: "Original", nested: { brand: "Falken", codes: ["1", "2"] } });
+    const reordered = stableIdempotencyFingerprint({ nested: { codes: ["1", "2"], brand: "Falken" }, name: "Original" });
+    const refreshed = stableIdempotencyFingerprint({ nested: { codes: ["1", "2"], brand: "Falken" }, name: "Refreshed" });
+
+    expect(reordered).toBe(first);
+    expect(refreshed).not.toBe(first);
   });
 });
 

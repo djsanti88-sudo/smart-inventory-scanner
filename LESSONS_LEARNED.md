@@ -352,3 +352,53 @@ rungs only, and the old guess replays rather than regressing to "Unidentified");
 identity is shown on the counted row immediately, labeled with an app-derived confidence band and
 correctable through Approve / Edit. Guards: `src/server/decode/pipeline.test.ts`,
 `src/stores/scanStore.rowControls.test.ts`, `src/services/ai/identityConfidenceBand.test.ts`.
+
+## L27 (2026-08-20). Pending local identities must beat stale cloud snapshots during navigation
+
+**What happened.** The incident looked like `1,000 -> 210 -> 966 -> 1,000`: a seeded/local page could show
+1,000 scanned rows and counts, navigation/reload could collapse visible product identities to the 210 rows
+already present in the cloud snapshot, later pending sync progress could raise that partial identity set to
+966, and the final settled state returned to 1,000. Firebase did not impose a 210-document read limit. The
+210 was only the partial snapshot available while local product and alias writes were still pending.
+
+**Root cause.** The stale reload path directly assigned the remote product/alias snapshot over local
+identity state during business bootstrap and `refreshFromCloud` instead of merging same-tenant pending
+`SAVE_PRODUCT` and `RESOLVE_ALIAS` rows first. The backlog contributor was separate: product writes created
+by scan/decode were draining serially behind scan/count/session work, so the cloud snapshot lagged during
+bulk pending runs. That backlog fix is an opt-in `syncLane: "independent_product"` lane only for audited
+standalone product upserts; correction bundles such as `markWrong`, delete/undo-delete, transfer, and
+trusted-exact flows stay serial.
+
+**Separate defects found during the repair.** History counts had their own bug: unresolved `unknown` /
+`needs_review` history rows were filtered out of timeline counts. The persist sanitizer had another bug:
+valid top-level product arrays could be replaced, and live repair logging could fire, even when no nested
+array field actually needed repair. Neither issue was the Firebase 210 symptom, but both would have made the
+same incident harder to reason about.
+
+**Isolation and provider model.** The confirmed local/emulator model is per UID and per business. A stale
+selected-business key from another account must fail closed, a single valid membership may recover safely,
+and browser persistence may retain inactive per-UID blobs only if those blobs do not contain another
+account's tenant markers. The protected app layout owns one persistent `BusinessContextProvider`, while
+page-level gates only render provider state; on selected-business changes the provider revalidates
+`getSession`, `getSelectedBusinessId`, `listMemberships`, `rehydrateForUid`, then `setBusinessContext`.
+
+**Browser proof boundary.** The 1,000-row browser proof is a local/mock lane. It seeds pending state, proves
+visible History/Reconcile/Settings navigation and reload preserve 1,000 local rows, DOM joins, scanner
+focus, and no business-loading flash, and inspects seeded persistence without self-healing it. IndexedDB is
+the primary persisted store; localStorage is only a fallback/envelope to inspect when present, not something
+the proof guarantees as primary. Stale-cloud merge proof lives in the store tests, retry/drain proof lives in
+the product-priority drain tests, and account isolation proof lives in Firebase emulator unit/E2E lanes.
+None of this is production deployment proof.
+
+**Regression lanes.** Run the exact incident lanes before claiming this class of issue is closed:
+
+```powershell
+npx.cmd vitest run src/stores/firebaseBackend.store.test.ts src/stores/refreshFromCloud.store.test.ts src/stores/scanStore.persistShapeGuard.test.ts src/components/BusinessContextGate.provider.test.tsx src/components/SessionCountsTable.test.tsx src/components/badges.test.tsx src/stores/productPriorityDrain.store.test.ts
+npm.cmd run test:ledger
+npm.cmd run test:firebase
+npm.cmd run test:e2e:firebase:two-account
+npm.cmd run test:e2e:firebase
+npm.cmd run test:e2e -- e2e/scan-1000-navigation-pending.spec.ts
+npm.cmd run qa:bots
+npm.cmd run proof:all
+```

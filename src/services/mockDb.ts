@@ -31,6 +31,9 @@ export interface SyncResult {
   error?: string;
   errorCode?: string;
   retryable?: boolean;
+  /** Optional physical completion for a write whose logical timeout has already returned. The store
+   *  keeps concurrency and same-entity ownership until this settles; it is scheduling metadata only. */
+  physicalSettlement?: Promise<void>;
 }
 
 /** Failure simulation is for MOCK/TEST proof only - never used by production logic. */

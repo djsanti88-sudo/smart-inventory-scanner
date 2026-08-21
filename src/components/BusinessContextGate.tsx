@@ -1,10 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import Link from "next/link";
 import { useScanStore } from "@/stores/scanStore";
 import { getSession, listMemberships } from "@/lib/auth";
-import { getSelectedBusinessId, isFirebaseBackend } from "@/lib/selectedBusiness";
+import {
+  getSelectedBusinessId,
+  isFirebaseBackend,
+  SELECTED_BUSINESS_CHANGED_EVENT,
+} from "@/lib/selectedBusiness";
 import { isLiveAuth } from "@/services/auth/authMode";
 import { hasMeaningfulLegacyBlobAsync, hasPersistedBlobAsync, persistKeyForUid } from "@/stores/scanPersistNamespace";
 
@@ -15,6 +19,22 @@ import { hasMeaningfulLegacyBlobAsync, hasPersistedBlobAsync, persistKeyForUid }
 // gate's call site only; getSession/listMemberships keep their existing contract for every other
 // caller (notably AuthGuard).
 const AUTH_BOOTSTRAP_TIMEOUT_MS = 15_000;
+
+type BusinessContextStatus = "resolving" | "no-user" | "no-business" | "adopt-choice" | "ready" | "error";
+type PendingBusinessContext = { businessId: string; uid: string };
+type AdoptStatus = "idle" | "adopting" | "error" | "error-postcopy";
+
+type BusinessContextValue = {
+  cloud: boolean;
+  status: BusinessContextStatus;
+  pendingCtx: PendingBusinessContext | null;
+  adoptStatus: AdoptStatus;
+  retryBootstrap: () => void;
+  runAdopt: () => Promise<void>;
+  skipAdopt: () => Promise<void>;
+};
+
+const BusinessContext = createContext<BusinessContextValue | null>(null);
 
 function withBootstrapTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -35,14 +55,13 @@ function withBootstrapTimeout<T>(promise: Promise<T>, label: string): Promise<T>
 // never an automatic first-sign-in inheritance (shared-browser hazard). Then it re-points persist to
 // the per-uid key and calls setBusinessContext exactly once. The mock path renders children directly.
 // Any failure or unbounded wait in this chain surfaces as an honest error with a Retry affordance
-// (never a silent hang, never a fallback into a wrong business context).
-export function BusinessContextGate({ children }: { children: React.ReactNode }) {
+// (never a silent hang, never a fallback into a wrong business context). Mount this provider once in
+// the protected app layout so page-to-page navigation does not re-run authenticated bootstrap.
+export function BusinessContextProvider({ children }: { children: React.ReactNode }) {
   const cloud = isLiveAuth() && isFirebaseBackend();
-  const businessContextReady = useScanStore((s) => s.businessContextReady);
-  const businessDataLoaded = useScanStore((s) => s.businessDataLoaded);
   const setBusinessContext = useScanStore((s) => s.setBusinessContext);
-  const [status, setStatus] = useState<"resolving" | "no-user" | "no-business" | "adopt-choice" | "ready" | "error">("resolving");
-  const [pendingCtx, setPendingCtx] = useState<{ businessId: string; uid: string } | null>(null);
+  const [status, setStatus] = useState<BusinessContextStatus>("resolving");
+  const [pendingCtx, setPendingCtx] = useState<PendingBusinessContext | null>(null);
   const [retryToken, setRetryToken] = useState(0);
   // B4 fix (owner-reported false-safety copy, 2026-08-09): "error" means the copy never landed (the
   // anon blob is untouched - both "try again" and "start fresh" are safe). "error-postcopy" means the
@@ -50,7 +69,7 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
   // anon blob is gone and the per-uid key already holds the adopted data, so "start fresh" must not be
   // offered (it would silently discard nothing and just re-point at the already-adopted data, which
   // looks like data loss to an owner who picked "start fresh" expecting an empty namespace).
-  const [adoptStatus, setAdoptStatus] = useState<"idle" | "adopting" | "error" | "error-postcopy">("idle");
+  const [adoptStatus, setAdoptStatus] = useState<AdoptStatus>("idle");
 
   useEffect(() => {
     if (!cloud) return; // mock/local path: nothing to wire (context + data already "ready")
@@ -64,7 +83,7 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
         const selected = getSelectedBusinessId();
         const memberships = await withBootstrapTimeout(listMemberships(), "your businesses");
         if (!active) return;
-        const membership = selected ? memberships.find((m) => m.businessId === selected) : undefined;
+        const membership = selected ? memberships.find((m) => m.businessId === selected && m.userId === user.uid) : undefined;
         if (!membership) { setStatus("no-business"); return; }
 
         // Legacy pre-account data on this browser + no per-uid key yet: the OWNER decides.
@@ -94,37 +113,89 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
     return () => { active = false; };
   }, [cloud, setBusinessContext, retryToken]);
 
+  useEffect(() => {
+    if (!cloud || typeof window === "undefined") return;
+    const rebootstrap = () => {
+      setStatus("resolving");
+      setPendingCtx(null);
+      setAdoptStatus("idle");
+      setRetryToken((t) => t + 1);
+    };
+    window.addEventListener(SELECTED_BUSINESS_CHANGED_EVENT, rebootstrap);
+    return () => {
+      window.removeEventListener(SELECTED_BUSINESS_CHANGED_EVENT, rebootstrap);
+    };
+  }, [cloud]);
+
+  const runAdopt = useCallback(async () => {
+    if (!pendingCtx) return;
+    setAdoptStatus("adopting");
+    // F5: the thrown error's tag alone left the post-copy window one line too narrow. Once
+    // adoptLegacyLocalData RESOLVES the copy has landed and the anon blob is already gone, so
+    // anything that throws after that point (setBusinessContext) is just as post-copy as a tagged
+    // failure from inside the store - and must not get the pre-copy "still safe" + Start fresh UI.
+    let copied = false;
+    try {
+      await useScanStore.getState().adoptLegacyLocalData(pendingCtx.uid);
+      copied = true;
+      setBusinessContext(pendingCtx.businessId, pendingCtx.uid);
+      setStatus("ready");
+    } catch (err) {
+      // Duck-typed (not instanceof) so this never depends on importing a class from scanStore -
+      // keeps this check robust across the store's various test mocks.
+      const tagged = !!(err && typeof err === "object" && (err as { postCopyAdoptFailure?: boolean }).postCopyAdoptFailure);
+      if (copied || tagged) {
+        // The anon blob is ALREADY GONE and the per-uid key already holds the adopted data: never
+        // claim "your local data is still safe" and never offer "start fresh" here (see state note
+        // above). Retry (re-running adoptLegacyLocalData) is idempotent and the only safe path.
+        setAdoptStatus("error-postcopy");
+      } else {
+        // The anon blob is untouched by design on a failed copy: never discard it and never
+        // silently fall through to a fresh empty namespace. Let the owner retry or start fresh.
+        setAdoptStatus("error");
+      }
+    }
+  }, [pendingCtx, setBusinessContext]);
+
+  const skipAdopt = useCallback(async () => {
+    if (!pendingCtx) return;
+    await useScanStore.getState().rehydrateForUid(pendingCtx.uid);
+    setBusinessContext(pendingCtx.businessId, pendingCtx.uid);
+    setStatus("ready");
+  }, [pendingCtx, setBusinessContext]);
+
+  const retryBootstrap = useCallback(() => {
+    setStatus("resolving");
+    setRetryToken((t) => t + 1);
+  }, []);
+
+  return (
+    <BusinessContext.Provider value={{ cloud, status, pendingCtx, adoptStatus, retryBootstrap, runAdopt, skipAdopt }}>
+      {children}
+    </BusinessContext.Provider>
+  );
+}
+
+// Page-level renderer for the provider's validated status. If a test or isolated page mounts the
+// gate without the protected layout provider, keep the old self-contained behavior by wrapping it.
+export function BusinessContextGate({ children }: { children: React.ReactNode }) {
+  const provider = useContext(BusinessContext);
+  const businessContextReady = useScanStore((s) => s.businessContextReady);
+  const businessDataLoaded = useScanStore((s) => s.businessDataLoaded);
+
+  if (!provider) {
+    return (
+      <BusinessContextProvider>
+        <BusinessContextGate>{children}</BusinessContextGate>
+      </BusinessContextProvider>
+    );
+  }
+
+  const { cloud, status, pendingCtx, adoptStatus, retryBootstrap, runAdopt, skipAdopt } = provider;
+
   if (!cloud) return <>{children}</>;
 
   if (status === "adopt-choice" && pendingCtx) {
-    const runAdopt = async () => {
-      setAdoptStatus("adopting");
-      // F5: the thrown error's tag alone left the post-copy window one line too narrow. Once
-      // adoptLegacyLocalData RESOLVES the copy has landed and the anon blob is already gone, so
-      // anything that throws after that point (setBusinessContext) is just as post-copy as a tagged
-      // failure from inside the store - and must not get the pre-copy "still safe" + Start fresh UI.
-      let copied = false;
-      try {
-        await useScanStore.getState().adoptLegacyLocalData(pendingCtx.uid);
-        copied = true;
-        setBusinessContext(pendingCtx.businessId, pendingCtx.uid);
-        setStatus("ready");
-      } catch (err) {
-        // Duck-typed (not instanceof) so this never depends on importing a class from scanStore -
-        // keeps this check robust across the store's various test mocks.
-        const tagged = !!(err && typeof err === "object" && (err as { postCopyAdoptFailure?: boolean }).postCopyAdoptFailure);
-        if (copied || tagged) {
-          // The anon blob is ALREADY GONE and the per-uid key already holds the adopted data: never
-          // claim "your local data is still safe" and never offer "start fresh" here (see state note
-          // above). Retry (re-running adoptLegacyLocalData) is idempotent and the only safe path.
-          setAdoptStatus("error-postcopy");
-        } else {
-          // The anon blob is untouched by design on a failed copy: never discard it and never
-          // silently fall through to a fresh empty namespace. Let the owner retry or start fresh.
-          setAdoptStatus("error");
-        }
-      }
-    };
     return (
       <div data-testid="adopt-banner" className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
         This device has local scan data saved from before sign-in. Adopt it into your account, or leave it and start fresh.
@@ -157,11 +228,7 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
               type="button"
               data-testid="skip-adopt"
               disabled={adoptStatus === "adopting"}
-              onClick={async () => {
-                await useScanStore.getState().rehydrateForUid(pendingCtx.uid);
-                setBusinessContext(pendingCtx.businessId, pendingCtx.uid);
-                setStatus("ready");
-              }}
+              onClick={skipAdopt}
               className="inline-flex min-h-[40px] items-center rounded-lg border border-amber-400 px-3 font-medium hover:bg-amber-100 disabled:opacity-50"
             >
               Start fresh (leave it)
@@ -180,15 +247,20 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
           <button
             type="button"
             data-testid="retry-bootstrap"
-            onClick={() => {
-              setStatus("resolving");
-              setRetryToken((t) => t + 1);
-            }}
+            onClick={retryBootstrap}
             className="inline-flex min-h-[40px] items-center rounded-lg bg-red-600 px-3 font-medium text-white hover:bg-red-700"
           >
             Try again
           </button>
         </div>
+      </div>
+    );
+  }
+
+  if (status === "resolving") {
+    return (
+      <div data-testid="business-loading" className="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-600">
+        Loading business data...
       </div>
     );
   }

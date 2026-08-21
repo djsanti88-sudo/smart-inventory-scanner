@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { localE2EWebServerEnv } from "./e2e/localWebServerEnv";
 
 // Human-like QA bot suite (e2e/human-bots). Runs the REAL app through the browser and pastes scan codes
 // into the scan input (no physical scanner needed). Mock/local backend (seed data + auth bypass) so the
@@ -24,11 +25,15 @@ export default defineConfig({
   webServer: {
     command: "npm run dev -- --port 3300",
     url: "http://localhost:3300",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 180_000,
     stdout: "pipe",
     // Mock/local backend, AI route forced to mock, auth bypass on. Pinned so .env.local (a real-cloud
     // god-account config) can never flip these for the bot run.
-    env: { ...process.env, IS_E2E: "1", NEXT_PUBLIC_E2E_AUTH_BYPASS: "1", NEXT_PUBLIC_FIREBASE_BACKEND: "0", NEXT_PUBLIC_FIREBASE_USE_EMULATOR: "0" },
+    env: localE2EWebServerEnv("bots-3300", {
+      NEXT_PUBLIC_E2E_AUTH_BYPASS: "1",
+      NEXT_PUBLIC_FIREBASE_BACKEND: "0",
+      NEXT_PUBLIC_FIREBASE_USE_EMULATOR: "0",
+    }),
   },
 });

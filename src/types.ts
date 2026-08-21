@@ -332,6 +332,9 @@ export interface UnknownCodeReview {
   resolvedAt: string | null;
   resolvedBy: string | null;
   resolutionAction: ResolutionAction | null;
+  /** Logical time of the latest terminal or explicit reopen decision. Used to reject stale cloud
+   *  snapshots after the matching durable write has already drained from the local queue. */
+  decisionUpdatedAt?: string;
   syncStatus: SyncStatus;
   idempotencyKey: string;
   // Phase 6 correction recheck (Gemini Pro, correction-only). Display/diagnostic; never auto-saves or counts.
@@ -402,6 +405,12 @@ export interface PendingSyncItem {
   updatedAt: string;
   idempotencyKey: string;
   scanEventId: string | null;
+  /**
+   * Optional cloud-drain scheduling hint. Omitted means preserve full queue order.
+   * Only standalone product upserts that do not belong to count/correction/delete
+   * bundles may opt into the bounded product lane.
+   */
+  syncLane?: "independent_product";
 }
 
 export interface Settings {

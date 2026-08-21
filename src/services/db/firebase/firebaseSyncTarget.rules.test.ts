@@ -248,6 +248,40 @@ describe.skipIf(!ready)("FirebaseSyncTarget - transaction-safe idempotency (emul
     expect((alias.data() as { approved: boolean }).approved).toBe(true);
   });
 
+  // PR #43 review defect (retry reordering): a transiently failed decision write retried on a LATER
+  // drain pass must not overwrite the newer decision that already landed. The server is the durable
+  // authority here - client-side merge guards only protect this device's local rows, so without a
+  // decisionUpdatedAt clock on the write itself, the resurrected stale decision reaches every other
+  // device. The stale item must still SETTLE (ok, marker written) so the queue never wedges on it.
+  it("a retried STALE review decision never overwrites a newer decision (decisionUpdatedAt clock)", async () => {
+    const t = target();
+    const mk = (key: string, status: string, decisionUpdatedAt: string): PendingSyncItem => ({
+      ...incItem(key, "rv-clock", 0),
+      operation: "SAVE_UNKNOWN_SCAN",
+      entityType: "UnknownCodeReview",
+      entityId: "r-clock",
+      scanEventId: null,
+      payload: {
+        id: "r-clock", businessId: BIZ, sessionId: SID, cleanCode: "999",
+        status, resolvedAt: status === "resolved" ? decisionUpdatedAt : null, decisionUpdatedAt,
+      },
+    });
+    // The newer re-resolution (v2) drains first because v1's write transiently failed in an earlier pass.
+    expect((await t.apply(mk("k-clock-v2", "resolved", "2026-08-20T12:01:00.000Z"))).ok).toBe(true);
+    // The next pass retries stale v1 (its own idempotency key, so the marker cannot dedupe it) - it
+    // must settle without touching the doc.
+    const staleResult = await t.apply(mk("k-clock-v1", "open", "2026-08-20T12:00:00.000Z"));
+    expect(staleResult.ok).toBe(true);
+    const snap = await getDoc(doc(env.authenticatedContext(UID).firestore() as unknown as Firestore, "businesses", BIZ, "unknownCodeReviews", "r-clock"));
+    const data = snap.data() as { status?: string; decisionUpdatedAt?: string };
+    expect(data.status).toBe("resolved");
+    expect(data.decisionUpdatedAt).toBe("2026-08-20T12:01:00.000Z");
+    // And a genuinely NEWER decision still writes through the guard.
+    expect((await t.apply(mk("k-clock-v3", "open", "2026-08-20T12:02:00.000Z"))).ok).toBe(true);
+    const reopened = await getDoc(doc(env.authenticatedContext(UID).firestore() as unknown as Firestore, "businesses", BIZ, "unknownCodeReviews", "r-clock"));
+    expect((reopened.data() as { status?: string }).status).toBe("open");
+  });
+
   it("SAVE_PRODUCT persists the product and retry does not duplicate", async () => {
     const t = target();
     const pItem: PendingSyncItem = { ...incItem("sp1", "pp1", 0), operation: "SAVE_PRODUCT", entityType: "Product", entityId: "prod1", scanEventId: null, payload: { id: "prod1", businessId: BIZ, name: "Widget", primaryBarcode: "012345678905", verified: true, structuredBrand: undefined } };

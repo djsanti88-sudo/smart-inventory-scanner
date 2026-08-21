@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import { DecodeStatusBadge, StatusBadge } from "@/components/badges";
+import { DecodeStatusBadge, StatusBadge, SyncBadge } from "@/components/badges";
 
 // Plan C, Task 1 (presentational only): collapse the weak decode states into a single
 // user-facing "Suggested" label. needs_review and conflict must both read "Suggested";
@@ -92,5 +92,17 @@ describe("StatusBadge - tolerates the parked 'suggested' review status (Task 9b)
     expect(el).toBeTruthy();
     expect(el.className).not.toContain("undefined");
     expect(el.className.trim().length).toBeGreaterThan(0);
+  });
+});
+
+describe("SyncBadge - explicit local-save labels", () => {
+  it("renders exact pending copy for locally saved work waiting to sync", () => {
+    render(<SyncBadge status="pending" />);
+    expect(screen.getByTestId("sync-badge").textContent).toBe("Saved on this device, waiting to sync");
+  });
+
+  it("renders exact error copy for locally saved work that failed to sync", () => {
+    render(<SyncBadge status="error" />);
+    expect(screen.getByTestId("sync-badge").textContent).toBe("Saved on this device, sync failed");
   });
 });

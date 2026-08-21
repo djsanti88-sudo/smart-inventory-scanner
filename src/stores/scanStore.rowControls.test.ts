@@ -197,6 +197,8 @@ describe("feed row identity controls (best-guess display)", () => {
 
       const after = store.getState().needsReviewQueue.find((r) => r.id === review.id)!;
       expect(after.status, "unresolved conflict stays visible as an OPEN review").toBe("open");
+      expect(after.decisionUpdatedAt, "the explicit reopen is a new durable review decision").not.toBe(review.decisionUpdatedAt);
+      expect(after.idempotencyKey, "the reopen payload must not reuse the auto-settled key").not.toBe(review.idempotencyKey);
       expect(store.getState().aliases.some((a) => a.cleanCode === CODE && a.approved)).toBe(false);
       expect(store.getState().finalCounts.reduce((n, c) => n + c.quantity, 0)).toBe(1);
     } finally {
