@@ -9,7 +9,7 @@
 // are thin Playwright page-driving wrappers (not unit-tested here - proven
 // by the lessons themselves running against a real page).
 
-import { parseLadderTrace, ladderTableRow } from './ladder.mjs';
+import { parseDecodeTraceTrace, decodeTraceTableRow } from './decodeTrace.mjs';
 
 // ---------------------------------------------------------------------------
 // PURE helpers (unit-testable, no page/browser dependency)
@@ -292,7 +292,7 @@ function isApiPath(url) {
 
 /**
  * Register a response listener that captures every POST /api/ai-lookup
- * response, parses it into a ladder trace (with latency), and feeds paid-rung
+ * response, parses it into a decodeTrace trace (with latency), and feeds paid-source
  * usage into `limits` for run-size enforcement. Also tallies EVERY /api/*
  * response (any method) into a lightweight call-coverage list, independent of
  * the ai-lookup-specific parsing, so a lesson can assert on which backend
@@ -301,7 +301,7 @@ function isApiPath(url) {
  * @param {import('playwright').Page} page
  * @param {import('./limits.mjs').RunLimits} limits
  */
-export function attachLadderCapture(page, limits) {
+export function attachDecodeTraceCapture(page, limits) {
   const traces = [];
   const apiCallList = [];
 
@@ -347,11 +347,11 @@ export function attachLadderCapture(page, limits) {
         body = null;
       }
 
-      const parsed = parseLadderTrace(body);
+      const parsed = parseDecodeTraceTrace(body);
       traces.push({ code, parsed, latencyMs: timing });
 
-      if (parsed.settledRung === 'goupc' || parsed.settledRung === 'fetchv2' || parsed.settledRung === 'gpt') {
-        limits.recordPaidLookup(parsed.settledRung);
+      if (parsed.reachedGpt) {
+        limits.recordPaidLookup('gpt');
       }
       limits.recordRequest();
     } catch {
@@ -364,7 +364,7 @@ export function attachLadderCapture(page, limits) {
   return {
     traces,
     rows() {
-      return traces.map((t) => ladderTableRow(t.code, t.parsed, { latencyMs: t.latencyMs }));
+      return traces.map((t) => decodeTraceTableRow(t.code, t.parsed, { latencyMs: t.latencyMs }));
     },
     apiCalls() {
       return apiCallList;

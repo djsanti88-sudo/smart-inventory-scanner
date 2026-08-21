@@ -106,4 +106,35 @@ describe("ai-lookup D4 live-mode trust", () => {
     // inside chargePaidSlot, alongside the global charge. No double-charge, no route-level post-charge.
     expect(chargeDailySlotForAccount).not.toHaveBeenCalled();
   });
+
+  it("defers an exhausted account cap to the pipeline so free decode tiers can still answer", async () => {
+    process.env.AI_LOOKUP_ACCOUNT_DAILY_LIMIT = "3";
+    readDailyUsedForAccount.mockResolvedValue(3);
+    runDecodePipeline.mockResolvedValue({
+      kind: "computed",
+      payload: {
+        mode: "decode",
+        providerNames: ["learned-products"],
+        results: [{ productName: "Known free identity" }],
+        evidences: [],
+        providerStatuses: [],
+        decision: { status: "suggested", confidence: 0.8 },
+        reasonCode: "ok",
+        reasonText: "",
+        timedOut: false,
+        debug: {},
+        sanitizedInput: { rawCodeSanitized: "TX100-PN", cleanCodeSanitized: "TX100-PN" },
+      },
+      cached: false,
+      paidComputeCharged: false,
+    });
+
+    const { POST } = await import("./route");
+    const res = await POST(decodeReq());
+
+    expect(res.status).toBe(200);
+    expect(runDecodePipeline).toHaveBeenCalledOnce();
+    const arg = runDecodePipeline.mock.calls[0][0] as { capContext?: { authedBusinessId?: string; accountLimit?: number } };
+    expect(arg.capContext).toEqual({ authedBusinessId: "b1", accountLimit: 3 });
+  });
 });

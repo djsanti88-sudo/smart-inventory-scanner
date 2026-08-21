@@ -19,7 +19,7 @@
 //   node scripts/import-tires-turso.mjs --dry-run   (count only, no writes)
 //   node scripts/import-tires-turso.mjs             (real import, batched INSERT OR REPLACE)
 //
-// Does NOT touch retail / decode_cache / goupc_* / decode_archive tables.
+// Does not touch retail, decode_cache, legacy provider, or decode_archive tables.
 
 import { readFileSync } from "node:fs";
 import { createClient } from "@libsql/client";

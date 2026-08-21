@@ -113,26 +113,26 @@ describe('planForLessons', () => {
     { id: 'add-known-product', level: 2 },
     { id: 'resolve-unknown', level: 4 },
     { id: 'export-csv', level: 4 },
-    { id: 'live-decode-ladder-trace', level: 7 },
+    { id: 'live-decode-trace', level: 7 },
   ];
 
   test('a single numeric level string resolves to that lesson', () => {
     const result = planForLessons(allLessons, ['7']);
     assert.equal(result.ok, true);
-    assert.deepEqual(result.plan.map((l) => l.id), ['live-decode-ladder-trace']);
+    assert.deepEqual(result.plan.map((l) => l.id), ['live-decode-trace']);
     assert.deepEqual(result.unknown, []);
   });
 
   test('a single lesson id/slug resolves to that lesson', () => {
-    const result = planForLessons(allLessons, ['live-decode-ladder-trace']);
+    const result = planForLessons(allLessons, ['live-decode-trace']);
     assert.equal(result.ok, true);
-    assert.deepEqual(result.plan.map((l) => l.id), ['live-decode-ladder-trace']);
+    assert.deepEqual(result.plan.map((l) => l.id), ['live-decode-trace']);
   });
 
   test('multiple requests are ordered by level ascending, not request order', () => {
     const result = planForLessons(allLessons, ['7', '2']);
     assert.equal(result.ok, true);
-    assert.deepEqual(result.plan.map((l) => l.id), ['add-known-product', 'live-decode-ladder-trace']);
+    assert.deepEqual(result.plan.map((l) => l.id), ['add-known-product', 'live-decode-trace']);
   });
 
   test('a level with multiple lessons at that level resolves all of them, sorted by id', () => {
@@ -142,9 +142,9 @@ describe('planForLessons', () => {
   });
 
   test('duplicate requests (level + id resolving to the same lesson) are deduped', () => {
-    const result = planForLessons(allLessons, ['7', 'live-decode-ladder-trace']);
+    const result = planForLessons(allLessons, ['7', 'live-decode-trace']);
     assert.equal(result.ok, true);
-    assert.deepEqual(result.plan.map((l) => l.id), ['live-decode-ladder-trace']);
+    assert.deepEqual(result.plan.map((l) => l.id), ['live-decode-trace']);
   });
 
   test('an unknown id/level yields ok:false with the bad id named', () => {

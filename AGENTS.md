@@ -14,7 +14,7 @@ Product invariants with pointers: `GUARDRAILS.md`. Architecture: `docs/ARCHITECT
 
 Scanbin (Smart Inventory Scanner) is a multi-tenant, multi-trade barcode inventory web app.
 
-A keyboard-wedge scanner types a code and sends Enter. The app captures the raw scan, cleans it, counts it immediately in local optimistic state, resolves identity deterministically through an alias table when possible, and syncs with idempotency keys so retries never double-count. Unknown codes run a cost-ordered decode ladder; anything not app-verified goes to Needs Review, where human resolution can teach an alias.
+A keyboard-wedge scanner types a code and sends Enter. The app captures the raw scan, cleans it, counts it immediately in local optimistic state, resolves identity deterministically through an alias table when possible, and syncs with idempotency keys so retries never double-count. Unknown codes check shared free knowledge and positive caches before one GPT-5.4 mini lookup; anything not app-verified goes to Needs Review, where human resolution can teach an alias.
 
 Tenant-owned records (products, aliases, scans, counts, sessions, review items) are scoped by `businessId`. The shared knowledge corpus, decode caches, and learned-products tier are platform-scoped server data that serve every tenant.
 
@@ -95,11 +95,11 @@ Every meaningful development or debugging session should leave Scanbin smarter. 
 
 ## Layout and boundaries
 
-- `src/app/` - App Router pages and API routes. `src/app/api/ai-lookup/route.ts` fronts the decode ladder.
+- `src/app/` - App Router pages and API routes. `src/app/api/ai-lookup/route.ts` fronts the decode pipeline.
 - `src/components/` - client UI with co-located `.test.tsx`.
 - `src/stores/scanStore.ts` - large Zustand scan-state store. Search for symbols; do not browse it top to bottom.
 - `src/services/` - pure application services. No React or `next/*`. `inventory.ts` is the counting ledger; `inventory.replay.ts` rebuilds counts from the scan feed; `resolver.ts` is deterministic product matching; `db/` holds the sync targets (mock and Firestore).
-- `src/server/` - server-only: decode pipeline (`decode/pipeline.ts`), UPC providers, tire/retail knowledge corpus, SQLite/Turso stores. Client code must never import `@/server/*`; client-safe UPC utilities live in `src/services/upc/`.
+- `src/server/` - server-only: decode pipeline and counters (`decode/`), tire/retail knowledge corpus, positive decode cache, and SQLite/Turso stores. Client code must never import `@/server/*`; client-safe barcode-shape utilities live in `src/services/upc/`.
 - Generated corpus and database artifacts are never hand-edited. Change the generator and rebuild.
 - API routes never import the client Firebase SDK (lint rule + import-graph tests).
 

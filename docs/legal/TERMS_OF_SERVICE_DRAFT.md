@@ -32,7 +32,7 @@ You agree not to:
 
 - Use the Service for any unlawful purpose or in violation of any applicable law or regulation.
 - Attempt to reverse engineer, decompile, or extract the underlying software, models, alias tables, or catalog data except as permitted by law.
-- Interfere with or disrupt the integrity or performance of the Service, including through excessive automated scanning designed to abuse the decode ladder or AI lookup features.
+- Interfere with or disrupt the integrity or performance of the Service, including through excessive automated scanning designed to abuse product decode or AI lookup features.
 - Attempt to gain unauthorized access to another customer's data, account, or tenant space.
 - Use the Service to store or transmit malicious code, unlawful content, or content that infringes the rights of others.
 - Resell, sublicense, or provide the Service to third parties outside your own business operations without our written consent.

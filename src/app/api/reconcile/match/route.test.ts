@@ -26,8 +26,8 @@ vi.mock("@/services/security/aiSpendGuard", () => ({
   intEnv: (value: string | undefined, fallback: number) => Number(value) || fallback,
 }));
 
-vi.mock("@/server/upc/storage", () => ({
-  ladderStorage: vi.fn().mockResolvedValue({}),
+vi.mock("@/server/decode/storage", () => ({
+  decodeStorage: vi.fn().mockResolvedValue({}),
 }));
 
 const mockLookupAll = vi.fn();

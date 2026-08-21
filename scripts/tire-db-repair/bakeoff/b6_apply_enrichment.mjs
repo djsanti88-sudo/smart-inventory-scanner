@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Task B6 - Codex scaled enrichment: trust gate + applier.
 //
-// Consumes a batch of Codex (or Firecrawl) enrichment results in the SAME "blind result contract"
+// Consumes a batch of enrichment results in the same blind result contract
 // shape used by the B1-B3 bakeoff lanes:
 //   { id, lane, fills: { <field>: <value>, ... }, source_url, source_host, evidence_quote,
 //     confidence, ... }
@@ -39,7 +39,7 @@
 //
 // Modes:
 //   --dry-run              : print what WOULD apply/review, write nothing to the DB or CSV.
-//   --batch <path>          : path to a results_*.json file (Codex or Firecrawl output).
+//   --batch <path>          : path to a results_*.json enrichment file.
 //   --input <path>          : path to the matching batch_*_input.json (for barcode lookup by id).
 //   --source-label <name>   : optional override for the "lane" label recorded in review reasons.
 //
@@ -153,7 +153,6 @@ const TRUSTED_HOSTS = [
   "westlaketires.com",
 ];
 
-const BOSS_BRANDS = ["nexen", "arisun", "blackhawk", "fortune", "falken"];
 
 function isPlaceholderBarcode(barcode) {
   const digits = String(barcode || "").replace(/\D/g, "");

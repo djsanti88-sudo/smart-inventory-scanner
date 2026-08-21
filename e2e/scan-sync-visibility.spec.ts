@@ -11,9 +11,8 @@ import { test, expect, type Page } from "@playwright/test";
 // Run with: npx playwright test --config=playwright.no-bypass.config.ts e2e/scan-sync-visibility.spec.ts
 
 const NO_AI_STATUS = {
-  liveEnabled: false, autoDecodeOnScan: false, geminiEnabled: false, openaiEnabled: false,
-  geminiConfigured: false, openaiConfigured: false, premiumFallback: false, mode: "off",
-  dailyLimit: 200, missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"], e2e: true,
+  liveEnabled: false, autoDecodeOnScan: false, openaiConfigured: false, mode: "off",
+  dailyLimit: 200, missingKeys: ["OPENAI_API_KEY"], e2e: true,
 };
 
 async function stubAiLookup(page: Page) {

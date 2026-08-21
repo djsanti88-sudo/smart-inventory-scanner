@@ -8,7 +8,7 @@ import "server-only";
 // never drift out of sync on which doc a given canonical GTIN actually resolves to.
 //
 // Resolution order matches masterLookup.ts's readEntry(): try "gtin_<canonical>" first (what a
-// fresh ladder append writes), then fall back to the bare canonical id (what the legacy import
+// fresh decode append writes), then fall back to the bare canonical id (what the legacy import
 // used). Returns the FIRST doc that exists, or null if neither does. Never throws on its own -
 // any Firestore error propagates to the caller exactly as a normal `.get()` rejection would, so
 // callers keep their own try/catch semantics (this helper does no swallowing itself).

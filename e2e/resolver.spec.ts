@@ -10,9 +10,8 @@ const PROOF = "e2e/proof";
 // a provider key is configured, so we run it in a NO-KEYS environment: the auto-decode gate fails on
 // hasKey, so unknown scans go straight to Needs Review with zero AI calls.
 const NO_AI_STATUS = {
-  liveEnabled: false, autoDecodeOnScan: false, geminiEnabled: false, openaiEnabled: false,
-  geminiConfigured: false, openaiConfigured: false, premiumFallback: false, mode: "off",
-  dailyLimit: 200, missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"], e2e: true,
+  liveEnabled: false, autoDecodeOnScan: false, openaiConfigured: false, mode: "off",
+  dailyLimit: 200, missingKeys: ["OPENAI_API_KEY"], e2e: true,
 };
 
 async function scan(page: Page, code: string) {

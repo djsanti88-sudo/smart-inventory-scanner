@@ -260,7 +260,7 @@ describe("scanStore - Phase 6 wrong-decode correction", () => {
     setDecodeAvailable(store, true);
     const reviewId = store.getState().reopenNeedsReview("RECHECK1", "marked wrong")!;
     const { spy, restore } = stub({
-      providerNames: ["gemini:pro"],
+      providerNames: ["gpt-5.4-mini"],
       results: [aiResult({ productName: "Correct Product", brand: "Acme", primarySku: "RC-1", primaryBarcode: "RECHECK1", confidence: 0.95 })],
       decision: { status: "verified", confidence: 0.95, evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" } },
     });
@@ -282,7 +282,7 @@ describe("scanStore - Phase 6 wrong-decode correction", () => {
     const store = createTestScanStore({ db: new MockDb() });
     setDecodeAvailable(store, true);
     const reviewId = store.getState().reopenNeedsReview("RECHECK2", "marked wrong")!;
-    const { restore } = stub({ providerNames: ["gemini:pro"], results: [aiResult({ productName: "Maybe", confidence: 0.4 })], decision: { status: "suggested", confidence: 0.4 } });
+    const { restore } = stub({ providerNames: ["gpt-5.4-mini"], results: [aiResult({ productName: "Maybe", confidence: 0.4 })], decision: { status: "suggested", confidence: 0.4 } });
     try {
       await store.getState().correctionRecheck(reviewId);
     } finally {
@@ -298,7 +298,7 @@ describe("scanStore - Phase 6 wrong-decode correction", () => {
     const store = createTestScanStore({ db: new MockDb() });
     setDecodeAvailable(store, true);
     const reviewId = store.getState().reopenNeedsReview("RECHECK3", "marked wrong")!;
-    const { restore } = stub({ providerNames: ["gemini:pro", "openai"], results: [aiResult({ productName: "A", brand: "X", confidence: 0.5 })], decision: { status: "conflict", confidence: 0.2, crossCheck: { decision: "conflict" } } });
+    const { restore } = stub({ providerNames: ["gpt-5.4-mini"], results: [aiResult({ productName: "A", brand: "X", confidence: 0.5 })], decision: { status: "conflict", confidence: 0.2, crossCheck: { decision: "conflict" } } });
     try {
       await store.getState().correctionRecheck(reviewId);
     } finally {
@@ -322,16 +322,16 @@ describe("scanStore - Phase 6 wrong-decode correction", () => {
     }
     const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
     expect(review.correctionRecheckStatus).toBe("unavailable");
-    // Key NAMES only, never a value, and never a Gemini key the pipeline does not use.
-    expect(review.correctionRecheckMissingKeys ?? []).not.toContain("GEMINI_API_KEY");
+    // Key names only, never values.
+    expect(review.correctionRecheckMissingKeys ?? []).toEqual(["OPENAI_API_KEY"]);
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("cost guard: only one Pro recheck per code unless an explicit retry", async () => {
+  it("cost guard: only one paid recheck per code unless an explicit retry", async () => {
     const store = createTestScanStore({ db: new MockDb() });
     setDecodeAvailable(store, true);
     const reviewId = store.getState().reopenNeedsReview("RECHECK5", "marked wrong")!;
-    const { spy, restore } = stub({ providerNames: ["gemini:pro"], results: [aiResult({ productName: "P" })], decision: { status: "suggested", confidence: 0.5 } });
+    const { spy, restore } = stub({ providerNames: ["gpt-5.4-mini"], results: [aiResult({ productName: "P" })], decision: { status: "suggested", confidence: 0.5 } });
     try {
       await store.getState().correctionRecheck(reviewId);
       await store.getState().correctionRecheck(reviewId); // guarded -> no second fetch
@@ -551,7 +551,7 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
   function decodeResponse(decision: object, result: object) {
     return {
       ok: true,
-      json: async () => ({ providerNames: ["gemini", "openai"], results: [result], decision }),
+      json: async () => ({ providerNames: ["gpt-5.4-mini"], results: [result], decision }),
     };
   }
   function stub(resp: object) {
@@ -866,7 +866,7 @@ describe("scanStore - auto-apply high-trust suggestions (owner order 2026-07-10)
   function decodeResponse(decision: object, result: object) {
     return {
       ok: true,
-      json: async () => ({ providerNames: ["gemini", "openai"], results: [result], decision }),
+      json: async () => ({ providerNames: ["gpt-5.4-mini"], results: [result], decision }),
     };
   }
   function stub(resp: object) {

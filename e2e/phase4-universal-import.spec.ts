@@ -23,8 +23,8 @@ const PROOF = "e2e/proof";
 const FIXTURE = path.join(__dirname, "..", "src", "services", "import", "__fixtures__", "reordered-renamed.tsv");
 
 const NO_AI_STATUS = {
-  liveEnabled: false, autoDecodeOnScan: false, geminiConfigured: false, openaiConfigured: false,
-  mode: "off", missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"], e2e: true,
+  liveEnabled: false, autoDecodeOnScan: false, openaiConfigured: false,
+  mode: "off", missingKeys: ["OPENAI_API_KEY"], e2e: true,
 };
 
 async function mockAiLookup(page: Page) {

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
+import { useShallow } from "zustand/react/shallow";
 import { useAccessLevel } from "@/services/security/useAccessLevel";
 import {
   exportAliases,
@@ -28,8 +29,20 @@ type Fmt = "csv" | "xlsx" | "pdf" | "html";
 interface Dataset { testid: string; title: string; filenameBase: string; rows: number; csv: () => string }
 
 export function ExportMenu() {
-  const s = useScanStore();
-  const currentSession = useScanStore((store) => store.currentSession);
+  const s = useScanStore(useShallow((store) => ({
+    businessId: store.businessId,
+    sessionId: store.sessionId,
+    currentSession: store.currentSession,
+    pendingSyncQueue: store.pendingSyncQueue,
+    finalCounts: store.finalCounts,
+    products: store.products,
+    scanFeed: store.scanFeed,
+    needsReviewQueue: store.needsReviewQueue,
+    aliases: store.aliases,
+    auditCsvExport: store.auditCsvExport,
+    importProductsCsv: store.importProductsCsv,
+  })));
+  const currentSession = s.currentSession;
   const level = useAccessLevel();
   const isPlatform = level === "platform";
   const activePendingQueue = s.pendingSyncQueue.filter((item) => item.businessId === s.businessId);

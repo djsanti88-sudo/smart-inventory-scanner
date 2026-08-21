@@ -16,11 +16,7 @@ function result(over: Record<string, unknown>) {
 }
 
 const STATUS = {
-  liveEnabled: true, autoDecodeOnScan: true, geminiEnabled: true, openaiEnabled: true,
-  geminiConfigured: true, openaiConfigured: true, firecrawlConfigured: false, openWebFallback: false,
-  geminiSearchGrounding: true, openaiWebSearch: true, geminiModel: "gemini-flash-latest", openaiModel: "gpt-5-mini",
-  geminiProModel: "gemini-2.5-pro", openaiProModel: "gpt-5", pageFetchAndRead: true, premiumFallback: false,
-  mode: "aggressive", dailyLimit: 100, missingKeys: [], e2e: true,
+  liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true, mode: "aggressive", dailyLimit: 100, missingKeys: [], e2e: true,
 };
 
 // Poisoned source: WEAK/unverified exact-code evidence (go-upc url_only, not app-verified), and the

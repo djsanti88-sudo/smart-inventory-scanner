@@ -98,7 +98,7 @@ export function canAutoCount(input: AutoCountInput): { allowed: boolean; reason:
 
   // Evidence-corroborated branch: app-verified exact code OR internet_two_source_size, on a "verified" decode.
   // D6 core (2026-07-20): this is now the ONLY verified-auto-count path. The former gptTrusted escape
-  // hatch (a bare GPT self-report on a public barcode shape) is DELETED - gptResultToDecodePayload no
+  // hatch (a bare GPT self-report on a public barcode shape) is DELETED - mapGptDecodeResult no
   // longer emits status "verified" for a self-report, so this branch can never be reached by one
   // anyway; deleting the dead branch here keeps the gate honest and prevents future re-introduction.
   if (status === "verified" && decodeCorroborated(decision)) {
@@ -124,7 +124,7 @@ export interface AutoApplySuggestionInput {
  * AUTO-SUGGEST-APPLY gate (owner order 2026-07-10). A decode that did NOT clear the full auto-count gate
  * can still skip Needs Review and have its identity applied onto the counted provisional row AS A
  * SUGGESTION (never verified, no alias) when confidence >= 0.8 on a NON-"verified" decode, OR the decode is
- * app-verified exact (status "verified" + exactCodeEvidenceVerifiedByApp true, the Go-UPC exact class).
+ * app-verified exact (status "verified" + exactCodeEvidenceVerifiedByApp true).
  *
  * TRUST FIREWALL (do not remove): the confidence>=0.8 clause is INTENTIONALLY restricted to
  * status !== "verified". A raw confidence on a "verified" decode is the PROVIDER'S self-reported number and

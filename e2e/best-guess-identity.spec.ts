@@ -18,11 +18,7 @@ const PROOF = "e2e/proof";
 const STATUS = {
   liveEnabled: true,
   autoDecodeOnScan: true,
-  geminiEnabled: false,
-  openaiEnabled: true,
-  geminiConfigured: false,
   openaiConfigured: true,
-  premiumFallback: false,
   mode: "aggressive",
   dailyLimit: 100,
   missingKeys: [],

@@ -6,7 +6,7 @@ import { COLLECTIONS, type CatalogEntry as DbCatalogEntry } from "@/services/db/
 import { resolveCatalogDocId } from "@/server/catalog/catalogDocId";
 
 // Sync Truth Task 4 (owner-approved 2026-07-22, docs/archive/superpowers/plans/2026-07-22-sync-truth-five-steps.md):
-// a FREE ladder rung that consults the top-level Firestore `catalogEntries` master catalog (the same
+// a free decode stage that consults the top-level Firestore `catalogEntries` master catalog (the same
 // collection masterAppend.ts writes) BEFORE any paid rung, so a code the app (or another shop) already
 // resolved and an owner already reviewed never pays again. Read via the Admin SDK (bypasses Firestore
 // rules, mirrors masterAppend.ts's server-only posture) keyed by canonicalGtin - the SAME doc id scheme
@@ -14,7 +14,7 @@ import { resolveCatalogDocId } from "@/server/catalog/catalogDocId";
 // an append there wrote.
 //
 // RESILIENCE (plan rule 5): missing Admin credentials, a Firestore error, or a read exceeding the
-// ~1500ms bound must never throw and never block the ladder - this rung silently MISSES on any of those,
+// ~1500ms bound must never throw and never block decode - this stage silently MISSES on any of those,
 // exactly like every other free rung's honest-miss posture. The timeout is a race against a plain
 // setTimeout (not a Firestore-native timeout option) so it stays simple and directly testable with a
 // delayed mock.
@@ -72,7 +72,7 @@ function classifyEntry(entry: DbCatalogEntry): MasterLookupOutcome {
   // Fix (owner-approved, rung self-poisoning): human_verified (owner-approved via catalog-review) AND
   // ladder_verified_strong (masterAppend.ts's write gate already required app-verified exact-code
   // evidence at >= 0.8 confidence on a public barcode shape before ever writing this tier) both settle
-  // verified. Without this, a code the ladder itself verified yesterday via paid rungs would replay
+  // verified. Without this, a code the decoder verified yesterday could replay
   // forever as a demoted 0.85 "suggestion" and the paid rungs would never run again to re-confirm it -
   // a previously-Verified code downgrading permanently. Any other/unrecognized provenanceTier on a
   // verified entry (legacy data, future tiers not yet trusted here) stays a review-first suggestion.
@@ -96,7 +96,7 @@ async function readEntry(canonical: string, deps: MasterLookupDeps): Promise<DbC
 
 /**
  * Consult the master catalog for a canonical GTIN. NEVER throws - any credential failure, Firestore
- * error, or a read exceeding READ_TIMEOUT_MS resolves to { kind: "miss" } so the ladder always falls
+ * error, or a read exceeding READ_TIMEOUT_MS resolves to { kind: "miss" } so decode always falls
  * through cleanly to the next rung. TTL-memoized per canonical GTIN (see MEMO_TTL_MS/MEMO_MAX_ENTRIES).
  */
 export async function lookupMasterCatalog(code: string, deps: MasterLookupDeps = {}): Promise<MasterLookupOutcome> {
@@ -121,7 +121,7 @@ export async function lookupMasterCatalog(code: string, deps: MasterLookupDeps =
     outcome = entry ? classifyEntry(entry) : { kind: "miss" };
   } catch {
     // Missing Admin credentials, a Firestore error, or any other unexpected failure: silent miss,
-    // never throws, never blocks the ladder (plan rule 5).
+    // never throws, never blocks decode (plan rule 5).
     outcome = { kind: "miss" };
   }
 

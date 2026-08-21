@@ -31,9 +31,9 @@ Chrome (attached, never a new browser), do three things:
   End with `detach` only.
 - Two other Claude windows share this same Chrome via their own sessions. Use ONLY your session
   name `-s=tier1scan` on every command. Don't touch their tabs.
-- COST GUARD: production decode may hit paid rungs (Go-UPC / Fetch V2 / GPT). Expected result
+- COST GUARD: production decode may hit GPT-5.4 mini. Expected result
   is free cache hits. After the first 10 one-by-one scans, inspect the network responses: if
-  paid rungs are firing for previously-scanned codes, PAUSE the blast, capture evidence, and
+  repeated GPT decodes are firing for previously-scanned codes, PAUSE the blast, capture evidence, and
   report - that IS the bug, don't pay for it 114 more times.
 - Scans will add counts to the owner's real production local state. He knows and approves. Note
   in your report which session the counts landed in so he can clean up if he wants.
@@ -77,7 +77,8 @@ If attach fails, STOP and tell the owner Chrome needs the debug-port restart (se
 
 1. Use `requests` and `response-body <n>` on the `/api/ai-lookup` calls captured during Phase B.
 2. For a sample of at least 10 codes, extract from the response: which ladder rung answered
-   (L1 cache / corpus / learned / L2 / free APIs / paid rungs), the reason strings, and timing.
+   (tire corpus / retail corpus / learned products / master catalog / persisted cache / memory cache /
+   GPT-5.4 mini), the reason strings, and timing.
 3. Answer with evidence: are these codes served from cache/learned tier (free, and only the UI
    makes it look like a fresh decode)? Or genuinely re-decoding (cache miss)? Or not in the
    master DB at all? Architecture pointers: `src/server/decode/pipeline.ts` (rung order),

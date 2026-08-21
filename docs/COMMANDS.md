@@ -150,22 +150,16 @@ preflight gate before proposing any deploy action, GitHub-driven or emergency.
 
 | Script | Spend |
 |---|---|
-| `npm run live-decode-smoke` | GET-only free; **PAID** when `LIVE_AI_TEST=1` (real Gemini/OpenAI). |
+| `npm run live-decode-smoke` | GET-only free; **PAID** when `LIVE_AI_TEST=1` (GPT-5.4 mini through the app route). |
 | `npm run eval-decode` (`--live`) | Default prints instructions ($0); `--live` is **PAID**, bounded to 10 codes. |
-| `npm run benchmark` | **PAID** live ladder benchmark; hard cap 400 Firecrawl credits (`BENCHMARK_FIRECRAWL_CAP`). |
-| `npm run intel:now` / `intel:tire-scan` / `npm run weekly-report` | **PAID** live decode monitoring (cents/run) + Gmail send. |
+| `npm run benchmark -- --allow-paid` | **PAID** current-path benchmark. Requires a non-E2E server; spend remains bounded by the server GPT and daily caps. |
+| `npm run intel:tire-scan -- --allow-paid` | **PAID** rotated tire decode monitor. Records call counts only; provider-console reconciliation is required for spend. |
+| `npm run intel:now -- --allow-paid` / `npm run weekly-report` | **PAID/LIVE** decode monitoring plus report/email workflow. |
 | `npm run harvest` / `harvest:discount-tire` / `harvest:test` | **LIVE** web scraping of retailer sites via Playwright (ToS-sensitive, not billed). Bare `harvest` requires `--site <name>`; `harvest:test` caps at 5 pages, visible browser. |
 | `npm run test:firebase:cloud-smoke` | **LIVE** cloud Firebase writes (self-cleaning throwaway business). |
 | `node scripts/create-god-account.mjs` / `repair-god-alias.mjs --repair` | **LIVE** real-account provisioning / repair (repair is read-only without `--repair`). |
-| `node scripts/gpt-ladder-live-proof.mts`, `scripts/fetchv2-*.mts` | **PAID** provider/discovery probes (credit-capped). |
 | `npm run deploy:rules:prod` | **LIVE** deploys `firestore.rules` + `firestore.indexes.json` to the REAL production project (`smart-inventory-scanner-app`, alias `prod` in `.firebaserc`). Not billed, but production-affecting: a wrong rules push changes who can read/write real customer data. Owner approval required before every run. |
-| `node scripts/model-bakeoff.mjs` | Dry run (default, $0): prints which models/how many calls WOULD run + a worst-case cost floor, exits 0. **PAID** only with BOTH `--live` and `--yes-i-accept-cost`, and only after `BAKEOFF_OPENAI_KEY`/`BAKEOFF_GEMINI_KEY` are set (dev-tooling-only vars - it never reads `.env.local`'s Lane 2 `OPENAI_API_KEY`/`GEMINI_API_KEY`). Up to `count`(default 10) x 5 models live calls to `api.openai.com` and `generativelanguage.googleapis.com`. Not wired into `package.json`. |
-| `LIVE_AI_TEST=1 node scripts/weekly-accuracy.ts` | Safe by default (dry run, $0, prints what would run) unless `LIVE_AI_TEST=1` is set, in which case it POSTs real codes through the app's own `/api/ai-lookup` route (spending against the app's Lane 2 live provider keys), cost-capped via `THIRDPARTY_CAP_USD` (default $0.50 lean / $2 deep). Requires a running dev server. Not wired into `package.json`. |
 | `node scripts/import-retail-turso.mjs --force` | **LIVE**: `--force` on an existing >3M-row Turso `retail` table DROPs it and reimports from the local `retailKnowledge.generated.json`. Guarded (F1-style, mirrors `build-tire-knowledge.mjs`): refuses the drop when the local source has under 90% of the live table's row count, unless `--force-shrink` is ALSO passed for a deliberate replacement. Not billed by a provider, but destructive to the production retail corpus - owner approval required before every `--force` run. |
-| `node scripts/prefix-mining/phase05-prefix-cleanup.mjs`, `scripts/prefix-mining/phase1-enrich-build.mjs` | Dry run (default, $0): prints the plan + a worst-case cost floor, exits 0. **PAID** only with BOTH `--live` and `--yes-i-accept-cost`, and only after `PHASE05_GEMINI_KEY` / `PHASE1_GEMINI_KEY` are set (dev-tooling-only vars via `scripts/lib/paidScriptGuard.mjs` - never `.env.local`'s Lane 2 `GEMINI_API_KEY`). `phase1-enrich-build.mjs` also overwrites `src/services/catalog/derivedPrefixMap.json` when live. Hard-capped $10 / $3 respectively. Not wired into `package.json`. |
-| `node scripts/proof-full-ladder.mjs`, `scripts/proof-rung-goupc.mjs`, `scripts/proof-rung-3-fetchv2.mjs`, `scripts/proof-rung-4-gpt.mjs` | **LIVE ladder-proof harnesses**: spawn a real `next dev` server with REAL `.env.local` keys and drive it through curated code sets, spending real Go-UPC/Firecrawl/GPT money. All four require BOTH `--live` and `--yes-i-accept-cost` (via `scripts/lib/paidScriptGuard.mjs`); bare invocation now prints a worst-case cost floor and exits 0, $0 spent (previously `proof-full-ladder.mjs` and `proof-rung-goupc.mjs` had no gate at all - fixed 2026-08-13). Spend caps documented in each file's header. Not wired into `package.json`. |
-| `npx tsx scripts/fetchv2-benchmark.mts`, `scripts/fetchv2-discovery-shootout.mts`, `scripts/fetchv2-forensic.mts`, `scripts/gpt-ladder-live-proof.mts`, `scripts/stress/rung-isolated-test.mts` | **PAID** Fetch V2 / GPT discovery probes (Brave, Firecrawl, OpenAI), credit/dollar-capped per file. All now require `--live` (`fetchv2-discovery-shootout.mts` defaults to a $0 mock self-test without it) AND `--yes-i-accept-cost` via `scripts/lib/paidScriptGuard.mjs`; `fetchv2-forensic.mts` and `rung-isolated-test.mts` previously had NO gate at all - fixed 2026-08-13. Not wired into `package.json`. |
-| `node scripts/stress/sync-preview-keys.mjs` / `sync-production-keys.mjs` | Owner-authorized 2026-07-20: copies already-configured key VALUES from `.env.local` straight into Vercel's preview/production env store (values never printed). Not a paid-API-calling script itself - allowlisted in `scripts/paidScriptGuard.enforcement.test.mjs` with a written reason rather than gated, since it makes no billed call of its own. Owner approval required before every run (it mutates the deployed env). |
 
 Cost truths that always apply: a client-aborted call is still billed server-side; unmeterable fees
 reserve documented worst case; reconcile against the provider console before quoting spend.
@@ -182,14 +176,11 @@ clone - this section is the durable name list. Client-exposed vars are
   `NEXT_PUBLIC_FIREBASE_ALLOW_PROD`, `NEXT_PUBLIC_FIREBASE_*` (app config), `NEXT_PUBLIC_REQUIRE_LOGIN`
 - Firebase server: `FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT_JSON` / `_PATH`,
   `GOOGLE_APPLICATION_CREDENTIALS`, emulator hosts
-- AI providers (server-only secrets): `OPENAI_API_KEY` (+ `OPENAI_MODEL`, `GPT_LADDER_MODEL` - decode
-  ladder's paid GPT rung, defaults to `gpt-5.4-mini` as of 2026-07-27,
-  `GPT_LADDER_DAILY_USD`), `GEMINI_API_KEY` (+ model vars; decode-disabled), `GO_UPC_API_KEY`
-  (+ `GO_UPC_MONTHLY_LIMIT`), `FIRECRAWL_API_KEY` (+ `_1..4` rotation), `BRAVE_SEARCH_API_KEY`,
-  `UPCITEMDB_DAILY_LIMIT`, `OPENFOODFACTS_PER_MINUTE_LIMIT`
+- Paid decode (server-only): `OPENAI_API_KEY`, `GPT_DECODE_MODEL` (defaults to exact alias
+  `gpt-5.4-mini`), `GPT_DECODE_DAILY_USD`, `AI_LOOKUP_GPT_DECODE_FILE`
 - Spend/rate guards: `AI_LOOKUP_DAILY_LIMIT` (default 2000), `AI_LOOKUP_KILL_SWITCH`,
   `AI_LOOKUP_RATE_LIMIT` / `_WINDOW_MS` / `_GET_RATE_LIMIT`, `ENABLE_LIVE_AI_LOOKUP`,
-  `ENABLE_AUTO_DECODE_ON_SCAN`, `AI_LOOKUP_MODE`, `DECODE_CACHE_FILE`, `DECODE_MISS_TTL_MS` (L1 miss, default 10 min), `DECODE_NEGATIVE_TTL_MS` (L2 no-result cooldown, default 7 days; only the cooldown reopens paid rungs)
+  `ENABLE_AUTO_DECODE_ON_SCAN`, `AI_LOOKUP_MODE`, `DECODE_CACHE_FILE`
 - Data stores: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`
 - Roles: `PLATFORM_OWNER_EMAILS` / `_UIDS` (+ `NEXT_PUBLIC_` mirrors)
 - Test-only (never real prod): `IS_E2E`, `NEXT_PUBLIC_E2E_AUTH_BYPASS`, `NEXT_PUBLIC_E2E_PLATFORM_OWNER`,

@@ -25,7 +25,7 @@ export const COUNTS_RENDER_CHUNK = 300;
 // Final count database: spreadsheet-style, grouped by PRODUCT (not by code). Raw codes (barcode +
 // aliases) are platformOwner-only. Row actions let the owner fix a wrong saved decode safely:
 // Correct (edit product fields), Remove from count (session-only), Mark wrong (platformOwner: deactivate
-// the bad alias + reopen Needs Review + Gemini Pro recheck).
+// the bad alias + reopen Needs Review + run the configured decode again).
 export function FinalCountTable() {
   const finalCounts = useScanStore((s) => s.finalCounts);
   const currentSession = useScanStore((s) => s.currentSession);
@@ -229,7 +229,7 @@ function CountRow({
   const onMarkWrong = () => {
     if (
       window.confirm(
-        "Mark this product as the WRONG match? This removes the count, deactivates the scanned code's alias so it stops counting, reopens Needs Review, and runs a Gemini Pro recheck if configured.",
+        "Mark this product as the WRONG match? This moves the count, deactivates the scanned code's alias so it stops matching, reopens Needs Review, and runs product lookup again if configured.",
       )
     ) {
       void markWrong(product.id, { reason: "marked wrong from final count" });

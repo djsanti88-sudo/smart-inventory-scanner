@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // /api/health is a public, unauthenticated uptime-monitor endpoint. It must NEVER leak secret
 // values, must never throw (a hung/degraded dependency reports false, not a 500), and must stay
-// fast. These tests mock the Admin SDK and Turso-backed ladder storage the same way
+// fast. These tests mock the Admin SDK and Turso-backed decode storage the same way
 // src/app/api/account/export/route.test.ts and src/app/api/ai-lookup/route.d4.test.ts do - no live
 // Firestore/Turso involved.
 
@@ -21,8 +21,8 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   }),
 }));
 
-vi.mock("@/server/upc/storage", () => ({
-  ladderStorage: async () => ({ get: mocks.tursoGet }),
+vi.mock("@/server/decode/storage", () => ({
+  decodeStorage: async () => ({ get: mocks.tursoGet }),
 }));
 
 const ORIG_ENV = { ...process.env };
@@ -32,10 +32,7 @@ beforeEach(async () => {
   mocks.firestoreGet.mockReset().mockResolvedValue({ docs: [] });
   mocks.tursoGet.mockReset().mockResolvedValue(null);
   process.env = { ...ORIG_ENV };
-  delete process.env.GEMINI_API_KEY;
   delete process.env.OPENAI_API_KEY;
-  delete process.env.FIRECRAWL_API_KEY;
-  delete process.env.GO_UPC_API_KEY;
   delete process.env.VERCEL_GIT_COMMIT_SHA;
   delete process.env.GIT_COMMIT_SHA;
   const { __resetForTest } = await import("@/services/security/aiSpendGuard");
@@ -44,7 +41,6 @@ beforeEach(async () => {
 
 describe("GET /api/health", () => {
   it("returns 200 with ok:true and boolean-only fields when firestore/turso are reachable and keys are present", async () => {
-    process.env.GEMINI_API_KEY = "sk-real-gemini-secret-value-12345";
     process.env.OPENAI_API_KEY = "sk-real-openai-secret-value-67890";
     process.env.VERCEL_GIT_COMMIT_SHA = "abc1234";
     const { GET } = await import("./route");
@@ -71,7 +67,7 @@ describe("GET /api/health", () => {
     expect(body.ok).toBe(false);
   });
 
-  it("degrades to turso:false and ok:false (never throws) when the ladder storage backend is unreachable", async () => {
+  it("degrades to turso:false and ok:false (never throws) when decode storage is unreachable", async () => {
     mocks.tursoGet.mockRejectedValue(new Error("Turso: connection reset"));
     const { GET } = await import("./route");
     const res = await GET(new Request("http://x/api/health"));
@@ -102,10 +98,7 @@ describe("GET /api/health", () => {
   });
 
   it("never leaks the raw value of any secret/env var in the response body", async () => {
-    process.env.GEMINI_API_KEY = "sk-super-secret-gemini-value-should-never-leak";
     process.env.OPENAI_API_KEY = "sk-super-secret-openai-value-should-never-leak";
-    process.env.FIRECRAWL_API_KEY = "fc-super-secret-firecrawl-value-should-never-leak";
-    process.env.GO_UPC_API_KEY = "goupc-super-secret-value-should-never-leak";
     process.env.TURSO_DATABASE_URL = "libsql://super-secret-host.example.com";
     process.env.TURSO_AUTH_TOKEN = "super-secret-turso-auth-token-value";
     process.env.FIREBASE_SERVICE_ACCOUNT_JSON = '{"private_key":"super-secret-pem-value"}';

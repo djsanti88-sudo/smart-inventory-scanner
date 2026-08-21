@@ -43,7 +43,7 @@ function corpusEval(): void {
   console.log(`  auto-count rate:       ${codes.length ? Math.round((100 * autoCandidates.length) / codes.length) : 0}% (of trusted corpus rows)`);
   console.log(`  FALSE auto-count:      ${poisonInCorpus ? "FAIL (poison in corpus!)" : "0% (poison 745125495781 absent)"}`);
   console.log(`  near-match in corpus:  ${nearInCorpus ? "present" : "absent (7451254957818)"}`);
-  console.log(`  AI-call avoidance:     100% (corpus hits never call Gemini/OpenAI/page-fetch)`);
+  console.log(`  Paid-call avoidance:   100% (corpus hits never call GPT-5.4 mini)`);
   console.log(`  latency p50/p95:       in-memory exact lookup (~0ms after first lazy load)`);
   if (poisonInCorpus) process.exitCode = 1;
 }

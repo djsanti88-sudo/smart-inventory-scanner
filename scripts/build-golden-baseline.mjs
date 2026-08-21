@@ -68,6 +68,6 @@ fs.mkdirSync("benchmarks/golden", { recursive: true });
 fs.writeFileSync("benchmarks/golden/phase1-corpus-golden.json", JSON.stringify(golden, null, 1) + "\n");
 console.log(`golden: ${golden.length}/${OWNER_100_CODES.length} codes`);
 if (notFound.length) {
-  console.error(`\n${notFound.length} owner-100 codes are NOT resolvable by pure corpus lookup (they likely settled via a paid ladder rung - goupc/GPT - in the live 100/100 preview run, not the local corpus):`);
+  console.error(`\n${notFound.length} owner-100 codes are NOT resolvable by pure corpus lookup (they may have settled via GPT-5.4 mini in a live preview run rather than the local corpus):`);
   for (const c of notFound) console.error(`  - ${c}`);
 }

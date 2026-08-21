@@ -35,8 +35,8 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   getAdminDb: () => ({ doc: () => ({ get: (...args: unknown[]) => memberGet(...args) }) }),
 }));
 
-const ladderStorage = vi.fn();
-vi.mock("@/server/upc/storage", () => ({ ladderStorage: (...args: unknown[]) => ladderStorage(...args) }));
+const decodeStorage = vi.fn();
+vi.mock("@/server/decode/storage", () => ({ decodeStorage: (...args: unknown[]) => decodeStorage(...args) }));
 
 const legacyRateLimit = vi.fn();
 const killSwitch = vi.fn();
@@ -139,7 +139,7 @@ beforeEach(async () => {
   hasBossHmacKeyConfigured.mockReset().mockReturnValue(true);
   logServerEvent.mockReset();
   runDecodePipeline.mockReset().mockResolvedValue({ kind: "computed", payload: { debug: {} }, cached: false, paidComputeCharged: false });
-  ladderStorage.mockReset().mockResolvedValue({});
+  decodeStorage.mockReset().mockResolvedValue({});
   legacyRateLimit.mockReset().mockResolvedValue({ allowed: true, retryAfterMs: 0 });
   killSwitch.mockReset().mockReturnValue(false);
 });
@@ -163,7 +163,7 @@ describe("authenticated Boss trusted-exact route", () => {
     expect(memberGet).toHaveBeenCalledOnce();
     expect(trustedExactCheck).toHaveBeenCalledWith("uid-a", "business-a");
     expect(resolveTrustedExactBarcodeDecision).toHaveBeenCalledWith("3220017438", { authenticatedBossCorpus: true });
-    expect(ladderStorage).not.toHaveBeenCalled();
+    expect(decodeStorage).not.toHaveBeenCalled();
     expect(legacyRateLimit).not.toHaveBeenCalled();
     expect(runDecodePipeline).not.toHaveBeenCalled();
     const body = await response.json();
@@ -194,7 +194,7 @@ describe("authenticated Boss trusted-exact route", () => {
     const response = await POST(request("029142337393"));
 
     expect(response.status).toBe(200);
-    expect(ladderStorage).not.toHaveBeenCalled();
+    expect(decodeStorage).not.toHaveBeenCalled();
     expect(legacyRateLimit).not.toHaveBeenCalled();
     expect(killSwitch).not.toHaveBeenCalled();
     expect(runDecodePipeline).not.toHaveBeenCalled();
@@ -225,7 +225,7 @@ describe("authenticated Boss trusted-exact route", () => {
     expect(trustedExactCheck).toHaveBeenCalledOnce();
     expect(resolveTrustedExactBarcodeDecision).toHaveBeenCalledOnce();
     expect(runDecodePipeline).not.toHaveBeenCalled();
-    expect(ladderStorage).not.toHaveBeenCalled();
+    expect(decodeStorage).not.toHaveBeenCalled();
   });
 
   it("expires a positive membership after 30 seconds without ever caching the token verification", async () => {
@@ -335,7 +335,7 @@ describe("authenticated Boss trusted-exact route", () => {
     expect(shortMissBody.trustedExact).toEqual({ path: "trusted_exact_miss" });
     expect(malformedMissBody.trustedExact).toEqual({ path: "trusted_exact_miss" });
     expect(runDecodePipeline).not.toHaveBeenCalled();
-    expect(ladderStorage).not.toHaveBeenCalled();
+    expect(decodeStorage).not.toHaveBeenCalled();
     expect(legacyRateLimit).not.toHaveBeenCalled();
   });
 
@@ -357,7 +357,7 @@ describe("authenticated Boss trusted-exact route", () => {
     expect(body.decision.status).toBe("needs_review");
     expect(body.trustedExact).toEqual({ path: "trusted_exact_miss" });
     expect(runDecodePipeline).not.toHaveBeenCalled();
-    expect(ladderStorage).not.toHaveBeenCalled();
+    expect(decodeStorage).not.toHaveBeenCalled();
     expect(legacyRateLimit).not.toHaveBeenCalled();
   });
 

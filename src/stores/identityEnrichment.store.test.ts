@@ -120,7 +120,7 @@ describe("empty-suggested regression guard (Group C)", () => {
     const store = aiOnStore();
     const review = openReview(store, "0000000000001");
     const RESP = {
-      providerNames: ["gpt-5.5-ladder"],
+      providerNames: ["gpt-5.4-mini"],
       results: [gptResult({ productName: "" })],
       decision: {
         status: "suggested",
@@ -162,7 +162,7 @@ describe("identity enrichment - owner-reported Falken bug (848983017918)", () =>
     const store = aiOnStore();
     const review = openReview(store, "848983017918");
     const RESP = {
-      providerNames: ["gpt-5.5-ladder"],
+      providerNames: ["gpt-5.4-mini"],
       results: [gptResult()],
       decision: {
         status: "suggested",

@@ -382,7 +382,7 @@ async function main() {
 // TURSO_DATABASE_URL being present in .env.local and --no-turso not being passed. Errors here are
 // logged as a warning and swallowed — the local corpus apply (JSON + SQLite rebuild + spot-check)
 // has already succeeded by the time this runs and must not be undone by a Turso-side problem.
-// Only ever writes `tires` / `tire_part_numbers` — never retail / decode_cache / goupc_* tables.
+// Only ever writes `tires` / `tire_part_numbers` - never retail, decode_cache, or legacy provider tables.
 // ---------------------------------------------------------------------------
 async function maybeUpsertToTurso(newlyAdded, noTurso) {
   if (noTurso) {

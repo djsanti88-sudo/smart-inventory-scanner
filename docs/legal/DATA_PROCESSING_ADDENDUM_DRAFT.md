@@ -27,7 +27,7 @@ This Data Processing Addendum ("DPA") supplements the Scanbin Terms of Service a
 
 ## 4. Sub-Processors
 
-Scanbin uses the sub-processors listed in the Privacy Policy (Section 4), including hosting (Vercel), authentication/database (Google Firebase), catalog cache (Turso), AI decode/lookup providers (OpenAI, Google Gemini), web evidence retrieval (Firecrawl), and payment processing (Stripe, when enabled). Scanbin will:
+Scanbin uses the sub-processors listed in the Privacy Policy (Section 4), including hosting (Vercel), authentication/database (Google Firebase), catalog cache (Turso), AI decode/lookup (OpenAI), and payment processing (Stripe, when enabled). Scanbin will:
 
 - Maintain the current sub-processor list referenced from the Privacy Policy.
 - Provide notice of new sub-processors through the Privacy Policy or direct communication, consistent with the Terms of Service.

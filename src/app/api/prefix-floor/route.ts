@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { detectCodeType } from "@/services/codeTypeDetector";
 import { prefixFloorNameFull } from "@/server/catalog/prefixIndexServer";
 import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
-import { ladderStorage } from "@/server/upc/storage";
+import { decodeStorage } from "@/server/decode/storage";
 
 // F5 bundle-surgery (wave 2, 2026-07-20): the DERIVED-tier prefix->brand map (2.3MB, generated from
 // our 4M-row retail/tire corpus) must never reach the client bundle (see
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const rate = await checkRateLimit(`PREFIX_FLOOR:${clientIp}`, {
       limit: intEnv(process.env.PREFIX_FLOOR_RATE_LIMIT, 60),
       windowMs: intEnv(process.env.PREFIX_FLOOR_RATE_WINDOW_MS, 60_000),
-      storage: await ladderStorage(),
+      storage: await decodeStorage(),
     });
     if (!rate.allowed) {
       return NextResponse.json({ error: "Too many prefix lookups. Slow down and try again.", retryAfterMs: rate.retryAfterMs }, {

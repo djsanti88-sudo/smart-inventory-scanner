@@ -11,20 +11,18 @@
 // the orchestrator must call requestsExceeded()/usdAdvisoryExceeded() itself
 // to stop a run on them - this module does not enforce them on its own. The
 // USD figure is an ESTIMATED floor/upper bound derived from documented
-// worst-case-per-rung figures, never a measured cost. Per the owner's Paid
+// worst-case-per-source figures, never a measured cost. Per the owner's Paid
 // API Cost Truth Rule: true spend must always be reconciled against the
 // provider's billing console before quoting a wallet number - these numbers
 // are for run-time decision making only, never a receipt.
 
 /**
- * Worst-case USD per paid decode rung. These are documented estimates, not
+ * Worst-case USD per paid decode source. These are documented estimates, not
  * measured truth - the server does not echo back authoritative per-call
  * cost. True spend = provider console, always.
  */
-export const RUNG_WORST_CASE_USD = {
-  goupc: 0.01,
-  fetchv2: 0.02,
-  gpt: 0.06,
+export const SOURCE_WORST_CASE_USD = {
+  gpt: 0.39,
 };
 
 function readEnvNumber(name, fallback) {
@@ -93,13 +91,13 @@ export class RunLimits {
     return !this.requestsExceeded();
   }
 
-  recordPaidLookup(rung) {
+  recordPaidLookup(source) {
     const worstCase = Object.prototype.hasOwnProperty.call(
-      RUNG_WORST_CASE_USD,
-      rung
+      SOURCE_WORST_CASE_USD,
+      source
     )
-      ? RUNG_WORST_CASE_USD[rung]
-      : RUNG_WORST_CASE_USD.gpt;
+      ? SOURCE_WORST_CASE_USD[source]
+      : SOURCE_WORST_CASE_USD.gpt;
     this.paidLookups += 1;
     this.upperUsdAccrued += worstCase;
     this.floorUsdAccrued += worstCase / 2;

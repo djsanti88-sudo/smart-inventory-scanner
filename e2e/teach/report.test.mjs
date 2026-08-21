@@ -52,23 +52,23 @@ describe('timingSection', () => {
 });
 
 describe('buildReportMarkdown timing section placement', () => {
-  test('includes a Timing section right after the Ladder diagnosis section', () => {
+  test('includes a Timing section right after the DecodeTrace diagnosis section', () => {
     const model = {
       runId: 'run-1',
       deployment: {},
       personaResults: [],
       findings: [],
-      ladderRows: [],
+      decodeTraceRows: [],
       apiCalls: [{ urlPath: '/api/ai-lookup', method: 'POST', status: 200, latencyMs: 123 }],
       createdData: {},
       coverageDelta: {},
       limits: {},
     };
     const md = buildReportMarkdown(model);
-    const ladderIdx = md.indexOf('## Ladder diagnosis');
+    const decodeTraceIdx = md.indexOf('## DecodeTrace diagnosis');
     const timingIdx = md.indexOf('## Timing');
-    assert.ok(ladderIdx >= 0, 'ladder section present');
-    assert.ok(timingIdx > ladderIdx, 'timing section appears after ladder section');
+    assert.ok(decodeTraceIdx >= 0, 'decodeTrace section present');
+    assert.ok(timingIdx > decodeTraceIdx, 'timing section appears after decodeTrace section');
   });
 });
 
@@ -128,7 +128,7 @@ describe('buildReportMarkdown oracle section placement', () => {
       deployment: {},
       personaResults: [],
       findings: [],
-      ladderRows: [],
+      decodeTraceRows: [],
       apiCalls: [{ urlPath: '/api/ai-lookup', method: 'POST', status: 200, latencyMs: 123 }],
       oracleResults: [{ code: 'x', expected: 'X', observed: 'X', match: true }],
       createdData: {},
@@ -148,7 +148,7 @@ describe('buildReportMarkdown oracle section placement', () => {
       runId: 'run-1',
       deployment: {},
       findings: [],
-      ladderRows: [],
+      decodeTraceRows: [],
       apiCalls: [],
       createdData: {},
       coverageDelta: {},

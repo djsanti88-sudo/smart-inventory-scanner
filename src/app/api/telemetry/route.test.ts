@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { checkRateLimit, ladderStorage, logServerEvent } = vi.hoisted(() => ({
+const { checkRateLimit, decodeStorage, logServerEvent } = vi.hoisted(() => ({
   checkRateLimit: vi.fn(),
-  ladderStorage: vi.fn(),
+  decodeStorage: vi.fn(),
   logServerEvent: vi.fn(),
 }));
 
@@ -11,7 +11,7 @@ vi.mock("@/services/security/aiSpendGuard", () => ({
   checkRateLimit,
   intEnv: (_raw: string | undefined, fallback: number) => fallback,
 }));
-vi.mock("@/server/upc/storage", () => ({ ladderStorage }));
+vi.mock("@/server/decode/storage", () => ({ decodeStorage }));
 vi.mock("@/server/log", () => ({ logServerEvent }));
 
 import { POST } from "./route";
@@ -80,7 +80,7 @@ describe("POST /api/telemetry", () => {
     expect(checkRateLimit.mock.calls[0][0]).toBe("TELEMETRY:anonymous:client_error");
     expect(checkRateLimit.mock.calls[1][0]).toBe("TELEMETRY:anonymous:client_error");
     expect(checkRateLimit.mock.calls[0][1]).not.toHaveProperty("storage");
-    expect(ladderStorage).not.toHaveBeenCalled();
+    expect(decodeStorage).not.toHaveBeenCalled();
   });
 
   it("returns 429 when the rate limiter rejects the request", async () => {

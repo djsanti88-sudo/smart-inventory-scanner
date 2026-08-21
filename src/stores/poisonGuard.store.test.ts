@@ -15,7 +15,7 @@ const DRESS = "Velvet Torch Womens Lace Strapless Dress";
 
 // AI returns the plausible-but-wrong product with NO evidence (the historical poison shape).
 const DRESS_SUGGESTION = {
-  providerNames: ["gemini", "openai"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{ productName: DRESS, brand: "", category: "", gtin: "", upc: "", ean: "", sourceUrls: [], verifiedFacts: [], guesses: ["guess"], aliases: [], confidence: 0.5 }],
   decision: { status: "suggested", confidence: 0.5, reason: "Suggested", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider" } },
 };

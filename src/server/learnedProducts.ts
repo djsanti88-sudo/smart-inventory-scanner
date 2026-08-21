@@ -8,7 +8,7 @@
 //
 // Storage shape mirrors decodeCacheStore.ts's file-fallback + Turso pattern exactly (keyed upsert by
 // canonical code, INSERT OR REPLACE / ON CONFLICT DO UPDATE) - this is a lookup table, not an
-// append-only ledger, so it does NOT reuse LadderStorage's appendOutcome/appendArchive contract.
+// append-only ledger, so it does NOT reuse DecodeStorage's appendOutcome/appendArchive contract.
 import "server-only";
 import fs from "node:fs";
 import path from "node:path";

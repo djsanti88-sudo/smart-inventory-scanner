@@ -54,7 +54,7 @@ describe("golden code classes: identity outcome per class (AI off)", () => {
 });
 
 // P5 Task 4 (AI-on golden class): proves the D6 demotion (Task 1) holds inside the golden-class
-// harness too, mirroring scanStore.gptLadder.test.ts's mock pattern - a bare GPT self-report claim
+// harness too, mirroring scanStore.gptDecode.test.ts's mock pattern - a bare GPT self-report claim
 // still counts (TOP-LEVEL LAW), but is demoted to a suggestion: verified stays false and no
 // approved alias is ever written from a bare model self-report.
 function stubFetch(resp: object) {
@@ -77,7 +77,7 @@ describe("golden code classes: AI-on GPT self-report demotion (mocked, $0)", () 
   it("GPT_SELF_REPORT (public barcode, self-reported 'verified' tier) counts, is demoted to suggested, verified stays false, no approved alias is written", async () => {
     const store = createTestScanStore({ db: new MockDb() });
     // Scan while AI is off so the code opens a review without triggering a live fetch, then enable AI
-    // and drive the mocked decode ourselves (same pattern as scanStore.gptLadder.test.ts).
+    // and drive the mocked decode ourselves (same pattern as scanStore.gptDecode.test.ts).
     store.getState().updateSettings({ aiLookupEnabled: false });
     store.getState().processScan("012345678905");
     store.getState().updateSettings({ aiLookupEnabled: true });
@@ -85,7 +85,7 @@ describe("golden code classes: AI-on GPT self-report demotion (mocked, $0)", () 
     expect(review, "scan opens a review while AI is off").toBeDefined();
 
     const RESP = {
-      providerNames: ["gpt-5.5-ladder"],
+      providerNames: ["gpt-5.4-mini"],
       results: [
         {
           productName: "Falken Wildpeak A/T3W 265/70R17",
@@ -108,7 +108,7 @@ describe("golden code classes: AI-on GPT self-report demotion (mocked, $0)", () 
           needsHumanReview: false,
         },
       ],
-      // Exactly what gptResultToDecodePayload emits post-D6-demotion for a bare self-report: status
+      // Exactly what mapGptDecodeResult emits post-D6-demotion for a bare self-report: status
       // "suggested", corroborationPath "gpt_self_report", exactCodeEvidenceVerifiedByApp false.
       decision: {
         status: "suggested",

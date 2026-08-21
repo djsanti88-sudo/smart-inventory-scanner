@@ -7,8 +7,7 @@ import { test, expect, type Page, type Route } from "@playwright/test";
 const PROOF = "e2e/proof";
 
 const STATUS = {
-  liveEnabled: true, autoDecodeOnScan: true, geminiEnabled: true, openaiEnabled: true,
-  geminiConfigured: true, openaiConfigured: true, premiumFallback: true, mode: "aggressive",
+  liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true, mode: "aggressive",
   dailyLimit: 100, missingKeys: [], e2e: true,
 };
 
@@ -23,7 +22,7 @@ function r(over: Record<string, unknown>) {
 const DECODE: Record<string, object> = {
   // Corroborated tire (strong prefix family 029142 = Cooper, full specs, app-verified code) -> verified.
   "029142712886": {
-    providerNames: ["gemini"],
+    providerNames: ["gpt-5.4-mini"],
     results: [r({ productName: "Cooper Discoverer A/T3 LT245/75R16 120R", brand: "Cooper", category: "Tire", specsShort: "LT245/75R16 120R", upc: "029142712886", sourceUrls: ["https://www.upcitemdb.com/upc/029142712886"] })],
     decision: { status: "verified", confidence: 0.92, reason: "Verified AI Decode: tire corroborated by prefix family + specs.", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" } },
   },
@@ -32,7 +31,7 @@ const DECODE: Record<string, object> = {
   // to real weak evidence shape) - the real EvidenceVerifier never marks a go-upc url_only source
   // app-verified (go-upc is the canonical poison source, not a trusted host). Assertions unchanged.
   "745125495781": {
-    providerNames: ["gemini"],
+    providerNames: ["gpt-5.4-mini"],
     results: [r({ productName: "Manstel 200 Pcs Aluminum Rivet Screw Kit", brand: "Manstel", category: "Hardware", upc: "745125495781", sourceUrls: ["https://go-upc.com/745125495781"] })],
     decision: { status: "suggested", confidence: 0.6, reason: "(poisoned source)", evidenceStrength: "url_only", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider" } },
   },

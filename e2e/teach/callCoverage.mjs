@@ -1,7 +1,7 @@
 // e2e/teach/callCoverage.mjs
 //
 // Pure call-coverage helper for the Teach Bot harness. Given the set of
-// backend paths a lesson actually observed firing (e.g. via attachLadderCapture's
+// backend paths a lesson actually observed firing (e.g. via attachDecodeTraceCapture's
 // apiCalls()) and the set of paths a lesson expects to fire, reports which
 // expected paths never appeared - so a lesson can assert nothing was silently
 // skipped, rather than only asserting on what DID happen.

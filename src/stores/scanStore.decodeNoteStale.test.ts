@@ -5,12 +5,12 @@ import { MockDb } from "@/services/mockDb";
 // Bug: scanFeed[].decodeNote is set once, synchronously at scan time, to "Decoding with AI..."
 // (evaluateAutoDecode's allowed:true reason) and is never refreshed once the decode settles. The
 // needsReviewQueue row's decodeNote IS updated on settle (see the gptSkipNote path in
-// scanStore.gptLadder.test.ts), but the scanFeed row that LiveScanFeed actually renders for
+// scanStore.gptDecode.test.ts), but the scanFeed row that LiveScanFeed actually renders for
 // platformOwner is not - so the note stays stuck forever, even after the row shows a final
 // status/reason. See .superpowers/sdd/goupc-cap-rootcause.md item 3.
 
 const VERIFIED = {
-  providerNames: ["gemini", "openai"],
+  providerNames: ["gpt-5.4-mini"],
   results: [
     {
       productName: "Coca-Cola Classic",
@@ -33,7 +33,7 @@ const VERIFIED = {
   },
 };
 const SUGGESTED = {
-  providerNames: ["gemini", "openai"],
+  providerNames: ["gpt-5.4-mini"],
   results: [
     {
       productName: "Maybe Snack",
@@ -55,7 +55,7 @@ const SUGGESTED = {
   },
 };
 const NEEDS_REVIEW = {
-  providerNames: ["gemini"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{ productName: "", brand: "", sourceUrls: [], verifiedFacts: [], guesses: [], aliases: [], confidence: 0 }],
   decision: {
     status: "needs_review",

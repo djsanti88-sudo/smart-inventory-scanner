@@ -11,17 +11,16 @@
 - A guess is never verified and never becomes an alias without human confirmation or app-verified evidence; it is shown immediately with an app-derived confidence band. -> `src/services/ai/identityConfidenceBand.ts`
 - Original scan evidence is permanent; fixing a wrong scan moves the count, never deletes it. -> `markWrong` in `src/stores/scanStore.ts`
 
-## Shared decode cache
-- Two memories only: a verified result replays for every tenant, and a suggested result replays with Approve/Edit and never re-pays until cooldown or knowledge-version invalidation. NO-CANDIDATE ROWS ARE ABOLISHED (owner 2026-08-20): a failed decode stores nothing, every rescan re-runs the full ladder, and no negative-result memory may ever be rebuilt. -> `docs/DECODER_ARCHITECTURE.md` section 2b
-- The knowledge version is composed in one place (ladder version plus each corpus build stamp); nothing else mints one. -> `src/server/decode/knowledgeVersion.ts`
-- A researched code is paid for once: a free suggestion that paid rungs failed to beat persists with the pay-once marker. -> `paidEscalationExhausted` in `src/server/decode/pipeline.ts`
-- A stale suggestion is re-evaluated with free rungs only, and never regresses to "Unidentified". -> `freeOnlyPass` / stale-row fallback in `src/server/decode/pipeline.ts`
-- A verified row replays regardless of version and stays correctable through `forceRetry`. -> `src/server/decode/pipeline.ts`
+## Shared decode cache and paid lookup
+- Positive identities are the only persisted decode-cache rows. A failed decode stores nothing, so no negative-result memory may be rebuilt. -> `src/server/decodeCacheStore.ts`, `src/server/decode/pipeline.ts`
+- Current deterministic sources run before cached GPT identities, allowing corpus/master corrections to supersede an older suggestion immediately. -> `runDecodePipeline`
+- Process-local positive caching and same-code in-flight coalescing prevent duplicate concurrent GPT calls. -> `src/services/ai/decodeCache.ts`
+- Only a usable GPT-5.4 mini result is written to the shared positive cache; GPT never verifies itself. -> `src/server/decode/pipeline.ts`
 - Decode only attaches identity; dedupe and caching never block or hide a counted row. -> AGENTS.md "TOP-LEVEL LAW"
-- A code not in the DB always continues through the ladder, in every environment; probes never dead-end (owner rule 2026-08-05). -> LESSONS_LEARNED.md L16, `src/stores/scanStore.ladderContinuation.test.ts`
-- A daily-cap denial skips the paid upgrade only; a free suggestion already in hand is never discarded and no pay-once marker is written for it. -> `paidStep` in `src/server/decode/pipeline.ts`, `pipeline.test.ts` "ESCALATION cap-blocked"
-- `ENABLE_LIVE_AI_LOOKUP=false` means zero paid rungs on the server, not only in the client gate; `AI_LOOKUP_KILL_SWITCH` stops every decode. -> `src/server/upc/paidWorkPossible.ts`
-- Gemini is used nowhere in the app; `/api/ai-lookup` has one mode (`decode`). -> `docs/DECODER_ARCHITECTURE.md` section 2
+- A code not in free knowledge continues to positive cache and then GPT in every environment where paid decode is enabled. -> `src/stores/scanStore.decodeContinuation.test.ts`
+- Global and account caps settle lazily, once, immediately before paid egress. A cap denial cannot hide a free result because every free source ran first. -> `createPaidEgressCoordinator`, `pipeline.test.ts`
+- `ENABLE_LIVE_AI_LOOKUP=false` prevents paid decode on the server; `AI_LOOKUP_KILL_SWITCH` stops every decode. -> `src/services/ai/gptDecodePolicy.ts`, `/api/ai-lookup`
+- `/api/ai-lookup` has one decode mode and one paid provider path. -> `docs/DECODER_ARCHITECTURE.md`
 
 ## Tenancy
 - Tenant-owned records (products, aliases, scans, counts, sessions, review items) are scoped by `businessId`. -> `docs/FIREBASE_SECURITY.md`

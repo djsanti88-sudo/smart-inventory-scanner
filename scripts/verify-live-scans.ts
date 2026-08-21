@@ -10,6 +10,7 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import type { ServiceAccount } from "firebase-admin/app";
 import { cleanScanCode, buildNormalizedCandidates } from "@/services/scanCleaner";
 import { COLLECTIONS } from "@/services/db/types";
 
@@ -51,7 +52,12 @@ async function main() {
   const { initializeApp, cert, getApps } = await import("firebase-admin/app");
   const { getFirestore } = await import("firebase-admin/firestore");
   const { getAuth } = await import("firebase-admin/auth");
-  if (!getApps().length) initializeApp({ credential: cert(sa as any), projectId: EXPECTED_PROJECT });
+  const serviceAccount: ServiceAccount = {
+    projectId: String(sa.project_id),
+    clientEmail: String(sa.client_email),
+    privateKey: String(sa.private_key),
+  };
+  if (!getApps().length) initializeApp({ credential: cert(serviceAccount), projectId: EXPECTED_PROJECT });
   const db = getFirestore();
 
   let businessId = argVal("--businessId");

@@ -29,20 +29,19 @@ walks this whole folder and fails on any unguarded billed call.
 - `prefix-mining/` - GS1 prefix -> brand derivation tooling and its CSV inputs (`data/tire-knowledge/prefixes/`).
 - `kkm-catalog/`, `distributor-catalog/` - distributor catalog ingestion.
 - `barcode-harvester/` (generic Playwright scraper) and `dt-harvest/` (the weekly Discount Tire harvest job, cron-registered).
-- `corpus-purge.mjs` - quarantine corpus rows learned from a paid source; `purge-*-examples.mjs` - remove textbook GS1 example rows.
-- `decode-cache-backup.mjs`, `decode-outcomes-report.mjs` - dump/restore the paid decode cache; offline outcome rollup.
+- `purge-*-examples.mjs` - remove textbook GS1 example rows.
+- `decode-cache-backup.mjs`, `decode-outcomes-report.mjs` - dump/restore the positive decode cache; offline outcome rollup.
 
 ## Boss barcode certification
 
 - `certify-boss-barcodes.mjs` (direct mode), `boss-workbook-reconcile-dryrun.mjs`, `boss-override-2026-08-05.mjs`, `assert-tire-exact-index-trace.mjs`. UI-mode harnesses live in `e2e/boss-barcode-corpus/` and `e2e/boss-barcode-preview/`.
 
-## Decode proofs and benchmarks (mostly PAID; all guarded)
+## Decode proofs and benchmarks
 
-- `eval-decode.ts`, `benchmark-decodes.ts`, `live-decode-smoke.ts`, `scan-matrix.mjs`, `build-golden-baseline.mjs` (regenerates `benchmarks/golden/`).
-- `proof-full-ladder.mjs`, `proof-rung-{corpus,goupc,3-fetchv2,4-gpt}.mjs`, `gpt-ladder-live-proof.mts`, `model-bakeoff.mjs` (the guard's reference pattern).
-- `fetchv2-benchmark.mts`, `fetchv2-discovery-shootout.mts`, `fetchv2-forensic.mts`, `fetchv2-db-sample*.mjs`, `fetchv2-ladder-handoff.mjs`.
-- `polish-backfill.mts`, `polish-eval.mts` - deterministic structurer backfill and eval.
-- `stress/` - decode-ladder stress harness and Vercel env key sync.
+- `eval-decode.ts`, `scan-matrix.mjs`, `build-golden-baseline.mjs` (regenerates `benchmarks/golden/`) - local or fixture-driven evaluation.
+- `benchmark-decodes.ts`, `weekly-tire-scan.ts`, `live-decode-smoke.ts` - potentially paid GPT-5.4 mini route probes. Each requires an explicit live/paid opt-in and a running non-E2E server.
+- `polish-backfill.mts` - deterministic structurer backfill.
+- `stress/` - general scanner/load fixtures; retired provider-specific decode and environment-key scripts were removed.
 - `archive-tmp-2026-07/` - frozen July-2026 tmp probes; named in the guard test's exclusion list, safe to delete on owner order.
 
 ## Cloud, accounts, data
@@ -51,7 +50,7 @@ walks this whole folder and fails on any unguarded billed call.
 
 ## Weekly intelligence
 
-- `weekly-report.mjs` (`npm run weekly-report`, merged QA bots + intel; `weekly-report.workflow.js` is its judgment-fleet workflow), `weekly-intel.mjs` (`intel:now`), `weekly-tire-scan.ts`, `weekly-accuracy.ts`, `build-report-html.mjs`, `render-report-pdf.mjs`, `email-report.mjs`, `register-weekly-task.ps1`, `validate-agents.mjs`, `build-oracle-codes.mjs` (Teach Bot oracle).
+- `weekly-report.mjs` (`npm run weekly-report`, merged QA bots + intel; `weekly-report.workflow.js` is its judgment-fleet workflow), `weekly-intel.mjs` (`intel:now`), `weekly-tire-scan.ts`, `build-report-html.mjs`, `render-report-pdf.mjs`, `email-report.mjs`, `register-weekly-task.ps1`, `validate-agents.mjs`, `build-oracle-codes.mjs` (Teach Bot oracle).
 
 ## Shared
 

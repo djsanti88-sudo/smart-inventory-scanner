@@ -23,11 +23,7 @@ import { join, dirname, resolve } from "node:path";
 const SRC = join(process.cwd(), "src");
 
 const SECRET_READS = [
-  "process.env.GEMINI_API_KEY",
   "process.env.OPENAI_API_KEY",
-  "process.env.GO_UPC_API_KEY",
-  "process.env.FIRECRAWL_API_KEY",
-  "process.env.BRAVE_SEARCH_API_KEY",
   "process.env.TURSO_AUTH_TOKEN",
   "FIREBASE_SERVICE_ACCOUNT_PATH",
   "GOOGLE_APPLICATION_CREDENTIALS",

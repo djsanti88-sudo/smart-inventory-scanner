@@ -1,6 +1,6 @@
 // Two-currency cost ledger for the weekly report.
 // Currency 1: Claude subscription usage (zero out-of-pocket CASH; estimated agent/token usage).
-// Currency 2: third-party out-of-pocket cash (Gemini, OpenAI, Firecrawl, web search, ...).
+// Currency 2: third-party out-of-pocket cash (OpenAI tokens and web-search calls).
 // Pure functions (no fs) to match the scripts/lib pattern. Scripts read/write cost.json themselves.
 
 export function emptyLedger(mode = 'lean') {

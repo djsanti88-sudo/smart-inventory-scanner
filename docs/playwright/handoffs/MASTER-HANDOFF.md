@@ -67,7 +67,7 @@ counted; (C) network forensics on `/api/ai-lookup` via `requests`/`response-body
 codes report which ladder rung answered and the `cached`/`persistedCacheHit` debug flags.
 Core question: does production PERSIST decodes (Turso) or re-decode every time (suspect:
 TURSO_DATABASE_URL/TURSO_AUTH_TOKEN missing from Vercel prod env)?
-COST GUARD: if paid rungs (goupc/fetchv2/gpt) fire for these previously-scanned codes, STOP
+COST GUARD: if GPT fires for these previously scanned codes instead of a free corpus/cache hit, STOP
 after 10, capture evidence, report - do not pay 114 more times.
 NOTE: scans add counts to the profile-clone's local state - harmless, but report the final
 counts so the owner knows.

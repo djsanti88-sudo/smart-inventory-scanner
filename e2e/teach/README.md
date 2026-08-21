@@ -2,7 +2,7 @@
 
 A Playwright system that drives the **live** Scanbin app as 3 synthetic business-owner personas, learns
 the app a little more every run, and reports every bug / empty field / slow load / nice-to-have plus a
-decode-ladder diagnosis. It is **diagnose-only**: it never fixes the app, and it never turns an observed
+decode-decodeTrace diagnosis. It is **diagnose-only**: it never fixes the app, and it never turns an observed
 behavior into an approved test on its own.
 
 > Additive testing infrastructure only. Nothing here modifies product runtime or business-logic source —
@@ -17,7 +17,7 @@ behavior into an approved test on its own.
    to a locked requirement / explicit requirement / existing approved test.
 3. **Sacred law — flag, never change.** Violations of Scan N = count N, idempotency, vendor-never-auto-verify,
    or tenant isolation become `locked:true` report-only findings. `testing/app-knowledge/LOCKED_REQUIREMENTS.md`
-   is never written by code (enforced in `knowledge.mjs`). The decode ladder is observed read-only and may be
+   is never written by code (enforced in `knowledge.mjs`). The decode decodeTrace is observed read-only and may be
    *diagnosed/proposed*, never modified without explicit owner approval.
 4. **Secrets never leave.** Passwords (CSPRNG-generated), tokens, cookies are never written to the manifest,
    report, knowledge files, or logs.
@@ -53,7 +53,7 @@ accounts + data and can spend real money** — trigger it deliberately.
   report with URL/git-sha/version/browser/timestamp, prints the spend line. `--self-check` runs against a
   temp knowledge base so it is side-effect-free. `--help`/`-h` prints usage and exits without any side
   effects; an unrecognized flag errors out (exit 1) instead of falling through to a live run.
-- `report.mjs` — builds `report.md` + `report.json` (bugs, empty fields, performance, nice-to-haves, ladder
+- `report.mjs` — builds `report.md` + `report.json` (bugs, empty fields, performance, nice-to-haves, decodeTrace
   diagnosis table, created-data list, coverage delta, spend).
 - `personas.mjs` — 3 TEACH-BOT personas (tire/cstore/supp, one mobile), synthetic non-deliverable emails
   (`teachbot+<runId>-<key>@scanbin-teachbot.test`), deployment probe (`live_auth` vs `demo_open`), real
@@ -61,10 +61,10 @@ accounts + data and can spend real money** — trigger it deliberately.
 - `curriculum.mjs` — cumulative selection (`run N = lessons 1..N`), `pickExploration`, `loadLessons` + the
   `LESSON_CONTRACT`.
 - `lessonHelpers.mjs` — DOM-based helpers (on prod `window.__scanStore` is NOT exposed, so assertions use
-  testids): scan/wedge, feedCount, countedTotal, reviewRow, setOffline, timeToUsable, `attachLadderCapture`.
+  testids): scan/wedge, feedCount, countedTotal, reviewRow, setOffline, timeToUsable, `attachDecodeTraceCapture`.
 - `lessons/1..11` — the curriculum (see below). Each returns `{pass, findings, learned, notes}`.
-- `ladder.mjs` — read-only parse of the `/api/ai-lookup` response `debug.ladderPath` / `ladderReasons` /
-  `gptLadderSkipReason`: which rung settled, did it reach GPT or escape, partial-identity flag.
+- `decodeTrace.mjs` — read-only parse of the `/api/ai-lookup` response `debug.decodeTracePath` / `decodeTraceReasons` /
+  `gptDecodeSkipReason`: which source settled, did it reach GPT or escape, partial-identity flag.
 - `triage.mjs` — classify a finding (`confirmed_app_bug | probable_app_bug | test_bug | test_data_problem |
   environment_problem | flaky`); a suspected app bug must reproduce twice before "confirmed".
 - `sheets.mjs` — generates inventory spreadsheets in escalating messy formats (renamed/shuffled cols,
@@ -83,13 +83,13 @@ orchestrator writes shared knowledge (atomic; personas never write concurrently)
 
 ## The curriculum (cumulative: run N runs lessons 1..N + one exploration)
 1 signup + first scan · 2 Scan N = count N (L1) · 3 teach an alias · 4 offline/reconnect (L5) ·
-5 keyboard-wedge scanner · 6 refresh + duplicate resilience · 7 live decode + ladder trace (budgeted) ·
+5 keyboard-wedge scanner · 6 refresh + duplicate resilience · 7 live decode + decodeTrace trace (budgeted) ·
 8 import clean CSV · 9 import messy formats · 10 reconcile equal/different · 11 deep tenant isolation (L6).
 
 > **Lesson 7 is code-gated off by default.** It fires up to 3 real paid `/api/ai-lookup` calls.
 > It only runs when `TEACH_ALLOW_LIVE_DECODE=1` is set in the environment; otherwise it skips with an
 > honest logged reason (`live_decode_not_opted_in`) and spends nothing. This is enforced in code
-> (`lessons/7-live-decode-ladder-trace.mjs`), not just by this note.
+> (`lessons/7-live-decode-trace.mjs`), not just by this note.
 
 ## Tooling
 `@playwright/cli` (terminal Playwright/MCP driver) + official planner/generator/healer agents

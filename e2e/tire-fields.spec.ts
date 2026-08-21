@@ -7,8 +7,7 @@ import { test, expect, type Page, type Route } from "@playwright/test";
 const PROOF = "e2e/proof";
 
 const STATUS = {
-  liveEnabled: true, autoDecodeOnScan: true, geminiEnabled: true, openaiEnabled: true,
-  geminiConfigured: true, openaiConfigured: true, premiumFallback: true, mode: "aggressive",
+  liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true, mode: "aggressive",
   dailyLimit: 100, missingKeys: [], e2e: true,
 };
 
@@ -28,7 +27,7 @@ const verified = (reason: string) => ({
 const DECODE: Record<string, object> = {
   // Messy blob: brand + size + load/speed all jammed into the name. Has a SKU.
   "745125495781": {
-    providerNames: ["gemini", "openai"], premiumUsed: false,
+    providerNames: ["gpt-5.4-mini"], premiumUsed: false,
     results: [result({
       productName: "MICHELIN DEFENDER LTX M/S 235/65R18 104H BSW",
       brand: "Michelin", specsShort: "235/65R18 104H", primarySku: "MICH-99812",
@@ -38,7 +37,7 @@ const DECODE: Record<string, object> = {
   },
   // Real tire, full specs, but NO SKU -> Part number must be blank ("-"), never invented.
   "036625112231": {
-    providerNames: ["gemini", "openai"], premiumUsed: false,
+    providerNames: ["gpt-5.4-mini"], premiumUsed: false,
     results: [result({
       productName: "Falken Wildpeak AT3W 275/55R20 113T",
       brand: "Falken", specsShort: "275/55R20 113T",

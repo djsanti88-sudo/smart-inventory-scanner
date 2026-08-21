@@ -3,7 +3,7 @@
 //
 // Hits a DEPLOYED URL with read-only GET requests only (no paid calls, no writes) and asserts:
 //   1. /api/ai-lookup capability JSON matches scripts/smoke-expected.json (missingKeys empty,
-//      goUpc.configured, daily.limit, decodeLadder order, no gemini rung).
+//      openaiConfigured, daily.limit, and decodePath order).
 //   2. Route fingerprint: /scan (200|307), /history 200, /catalog-review 200, /reconcile 200,
 //      /sessions 200 after following its index redirect to the rendered page.
 //   3. Vercel's "Deployment has failed" masquerade page: a failed-build deployment can still answer
@@ -132,22 +132,13 @@ async function runCapabilityCheck(baseUrl, expected, mismatches) {
     mismatches.push({ label: "missingKeys (expect empty)", expected: [], actual: missingKeys });
   }
 
-  // goUpc.configured
-  diffValue("goUpc.configured", exp.goUpcConfigured, body.goUpc?.configured, mismatches);
+  diffValue("openaiConfigured", exp.openaiConfigured, body.openaiConfigured, mismatches);
 
   // daily.limit
   diffValue("daily.limit", exp.dailyLimit, body.daily?.limit, mismatches);
 
-  // decodeLadder order
-  if (!arraysEqual(body.decodeLadder, exp.decodeLadder)) {
-    mismatches.push({ label: "decodeLadder order", expected: exp.decodeLadder, actual: body.decodeLadder });
-  }
-
-  // Gemini is permanently out of decode (L11) and, since 2026-08-19, out of the app entirely: the
-  // ladder the deployment reports must never name it (the old boolean field was removed with the
-  // legacy lookup mode).
-  if ((body.decodeLadder ?? []).some((r) => /gemini/i.test(String(r)))) {
-    mismatches.push({ label: "decodeLadder names gemini", expected: "no gemini rung", actual: body.decodeLadder });
+  if (!arraysEqual(body.decodePath, exp.decodePath)) {
+    mismatches.push({ label: "decodePath order", expected: exp.decodePath, actual: body.decodePath });
   }
 }
 

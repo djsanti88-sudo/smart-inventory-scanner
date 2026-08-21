@@ -15,7 +15,7 @@ belong," start here before adding a new file.
 | `PROGRESS.md` | Current phase, completed work, next tasks, blockers |
 | `DECISIONS.md` | Important technical decisions and why they were made |
 | `TESTING.md` | Test commands, acceptance checklist, known test limitations |
-| `LESSONS_LEARNED.md` | Permanent hard-won lessons (numbered, e.g. L11 Gemini billing) |
+| `LESSONS_LEARNED.md` | Permanent hard-won lessons (numbered, e.g. L11 provider billing) |
 | `docs/PLAN_EXECUTION.md` (appendix) | Plan template |
 | `docs/FIREBASE_SETUP.md` | Backend foundation setup for Firebase Auth/Firestore |
 | `docs/FIREBASE_SECURITY.md` | Tenancy/security model for Firestore rules |
@@ -50,7 +50,6 @@ belong," start here before adding a new file.
 | `docs/GS1_COUNTRY_REFERENCE.md` | GS1 barcode country-prefix reference data |
 | `docs/WEEKLY_REPORT_STYLE_GUIDE.md` | Style guide for the weekly report |
 | `docs/FULL_SYSTEM_AUDIT_PROMPT.md` | Standing prompt used for full-system audits |
-| `docs/FIRECRAWL_USAGE.md` | Firecrawl tool usage reference |
 
 ## Historical (superseded, complete, or point-in-time)
 

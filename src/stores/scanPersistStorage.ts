@@ -715,7 +715,7 @@ export function createAsyncCoalescedFailSoftPersistStorage<S>(
       // so the adopt-banner/adopt-copy path (scanPersistNamespace) shares this exact rule (F1).
       const read = await readNewestPersistedRaw(
         name,
-        { getItem: (key: string) => getAsyncBacking().getItem(key) },
+        getAsyncBacking(),
         opts.migrateFrom ?? null,
       );
 

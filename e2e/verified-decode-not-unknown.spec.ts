@@ -10,15 +10,12 @@ const CODE_B = "816218028015";
 const CODE_NONAME = "000000000000"; // exact evidence but no usable product identity
 
 const STATUS = {
-  liveEnabled: true, autoDecodeOnScan: true, geminiEnabled: true, openaiEnabled: true,
-  geminiConfigured: true, openaiConfigured: true, geminiSearchGrounding: true, openaiWebSearch: true,
-  geminiModel: "gemini-flash-latest", openaiModel: "gpt-5-mini", pageFetchAndRead: true,
-  premiumFallback: false, mode: "aggressive", dailyLimit: 100, missingKeys: [], e2e: true,
+  liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true, mode: "aggressive", dailyLimit: 100, missingKeys: [], e2e: true,
 };
 
 // Single provider, Tier-3 source (upcitemdb), app-confirmed exact evidence - the exact failure shape.
 const verifiedSingleTier3 = (code: string, name: string) => ({
-  mode: "decode", providerNames: ["gemini"],
+  mode: "decode", providerNames: ["gpt-5.4-mini"],
   results: [{
     productName: name, brand: "TestBrand", category: "General", specsShort: "", specsFull: "", primarySku: "",
     primaryBarcode: code, gtin: "", upc: code, ean: "", aliases: [], imageUrl: "", productUrl: "",

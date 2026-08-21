@@ -26,7 +26,7 @@
 //   {
 //     page, persona, runId, baseURL, deploymentMode, limits,
 //     h,        // lessonHelpers.mjs
-//     ladder,   // ladder.mjs
+//     decodeTrace,   // decodeTrace.mjs
 //     sheets,   // sheets.mjs
 //     triage,   // triage.mjs
 //     artifactsDir,
@@ -47,7 +47,7 @@ export const LESSON_CONTRACT = {
   },
   ctx: [
     'page', 'persona', 'runId', 'baseURL', 'deploymentMode', 'limits',
-    'h', 'ladder', 'sheets', 'triage', 'artifactsDir', 'recordFinding',
+    'h', 'decodeTrace', 'sheets', 'triage', 'artifactsDir', 'recordFinding',
   ],
 };
 
@@ -113,7 +113,7 @@ export function pickExploration(allLessons, { runNumber, mastered }) {
 
 /**
  * Resolves an explicit `--lesson` request list (each entry either a numeric
- * level string like "7" or a lesson id/slug like "live-decode-ladder-trace")
+ * level string like "7" or a lesson id/slug like "live-decode-trace")
  * against the full lesson set. Pure function, no side effects.
  *
  * - A numeric-level request selects every lesson at that level.

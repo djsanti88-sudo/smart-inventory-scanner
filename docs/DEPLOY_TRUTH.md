@@ -57,8 +57,8 @@ PR #21 as the deliberate last cutover step after protection was confirmed live (
    a live AI provider.
 4. **Preview URL.** The Vercel GitHub bot comments the PR with a preview deployment URL once the
    build succeeds. Preview runs against a dedicated, authenticated Firebase project
-   (`smart-inventory-preview`, separate from production) and carries live paid AI provider keys
-   (`GO_UPC_API_KEY`, `OPENAI_API_KEY`) so decode can be exercised end to end - see "Preview
+   (`smart-inventory-preview`, separate from production) and carries the live paid decode key
+   (`OPENAI_API_KEY`) so decode can be exercised end to end - see "Preview
    environment" below for the full policy and the daily-cap guard that bounds that spend. A preview
    link is safe to hand out or click for auth/scan testing against preview data, but it is NOT a
    mock, no-login, no-spend sandbox.
@@ -101,7 +101,7 @@ PR #21 as the deliberate last cutover step after protection was confirmed live (
   `docs/GO_LIVE_CHECKLIST.md`.
 - **Paid/live API keys and any live-provider calls** - CI runs against mock providers, so nothing in
   the CI pipeline itself calls a paid AI provider. Preview is different: it carries real
-  `GO_UPC_API_KEY` / `OPENAI_API_KEY` values and can make live paid decode calls, bounded by the same
+  `OPENAI_API_KEY` value and can make live paid decode calls, bounded by the same
   daily cap as production - see "Preview environment" below before treating a preview URL as spend-free.
 - **The local CLI deploy path** - emergency-only now that production ships from `master`; see below.
 - **Branch protection, required-check config, and the Vercel Git connection itself** - changing any
@@ -161,8 +161,8 @@ supersedes the earlier mock/no-login-by-design Preview state described in histor
 and `DECISIONS.md`'s 2026-07-22 deployment-model entry; this file (not `docs/FIREBASE_SETUP.md`) is the
 authoritative current statement of Preview policy.
 
-**Owner-ratified policy (2026-07-27): paid AI keys REMAIN in Preview.** `scripts/env-manifest.json`
-requires `GO_UPC_API_KEY` and `OPENAI_API_KEY` in the `preview` environment (same as production) so
+**Owner-ratified policy: paid decode remains enabled in Preview.** `scripts/env-manifest.json`
+requires `OPENAI_API_KEY` in the `preview` environment (same as production) so
 PR previews can exercise live decode end to end, not just against mocks. The guard against runaway
 spend is the daily AI cap (`AI_LOOKUP_DAILY_LIMIT`), shared across environments the same way it bounds
 production - NOT the absence of keys. A preview link is therefore not spend-free: opening a PR and
@@ -182,9 +182,8 @@ Preview variables and runtime proof must be updated before a new authenticated P
 
 Production carries the real Firebase config (`NEXT_PUBLIC_FIREBASE_*`, `NEXT_PUBLIC_AUTH_MODE=live`,
 `FIREBASE_SERVICE_ACCOUNT_JSON`/`_BASE64`) per `docs/GO_LIVE_CHECKLIST.md`. As of 2026-07-22,
-production also includes `GO_UPC_API_KEY` so the paid Go-UPC rung of the decode ladder is live in
-production. As of the 2026-07-27 owner-ratified Preview policy above, `GO_UPC_API_KEY` is now also
-required in Preview (no longer production-only) - see "Preview environment" above. Whenever a new env
+production and Preview include `OPENAI_API_KEY` for the single GPT-5.4 mini decode path. Retired
+provider keys are forbidden by `scripts/env-manifest.json`. Whenever a new env
 var is added to one environment, check the other environments for parity before assuming it is
 everywhere the code expects it.
 
@@ -207,17 +206,16 @@ everywhere the code expects it.
   `vercel env ls <environment>` and diffs variable NAMES ONLY (never values - Vercel only ever shows
   Encrypted/Plain, and this script deliberately never runs `vercel env pull`) against
   `scripts/env-manifest.json`'s required/forbidden/optional sets per environment. Catches a required
-  var silently missing (e.g. `GO_UPC_API_KEY` absent from Preview, which IS required there per the
-  Preview environment section above) and a forbidden var silently present (e.g. emulator mode, a
+  var silently missing (for example, `OPENAI_API_KEY` absent from Preview) or a retired-provider
+  variable silently present, plus forbidden backend flags (for example, emulator mode, a
   production-mode opt-in, or raw service-account JSON leaking into Preview, which would break the
   dedicated-project isolation guarantee above). Exit 0 = no gaps, exit 1 = gaps printed per
   environment.
 - `node scripts/smoke-fingerprint.mjs <deployed-url> [--expect-lineage-mismatch]` - post-deploy,
   read-only GET checks against a URL that has already been deployed: the `/api/ai-lookup` capability
-  JSON matches `scripts/smoke-expected.json` (empty `missingKeys`, Go-UPC configured, daily limit,
-  ladder order, Gemini never used for decode), a route fingerprint (`/scan`, `/history`,
-  `/catalog-review`, `/reconcile` 200/307 as expected; `/sessions` 404 is correct, not a bug - there
-  is no index route under `sessions/`, only `sessions/[id]`), and a check for Vercel's "Deployment has
+  JSON matches `scripts/smoke-expected.json` (empty `missingKeys`, OpenAI configured, daily limit,
+  and the current decode path), plus a route fingerprint (`/scan`, `/history`,
+  `/catalog-review`, `/reconcile`, and `/sessions` with their expected 200/307 responses), and a check for Vercel's "Deployment has
   failed" masquerade page (a failed build can still answer 200 while serving Vercel's own error HTML).
   Exit 0 = all checks passed, exit 1 = a mismatch, exit 2 = usage/network error.
   `--expect-lineage-mismatch` is for the script's own self-test only. Useful for spot-checking a

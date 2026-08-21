@@ -73,7 +73,7 @@ describe("BUG #14: client-side reason sanitization (defense in depth)", () => {
     expect(feedRow?.reason ?? "").not.toMatch(DENYLIST_RE);
   });
 
-  it("a raw decision.reason naming the GPT ladder never reaches the needs-review row's reason", async () => {
+  it("a raw decision.reason naming the GPT decode never reaches the needs-review row's reason", async () => {
     const store = aiOnStore();
     const code = "086699998541";
     const review = openReview(store, code);
@@ -82,7 +82,7 @@ describe("BUG #14: client-side reason sanitization (defense in depth)", () => {
     globalThis.fetch = vi.fn(async () =>
       new Response(
         JSON.stringify({
-          providerNames: ["gpt-5.5-ladder"],
+          providerNames: ["gpt-5.4-mini"],
           results: [
             {
               productName: "Goodyear (best guess, low confidence)",

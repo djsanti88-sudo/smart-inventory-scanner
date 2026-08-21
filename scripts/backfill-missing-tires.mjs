@@ -31,8 +31,8 @@
 //   node scripts/backfill-missing-tires.mjs --live
 //   DECODE_BASE=http://localhost:3100 node scripts/backfill-missing-tires.mjs --live
 //
-// Refuses to run without --live (cost warning) - this hits a local dev server that has LIVE
-// provider keys wired (Go-UPC + GPT-5.5 ladder), so every code can spend real money.
+// Refuses to run without --live (cost warning). This hits a local dev server whose unresolved rows
+// can call GPT-5.4 mini, so every code can spend real money.
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -40,8 +40,8 @@ import { fileURLToPath } from "node:url";
 const LIVE = process.argv.includes("--live");
 if (!LIVE) {
   console.error(
-    "COST WARNING: this script POSTs to a live decode server (Go-UPC + GPT-5.5 ladder keys).\n" +
-    "Each of the 16 codes can spend real money (Go-UPC quota + up to $3/day GPT ladder cap).\n" +
+    "COST WARNING: this script POSTs to a live GPT-5.4 mini decode server.\n" +
+    "Each of the 16 codes can consume the configured GPT decode budget.\n" +
     "Refusing to run without --live. Re-run as: node scripts/backfill-missing-tires.mjs --live"
   );
   process.exit(1);

@@ -1,4 +1,4 @@
-// identityMerge.ts (decode ladder Task 9) - decide whether a freshly decoded product is the SAME
+// Decide whether a freshly decoded product is the same
 // countable product as one the shop already has, so a second scan links to the existing row (new alias +
 // increment) instead of minting a duplicate. Pure service: no React/next imports.
 //

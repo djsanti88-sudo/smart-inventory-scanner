@@ -5,7 +5,7 @@ import type { InventoryCount, Product, UnknownCodeReview } from "@/types";
 
 const product = { id: "p1", businessId: "b", name: "Falken Sincera", brand: "Falken", category: "Tire", specsShort: "215/70R15", specsFull: "", primarySku: "28816861", primaryBarcode: "848983012906", gtin: "848983012906", upc: "", ean: "", vendorCodes: ["x"], aliases: ["28816861", "2881-6861"], imageUrl: "", productUrl: "", location: "Bay A", notes: "", status: "active", source: "manual", confidence: 1, verified: true, createdAt: "", updatedAt: "", createdBy: "", updatedBy: "" } as Product;
 const count = { id: "c1", businessId: "b", sessionId: "s1", productId: "p1", quantity: 3, lastScannedAt: "t", aliasesSeen: ["28816861"], scanEventIds: ["e1"], createdAt: "", updatedAt: "", syncStatus: "synced", syncError: null, appliedIdempotencyKeys: [] } as InventoryCount;
-const review = { rawCode: "999", cleanCode: "999", normalizedCandidates: ["999"], suggestedProductName: "Mystery", suggestedBrand: "X", suggestedCategory: "Tire", status: "open", providerName: "gemini", syncStatus: "synced" } as unknown as UnknownCodeReview;
+const review = { rawCode: "999", cleanCode: "999", normalizedCandidates: ["999"], suggestedProductName: "Mystery", suggestedBrand: "X", suggestedCategory: "Tire", status: "open", providerName: "gpt-5.4-mini", syncStatus: "synced" } as unknown as UnknownCodeReview;
 
 // "barcode" is intentionally EXCLUDED here: a shop's own scanned barcode on its own product row is
 // their data (same rule as commit 13adbdd / sensitiveFields.ts CUSTOMER_SAFE_PRODUCT_FIELDS comment).
@@ -48,7 +48,7 @@ describe("customer-safe exports", () => {
     const h = headerCols(csv);
     const unknownsSensitive = [...SENSITIVE_HEADERS, "barcode"];
     for (const bad of unknownsSensitive) expect(h.some((c) => c.toLowerCase().includes(bad))).toBe(false);
-    expect(csv).not.toContain("gemini"); // provider name never in a customer export
+    expect(csv).not.toContain("gpt-5.4-mini"); // provider name never in a customer export
   });
   it("no customer export header is a sensitive key (barcode excepted for the shop's-own-data exports)", () => {
     for (const fn of [exportFinalCountsCustomer([count], [product], "s1"), exportQuantityAdjustmentsCustomer([count], [product], "s1")]) {

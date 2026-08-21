@@ -81,12 +81,12 @@ async function checkFirestore(): Promise<boolean> {
   }
 }
 
-/** Cheap Turso/ladder-storage reachability check with a short timeout. Never throws - degrades to false. */
+/** Cheap Turso decode-storage reachability check with a short timeout. Never throws - degrades to false. */
 async function checkTurso(): Promise<boolean> {
   const timeoutMs = intEnv(process.env.HEALTH_TURSO_TIMEOUT_MS, 3000);
   try {
-    const { ladderStorage } = await import("@/server/upc/storage");
-    const storage = await withTimeout(ladderStorage(), timeoutMs);
+    const { decodeStorage } = await import("@/server/decode/storage");
+    const storage = await withTimeout(decodeStorage(), timeoutMs);
     await withTimeout(storage.get("__health_check__"), timeoutMs);
     return true;
   } catch (err) {
@@ -126,9 +126,9 @@ export async function GET(request: Request): Promise<Response> {
 
   const [firestore, turso] = await Promise.all([checkFirestore(), checkTurso()]);
 
-  // aiKeys: presence-only signal for the core paid decode providers (Gemini/OpenAI). Advisory,
+  // aiKeys: presence-only signal for the one paid decode provider. Advisory,
   // not critical - the app functions in mock/degraded mode without them, so it never flips `ok`.
-  const aiKeys = Boolean(process.env.GEMINI_API_KEY) || Boolean(process.env.OPENAI_API_KEY);
+  const aiKeys = Boolean(process.env.OPENAI_API_KEY);
 
   // ok reflects only the CRITICAL checks (data reachability). Missing provider keys or other
   // advisory config never flip ok to false - the app is designed to degrade gracefully there.

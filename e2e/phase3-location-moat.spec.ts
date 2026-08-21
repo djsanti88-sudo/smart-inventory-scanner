@@ -7,9 +7,8 @@ test.describe("Phase 3: location recents and moat line", () => {
         json: {
           liveEnabled: false,
           autoDecodeOnScan: false,
-          geminiConfigured: false,
           openaiConfigured: false,
-          missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"],
+          missingKeys: ["OPENAI_API_KEY"],
           mode: "off",
           e2e: true,
         },

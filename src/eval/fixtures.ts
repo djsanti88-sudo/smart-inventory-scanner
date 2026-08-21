@@ -1,27 +1,23 @@
 import { emptyResult } from "@/services/ai/provider";
 import type { AiLookupResult, DecodeDecision } from "@/types";
 
-// MOCK/OFFLINE fixtures for the eval harness — NO live AI. Each fixture represents the decode INPUT the
-// pipeline realistically produces today: a SINGLE-provider page-fetch result (brand + title + specs) plus
-// the fetched page text the EvidenceVerifier reads. This mirrors the observed live reality (see
-// docs/decode/ARCHITECTURE.md s4: within budget usually only the page-fetch returns). The harness feeds
-// these through the REAL verifyEvidence + decideDecode + firewall, so it measures the actual decision
-// logic - not a hand-picked outcome.
+// Mock/offline evidence fixtures. These preserve poisoned and legacy evidence shapes so the trust
+// firewall cannot regress even though the current GPT path never app-verifies model output.
 //
 // HONESTY NOTE: these are REPRESENTATIVE fixtures (real brands/codes + plausible specs), not captured live
 // transcripts - capturing 10 live transcripts would spend AI tokens, which the money-safety rules forbid
 // by default. Run `npm run eval-decode -- --live` (manual, capped) to measure the real live extraction.
 
 export interface DecodeFixture {
-  /** The single source the pipeline got back (page-fetch product). */
+  /** The single candidate result under evaluation. */
   result: AiLookupResult;
-  /** The REAL page text the EvidenceVerifier reads (must contain the EXACT scanned code to verify). */
+  /** Evidence text used by the verifier regression harness. */
   fetchedSourceText: string;
   /**
    * P5 Task 4 (golden precision gates): an OPTIONAL pre-built DecodeDecision. When present, the
    * harness scores this decision directly (through the real canAutoCount/shouldAutoApplySuggestion
    * gate) instead of deriving one via verifyEvidence + decideDecode. Needed for classes whose
-   * decision is never built by decideDecode - gpt_self_report (gptLadderRung.ts) and the Go-UPC /
+   * decision is never built by decideDecode; self-reported and weak single-source
    * corpus / retail / learned-tier payload builders each hand-build their own DecodeDecision.
    */
   decision?: DecodeDecision;
@@ -88,7 +84,7 @@ export const FIXTURES: Record<string, DecodeFixture> = {
   // production payload builder emits post-D6-demotion, so the harness proves the REAL gate
   // (canAutoCount/shouldAutoApplySuggestion) scores each class per its ground-truth expectedStatus.
 
-  // Mirrors gptLadderRung.ts gptResultToDecodePayload's r.tier === "verified" branch (post-D6): a bare
+  // Mirrors gptDecodeRung.ts mapGptDecodeResult's r.tier === "verified" branch (post-D6): a bare
   // GPT self-report on a public barcode (upc_a) is demoted to "suggested" - never verified.
   "gpt-self-report-verified-should-demote-to-suggested": {
     result: { ...emptyResult(), productName: "Falken Wildpeak A/T3W 265/70R17", brand: "Falken", specsShort: "265/70R17 115T", category: "Tire", confidence: 0.9, sourceUrls: ["https://www.tirerack.com/x"] },
@@ -104,7 +100,7 @@ export const FIXTURES: Record<string, DecodeFixture> = {
     },
   },
   // T20/code-1225: a GPT self-report on a NON-public-barcode shape (numeric_sku) must never mint
-  // verified either - mirrors the same gptResultToDecodePayload branch on a vendor part number.
+  // verified either - mirrors the same mapGptDecodeResult branch on a vendor part number.
   "gpt-self-report-on-vendor-shape": {
     result: { ...emptyResult(), productName: "Spitz Vorosafonya Cranberry Juice", brand: "Spitz", category: "Beverage", confidence: 0.9, sourceUrls: [] },
     fetchedSourceText: "",

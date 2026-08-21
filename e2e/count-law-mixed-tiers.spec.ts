@@ -2,7 +2,7 @@ import { test, expect, type Page, type Route } from "./fixtures";
 
 // TOP-LEVEL LAW at scale, mixed tiers (coverage gap #1, docs/superpowers/reports/2026-08-13-e2e-coverage-map.md
 // item B). Every existing law spec proves the invariant with 1-2 tiers and <=20 codes
-// (count-always.spec.ts, trust-gate-law.spec.ts, fetchv2-count-contract.spec.ts, gpt-ladder-burst.spec.ts).
+// (count-always.spec.ts, trust-gate-law.spec.ts, and gpt-decode-burst.spec.ts).
 // This spec scans 60+ codes across EVERY resolution tier in one session and asserts:
 //   1. feed row count == number of physical scans (every scan APPEARS)
 //   2. sum of all final-count quantities == number of physical scans (every scan COUNTS)
@@ -22,7 +22,7 @@ const PROOF = "e2e/proof/count-law-mixed-tiers";
 // Code generation helpers
 // ---------------------------------------------------------------------------------------------
 
-// GS1 check digit (mod-10, weights 3/1 from the right) - identical algorithm to gpt-ladder-burst.spec.ts.
+// GS1 check digit (mod-10, weights 3/1 from the right) - identical algorithm to gpt-decode-burst.spec.ts.
 function gs1CheckDigit(payload: string): string {
   const d = payload.split("").map(Number);
   let sum = 0;
@@ -100,7 +100,7 @@ CORPUS_CODES.forEach((code, i) => {
 // A5: AI-verified auto-count - two providers agree, app-confirmed exact evidence.
 AI_VERIFIED_CODES.forEach((code, i) => {
   RESPONSES[code] = {
-    providerNames: ["gemini", "openai"],
+    providerNames: ["gpt-5.4-mini"],
     results: [baseResult({ productName: `AI Verified Item ${i}`, brand: "VerifiedBrand", upc: code, sourceUrls: [`https://gs1.org/${code}`] })],
     decision: {
       status: "verified", confidence: 0.97,
@@ -113,7 +113,7 @@ AI_VERIFIED_CODES.forEach((code, i) => {
 // A4-high: suggested, confidence >= 0.8 -> auto-applies with the confidence band + one-tap Approve, review auto-closes.
 SUGGESTED_HIGH_CODES.forEach((code, i) => {
   RESPONSES[code] = {
-    providerNames: ["gemini", "openai"],
+    providerNames: ["gpt-5.4-mini"],
     results: [baseResult({ productName: `High Suggested ${i}`, brand: "GuessBrand", upc: code, confidence: 0.85 })],
     decision: {
       status: "suggested", confidence: 0.85,
@@ -128,7 +128,7 @@ SUGGESTED_HIGH_CODES.forEach((code, i) => {
 SUGGESTED_LOW_CODES.forEach((code, i) => {
   const conf = 0.3 + i * 0.05;
   RESPONSES[code] = {
-    providerNames: ["gpt-5.5-ladder"],
+    providerNames: ["gpt-5.4-mini"],
     results: [baseResult({ productName: `Low Suggested ${i}`, brand: "WeakBrand", confidence: conf })],
     decision: {
       status: "suggested", confidence: conf, reason: "Suggested", evidenceStrength: "none",
@@ -141,7 +141,7 @@ SUGGESTED_LOW_CODES.forEach((code, i) => {
 // in Needs Review, still counts (TOP-LEVEL LAW).
 CONFLICT_CODES.forEach((code, i) => {
   RESPONSES[code] = {
-    providerNames: ["gemini", "openai"],
+    providerNames: ["gpt-5.4-mini"],
     results: [
       baseResult({ productName: `Conflict Item A ${i}`, brand: "BrandA" }),
       baseResult({ productName: `Conflict Item B ${i}`, brand: "BrandB" }),
@@ -157,7 +157,7 @@ CONFLICT_CODES.forEach((code, i) => {
 // A7: vendor_label/FNSKU/ASIN - never a public barcode, never "verified" (decode.spec.ts fixture shape).
 VENDOR_LABEL_CODES.forEach((code) => {
   RESPONSES[code] = {
-    providerNames: ["gemini", "openai"],
+    providerNames: ["gpt-5.4-mini"],
     results: [baseResult({ productName: "Amazon FBA Label", brand: "Amazon", confidence: 0.3 })],
     decision: {
       status: "suggested", confidence: 0.3,
@@ -168,14 +168,12 @@ VENDOR_LABEL_CODES.forEach((code) => {
 });
 
 const AI_ON_STATUS = {
-  liveEnabled: true, autoDecodeOnScan: true, geminiEnabled: true, openaiEnabled: true,
-  geminiConfigured: true, openaiConfigured: true, premiumFallback: true, mode: "aggressive",
+  liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true, mode: "aggressive",
   dailyLimit: 1000, missingKeys: [], e2e: true,
 };
 const NO_AI_STATUS = {
-  liveEnabled: false, autoDecodeOnScan: false, geminiEnabled: false, openaiEnabled: false,
-  geminiConfigured: false, openaiConfigured: false, premiumFallback: false, mode: "off",
-  dailyLimit: 1000, missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"], e2e: true,
+  liveEnabled: false, autoDecodeOnScan: false, openaiConfigured: false, mode: "off",
+  dailyLimit: 1000, missingKeys: ["OPENAI_API_KEY"], e2e: true,
 };
 
 async function scan(page: Page, code: string) {

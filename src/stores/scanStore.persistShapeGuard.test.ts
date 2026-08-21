@@ -499,7 +499,7 @@ describe("FINDING 2: a corrupted/stale existing count for the same code must not
       location: "",
       notes: "",
       status: "active",
-      source: "ai_gemini",
+      source: "ai_openai",
       confidence: 0,
       verified: false,
       provisional: true,

@@ -1,8 +1,8 @@
 import { test, expect, type Page, type Route } from "./fixtures";
 
 // Build 2 / Task 4: Playwright proof for the final-count table's Brand/Model/Size columns and the
-// single "polish-filter" input. Follows e2e/gpt-ladder-burst.spec.ts's pattern: the decode API is
-// mocked (IS_E2E; zero live AI calls) with gpt-5.5-ladder "verified" payloads so each scanned code
+// single "polish-filter" input. Follows e2e/gpt-decode-burst.spec.ts's pattern: the decode API is
+// mocked (IS_E2E; zero live AI calls) with gpt-5.4-mini "verified" payloads so each scanned code
 // auto-counts into its own product, whose structured fields (structuredBrand/structuredModel/
 // sizeTag) are stamped by the deterministic hot path (scanStore.ts resolveUnknown create_new).
 //
@@ -14,10 +14,9 @@ import { test, expect, type Page, type Route } from "./fixtures";
 const PROOF = "e2e/proof/polish";
 
 const AI_ON_STATUS = {
-  liveEnabled: true, autoDecodeOnScan: true, geminiEnabled: false, openaiEnabled: true,
-  geminiConfigured: false, openaiConfigured: true, premiumFallback: false, mode: "live",
+  liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true, mode: "live",
   dailyLimit: 200, missingKeys: [], e2e: true,
-  gptLadder: { spentTodayUsd: 0, capUsd: 3, callsToday: 0, enabled: true },
+  gptDecode: { spentTodayUsd: 0, capUsd: 3, callsToday: 0, enabled: true },
 };
 
 interface FixtureRow {
@@ -38,7 +37,7 @@ const ROWS: FixtureRow[] = [
 function gptVerifiedPayload(row: FixtureRow) {
   return {
     mode: "decode",
-    providerNames: ["gpt-5.5-ladder"],
+    providerNames: ["gpt-5.4-mini"],
     providerStatuses: [],
     results: [{
       productName: row.productName, brand: row.brand, category: "tires",
@@ -48,7 +47,7 @@ function gptVerifiedPayload(row: FixtureRow) {
     }],
     evidences: [],
     // P5 Task 1 demotion (2026-07-20): a bare GPT self-report never mints an app-verified identity
-    // (the gptTrusted auto-count escape hatch was deleted); gptResultToDecodePayload now maps this
+    // (the gptTrusted auto-count escape hatch was deleted); mapGptDecodeResult now maps this
     // tier to status "suggested", not "verified".
     decision: {
       status: "suggested", confidence: 0.9, reason: "gpt-5.5 from-scratch: exact code self-reported (owner trust rule)",
@@ -56,7 +55,7 @@ function gptVerifiedPayload(row: FixtureRow) {
       crossCheck: { decision: "single_provider", confidence: 0.9, reason: "single provider", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
       corroborationPath: "gpt_self_report",
     },
-    reasonCode: "gpt_ladder",
+    reasonCode: "gpt_decode",
     reasonText: "gpt-5.5 ladder verified",
     timedOut: false,
     debug: {},

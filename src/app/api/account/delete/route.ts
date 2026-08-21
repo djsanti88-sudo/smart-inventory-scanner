@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
   // Rate limit AFTER role verification (rejected non-owners never consume the owner's bucket,
   // mirroring the export route) and BEFORE the phrase check (a phrase-guessing loop is exactly
   // the abuse this bounds). Durable Firestore-backed limiter (src/services/security/
-  // accountDeleteRateLimit.ts) - deliberately NOT the decode ladder's Turso storage, so this
+  // accountDeleteRateLimit.ts) - deliberately NOT decode Turso storage, so this
   // GDPR/CCPA erasure path never 503s because an unrelated decode-cache DB is down or misconfigured.
   // It shares the SAME failure domain as the deletion itself (Firestore Admin SDK); verified
   // identities only in the key; fail CLOSED - if Firestore is down we refuse an irreversible action

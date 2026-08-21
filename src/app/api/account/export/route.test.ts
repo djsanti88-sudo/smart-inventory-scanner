@@ -4,18 +4,18 @@ import { NextRequest } from "next/server";
 // D1 (Phase 6): account export route tests. Mocks the Admin SDK the same way
 // src/app/api/share/route.test.ts does - no live Firestore/emulator involved.
 
-// Fix 1: route.ts now calls checkRateLimit(..., { storage: await ladderStorage() }) on the live
-// path. Redirect ladderStorage() at a per-process tmp dir (same pattern as
+// Fix 1: route.ts now calls checkRateLimit(..., { storage: await decodeStorage() }) on the live
+// path. Redirect decodeStorage() at a per-process tmp dir (same pattern as
 // src/app/api/ai-lookup/route.test.ts:21-34) so the durable rate-limit counter never pollutes the
 // real repo working tree (.ladder-kv.json) across test runs.
-vi.mock("@/server/upc/storage", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/server/upc/storage")>();
+vi.mock("@/server/decode/storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/decode/storage")>();
   const os = await import("node:os");
   const path = await import("node:path");
   const tmpLadderDir = path.join(os.tmpdir(), `ladder-storage-export-route-test-${process.pid}`);
   return {
     ...actual,
-    ladderStorage: async () => actual.fileLadderStorage(tmpLadderDir),
+    decodeStorage: async () => actual.fileDecodeStorage(tmpLadderDir),
   };
 });
 
@@ -308,8 +308,8 @@ describe("POST /api/account/export rate limiting (live path)", () => {
   });
 
   it("fails closed with 503 when limiter storage is unavailable after authorization", async () => {
-    const storageMod = await import("@/server/upc/storage");
-    vi.spyOn(storageMod, "ladderStorage").mockRejectedValueOnce(new Error("storage unavailable"));
+    const storageMod = await import("@/server/decode/storage");
+    vi.spyOn(storageMod, "decodeStorage").mockRejectedValueOnce(new Error("storage unavailable"));
 
     const response = await POST(
       exportRequest({ businessId: "biz-1", idToken: "firebase-token" }),

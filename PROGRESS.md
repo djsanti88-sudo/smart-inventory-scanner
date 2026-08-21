@@ -3,44 +3,50 @@
 > Live status checkpoint. Update after every phase so a fresh session continues without guessing.
 > History: `docs/archive/PROGRESS_HISTORY_2026-07_2026-08.md` (2026-07-08 to 2026-08-19, verbatim)
 > and `docs/archive/PROGRESS_HISTORY_2026-06.md`. Branch/worktree truth: `REPO_HEALTH.md`.
-> Last updated: 2026-08-19.
+> Last updated: 2026-08-21.
 
 ## Current phase
 
-**Consolidation SHIPPED.** `master` = `2150c17a` (PR #40 consolidation + PR #41 e2e flake
-hardening), merged 2026-08-19, auto-deployed to production, smoke green. Before that, PR #38
-(best-guess identity + honest shared decode cache) and PR #39 (post-PR38 consolidation) landed the
-identity-philosophy decision (DECISIONS.md 2026-08-19).
+**Local decoder simplification complete on `fix/simple-gpt54-decode-audit`.** The branch is
+uncommitted, unpushed, and undeployed. Production remains at the previously recorded `master`
+release until the owner separately approves the Git and deployment gates.
 
-What PR #40 shipped:
+The local branch now has one decode path:
 
-- One decode mode: `/api/ai-lookup` accepts `mode:"decode"` (+ `decode-deep` alias) only; the legacy
-  `mode:"lookup"` path and every Gemini module are deleted.
-- A daily-cap denial never discards a free identity already in hand and never mints a pay-once
-  marker for it (`paidStep` in `src/server/decode/pipeline.ts`).
-- `ENABLE_LIVE_AI_LOOKUP=false` is enforced server-side (`src/server/upc/paidWorkPossible.ts`).
-- Turso `decode_cache` carries `source_tier` so a free title never overwrites a paid identity.
-- CI runs `npm run proof:all`; repo shape cleanup (scripts catalog, prefix-mining grouped, dead
-  trees deleted; recovery tag `backup/pre-aws-cleanup-2026-08-19`).
+1. Tire knowledge corpus.
+2. Retail knowledge corpus.
+3. Platform learned products.
+4. Master catalog.
+5. Positive persisted and memory caches.
+6. One paid GPT-5.4 mini request when every free source misses.
 
-## Next (owner decides, none started)
+All other executable provider rungs, clients, provider-specific scripts, environment switches,
+and current operational docs were removed. GPT suggestions remain unverified until app evidence or
+human approval verifies them. Negative results are not cached, every scan still counts before
+decode, and charge/cap settlement happens at actual paid egress.
 
-1. Open decisions in DECISIONS.md 2026-08-19: (a) retail corpus = truth vs high-trust suggestion;
-   (b) tenant approvals promoting into the platform learned tier.
-2. Deep-verify multi-variant auto-apply gap (`backgroundVerifyDeep`) - small separate PR
-   (DECISIONS.md FOLLOW-UP).
-3. `scanStore.ts` `canon` TEMP stub (pre-existing on master since `0570ca9e`) disables the
-   canonical-GTIN orphan dedup it documents - separate ticket.
-4. Branch triage: 10+ unmerged local branches listed in `REPO_HEALTH.md` - decide deliberately,
-   never drive-by.
-5. Tier-3 followups backlog: `docs/superpowers/plans/2026-08-09-tier3-followups.md` (items 2-9,
-   plus 10 charge-settlement hardening and 11 honest cap-scope reason code).
-6. Deep-review residuals (a)-(e) recorded, not fixed, in DECISIONS.md "Consolidation pass" entry.
+Local verification completed on this branch:
+
+- `npm run proof:all`: passed (3,482 Vitest tests passed, 99 skipped; 117 Node tests passed,
+  125 local-data skips; 268 teach tests passed; import graph and orphan checks passed).
+- `npm run build`: passed.
+- `npm run test:ledger`: passed (40 tests).
+- `npm run test:firebase`: passed (136 tests).
+- Focused customer-path Playwright proof: passed (8 tests covering GPT burst coalescing, mixed-tier
+  count law, current decoder UI states, decode, IndexedDB persistence, and offline retry/idempotency).
+
+## Next (owner-gated, none performed)
+
+1. Review and commit this branch.
+2. Push/open a PR only with explicit owner approval.
+3. Remove retired provider credentials from the real deployment environment and deploy only with
+   explicit owner approval. The local environment manifest now rejects those keys.
+4. Run authenticated production smoke and billing-console reconciliation after deployment.
 
 ## Standing hazards
 
-- `benchmark-tire-db-automation` is PARKED - do NOT delete or merge (merging deletes ~152k lines
-  including the poison guard). Standing owner order; also in `REPO_HEALTH.md` CRITICAL callouts.
+- `benchmark-tire-db-automation` is PARKED - do NOT delete or merge. Standing owner order; also in
+  `REPO_HEALTH.md` CRITICAL callouts.
 - Merging or pushing to `master` auto-deploys production - owner-gated, every time
   (`docs/DEPLOY_TRUTH.md`).
 

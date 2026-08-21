@@ -20,9 +20,8 @@ test("camera scan overlay opens and closes over the scan page", async ({ page })
         json: {
           liveEnabled: false,
           autoDecodeOnScan: false,
-          geminiConfigured: false,
           openaiConfigured: false,
-          missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"],
+          missingKeys: ["OPENAI_API_KEY"],
           mode: "off",
           dailyLimit: 100,
         },

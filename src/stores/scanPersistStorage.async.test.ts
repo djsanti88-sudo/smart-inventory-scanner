@@ -70,6 +70,19 @@ describe("createAsyncCoalescedFailSoftPersistStorage", () => {
     await expect(storage.getItem("sis-scan-v1")).resolves.toEqual(VALUE);
   });
 
+  it("reads the blob and stamp through one backing snapshot when getItems is available", async () => {
+    const { backing, data } = makeFakeBacking();
+    data.set("sis-scan-v1", JSON.stringify(VALUE));
+    data.set(stampKey("sis-scan-v1"), "7");
+    backing.getItems = vi.fn(async (names: string[]) => names.map((name: string) => data.get(name) ?? null));
+    const storage = createAsyncCoalescedFailSoftPersistStorage(() => backing);
+
+    await expect(storage.getItem("sis-scan-v1")).resolves.toEqual(VALUE);
+
+    expect(backing.getItems).toHaveBeenCalledWith(["sis-scan-v1", stampKey("sis-scan-v1")]);
+    expect(backing.getItem).not.toHaveBeenCalled();
+  });
+
   it("migrates from legacy storage on IDB miss and clears legacy only after copy succeeds", async () => {
     const { backing, data } = makeFakeBacking();
     const legacy = {
@@ -1039,4 +1052,3 @@ describe("createAsyncCoalescedFailSoftPersistStorage", () => {
     });
   });
 });
-

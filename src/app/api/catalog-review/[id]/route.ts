@@ -6,7 +6,7 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS } from "@/services/db/types";
 import { accessLevelServer } from "@/services/security/roleAccess";
 import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
-import { ladderStorage } from "@/server/upc/storage";
+import { decodeStorage } from "@/server/decode/storage";
 import { logServerEvent } from "@/server/log";
 
 export const runtime = "nodejs";
@@ -66,7 +66,7 @@ export async function POST(
     // client IP even though each route configures its own distinct rate-limit env var.
     const rl = await checkRateLimit(`CATALOG_REVIEW_ID:${ip}`, {
       limit: intEnv(process.env.CATALOG_REVIEW_RATE_LIMIT, CATALOG_REVIEW_ID_RATE_LIMIT),
-      storage: await ladderStorage(),
+      storage: await decodeStorage(),
     });
     if (!rl.allowed) {
       logServerEvent({ route: "/api/catalog-review/[id]", event: "rate_limited", reasonCode: "rate_limited", status: 429 });

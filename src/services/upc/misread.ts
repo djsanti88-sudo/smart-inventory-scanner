@@ -5,7 +5,7 @@ import { isGtinShaped, isValidCheckDigit, expandUpcE } from "@/services/upc/gtin
  * digit is either a scanner misread (dirty label, bad angle, camera blur) OR a legitimate non-GS1
  * shape that fails the plain check digit BY DESIGN (in-store number-system-2 price-embedded UPCs,
  * ITF-14 wrappers, warehouse numerics). This helper cannot and does not try to tell those apart -
- * it only answers "does the check digit fail" so the caller can skip the decode ladder (a bad
+ * it only answers "does the check digit fail" so the caller can skip paid decode (a bad
  * check digit dooms every GTIN rung either way) and surface an ADDITIVE, non-terminal reason that
  * names both possibilities (see resolver.ts). The row always stays a normal, aliasable needs_review
  * row - nothing here removes affordance from the review flow.

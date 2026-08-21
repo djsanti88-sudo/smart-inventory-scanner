@@ -59,10 +59,10 @@ export function evaluateSentinel(input = {}) {
   return { verdict: blockers.length ? "BLOCKED" : "CLEAR", blockers, warnings };
 }
 
-/** Env NAMES only (values masked). Never returns a value. Scoped to the app's known env prefixes. */
+/** Env names only, with values masked. Include generic secret suffixes so retired keys stay hidden. */
 export function maskEnvNames(env = {}) {
   return Object.keys(env)
-    .filter((k) => /^(NEXT_PUBLIC_|GEMINI|OPENAI|AI_LOOKUP|FIREBASE|SUPABASE|GMAIL|TIRELIBRARY|FIRECRAWL|PLATFORM_OWNER)/.test(k))
+    .filter((k) => /^(NEXT_PUBLIC_|OPENAI|AI_LOOKUP|FIREBASE|SUPABASE|GMAIL|TIRELIBRARY|PLATFORM_OWNER)/.test(k) || /(?:_API_KEY|_TOKEN|_SECRET(?:_|$))/.test(k))
     .sort()
     .map((name) => ({ name, value: "***masked***" }));
 }
@@ -138,7 +138,7 @@ if (runningAsScript()) {
     head: head.value,
     firebaseDefaultProject,
     linkedVercelProject,
-    liveAiKeysPresent: !!(process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY),
+    liveAiKeysPresent: !!process.env.OPENAI_API_KEY,
     isE2E: process.env.IS_E2E === "1",
     localProof: process.env.SENTINEL_LOCAL_PROOF !== "0",
     approvedSha: process.env.SENTINEL_APPROVED_SHA || null,

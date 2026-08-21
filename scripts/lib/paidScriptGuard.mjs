@@ -1,20 +1,20 @@
 // THE ONLY SANCTIONED WAY a Lane 1 dev-tooling script (anything under scripts/) may obtain a
 // provider key and permission to spend real money. Born from the 2026-07-26 incident
-// (scripts/model-bakeoff.mjs read .env.local's OPENAI_API_KEY on a bare invocation and fired ~50
+// (a retired experiment read .env.local's OPENAI_API_KEY on a bare invocation and fired many
 // live paid calls with no flag, causing a real owner charge) and finding TL2-1 (2026-08-13), which
 // found 9 sibling scripts doing the identical unguarded thing, plus 3 more found re-verifying that
 // list (scripts/paidScriptGuard.enforcement.test.mjs is what makes the NEXT sibling impossible to
 // add silently).
 //
-// CLAUDE.md's Delegation Model Policy, verbatim: "DEV TOOLING MUST NEVER READ .env.local's
-// OPENAI_API_KEY - that key is Lane 2's exclusively" (the app runtime's own decode ladder, which
+// Project policy: dev tooling must never read the app runtime's OPENAI_API_KEY. That key belongs
+// exclusively to the app decoder, which
 // has its own cap/breaker/kill-switch). This module is how a Lane 1 script complies without
 // reinventing the pattern every time.
 //
 // Contract:
 //   1. This module itself NEVER reads .env.local. Keys come ONLY from explicitly-named
 //      dev-tooling env vars the owner sets deliberately for a specific script/run (e.g.
-//      BAKEOFF_OPENAI_KEY, PREFIXBUILD_GEMINI_KEY) - never the app runtime's own
+//      SCRIPT_OPENAI_KEY) - never the app runtime's own
 //      OPENAI_API_KEY/GEMINI_API_KEY/GO_UPC_API_KEY/FIRECRAWL_API_KEY/BRAVE_SEARCH_API_KEY names.
 //   2. Callers default to a DRY RUN: requireLiveApproval() prints what WOULD run plus a worst-case
 //      cost FLOOR, spends $0, and exits 0 unless --live is passed.
@@ -23,15 +23,13 @@
 //   4. Reports cost as a computed FLOOR only (Paid API Cost Truth Rule, CLAUDE.md): true spend must
 //      be read from the provider's own billing console, never presented as a final number.
 //
-// Reference integration: scripts/model-bakeoff.mjs (the pattern this module generalizes) and
-// scripts/phase05-prefix-cleanup.mjs / scripts/phase1-enrich-build.mjs / scripts/proof-full-ladder.mjs
-// (migrated onto this module).
+// This guard remains generic so a retired provider cannot be reintroduced through an unguarded script.
 //
 // Usage:
 //   import { requireLiveApproval, requireDevToolingKey } from "./lib/paidScriptGuard.mjs";
 //   const approval = requireLiveApproval({ worstCaseFloorUsd: 2.5, describe: () => "..." });
 //   if (!approval.live) return; // dry run already printed + exited 0 inside requireLiveApproval
-//   const key = requireDevToolingKey("BAKEOFF_OPENAI_KEY");
+//   const key = requireDevToolingKey("SCRIPT_OPENAI_KEY");
 
 const LANE2_KEY_NAMES = /^(OPENAI|GEMINI|GO_UPC|FIRECRAWL|BRAVE_SEARCH)_API_KEY$/;
 

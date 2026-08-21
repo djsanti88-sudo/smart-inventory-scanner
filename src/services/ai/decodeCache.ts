@@ -1,7 +1,7 @@
 // Server-side decode cache. A repeat lookup of the same SUCCESSFULLY decoded code must NOT cost
-// another AI/Firecrawl call: successes are cached indefinitely (within the running process). MISSES
+// another paid GPT call: successes are cached indefinitely (within the running process). Misses
 // ARE NEVER CACHED (owner ruling 2026-08-20, no-candidate memory abolished everywhere): an unresolved
-// code re-runs the full ladder on every scan; only the in-flight map below coalesces CONCURRENT scans
+// code reruns decode on every scan; only the in-flight map below coalesces concurrent scans
 // of the same code. In-memory + per-process: the client catalog/alias layer is the durable cache.
 
 interface Entry {
@@ -28,7 +28,7 @@ export function getDecodeCache<T = unknown>(code: string): T | undefined {
   return e.value as T;
 }
 
-/** Store a value. Pass ttlMs to make it expire (used for misses); omit for an indefinite (success) entry. */
+/** Store a positive value. An optional TTL is retained for generic/test callers. */
 export function setDecodeCache(code: string, value: unknown, ttlMs?: number): void {
   const k = decodeCacheKey(code);
   if (!k) return;
@@ -54,8 +54,8 @@ export interface WithDecodeCacheOpts {
 
 // L3 in-flight coalescing (owner-ratified 2026-07-15, Task 12c/AM-6): two concurrent scans of the
 // SAME unknown code (e.g. a shop scanning two units back to back before the first decode settles)
-// used to both call compute() - both charging a cap slot, both possibly calling GPT. Only Go-UPC
-// deduped via its own throttle; this map dedupes at the cache layer for EVERY caller of
+// used to both call compute(), both charging a cap slot and possibly calling GPT. This map dedupes
+// at the cache layer for every caller of
 // withDecodeCache. Keyed by the already-canonical decodeCacheKey (the pipeline passes canonicalGtin
 // today, so two zero-padding encodings of one product already share a key and now also share one
 // in-flight compute). A THROWING compute (e.g. DailyCapExceededError) deletes its slot in a `finally`

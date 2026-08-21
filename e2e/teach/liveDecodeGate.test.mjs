@@ -1,13 +1,13 @@
 // e2e/teach/liveDecodeGate.test.mjs
 //
 // Proves the OWNER-GATED live-paid-spend gate on lesson 7
-// (live-decode-ladder-trace): without TEACH_ALLOW_LIVE_DECODE=1 the lesson
+// (live-decode-trace): without TEACH_ALLOW_LIVE_DECODE=1 the lesson
 // must skip BEFORE touching the page/persona/harness (i.e. before any scan,
 // any "Look up with AI" click, or any real /api/ai-lookup spend). See
 // Codex-19 Finding 3.
 import test from "node:test";
 import assert from "node:assert/strict";
-import lesson from "./lessons/7-live-decode-ladder-trace.mjs";
+import lesson from "./lessons/7-live-decode-trace.mjs";
 
 // A ctx whose live surfaces throw the instant they are touched, so the test
 // fails loudly if the gate ever falls through to real work.

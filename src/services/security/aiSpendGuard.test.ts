@@ -114,7 +114,7 @@ describe("aiSpendGuard", () => {
   });
 
   // B1: durable storage-backed rate limiting - same fixed-window contract, but backed by the
-  // injected LadderStorage-shaped get/set/increment seam (mirrors chargeDailySlot's pattern).
+  // injected DecodeStorage-shaped get/set/increment seam (mirrors chargeDailySlot's pattern).
   describe("checkRateLimit (durable, storage-backed)", () => {
     it("allows up to the limit then blocks within the window", async () => {
       const s = memStorage();

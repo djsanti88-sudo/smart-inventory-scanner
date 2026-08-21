@@ -48,6 +48,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Vercel build output (gitignored artifact - never our source to lint):
     ".vercel/**",
+    // Playwright's generated HTML-report assets are third-party build output, not source.
+    "playwright/.cache/**",
   ]),
 ]);
 

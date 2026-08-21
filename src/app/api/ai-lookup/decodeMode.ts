@@ -1,5 +1,5 @@
 // Shared predicate for a single security/money invariant: "the daily AI cap charges ONLY paid rungs,
-// exactly once per genuine compute" (CLAUDE.md Decode Ladder + Evidence Rules; LESSONS_LEARNED L12).
+// exactly once per genuine compute" (decode evidence rules; LESSONS_LEARNED L12).
 //
 // Extracted per the 2026-08-12 invariant audit (docs/superpowers/reports/2026-08-12-invariant-audit-
 // security.md, finding #2): route.ts previously computed `isDecodeMode` inline from the client-supplied
@@ -10,7 +10,7 @@
 // comparison at one site without updating the other - exactly the duplicate-condition shape that produced
 // the L12 double-charge incident (232 charges vs ~27 genuine calls). Pulling the comparison into one
 // named, unit-testable function removes that risk: there is now exactly one place that decides what a
-// "decode-mode" (paid-ladder) request looks like.
+// "decode-mode" request looks like.
 //
 // CONSOLIDATION A1 (2026-08-19): the legacy 'lookup' mode is DELETED, so this predicate is now also
 // the route's ADMISSION gate - a request whose mode it rejects is answered 400 unsupported_mode before

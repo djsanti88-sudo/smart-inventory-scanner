@@ -17,6 +17,7 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import type { ServiceAccount } from "firebase-admin/app";
 import type { Alias, Product } from "@/types";
 import { cleanScanCode, buildNormalizedCandidates } from "@/services/scanCleaner";
 import { COLLECTIONS } from "@/services/db/types";
@@ -160,7 +161,12 @@ async function main() {
   if (typeof sa.private_key === "string") sa.private_key = (sa.private_key as string).replace(/\\n/g, "\n");
   if (sa.project_id !== EXPECTED_PROJECT) die(`service account project_id is not ${EXPECTED_PROJECT}`, 2);
 
-  if (!getApps().length) initializeApp({ credential: cert(sa as any), projectId: EXPECTED_PROJECT });
+  const serviceAccount: ServiceAccount = {
+    projectId: String(sa.project_id),
+    clientEmail: String(sa.client_email),
+    privateKey: String(sa.private_key),
+  };
+  if (!getApps().length) initializeApp({ credential: cert(serviceAccount), projectId: EXPECTED_PROJECT });
   const db = getFirestore();
 
   // Resolve business

@@ -1,8 +1,8 @@
 {
-  "_comment": "Seeded from GET /api/ai-lookup live truth against https://inventory-5ha3w7se8-sharpenly.vercel.app on 2026-07-22. Update this file deliberately when the deployment's real capability shape changes on purpose (new key, new daily cap, etc.) - never silently to make a smoke run pass.",
+  "_comment": "Expected capability contract after the 2026-08-21 decoder simplification. Update deliberately when the deployed contract changes; never silently to make smoke pass.",
   "aiLookup": {
-    "goUpcConfigured": true,
+    "openaiConfigured": true,
     "dailyLimit": 5000,
-    "decodeLadder": ["corpus", "go_upc", "fetch_v2", "gpt"]
+    "decodePath": ["tire_corpus", "retail_corpus", "learned_products", "master_catalog", "persisted_cache", "memory_cache", "gpt_5_4_mini"]
   }
 }

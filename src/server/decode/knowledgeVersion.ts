@@ -1,30 +1,12 @@
-// DECODE KNOWLEDGE VERSION + NEGATIVE-CACHE COOLDOWN (owner 2026-08-19: "a failed search is an event,
-// not an identity"). The shared Turso decode cache (L2) is a platform asset every tenant replays for
-// $0 - but a stored "no result", and a stored guess that never reached verified, are only as good as
-// the knowledge that produced them. Both dials live HERE, in ONE place, and nothing else may mint a
-// version string: every persisted row carries the version it was computed under (inside its payload's
-// debug.cache, no schema change) and the pipeline re-evaluates the row once that version moves or the
-// row ages past the cooldown.
+// One version for the free knowledge and decode policy used to create a cached positive identity.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * Hand-bumped ladder identity. BUMP THIS whenever a decode PROVIDER is added, removed, or swapped,
- * the RUNG ORDER changes, or a resolver/trust rule that decides identity changes - anything that
- * could make the ladder answer a code differently than it did before. Corpus rebuilds need no bump:
+ * Hand-bumped pipeline identity. Bump when a provider or trust rule changes. Corpus rebuilds need no bump:
  * their own build stamps are composed into the version below.
  */
-export const DECODE_LADDER_VERSION = "v1";
-
-/**
- * How long a cached "no result" stays authoritative before the ladder is allowed one honest new try
- * (and how long a guess that paid rungs already failed to beat replays before paying is permitted
- * again). Tuning value, not a product rule - hence an env override with a 7-day default.
- */
-export function decodeNegativeTtlMs(): number {
-  const raw = Number(process.env.DECODE_NEGATIVE_TTL_MS);
-  return Number.isFinite(raw) && raw > 0 ? raw : 7 * 24 * 60 * 60 * 1000;
-}
+export const DECODE_PIPELINE_VERSION = "v2-simple-gpt54";
 
 // The generated corpus build stamps. Both meta files carry `generated_at` (see the generators); an
 // unreadable/absent file degrades to "none" rather than throwing - a version string is a cache key,
@@ -46,12 +28,12 @@ function corpusStamp(file: string): string {
 }
 
 /**
- * The single composed knowledge version: the hand-bumped ladder version plus each corpus build stamp.
+ * The composed pipeline version plus each corpus build stamp.
  * Read once per process (the meta files only change with a rebuild, which restarts the server).
  */
 export function getDecodeKnowledgeVersion(): string {
   if (_version === null) {
-    _version = [DECODE_LADDER_VERSION, ...META_PATHS.map(([name, file]) => `${name}:${corpusStamp(file)}`)].join("|");
+    _version = [DECODE_PIPELINE_VERSION, ...META_PATHS.map(([name, file]) => `${name}:${corpusStamp(file)}`)].join("|");
   }
   return _version;
 }

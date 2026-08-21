@@ -396,7 +396,7 @@ describe("LiveScanFeed - decodeNote must not show a stale 'Decoding with AI...' 
       ...baseEvent(code, "prod1"),
       decodeStatus: "needs_review",
       reason: "No provider returned a usable product",
-      decodeNote: "gpt-5.5-ladder skipped: budget_exceeded",
+      decodeNote: "gpt-5.4-mini skipped: budget_exceeded",
     } as unknown as ScanEvent;
     useScanStore.setState({ scanFeed: [event], needsReviewQueue: [], products: [], finalCounts: [] });
 

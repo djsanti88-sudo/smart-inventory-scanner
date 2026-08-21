@@ -86,14 +86,14 @@ describe("release-sentinel (dry-run deploy gate; read-only, no mutation)", () =>
   });
 
   it("masks env VALUES - returns names only, never a secret value", () => {
-    const masked = maskEnvNames({ GEMINI_API_KEY: "super-secret-123", NEXT_PUBLIC_FIREBASE_PROJECT_ID: "p", UNRELATED: "x" });
-    expect(masked.find((e) => e.name === "GEMINI_API_KEY")?.value).toBe("***masked***");
+    const masked = maskEnvNames({ OPENAI_API_KEY: "super-secret-123", NEXT_PUBLIC_FIREBASE_PROJECT_ID: "p", UNRELATED: "x" });
+    expect(masked.find((e) => e.name === "OPENAI_API_KEY")?.value).toBe("***masked***");
     expect(JSON.stringify(masked)).not.toContain("super-secret-123");
     expect(masked.some((e) => e.name === "UNRELATED")).toBe(false); // only app-relevant names are listed
   });
 
   it("deploy card carries the owner approval phrase + masked env, and is BLOCKED without approval", () => {
-    const card = buildDeployCard({ ...clean, approvedSha: null, env: { GEMINI_API_KEY: "leak-me" } });
+    const card = buildDeployCard({ ...clean, approvedSha: null, env: { OPENAI_API_KEY: "leak-me" } });
     expect(card.ownerApprovalPhrase).toBe("DEPLOY THIS SHA");
     expect(card.verdict).toBe("BLOCKED");
     expect(JSON.stringify(card)).not.toContain("leak-me");

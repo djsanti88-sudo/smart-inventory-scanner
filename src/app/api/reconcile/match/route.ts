@@ -4,7 +4,7 @@ import { isLiveAuth } from "@/services/auth/authMode";
 import { isAuthBypassEnabled } from "@/services/auth/authBypass";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
-import { ladderStorage } from "@/server/upc/storage";
+import { decodeStorage } from "@/server/decode/storage";
 import {
   matchExpectedRow,
   type CorpusCandidate,
@@ -187,7 +187,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const rate = await checkRateLimit(rateLimitKey, {
       limit: intEnv(process.env.RECONCILE_MATCH_RATE_LIMIT, 30),
       windowMs: intEnv(process.env.RECONCILE_MATCH_RATE_WINDOW_MS, 60_000),
-      storage: await ladderStorage(),
+      storage: await decodeStorage(),
       failClosedOnStorageError: true,
     });
     if (!rate.allowed) {

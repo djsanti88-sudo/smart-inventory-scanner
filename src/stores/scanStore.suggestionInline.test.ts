@@ -21,7 +21,7 @@ function suggestedDecode(overrides: { confidence?: number; productName?: string;
   const brand = overrides.brand ?? "Anchor Bar";
   const sourceUrls = overrides.sourceUrls ?? ["https://go-upc.com/search?q=" + CODE];
   return {
-    providerNames: ["gpt-5.5-ladder"],
+    providerNames: ["gpt-5.4-mini"],
     results: [
       {
         productName, brand, category: "food", specsShort: "", specsFull: "", primarySku: "",
@@ -168,7 +168,7 @@ describe("Task 9b: inline suggestion approve/decline (suggestions bypass Needs R
   it("a CONFLICT decode still creates/keeps the open review (unchanged)", async () => {
     const store = newStore();
     const conflictResp = {
-      providerNames: ["gemini", "openai"],
+      providerNames: ["gpt-5.4-mini"],
       results: [
         { productName: "Product A", brand: "A", category: "", specsShort: "", specsFull: "", primarySku: "", primaryBarcode: "", gtin: "", upc: "", ean: "", aliases: [], imageUrl: "", productUrl: "", sourceUrls: [], confidence: 0.5, verifiedFacts: [], guesses: [], needsHumanReview: true },
       ],

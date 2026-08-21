@@ -155,7 +155,7 @@ function resolveAndVerifyDbPath(paths: KnowledgeDbVerifyPaths): ResolveAndVerify
         `${paths.manifestPath}. This usually means a crashed/interrupted "npm run build:knowledge-db" left the ` +
         `.db and .db.gz pair out of sync (see DT2-1). Disabling the knowledge corpus for this process rather ` +
         `than silently serving a mismatched generation. Fix: rerun npm run build:knowledge-db. This never blocks ` +
-        `scanning -- the decode ladder simply skips this rung with an honest reason.`,
+        `scanning - the decoder skips this free source with an honest reason.`,
     );
     return { status: "mismatch" };
   }

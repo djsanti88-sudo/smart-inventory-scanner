@@ -6,7 +6,7 @@ import { accessLevelServer } from "@/services/security/roleAccess";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { canonicalGtin } from "@/services/upc/gtin";
 import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
-import { ladderStorage } from "@/server/upc/storage";
+import { decodeStorage } from "@/server/decode/storage";
 import { disputeCatalogEntry } from "@/server/catalog/catalogDispute";
 import { logServerEvent } from "@/server/log";
 
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
     // client IP even though each route configures its own distinct rate-limit env var.
     const rl = await checkRateLimit(`CATALOG_DISPUTE:${ip}`, {
       limit: intEnv(process.env.CATALOG_DISPUTE_RATE_LIMIT, CATALOG_DISPUTE_RATE_LIMIT),
-      storage: await ladderStorage(),
+      storage: await decodeStorage(),
     });
     if (!rl.allowed) {
       logServerEvent({ route: "/api/catalog-dispute", event: "rate_limited", reasonCode: "rate_limited", status: 429 });

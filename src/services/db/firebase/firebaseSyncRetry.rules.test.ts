@@ -128,7 +128,7 @@ describe.skipIf(!ready)("FirebaseSyncTarget counter retry classification (emulat
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(doc(ctx.firestore(), "businesses", BIZ, "products", productId), {
         id: productId, businessId: BIZ, provisional: true, verified: false, status: "active",
-        source: "ai_gemini", createdBy: "ai", updatedBy: "ai", name: "Unidentified item", brand: "",
+        source: "ai_openai", createdBy: "ai", updatedBy: "ai", name: "Unidentified item", brand: "",
         createdAt: "2026-08-05T00:00:00.000Z", updatedAt: "2026-08-05T00:00:00.000Z",
       });
     });
@@ -162,7 +162,7 @@ describe.skipIf(!ready)("FirebaseSyncTarget counter retry classification (emulat
       provisional: true,
       verified: false,
       status: "active",
-      source: "ai_gemini",
+      source: "ai_openai",
       createdBy: "ai",
       updatedBy: "ai",
       name: "Unidentified item",
@@ -242,7 +242,7 @@ describe.skipIf(!ready)("FirebaseSyncTarget counter retry classification (emulat
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(doc(ctx.firestore(), ...path), {
         id: "campaign-product-cost", businessId: BIZ, provisional: true, verified: false, status: "active",
-        source: "ai_gemini", createdBy: "ai", updatedBy: "ai", name: "Unidentified item", brand: "",
+        source: "ai_openai", createdBy: "ai", updatedBy: "ai", name: "Unidentified item", brand: "",
       });
     });
     const counterCtx = env.authenticatedContext(UID).firestore();
@@ -256,7 +256,7 @@ describe.skipIf(!ready)("FirebaseSyncTarget counter retry classification (emulat
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(doc(ctx.firestore(), ...path), {
         id: "campaign-product-alias", businessId: BIZ, provisional: true, verified: false, status: "active",
-        source: "ai_gemini", createdBy: "ai", updatedBy: "ai", name: "Unidentified item", brand: "", aliases: [],
+        source: "ai_openai", createdBy: "ai", updatedBy: "ai", name: "Unidentified item", brand: "", aliases: [],
       });
     });
     const counterCtx = env.authenticatedContext(UID).firestore();

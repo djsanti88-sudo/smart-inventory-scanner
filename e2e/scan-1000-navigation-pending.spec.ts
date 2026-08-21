@@ -3,14 +3,10 @@ import { test, expect, type Page } from "./fixtures";
 const NO_AI_STATUS = {
   liveEnabled: false,
   autoDecodeOnScan: false,
-  geminiEnabled: false,
-  openaiEnabled: false,
-  geminiConfigured: false,
   openaiConfigured: false,
-  premiumFallback: false,
   mode: "off",
   dailyLimit: 200,
-  missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"],
+  missingKeys: ["OPENAI_API_KEY"],
   e2e: true,
 };
 
