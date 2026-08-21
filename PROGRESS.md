@@ -3,25 +3,38 @@
 > Live status checkpoint. Update after every phase so a fresh session continues without guessing.
 > History: `docs/archive/PROGRESS_HISTORY_2026-07_2026-08.md` (2026-07-08 to 2026-08-19, verbatim)
 > and `docs/archive/PROGRESS_HISTORY_2026-06.md`. Branch/worktree truth: `REPO_HEALTH.md`.
-> Last updated: 2026-08-19.
+> Last updated: 2026-08-21.
 
 ## Current phase
 
-**Consolidation SHIPPED.** `master` = `2150c17a` (PR #40 consolidation + PR #41 e2e flake
-hardening), merged 2026-08-19, auto-deployed to production, smoke green. Before that, PR #38
-(best-guess identity + honest shared decode cache) and PR #39 (post-PR38 consolidation) landed the
-identity-philosophy decision (DECISIONS.md 2026-08-19).
+**Navigation/isolation train + no-candidate abolition SHIPPED.** `master` = `828b74ce` (PR #43 +
+PR #44), merged 2026-08-21, both auto-deployed to production, smoke green.
 
-What PR #40 shipped:
+What PR #43 shipped (`fix/navigation-sync-account-isolation`):
 
-- One decode mode: `/api/ai-lookup` accepts `mode:"decode"` (+ `decode-deep` alias) only; the legacy
-  `mode:"lookup"` path and every Gemini module are deleted.
-- A daily-cap denial never discards a free identity already in hand and never mints a pay-once
-  marker for it (`paidStep` in `src/server/decode/pipeline.ts`).
-- `ENABLE_LIVE_AI_LOOKUP=false` is enforced server-side (`src/server/upc/paidWorkPossible.ts`).
-- Turso `decode_cache` carries `source_tier` so a free title never overwrites a paid identity.
-- CI runs `npm run proof:all`; repo shape cleanup (scripts catalog, prefix-mining grouped, dead
-  trees deleted; recovery tag `backup/pre-aws-cleanup-2026-08-19`).
+- Business context stays mounted across History/Reconcile/Settings/Scan navigation (double-bootstrap
+  reload glitch gone); pending local data survives stale cloud snapshots; per-UID and per-business
+  persistence isolation with a same-browser A-B-A Firebase emulator proof; product sync ordering,
+  payload-versioned idempotency, and durable review decisions hardened; unresolved History rows count.
+- Review follow-ups landed on the same train: a server-side `decisionUpdatedAt` clock in the
+  `SAVE_UNKNOWN_SCAN` transaction (a retried stale decision can never overwrite a newer one), a
+  narrowed `countsFromTimeline` filter (conflict/quantity-less events stay out of archived-session
+  tables), and the two-account e2e seed made run-relative (it was a wall-clock time bomb).
+
+What PR #44 shipped (`chore/abolish-no-result-receipts`, owner ruling 2026-08-20 in DECISIONS.md):
+
+- ALL negative-result decode memory is abolished: no `no_result_receipt` rows (kind narrowed to
+  `result`, legacy rows read back as a miss), no L1 miss TTL (successes-only cache; in-flight map
+  still coalesces concurrent scans), no Go-UPC 30-day miss cache (LadderStorage seam pruned).
+- Production data cleaned with owner approval: 91 receipt rows deleted from Turso `decode_cache`
+  (458 result rows untouched, via `scripts/purge-decode-cache-receipts.mjs`), `goupc_miss_cache`
+  table (409 rows) dropped.
+- A failed decode stores NOTHING; every rescan re-runs the full ladder; the ladder's own cost gates
+  still bound spend and every real egress is metered. Never rebuild negative memory (GUARDRAILS.md).
+
+Earlier this cycle: PR #40/#41 consolidation (one decode mode, Gemini deleted, cap never discards a
+free identity, `source_tier` on Turso, CI runs proof:all) and PR #42 root-docs refresh - history in
+`docs/archive/PROGRESS_HISTORY_2026-07_2026-08.md`.
 
 ## Next (owner decides, none started)
 
