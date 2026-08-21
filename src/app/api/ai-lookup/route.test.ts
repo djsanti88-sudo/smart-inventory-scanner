@@ -263,19 +263,18 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect((await dailyUsedNow())).toBe(1);
   }, 20000);
 
-  // Regression (same run): the cap was consumed BEFORE the decode cache was read, so a zero-spend
-  // cached repeat scan burned cap slots and, once the cap tripped, returned 429 instead of the cached
-  // product (the harness saw 109 "name mismatches" that were really empty 429 bodies).
-  it("a cached repeat decode is FREE: no cap slot consumed and it still succeeds AT the cap", async () => {
+  // ABOLITION UPDATE (owner 2026-08-20): an UNRESOLVED code is no longer miss-cached, so its repeat
+  // at an exhausted cap re-runs the ladder and gets the honest cap answer instead of a replayed miss.
+  // The wallet stays protected: a cap-blocked repeat burns ZERO additional slots. (A SUCCESSFUL
+  // decode still replays free from cache - proven by the Task 4 suggested-result replay test below.)
+  it("an unresolved repeat AT the cap re-runs, is cap-limited honestly, and burns no extra slot", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "1";
     process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // L6: a key makes paid work genuinely possible -> slot charged
     const first = await POST(makeRequest({ cleanCode: "111000222555", mode: "decode" }));
     expect(first.status).toBe(200); // consumed the single slot
     const repeat = await POST(makeRequest({ cleanCode: "111000222555", mode: "decode" }));
-    expect(repeat.status, "cached repeat must not be blocked by the cap").toBe(200);
-    const json = await repeat.json();
-    expect(json.debug?.cached).toBe(true);
-    expect((await dailyUsedNow())).toBe(1);
+    expect(repeat.status, "cap answer for an unresolved re-run at the cap").toBe(429);
+    expect((await dailyUsedNow()), "a cap-blocked repeat must not burn another slot").toBe(1);
   }, 40000);
 
   // --- GPT-5.5 ladder rung wiring (route-level; Task 3 review fixes + Task 3b) -------------------
@@ -1107,7 +1106,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
       expect((await dailyUsedNow())).toBe(1);
     }, 20000);
 
-    it("(e) a subsequent identical request is served from cache with ZERO new daily-cap slots burned", async () => {
+    it("(e) ABOLITION: an unresolved identical repeat re-runs the ladder and honestly bills its own slot", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "100";
       process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // L6: a key makes paid work genuinely possible -> slot charged
       const code = "111000222890";
@@ -1117,8 +1116,9 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
       const second = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
       expect(second.status).toBe(200);
       const secondJson = await second.json();
-      expect(secondJson.debug.cached).toBe(true);
-      expect((await dailyUsedNow()), "a cached repeat must not burn a second daily slot").toBe(1);
+      // No miss memory (owner 2026-08-20): the repeat genuinely recomputed and is metered again.
+      expect(secondJson.debug.cached ?? false).toBe(false);
+      expect((await dailyUsedNow()), "a genuine re-run bills its own slot").toBe(2);
     }, 20000);
   });
 

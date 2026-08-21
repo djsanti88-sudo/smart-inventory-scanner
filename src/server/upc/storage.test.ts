@@ -8,7 +8,6 @@ import {
   ladderStorage,
   __resetLadderStorageSelectorForTests,
   type UsageState,
-  type MissEntry,
   type DecodeArchiveEntry,
   type DecodeOutcomeEntry,
   type TursoClientLike,
@@ -60,37 +59,6 @@ describe("fileLadderStorage", () => {
       expect(await store.incrementUsage("2026-06")).toBe(2);
       // a new month key starts its own counter at 1
       expect(await store.incrementUsage("2026-07")).toBe(1);
-    });
-  });
-
-  describe("miss cache", () => {
-    it("returns null for an unknown key", async () => {
-      const store = fileLadderStorage(dir);
-      expect(await store.readMissCache("0036000291452")).toBeNull();
-    });
-
-    it("round-trips a miss entry with its TTL fields", async () => {
-      const store = fileLadderStorage(dir);
-      const entry: MissEntry = {
-        canonical: "0036000291452",
-        missedAt: "2026-07-08T00:00:00.000Z",
-        ttlDays: 30,
-      };
-      await store.writeMissCache(entry.canonical, entry);
-      const reread = await fileLadderStorage(dir).readMissCache(entry.canonical);
-      expect(reread).toEqual(entry);
-    });
-
-    it("keeps multiple keys independent", async () => {
-      const store = fileLadderStorage(dir);
-      const a: MissEntry = { canonical: "111", missedAt: "2026-07-08T00:00:00.000Z", ttlDays: 30 };
-      const b: MissEntry = { canonical: "222", missedAt: "2026-07-08T01:00:00.000Z", ttlDays: 30 };
-      await store.writeMissCache(a.canonical, a);
-      await store.writeMissCache(b.canonical, b);
-      const s2 = fileLadderStorage(dir);
-      expect(await s2.readMissCache("111")).toEqual(a);
-      expect(await s2.readMissCache("222")).toEqual(b);
-      expect(await s2.readMissCache("333")).toBeNull();
     });
   });
 
@@ -471,18 +439,6 @@ describe("tursoLadderStorage", () => {
     expect(await store.readUsage()).toEqual({ month: "2026-07", used: 43 });
   });
 
-  it("readMissCache returns null for an unknown key", async () => {
-    const store = tursoLadderStorage(memTursoClient());
-    expect(await store.readMissCache("0036000291452")).toBeNull();
-  });
-
-  it("writeMissCache then readMissCache round-trips via upsert-by-canonical", async () => {
-    const store = tursoLadderStorage(memTursoClient());
-    const entry: MissEntry = { canonical: "0036000291452", missedAt: "2026-07-08T00:00:00.000Z", ttlDays: 30 };
-    await store.writeMissCache(entry.canonical, entry);
-    expect(await store.readMissCache(entry.canonical)).toEqual(entry);
-  });
-
   it("appendArchive inserts append-only (no update/delete SQL issued)", async () => {
     const client = memTursoClient();
     const store = tursoLadderStorage(client);
@@ -542,9 +498,9 @@ describe("tursoLadderStorage", () => {
     await store.readUsage();
     await store.readUsage();
     const createCalls = client.calls.filter((c) => c.startsWith("CREATE TABLE"));
-    // 5 tables (usage, miss cache, archive, generic kv, decode outcomes) created on the FIRST call
-    // only; the second readUsage must not re-issue them.
-    expect(createCalls).toHaveLength(5);
+    // 4 tables (usage, archive, generic kv, decode outcomes) created on the FIRST call only; the
+    // second readUsage must not re-issue them. (goupc_miss_cache is gone - owner 2026-08-20.)
+    expect(createCalls).toHaveLength(4);
   });
 
   describe("generic kv (get/set/increment)", () => {

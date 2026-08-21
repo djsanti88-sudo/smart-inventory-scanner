@@ -606,7 +606,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // L12 says: charge exactly once per GENUINE compute. The old chargePaidSlot did the cap CHECK and the
   // cap CHARGE together, immediately BEFORE each paid rung ran - but a rung's own internal gates can
   // still short-circuit with ZERO provider egress after that point:
-  //   - Go-UPC returns on its 30-day negative miss cache, or on its monthly spend cap
+  //   - Go-UPC returns on its monthly spend cap
   //     (GoUpcProvider.ts goUpcRung: both branches return before deps.client is ever called);
   //   - the GPT rung declines inside shouldRunGptRung's own $/day budget check.
   // Every one of those burned a daily slot for a request that spent nothing. So the two halves are now
@@ -1492,10 +1492,10 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       const ladderStore = await ladderStorage();
       const r = await goUpcRung(code, {
         apiKey: process.env.GO_UPC_API_KEY,
-        // S5 EGRESS POINT: goUpcRung calls `client` ONLY after its own GTIN gate, 30-day negative miss
+        // S5 EGRESS POINT: goUpcRung calls `client` ONLY after its own GTIN gate
         // cache, and monthly spend cap have all passed (GoUpcProvider.ts goUpcRung) - i.e. exactly when
         // a billed request is about to leave. Charging here instead of before the rung is what makes a
-        // negative-cache hit or a capped month cost ZERO daily slots. If the charge itself fails, the
+        // and spend gates, so a capped month costs ZERO daily slots. If the charge itself fails, the
         // lookup never happens (runLadder records the rung error) - fail closed, no unmetered spend.
         // DC-1: `deps.gate.run` (via goUpcRung's own `deps.signal` threading) drops this call BEFORE it
         // ever reaches here when ctx.signal is already aborted, so chargeOnEgress can never fire for an
@@ -1860,7 +1860,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // chargeOnEgress, declared at the top of runDecodePipeline (see their doc comment). The check still
     // runs at exactly these sites - a blown cap still throws DailyCapExceededError BEFORE any paid rung
     // starts - but the WRITE now happens at real provider egress, so a rung that short-circuits on its
-    // own negative cache / monthly cap / $-budget bills nothing. E2E is a no-op on both halves.
+    // own monthly cap / $-budget bills nothing. E2E is a no-op on both halves.
 
     let ladderRun: LadderResult;
     if (freeSuggestion) {
@@ -2013,7 +2013,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         runLadder(code, preGated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) });
       // S5: ONE charge armed for the WHOLE paid ladder (unchanged from the single pre-ladder charge this
       // branch always did) - but it is now only spent if some rung genuinely reaches a provider. A
-      // keyless/negative-cached/budget-declined run down this branch now bills zero instead of one.
+      // keyless/budget-declined run down this branch now bills zero instead of one.
       let paidRun: LadderResult;
       try {
         // preGated.rungs.length guard (deep-review 2026-08-19 finding 3): a free-only pass builds ZERO

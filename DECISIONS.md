@@ -487,3 +487,11 @@ Why each choice was made. Newest decisions at the bottom of each section.
   (belt-and-braces) and its exhausted-ladder write-through persists nothing; regression tests in
   `decodeCacheStore.test.ts`, `decodeCacheBackup.test.ts`, `pipeline.test.ts`, `route.test.ts`.
   Legacy rows deleted from the production Turso `decode_cache` and the local dev cache file.
+- **Extended same day (owner audit follow-up, "remove both"):** the two remaining negative-result
+  memories are also gone. (1) The L1 in-memory MISS cache (`DECODE_MISS_TTL_MS`, 10 min) is removed -
+  `withDecodeCache` stores successes only; the in-flight map still coalesces CONCURRENT scans of one
+  code, which is request dedupe, not memory. (2) The Go-UPC 30-day negative miss cache is removed -
+  `goUpcRung` no longer reads or writes it, `readMissCache`/`writeMissCache`/`MissEntry` are deleted
+  from the `LadderStorage` seam, and the production Turso `goupc_miss_cache` table (409 rows) is
+  DROPPED. Every confirmed Go-UPC miss is re-checked with a fresh billed call on the next scan, and
+  every real egress is still metered.

@@ -5,7 +5,7 @@ import { canonicalGtin, isGtinShaped, isValidCheckDigit } from "@/services/upc/g
 import type { GoUpcOutcome, GoUpcProduct } from "@/services/upc/goUpcClient";
 import type { GoUpcGate } from "@/services/upc/goUpcThrottle";
 import type { GoUpcUsage } from "@/server/upc/goUpcUsage";
-import type { LadderStorage, DecodeArchiveEntry, MissEntry } from "@/server/upc/storage";
+import type { LadderStorage, DecodeArchiveEntry } from "@/server/upc/storage";
 import { sameBrandFamily } from "@/services/catalog/brandFamilies";
 import brandPrefixMap from "@/services/catalog/brandPrefixMap.json";
 
@@ -33,7 +33,6 @@ const GENERAL_MAP = brandPrefixMap as Record<string, string>;
 // handle a Go-UPC decode with the same AiLookupResult shape as a trusted-corpus decode; the DECISION
 // status differs on purpose (suggested, not verified - see above).
 
-const MISS_TTL_DAYS = 30;
 
 /** The smart prefix firewall verdict for a Go-UPC hit. */
 export interface PrefixVerdict {
@@ -226,9 +225,10 @@ function suggestResult(product: GoUpcProduct, code: string, canonical: string): 
 /**
  * The Go-UPC rung. Returns an explicit `reason` on EVERY branch (never silent).
  *
- * Order: GTIN gate -> spend gate -> negative miss cache -> throttled+deduped client call -> outcome
- * mapping (exact -> firewall -> verified/conflict; inferred -> suggestion; miss -> negative cache;
- * quota/auth/transient -> unavailable/fall-through).
+ * Order: GTIN gate -> spend gate -> throttled+deduped client call -> outcome mapping (exact ->
+ * firewall -> verified/conflict; inferred -> suggestion; miss -> fall through;
+ * quota/auth/transient -> unavailable/fall-through). The 30-day negative miss cache is REMOVED
+ * (owner ruling 2026-08-20: no negative-result memory anywhere - every rescan re-checks Go-UPC).
  */
 export async function goUpcRung(code: string, deps: GoUpcRungDeps): Promise<GoUpcRungResult> {
   const now = deps.now ?? (() => new Date());
@@ -246,12 +246,6 @@ export async function goUpcRung(code: string, deps: GoUpcRungDeps): Promise<GoUp
   const canonical = canonicalGtin(code);
   if (!canonical) {
     return { path: "goupc_miss", reason: "not a GTIN / failed check digit" };
-  }
-
-  // Negative cache: a genuine miss within the 30-day TTL short-circuits without spending a lookup.
-  const cached = await deps.storage.readMissCache(canonical);
-  if (cached && !isMissExpired(cached, now())) {
-    return { path: "goupc_miss", reason: "Go-UPC negative cache hit (within 30d TTL)" };
   }
 
   // Spend gate: hard-stop at the monthly cap BEFORE any billed call.
@@ -274,19 +268,18 @@ export async function goUpcRung(code: string, deps: GoUpcRungDeps): Promise<GoUp
       await deps.usage.record();
 
       // DC2-1 fix: no usable identity fields -> this is a MISS, not a confident hit. Never
-      // negative-cached (this is provider-payload ambiguity - a 200 with junk/empty content - NOT a
-      // confirmed "not in DB" answer, so it must not poison future lookups the way a real miss does).
+      // a hit of any kind (this is provider-payload ambiguity - a 200 with junk/empty content).
       if (!hasUsableIdentity(outcome.product)) {
         return {
           path: "goupc_miss",
-          reason: "Go-UPC 200 response has no usable identity fields -> miss (not negative-cached)",
+          reason: "Go-UPC 200 response has no usable identity fields -> miss",
         };
       }
 
       await maybeArchive(deps.storage, code, canonical, outcome.raw, now(), archiveEvery);
 
       if (outcome.inferred) {
-        // Inferred (not an exact match) -> suggestion only. No negative cache (it was a soft hit).
+        // Inferred (not an exact match) -> suggestion only.
         return {
           path: "goupc_inferred",
           decision: suggestionDecision("Go-UPC inferred match (not exact). Confirm before counting."),
@@ -321,23 +314,16 @@ export async function goUpcRung(code: string, deps: GoUpcRungDeps): Promise<GoUp
       // real billed call go unmetered just because we distrust the answer).
       await deps.usage.record();
 
-      // DC2-2 fix (2026-08-13): only a CONFIDENT negative (a 404 with a well-formed JSON body - see
-      // goUpcClient.ts) gets the long-lived negative cache. `confident` undefined is treated as
-      // confident (legacy/omitted case) so existing callers keep today's behavior. An AMBIGUOUS 404
-      // (empty/non-JSON body - indistinguishable from an outage or a load-balancer error page) is NOT
-      // cached at all: rather than guess a shorter TTL, the next scan of this code simply re-checks
-      // Go-UPC normally (one real egress per genuine scan, same as any other rung - no in-request
-      // retry was added here, so this can never double-charge a single lookup per L12).
+      // No negative cache is written (owner ruling 2026-08-20): a confirmed miss falls through and
+      // the next scan of this code re-checks Go-UPC with a fresh billed call. The confident flag is
+      // kept only for reason honesty.
       if (outcome.confident === false) {
         return {
           path: "goupc_miss",
-          reason: "Go-UPC 404 with an ambiguous/empty body -> possibly transient, not cached, fall through",
+          reason: "Go-UPC 404 with an ambiguous/empty body -> possibly transient, fall through",
         };
       }
-
-      const record: MissEntry = { canonical, missedAt: now().toISOString(), ttlDays: MISS_TTL_DAYS };
-      await deps.storage.writeMissCache(canonical, record);
-      return { path: "goupc_miss", reason: "Go-UPC miss (negative-cached 30d) -> fall through" };
+      return { path: "goupc_miss", reason: "Go-UPC confirmed miss -> fall through" };
     }
 
     case "quota":
@@ -354,13 +340,6 @@ export async function goUpcRung(code: string, deps: GoUpcRungDeps): Promise<GoUp
       // Timeout / 5xx / malformed JSON: fall through WITHOUT negative-caching (retry next scan).
       return { path: "goupc_unavailable", reason: `Go-UPC transient error: ${outcome.detail}` };
   }
-}
-
-function isMissExpired(entry: MissEntry, at: Date): boolean {
-  const missedAt = Date.parse(entry.missedAt);
-  if (Number.isNaN(missedAt)) return true; // corrupt timestamp -> treat as expired (re-check)
-  const ageMs = at.getTime() - missedAt;
-  return ageMs > entry.ttlDays * 24 * 60 * 60 * 1000;
 }
 
 async function maybeArchive(

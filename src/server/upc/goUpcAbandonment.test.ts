@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { runLadder, type RunLadderContext, type RungOutcome } from "@/server/upc/ladder";
 import { goUpcRung, type GoUpcRungDeps } from "@/server/upc/GoUpcProvider";
 import { GoUpcGate } from "@/services/upc/goUpcThrottle";
-import type { LadderStorage, MissEntry, UsageState, DecodeArchiveEntry } from "@/server/upc/storage";
+import type { LadderStorage, UsageState, DecodeArchiveEntry } from "@/server/upc/storage";
 import type { GoUpcUsage } from "@/server/upc/goUpcUsage";
 
 // DC-1 (docs/superpowers/reports/2026-08-13-loop1-decode.md): the Go-UPC rung's real network egress is
@@ -27,7 +27,6 @@ const CODE = "848983006257"; // valid GTIN (Falken), passes the GTIN + check-dig
 
 function memStorage(): LadderStorage {
   const usage: UsageState = { month: "2026-08", used: 0 };
-  const miss: Record<string, MissEntry> = {};
   const archives: DecodeArchiveEntry[] = [];
   const kv = new Map<string, string>();
   return {
@@ -39,10 +38,6 @@ function memStorage(): LadderStorage {
       const used = usage.month === month ? usage.used + 1 : 1;
       Object.assign(usage, { month, used });
       return used;
-    },
-    readMissCache: async (key) => miss[key] ?? null,
-    writeMissCache: async (key, e) => {
-      miss[key] = e;
     },
     appendArchive: async (entry) => {
       archives.push(entry);

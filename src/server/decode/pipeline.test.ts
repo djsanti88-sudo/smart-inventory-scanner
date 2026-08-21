@@ -2817,15 +2817,15 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         const missCacheFile = () =>
           path.join(os.tmpdir(), `ladder-storage-pipeline-test-${process.pid}`, ".go-upc-miss-cache.json");
 
-        it("(a) a Go-UPC NEGATIVE-CACHE hit bills ZERO daily slots (no provider call, no charge)", async () => {
+        it("(a) ABOLITION (owner 2026-08-20): a rescanned Go-UPC miss genuinely re-calls the provider and is honestly charged", async () => {
           process.env.AI_LOOKUP_DAILY_LIMIT = "100";
           process.env.GO_UPC_API_KEY = "test-key";
           try { fs.unlinkSync(missCacheFile()); } catch {}
           // Only Go-UPC is keyed: fetchv2/gpt can never pay, so goupc is the only chargeable rung.
           stubFreeSuggestionThenPaid({ goupcMiss: true });
 
-          // Run 1: genuine egress (Go-UPC is actually called and 404s) -> exactly one charge, and the
-          // miss is written to the 30-day negative cache.
+          // Run 1: genuine egress (Go-UPC is actually called and 404s) -> exactly one charge, and
+          // NOTHING is remembered about the miss (no negative cache).
           await runDecodePipeline(makeReq(VALID_GTIN));
           expect(await readDailyUsed(await ladderStorage())).toBe(1);
           expect(fetchSpy.mock.calls.some(([u]) => String(u).includes(GOUPC_API))).toBe(true);
@@ -2837,11 +2837,11 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
           try { fs.unlinkSync(decodeCacheTestFile()); } catch {}
           fetchSpy.mockClear();
 
-          // Run 2: the negative cache short-circuits goUpcRung BEFORE deps.client -> zero egress, and
-          // (the fix) zero charge. Pre-fix this billed a full slot for a request that spent nothing.
+          // Run 2: with no negative memory, Go-UPC is genuinely re-called (fresh egress) and that
+          // real billed call is honestly metered again (metering a real call is never skipped).
           await runDecodePipeline(makeReq(VALID_GTIN));
-          expect(fetchSpy.mock.calls.some(([u]) => String(u).includes(GOUPC_API))).toBe(false);
-          expect(await readDailyUsed(await ladderStorage())).toBe(0);
+          expect(fetchSpy.mock.calls.some(([u]) => String(u).includes(GOUPC_API))).toBe(true);
+          expect(await readDailyUsed(await ladderStorage())).toBe(1);
         });
 
         it("(b) a GPT rung declined by its own $/day budget bills ZERO daily slots", async () => {

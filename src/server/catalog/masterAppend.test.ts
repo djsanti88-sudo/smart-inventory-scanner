@@ -391,10 +391,6 @@ function makeMockStorage(): LadderStorage & { kv: Map<string, string> } {
     async incrementUsage() {
       return 0;
     },
-    async readMissCache() {
-      return null;
-    },
-    async writeMissCache() {},
     async appendArchive() {},
     async appendOutcome() {},
     async get(key: string) {
