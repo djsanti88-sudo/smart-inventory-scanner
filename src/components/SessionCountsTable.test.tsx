@@ -263,6 +263,69 @@ describe("countsFromTimeline product join", () => {
     expect(rowsOut.find((r) => r.id === "p-missing")?.product).toBeUndefined();
   });
 
+  // PR #43 review defect: removing the status filter let stale backend docs pollute archived-session
+  // tables. Two classes stay excluded: (1) "conflict" events - the alias-conflict orphan machinery
+  // transfers their full quantity onto the chosen product, so rendering them double-counts; (2) events
+  // with no finite quantityAfterScan - they cannot assert a running total and would emit or override
+  // rows with 0/undefined. Unknown/needs_review rows keep counting (the fix this PR shipped).
+  it("excludes conflict events and events without a finite quantityAfterScan", () => {
+    const getProduct = () => undefined;
+
+    const rowsOut = countsFromTimeline(
+      [
+        knownEvent({
+          id: "good-old",
+          cleanCode: "CODE-A",
+          matchedProductId: null,
+          status: "needs_review",
+          quantityAfterScan: 2,
+          createdAt: "2026-07-22T10:00:00.000Z",
+        }),
+        // Later conflict marking of the same key must not override the good running count.
+        knownEvent({
+          id: "conflict-late",
+          cleanCode: "CODE-A",
+          matchedProductId: null,
+          status: "conflict",
+          quantityAfterScan: 5,
+          createdAt: "2026-07-22T10:05:00.000Z",
+        }),
+        // A conflict-only key emits no row at all (its quantity lives on the transfer target).
+        knownEvent({
+          id: "conflict-only",
+          cleanCode: "CODE-B",
+          matchedProductId: "p-orphan",
+          status: "conflict",
+          quantityAfterScan: 3,
+          createdAt: "2026-07-22T10:06:00.000Z",
+        }),
+        // A stale doc with no quantityAfterScan must not override the older good row with undefined.
+        knownEvent({
+          id: "no-quantity-late",
+          cleanCode: "CODE-C",
+          matchedProductId: null,
+          status: "needs_review",
+          quantityAfterScan: undefined as unknown as number,
+          createdAt: "2026-07-22T10:07:00.000Z",
+        }),
+        knownEvent({
+          id: "good-c",
+          cleanCode: "CODE-C",
+          matchedProductId: null,
+          status: "unknown",
+          quantityAfterScan: 4,
+          createdAt: "2026-07-22T10:02:00.000Z",
+        }),
+      ],
+      getProduct,
+    );
+
+    expect(rowsOut.find((r) => r.id === "CODE-A")?.quantity).toBe(2);
+    expect(rowsOut.find((r) => r.id === "p-orphan")).toBeUndefined();
+    expect(rowsOut.find((r) => r.id === "CODE-C")?.quantity).toBe(4);
+    expect(rowsOut).toHaveLength(2);
+  });
+
   it("rendering timeline-derived rows shows the resolved product name and the cleanCode fallback for the unresolved one", () => {
     const storeProduct = makeProduct({ id: "p1" });
     const getProduct = (id: string | null) => (id === "p1" ? storeProduct : undefined);
