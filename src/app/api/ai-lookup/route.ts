@@ -237,7 +237,7 @@ export async function POST(request: Request) {
     // rung's mapping logic with ZERO network so E2E can prove the rung's UI/decision wiring
     // deterministically. Ignored entirely outside E2E.
     mockGptLadder?: Partial<GptFromScratchResult>;
-    // Task 4 (owner manual override): bypasses a permanent no_result_receipt AND overwrites it once the
+    // Task 4 (owner manual override): skips the L1/L2 cache peeks AND overwrites the stored row once the
     // fresh compute finishes. Also forces a fresh compute past the in-memory L1 cache (forceRefresh).
     forceRetry?: boolean;
     // D4 (live-mode auth): the caller's Firebase ID token + the businessId they claim membership in.

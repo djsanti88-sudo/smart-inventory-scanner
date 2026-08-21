@@ -15,19 +15,22 @@ describe("exportDecodeCache / parseBackup (Task 20)", () => {
         tier: "verified",
         createdAt: 1700000000000,
       },
-      {
-        code: "096385074",
-        kind: "no_result_receipt",
-        payload: "",
-        tier: "gpt_none",
-        createdAt: 1700000001111,
-      },
     ];
 
     const jsonl = exportDecodeCache(rows);
     const parsed = parseBackup(jsonl);
 
     expect(parsed).toEqual(rows);
+  });
+
+  it("skips legacy no_result_receipt lines from pre-abolition backups (owner 2026-08-20)", () => {
+    const jsonl = [
+      JSON.stringify({ code: "049000006346", kind: "result", payload: "{}", tier: "verified", createdAt: 1 }),
+      JSON.stringify({ code: "096385074", kind: "no_result_receipt", payload: "", tier: "gpt_none", createdAt: 2 }),
+    ].join("\n");
+    const parsed = parseBackup(jsonl);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]!.code).toBe("049000006346");
   });
 
   it("writes one JSON object per line", () => {

@@ -12,7 +12,7 @@
 - Original scan evidence is permanent; fixing a wrong scan moves the count, never deletes it. -> `markWrong` in `src/stores/scanStore.ts`
 
 ## Shared decode cache
-- Three memories, not one: a verified result replays for every tenant, a suggested result replays with Approve/Edit and never re-pays until cooldown or knowledge-version invalidation, and a no-candidate row is a cooldown, never an identity. -> `docs/DECODER_ARCHITECTURE.md` section 2b
+- Two memories only: a verified result replays for every tenant, and a suggested result replays with Approve/Edit and never re-pays until cooldown or knowledge-version invalidation. NO-CANDIDATE ROWS ARE ABOLISHED (owner 2026-08-20): a failed decode stores nothing, every rescan re-runs the full ladder, and no negative-result memory may ever be rebuilt. -> `docs/DECODER_ARCHITECTURE.md` section 2b
 - The knowledge version is composed in one place (ladder version plus each corpus build stamp); nothing else mints one. -> `src/server/decode/knowledgeVersion.ts`
 - A researched code is paid for once: a free suggestion that paid rungs failed to beat persists with the pay-once marker. -> `paidEscalationExhausted` in `src/server/decode/pipeline.ts`
 - A stale suggestion is re-evaluated with free rungs only, and never regresses to "Unidentified". -> `freeOnlyPass` / stale-row fallback in `src/server/decode/pipeline.ts`

@@ -33,7 +33,7 @@ describe("decodeCache (never re-pay AI/Firecrawl for the same barcode)", () => {
     expect(calls).toBe(1); // the expensive path ran exactly once
   });
 
-  it("caches a MISS briefly so the same unresolved code stops re-running (money-bleed fix)", async () => {
+  it("NEVER caches a MISS (owner 2026-08-20): every sequential rescan re-runs compute", async () => {
     let calls = 0;
     const compute = async () => {
       calls++;
@@ -41,28 +41,11 @@ describe("decodeCache (never re-pay AI/Firecrawl for the same barcode)", () => {
     };
     const isSuccess = (v: { ok: boolean }) => v.ok;
 
-    const a = await withDecodeCache("000", isSuccess, compute, { missTtlMs: 600_000 });
-    const b = await withDecodeCache("000", isSuccess, compute, { missTtlMs: 600_000 });
+    const a = await withDecodeCache("000", isSuccess, compute);
+    const b = await withDecodeCache("000", isSuccess, compute);
 
     expect(a.cached).toBe(false);
-    expect(b.cached).toBe(true); // served from the short-lived miss cache (no repeat AI/Firecrawl spend)
-    expect(calls).toBe(1);
-  });
-
-  it("re-runs a miss after its TTL expires (so a later retry still works)", async () => {
-    vi.useFakeTimers();
-    let calls = 0;
-    const compute = async () => {
-      calls++;
-      return { ok: false };
-    };
-    const isSuccess = (v: { ok: boolean }) => v.ok;
-
-    await withDecodeCache("000", isSuccess, compute, { missTtlMs: 1_000 });
-    vi.advanceTimersByTime(1_500); // past the miss TTL
-    const b = await withDecodeCache("000", isSuccess, compute, { missTtlMs: 1_000 });
-
-    expect(b.cached).toBe(false);
+    expect(b.cached).toBe(false); // no negative memory: the rescan genuinely recomputed
     expect(calls).toBe(2);
   });
 
@@ -90,9 +73,9 @@ describe("decodeCache (never re-pay AI/Firecrawl for the same barcode)", () => {
     };
     const isSuccess = (v: { ok: boolean }) => v.ok;
 
-    await withDecodeCache("ok1", isSuccess, compute, { missTtlMs: 1_000 });
+    await withDecodeCache("ok1", isSuccess, compute);
     vi.advanceTimersByTime(60 * 60 * 1000); // an hour later
-    const b = await withDecodeCache("ok1", isSuccess, compute, { missTtlMs: 1_000 });
+    const b = await withDecodeCache("ok1", isSuccess, compute);
 
     expect(b.cached).toBe(true); // success never expires
     expect(calls).toBe(1);

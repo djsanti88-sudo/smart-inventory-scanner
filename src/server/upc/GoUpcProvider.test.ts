@@ -7,7 +7,7 @@ import {
   type GoUpcRungDeps,
 } from "@/server/upc/GoUpcProvider";
 import type { GoUpcOutcome, GoUpcProduct } from "@/services/upc/goUpcClient";
-import type { LadderStorage, MissEntry, UsageState, DecodeArchiveEntry } from "@/server/upc/storage";
+import type { LadderStorage, UsageState, DecodeArchiveEntry } from "@/server/upc/storage";
 import type { GoUpcUsage } from "@/server/upc/goUpcUsage";
 
 // A real GTIN with a valid check digit (Falken Wildpeak from the 2026-07-08 run). Prefix 0929711 is
@@ -24,18 +24,18 @@ function passThroughGate() {
 }
 
 // In-memory LadderStorage with call spies.
-function memStorage(seed?: { miss?: Record<string, MissEntry> }): LadderStorage & {
+function memStorage(): LadderStorage & {
   archives: DecodeArchiveEntry[];
-  missWrites: Array<{ key: string; entry: MissEntry }>;
+
 } {
   const usage: UsageState = { month: "2026-07", used: 0 };
-  const miss: Record<string, MissEntry> = { ...(seed?.miss ?? {}) };
+
   const archives: DecodeArchiveEntry[] = [];
-  const missWrites: Array<{ key: string; entry: MissEntry }> = [];
+
   const kv = new Map<string, string>();
   return {
     archives,
-    missWrites,
+
     readUsage: async () => usage,
     writeUsage: async (s) => {
       Object.assign(usage, s);
@@ -44,11 +44,6 @@ function memStorage(seed?: { miss?: Record<string, MissEntry> }): LadderStorage 
       const used = usage.month === month ? usage.used + 1 : 1;
       Object.assign(usage, { month, used });
       return used;
-    },
-    readMissCache: async (key) => miss[key] ?? null,
-    writeMissCache: async (key, e) => {
-      miss[key] = e;
-      missWrites.push({ key, entry: e });
     },
     appendArchive: async (entry) => {
       archives.push(entry);
@@ -195,20 +190,27 @@ describe("goUpcRung", () => {
     expect(r.decision?.status).toBe("needs_review");
     expect(r.results?.[0].needsHumanReview).toBe(true);
     expect(storage.archives).toHaveLength(1);
-    expect(storage.missWrites).toHaveLength(0); // never negative-cache an inferred hit
   });
 
-  it("miss -> 30d negative cache written with canonical GTIN key + falls through", async () => {
+  // ABOLITION (owner 2026-08-20): no negative cache exists. A confirmed miss falls through and the
+  // NEXT scan of the same GTIN re-calls Go-UPC (fresh billed call) instead of replaying the old "no".
+  it("a confirmed miss falls through with NO negative cache; a rescan re-calls the client", async () => {
     const storage = memStorage();
-    const deps = baseDeps({ storage, client: vi.fn(async () => ({ kind: "miss" }) as GoUpcOutcome) });
-    const r = await goUpcRung(FALKEN, deps);
-    expect(r.path).toBe("goupc_miss");
-    expect(storage.missWrites).toHaveLength(1);
-    expect(storage.missWrites[0].entry.ttlDays).toBe(30);
-    expect(storage.missWrites[0].key).toBe("00848983006257"); // canonicalGtin(FALKEN)
+    const usage = usageGate();
+    const client = vi.fn(async () => ({ kind: "miss", confident: true }) as GoUpcOutcome);
+    const deps = baseDeps({ storage, usage, client });
+
+    const first = await goUpcRung(FALKEN, deps);
+    expect(first.path).toBe("goupc_miss");
+    expect(usage.records).toBe(1); // the real egress is metered
+
+    const second = await goUpcRung(FALKEN, deps);
+    expect(second.path).toBe("goupc_miss");
+    expect(client).toHaveBeenCalledTimes(2); // no memory of the first miss
+    expect(usage.records).toBe(2);
   });
 
-  it("DC2-2: an UNCONFIRMED miss (404 with ambiguous body) is NOT negative-cached, still records usage, falls through", async () => {
+  it("DC2-2: an UNCONFIRMED miss (404 with ambiguous body) still records usage and falls through", async () => {
     const storage = memStorage();
     const usage = usageGate();
     const deps = baseDeps({
@@ -218,47 +220,8 @@ describe("goUpcRung", () => {
     });
     const r = await goUpcRung(FALKEN, deps);
     expect(r.path).toBe("goupc_miss");
-    // The load-bearing assertion: an ambiguous/possibly-transient 404 must NOT poison the code for 30
-    // days the way a confident miss does.
-    expect(storage.missWrites).toHaveLength(0);
     // The provider WAS called (a real egress happened) - it must still be metered.
     expect(usage.records).toBe(1);
-  });
-
-  it("DC2-2: a CONFIDENT miss (404 with a well-formed body) IS negative-cached (unchanged happy path)", async () => {
-    const storage = memStorage();
-    const deps = baseDeps({
-      storage,
-      client: vi.fn(async () => ({ kind: "miss", confident: true }) as GoUpcOutcome),
-    });
-    const r = await goUpcRung(FALKEN, deps);
-    expect(r.path).toBe("goupc_miss");
-    expect(storage.missWrites).toHaveLength(1);
-    expect(storage.missWrites[0].entry.ttlDays).toBe(30);
-  });
-
-  it("second call on a cached miss does NOT invoke the client within TTL", async () => {
-    const canonical = "00848983006257";
-    const storage = memStorage({
-      miss: { [canonical]: { canonical, missedAt: "2026-07-01T00:00:00.000Z", ttlDays: 30 } },
-    });
-    const client = vi.fn(async () => hit());
-    const deps = baseDeps({ storage, client, now: () => new Date("2026-07-09T00:00:00.000Z") });
-    const r = await goUpcRung(FALKEN, deps);
-    expect(r.path).toBe("goupc_miss");
-    expect(client).not.toHaveBeenCalled();
-  });
-
-  it("expired TTL calls the client again", async () => {
-    const canonical = "00848983006257";
-    const storage = memStorage({
-      miss: { [canonical]: { canonical, missedAt: "2026-05-01T00:00:00.000Z", ttlDays: 30 } },
-    });
-    const client = vi.fn(async () => hit());
-    const deps = baseDeps({ storage, client, now: () => new Date("2026-07-09T00:00:00.000Z") });
-    const r = await goUpcRung(FALKEN, deps);
-    expect(client).toHaveBeenCalledTimes(1);
-    expect(r.path).toBe("goupc_exact");
   });
 
   it("cap reached -> goupc_unavailable, client NEVER called, reason 'Go-UPC monthly cap reached'", async () => {
@@ -286,7 +249,6 @@ describe("goUpcRung", () => {
     const r = await goUpcRung(FALKEN, deps);
     expect(r.path).toBe("goupc_unavailable");
     expect(r.reason).toContain("transient");
-    expect(storage.missWrites).toHaveLength(0);
   });
 
   it("missing key -> skipped with reason, client never called", async () => {
@@ -339,8 +301,6 @@ describe("goUpcRung", () => {
     expect(r.decision).toBeUndefined();
     // A real egress DID happen - the provider was called and answered 200 - so it must still be metered.
     expect(usage.records).toBe(1);
-    // This is a provider-payload ambiguity, not a confirmed not-in-DB answer: never negative-cache it.
-    expect(storage.missWrites).toHaveLength(0);
     expect(storage.archives).toHaveLength(0);
   });
 

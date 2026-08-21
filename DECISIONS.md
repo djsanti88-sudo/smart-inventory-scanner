@@ -469,3 +469,29 @@ Why each choice was made. Newest decisions at the bottom of each section.
   they are now OFF when ENABLE_LIVE_AI_LOOKUP=false.
   (e) A thrown `window.localStorage` property access (privacy-blocked storage) in the scan recovery
   path could drop a repeated-code count; needs its own trace + failing test (scanStore recovery).
+
+## No-candidate rows ABOLISHED: a failed decode stores nothing (owner ruling, 2026-08-20)
+
+- **Ruling:** the shared decode cache stores decode RESULTS only. A ladder run that finds no
+  candidate persists nothing - no `no_result_receipt`, no cooldown row, no negative-result memory of
+  any kind, here or anywhere else in the product. Every rescan of an unresolved code re-runs the full
+  ladder; the ladder's own cost gates (daily cap, budgets, provider negative caches) still decide
+  what each pass spends. The owner explicitly accepted the repeat-spend consequence ("do not worry
+  about my wallet") and ordered that nothing like this be built again.
+- **Supersedes:** the `no_result_receipt` half of the 2026-08-19 "failed search is an event" design
+  (the receipt + `DECODE_NEGATIVE_TTL_MS` cooldown for no-result rows). The cooldown remains ONLY as
+  the re-evaluation pacing for stored suggestion (`result`) rows - the pay-once suggestion machinery
+  is untouched.
+- **Enforcement:** `PersistedDecode.kind` is `"result"` only; `getPersistedDecode` and `parseBackup`
+  read legacy receipt rows/lines back as a miss; `pipeline.ts` ignores any non-result kind
+  (belt-and-braces) and its exhausted-ladder write-through persists nothing; regression tests in
+  `decodeCacheStore.test.ts`, `decodeCacheBackup.test.ts`, `pipeline.test.ts`, `route.test.ts`.
+  Legacy rows deleted from the production Turso `decode_cache` and the local dev cache file.
+- **Extended same day (owner audit follow-up, "remove both"):** the two remaining negative-result
+  memories are also gone. (1) The L1 in-memory MISS cache (`DECODE_MISS_TTL_MS`, 10 min) is removed -
+  `withDecodeCache` stores successes only; the in-flight map still coalesces CONCURRENT scans of one
+  code, which is request dedupe, not memory. (2) The Go-UPC 30-day negative miss cache is removed -
+  `goUpcRung` no longer reads or writes it, `readMissCache`/`writeMissCache`/`MissEntry` are deleted
+  from the `LadderStorage` seam, and the production Turso `goupc_miss_cache` table (409 rows) is
+  DROPPED. Every confirmed Go-UPC miss is re-checked with a fresh billed call on the next scan, and
+  every real egress is still metered.

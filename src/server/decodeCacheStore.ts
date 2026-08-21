@@ -3,10 +3,10 @@
 // new instance re-runs the WHOLE free+paid ladder for a code someone already scanned minutes ago on a
 // different instance. This module is the durable layer consulted on an L1 miss (see route.ts):
 //   - "result" entries replay a prior verified/suggested decode with zero provider work.
-//   - "no_result_receipt" entries are PERMANENT (owner rule: no auto-retry) - written only when the
-//     ladder genuinely exhausted itself (the paid GPT rung ran and found nothing, or was blocked by its
-//     own dollar budget), never for a transient skip (no key, e2e, non-public code, request timeout).
-//     Only a request with forceRetry:true bypasses AND overwrites a receipt.
+//   - NO-CANDIDATE ROWS ARE ABOLISHED (owner ruling 2026-08-20): a failed decode stores NOTHING.
+//     Every rescan of an unresolved code re-runs the full ladder. Do not reintroduce "no_result_receipt"
+//     rows, cooldowns, or any other negative-result memory here - legacy rows of that kind read back as
+//     a plain miss below.
 //
 // Backing store: Turso/libsql when TURSO_DATABASE_URL + TURSO_AUTH_TOKEN are configured (same client
 // construction pattern as src/server/retail-knowledge/retailKnowledgeIndex.ts), else a best-effort JSON
@@ -19,13 +19,11 @@ import { createTursoClient, tursoCredentialsFromEnv, type TursoClient } from "@/
 
 export interface PersistedDecode {
   code: string;
-  kind: "result" | "no_result_receipt";
+  kind: "result";
   payload: string; // JSON string of the route's cached decode response
-  /** Diagnostic-only, never read back for decision logic: decision.status ("verified"/"suggested") for a
-   *  "result" entry, or the ladder-exhaustion reason ("gpt_none"; historical rows may carry
-   *  "gpt_info_only" from before that tier was deleted, owner order 2026-07-06) for a
-   *  "no_result_receipt" entry. Disambiguated from `sourceTier` below, which is result-only and answers
-   *  a different question ("which stage paid for this"), not "what did the ladder decide". */
+  /** Diagnostic-only, never read back for decision logic: decision.status ("verified"/"suggested").
+   *  Disambiguated from `sourceTier` below, which answers a different question ("which stage paid for
+   *  this"), not "what did the ladder decide". */
   tier: string;
   /** Result-only (never set on a "no_result_receipt"): which PAID stage produced this "result" -
    *  "gpt_ladder" (the GPT-5.5 ladder rung), "paid_ai" (historical rows from the retired legacy
@@ -115,7 +113,7 @@ function isValidEntry(v: unknown): v is PersistedDecode {
   const e = v as Record<string, unknown>;
   return (
     typeof e.code === "string" &&
-    (e.kind === "result" || e.kind === "no_result_receipt") &&
+    e.kind === "result" && // legacy "no_result_receipt" entries read back as a miss (owner 2026-08-20)
     typeof e.payload === "string" &&
     typeof e.tier === "string" &&
     typeof e.createdAt === "number"
@@ -160,10 +158,13 @@ export async function getPersistedDecode(code: string): Promise<PersistedDecode 
       });
       const row = result.rows[0];
       if (!row) return null;
+      // Legacy "no_result_receipt" rows are a plain MISS (owner ruling 2026-08-20: no-candidate rows
+      // are abolished; a failed search stores nothing and every rescan re-runs the full ladder).
+      if (row.kind === "no_result_receipt") return null;
       const sourceTier = asSourceTier(row.source_tier);
       const entry: PersistedDecode = {
         code: String(row.code),
-        kind: row.kind === "no_result_receipt" ? "no_result_receipt" : "result",
+        kind: "result",
         payload: String(row.payload ?? ""),
         tier: String(row.tier ?? ""),
         ...(sourceTier ? { sourceTier } : {}),

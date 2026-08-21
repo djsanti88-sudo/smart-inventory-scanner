@@ -26,13 +26,6 @@ export interface UsageState {
   used: number;
 }
 
-/** A negative-cache entry: a canonical GTIN that Go-UPC returned a genuine miss for. */
-export interface MissEntry {
-  canonical: string;
-  missedAt: string;
-  ttlDays: number;
-}
-
 /** One archived paid-decode response (raw JSON + provenance). Purge-proof evidence. */
 export interface DecodeArchiveEntry {
   code: string;
@@ -87,8 +80,6 @@ export interface LadderStorage {
    * single atomic operation (in-SQL `used = used + 1` for Turso).
    */
   incrementUsage(month: string): Promise<number>;
-  readMissCache(key: string): Promise<MissEntry | null>;
-  writeMissCache(key: string, e: MissEntry): Promise<void>;
   appendArchive(entry: DecodeArchiveEntry): Promise<void>;
   /**
    * A4: append one decode outcome trace row. Same append-only contract as appendArchive (JSONL for
@@ -131,7 +122,6 @@ export interface LadderStorage {
 }
 
 const USAGE_FILE = ".go-upc-usage.json";
-const MISS_FILE = ".go-upc-miss-cache.json";
 const ARCHIVE_SUBDIR = "decode-archive";
 const OUTCOMES_SUBDIR = "decode-outcomes";
 const KV_FILE = ".ladder-kv.json";
@@ -158,13 +148,12 @@ function writeJson(path: string, value: unknown): void {
 /**
  * File-backed LadderStorage under `dir`:
  *  - usage  -> `<dir>/.go-upc-usage.json`         (JSON `{ month, used }`)
- *  - miss   -> `<dir>/.go-upc-miss-cache.json`     (JSON map `{ [canonical]: MissEntry }`)
  *  - archive-> `<dir>/decode-archive/<YYYY-MM>.jsonl` (append-only JSONL, bucketed by entry month)
+ * (The Go-UPC negative miss cache is REMOVED - owner ruling 2026-08-20, no negative-result memory.)
  * The dir is created lazily on first write. Reads of corrupt data degrade to defaults with a warn.
  */
 export function fileLadderStorage(dir: string): LadderStorage {
   const usagePath = join(dir, USAGE_FILE);
-  const missPath = join(dir, MISS_FILE);
   const archiveDir = join(dir, ARCHIVE_SUBDIR);
   const outcomesDir = join(dir, OUTCOMES_SUBDIR);
   const kvPath = join(dir, KV_FILE);
@@ -191,18 +180,6 @@ export function fileLadderStorage(dir: string): LadderStorage {
       const used = current.month === month ? current.used + 1 : 1;
       writeJson(usagePath, { month, used });
       return used;
-    },
-
-    async readMissCache(key: string): Promise<MissEntry | null> {
-      const map = readJson<Record<string, MissEntry>>(missPath, {});
-      return map[key] ?? null;
-    },
-
-    async writeMissCache(key: string, e: MissEntry): Promise<void> {
-      ensureDir(dir);
-      const map = readJson<Record<string, MissEntry>>(missPath, {});
-      map[key] = e;
-      writeJson(missPath, map);
     },
 
     async appendArchive(entry: DecodeArchiveEntry): Promise<void> {
@@ -284,7 +261,6 @@ export function fileLadderStorage(dir: string): LadderStorage {
 export type TursoClientLike = TursoClient;
 
 const TABLE_USAGE = "goupc_usage";
-const TABLE_MISS_CACHE = "goupc_miss_cache";
 const TABLE_ARCHIVE = "decode_archive";
 const TABLE_KV = "ladder_kv";
 const TABLE_OUTCOMES = "decode_outcomes";
@@ -293,8 +269,8 @@ const TABLE_OUTCOMES = "decode_outcomes";
  * Turso-backed LadderStorage over an injected client (never constructs its own connection --
  * callers/tests inject the client so unit tests never touch a live database).
  *  - goupc_usage: one row per month, upserted (`month` PK, `used` counter).
- *  - goupc_miss_cache: one row per canonical GTIN, upserted (`canonical` PK, `missed_at`, `ttl_days`).
  *  - decode_archive: append-only INSERT, never UPDATE/DELETE (purge-proof evidence trail).
+ * (goupc_miss_cache is gone - owner ruling 2026-08-20, no negative-result memory.)
  * `CREATE TABLE IF NOT EXISTS` runs once per adapter instance (memoized), lazily on first call.
  */
 export function tursoLadderStorage(client: TursoClientLike): LadderStorage {
@@ -305,10 +281,6 @@ export function tursoLadderStorage(client: TursoClientLike): LadderStorage {
       ensured = (async () => {
         await client.execute({
           sql: `CREATE TABLE IF NOT EXISTS ${TABLE_USAGE} (month TEXT PRIMARY KEY, used INTEGER NOT NULL)`,
-          args: [],
-        });
-        await client.execute({
-          sql: `CREATE TABLE IF NOT EXISTS ${TABLE_MISS_CACHE} (canonical TEXT PRIMARY KEY, missed_at TEXT NOT NULL, ttl_days INTEGER NOT NULL)`,
           args: [],
         });
         await client.execute({
@@ -382,30 +354,6 @@ export function tursoLadderStorage(client: TursoClientLike): LadderStorage {
         args: [month],
       });
       return Number(result.rows[0].used);
-    },
-
-    async readMissCache(key: string): Promise<MissEntry | null> {
-      await ensureTables();
-      const result = await client.execute({
-        sql: `SELECT canonical, missed_at, ttl_days FROM ${TABLE_MISS_CACHE} WHERE canonical = ?`,
-        args: [key],
-      });
-      if (result.rows.length === 0) return null;
-      const row = result.rows[0];
-      return {
-        canonical: row.canonical as string,
-        missedAt: row.missed_at as string,
-        ttlDays: Number(row.ttl_days),
-      };
-    },
-
-    async writeMissCache(key: string, e: MissEntry): Promise<void> {
-      await ensureTables();
-      await client.execute({
-        sql: `INSERT INTO ${TABLE_MISS_CACHE} (canonical, missed_at, ttl_days) VALUES (?, ?, ?)
-              ON CONFLICT(canonical) DO UPDATE SET missed_at = excluded.missed_at, ttl_days = excluded.ttl_days`,
-        args: [key, e.missedAt, e.ttlDays],
-      });
     },
 
     async appendArchive(entry: DecodeArchiveEntry): Promise<void> {

@@ -1,8 +1,8 @@
-// Server-side decode cache. A repeat lookup of the same code must NOT cost another AI/Firecrawl call.
-// SUCCESSES are cached indefinitely (within the running process). MISSES are cached for a SHORT TTL so
-// the same unresolved code stops re-running the whole pipeline on every scan (owner: the "money bleed"
-// of looping the same junk sites), while a genuine retry still works once the TTL lapses or via
-// forceRefresh. In-memory + per-process: the client catalog/alias layer is the durable cache.
+// Server-side decode cache. A repeat lookup of the same SUCCESSFULLY decoded code must NOT cost
+// another AI/Firecrawl call: successes are cached indefinitely (within the running process). MISSES
+// ARE NEVER CACHED (owner ruling 2026-08-20, no-candidate memory abolished everywhere): an unresolved
+// code re-runs the full ladder on every scan; only the in-flight map below coalesces CONCURRENT scans
+// of the same code. In-memory + per-process: the client catalog/alias layer is the durable cache.
 
 interface Entry {
   value: unknown;
@@ -11,8 +11,6 @@ interface Entry {
 
 const store = new Map<string, Entry>();
 const MAX_ENTRIES = 5000; // FIFO cap so a long-running server can't grow unbounded
-// How long a MISS (no usable product) is remembered before the next scan is allowed to re-run it.
-const DEFAULT_MISS_TTL_MS = Number(process.env.DECODE_MISS_TTL_MS || 600_000); // 10 min
 
 export function decodeCacheKey(code: string): string {
   return (code ?? "").trim();
@@ -50,8 +48,6 @@ export function decodeCacheSize(): number {
 }
 
 export interface WithDecodeCacheOpts {
-  /** TTL for a MISS (no usable product). Defaults to DECODE_MISS_TTL_MS (10 min). */
-  missTtlMs?: number;
   /** Skip the cache read and recompute (manual "Retry live decode"). */
   forceRefresh?: boolean;
 }
@@ -77,8 +73,8 @@ export function __clearInFlightForTest(): void {
 
 /**
  * Run compute() only on a cache MISS. A SUCCESS (`isSuccess(value) === true`) is cached indefinitely; a
- * non-success is cached for a SHORT TTL so the same code stops re-running every scan, yet stays
- * retryable later. `forceRefresh` bypasses the cache read AND the in-flight map entirely - a forced
+ * non-success is NEVER stored (owner 2026-08-20: no negative memory) - the same code re-runs the
+ * pipeline on its next scan. `forceRefresh` bypasses the cache read AND the in-flight map entirely - a forced
  * refresh (manual "Retry live decode") always computes its OWN fresh answer and never joins, nor
  * registers itself in, another call's in-flight computation (L3/AM-6(a)).
  *
@@ -96,7 +92,7 @@ export async function withDecodeCache<T>(
 ): Promise<{ value: T; cached: boolean; joined?: true }> {
   if (opts?.forceRefresh) {
     const value = await compute();
-    setDecodeCache(code, value, isSuccess(value) ? undefined : (opts?.missTtlMs ?? DEFAULT_MISS_TTL_MS));
+    if (isSuccess(value)) setDecodeCache(code, value);
     return { value, cached: false };
   }
 
@@ -113,7 +109,7 @@ export async function withDecodeCache<T>(
   const p = (async (): Promise<{ value: unknown; cached: boolean }> => {
     try {
       const value = await compute();
-      setDecodeCache(code, value, isSuccess(value) ? undefined : (opts?.missTtlMs ?? DEFAULT_MISS_TTL_MS));
+      if (isSuccess(value)) setDecodeCache(code, value);
       return { value, cached: false };
     } finally {
       if (key) inFlight.delete(key);
