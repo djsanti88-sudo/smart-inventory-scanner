@@ -533,13 +533,14 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect(fetchSpy.mock.calls.some(([u]) => String(u).includes("api.openai.com/v1/responses"))).toBe(false);
   }, 40000);
 
-  // --- Task 4: L2 persistent decode cache + permanent no_result_receipt --------------------------
+  // --- Task 4: L2 persistent decode cache (results only; no-candidate receipts ABOLISHED, owner
+  // 2026-08-20: a failed decode stores nothing and every rescan re-runs the full ladder) ------------
   // These tests clear the L1 in-memory decode cache (clearDecodeCache()) BEFORE the second/third/
   // fourth POST of a code, simulating a fresh serverless instance whose L1 is empty but whose L2
   // (file-fallback here; Turso in production) still has the prior outcome. That isolates the L2 peek/
   // write-through path from the already-covered L1 short-TTL behavior above.
 
-  it("Task 4: a genuinely exhausted code (GPT ran, tier none) gets a permanent receipt; a later POST short-circuits with ZERO provider calls and ZERO daily-slot burn", async () => {
+  it("ABOLITION (owner 2026-08-20): a genuinely exhausted code stores NOTHING; a later POST re-runs the full ladder and burns its own slot", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "100";
     process.env.OPENAI_API_KEY = "test-openai-key";
     // Genuine exhaustion = GPT ANSWERED and honestly found nothing (empty productName). An HTTP
@@ -566,27 +567,27 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect(firstJson.decision.status).toBe("needs_review");
     expect((await dailyUsedNow())).toBe(1);
 
-    // The receipt landed in the L2 store (file-fallback mode here).
-    // Z3: the L2 store is keyed by the canonical GTIN, not the raw scanned code.
-    const stored = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8"));
-    expect(stored[canonicalGtin(code) ?? code].kind).toBe("no_result_receipt");
+    // NOTHING landed in the L2 store: a failed decode stores no row of any kind.
+    // Z3 note: the store would be keyed by canonical GTIN; assert both shapes are absent.
+    const stored = fs.existsSync(tmpDecodeCacheFile) ? JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8")) : {};
+    expect(stored[canonicalGtin(code) ?? code]).toBeUndefined();
+    expect(stored[code]).toBeUndefined();
 
     const ladderCallsBefore = fetchSpy.mock.calls.filter(([u]) => String(u).includes("api.openai.com/v1/responses")).length;
-    clearDecodeCache(); // simulate a fresh serverless instance: L1 is empty, only L2 has the receipt
+    clearDecodeCache(); // simulate a fresh serverless instance: L1 empty, L2 has nothing for this code
 
     const second = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
     expect(second.status).toBe(200);
     const secondJson = await second.json();
     expect(secondJson.decision.status).toBe("needs_review");
-    expect(secondJson.debug.persistedCacheHit).toBe(true);
-    expect(secondJson.debug.persistedKind).toBe("no_result_receipt");
+    expect(secondJson.debug.persistedCacheHit ?? false).toBe(false);
 
     const ladderCallsAfter = fetchSpy.mock.calls.filter(([u]) => String(u).includes("api.openai.com/v1/responses")).length;
-    expect(ladderCallsAfter, "the receipted code must make ZERO new provider calls").toBe(ladderCallsBefore);
-    expect((await dailyUsedNow()), "a receipted repeat must not burn a daily slot").toBe(1);
+    expect(ladderCallsAfter, "the rescan must genuinely re-run the ladder").toBeGreaterThan(ladderCallsBefore);
+    expect((await dailyUsedNow()), "each genuine ladder run burns its own slot").toBe(2);
   }, 60000);
 
-  it("Task 4: forceRetry bypasses AND overwrites a permanent receipt, re-running providers and burning a fresh daily slot", async () => {
+  it("ABOLITION follow-on: after an exhausted first run (nothing stored), a plain rescan re-runs providers and its win persists as a result row", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "100";
     process.env.OPENAI_API_KEY = "test-openai-key";
     const code = "111000222719"; // QA round-2: valid check digit (tests forceRetry/receipt machinery, not misread)
@@ -614,25 +615,25 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
 
     const first = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
     expect((await first.json()).decision.status).toBe("needs_review");
-    const storedAfterFirst = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8"));
-    // Z3: the L2 store is keyed by the canonical GTIN, not the raw scanned code.
-    expect(storedAfterFirst[canonicalGtin(code) ?? code].kind).toBe("no_result_receipt");
+    // Nothing stored for the miss (abolition): no receipt, no row.
+    const storedAfterFirst = fs.existsSync(tmpDecodeCacheFile) ? JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8")) : {};
+    expect(storedAfterFirst[canonicalGtin(code) ?? code]).toBeUndefined();
     expect((await dailyUsedNow())).toBe(1);
 
     clearDecodeCache();
-    // Without forceRetry, this would short-circuit on the receipt with zero calls (proven above) -
-    // WITH forceRetry it must bypass the receipt, re-run the ladder, and burn a fresh slot.
-    const retried = await POST(makeRequest({ cleanCode: code, mode: "decode", forceRetry: true }));
+    // A PLAIN rescan (no forceRetry needed - there is no receipt to bypass) re-runs the ladder and
+    // burns a fresh slot; this pass the provider answers.
+    const retried = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
     expect(retried.status).toBe(200);
     const retriedJson = await retried.json();
     // D6 core (2026-07-20): a bare GPT self-report settles "suggested" (demoted), never "verified" -
     // it still genuinely re-ran and still settled/persisted, which is what this test proves.
     expect(retriedJson.decision.status).toBe("suggested");
     expect(retriedJson.providerNames).toContain("gpt-5.5-ladder");
-    expect(openaiCallCount, "forceRetry must genuinely re-call the provider").toBe(2);
-    expect((await dailyUsedNow()), "a genuine forceRetry recompute burns its own slot").toBe(2);
+    expect(openaiCallCount, "the rescan must genuinely re-call the provider").toBe(2);
+    expect((await dailyUsedNow()), "a genuine recompute burns its own slot").toBe(2);
 
-    // The overwrite is durable: the receipt is now a "result" entry.
+    // The win is durable: a "result" entry now exists.
     // Z3: the L2 store is keyed by the canonical GTIN, not the raw scanned code.
     const storedAfterRetry = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8"));
     expect(storedAfterRetry[canonicalGtin(code) ?? code].kind).toBe("result");

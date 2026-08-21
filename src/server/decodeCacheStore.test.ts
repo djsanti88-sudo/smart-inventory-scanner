@@ -61,22 +61,25 @@ describe("decodeCacheStore (file-fallback mode; no Turso configured)", () => {
     expect(Object.keys(raw)).toEqual(["222222222222"]);
   });
 
-  it("receipt short-circuit: a no_result_receipt is retrievable with its permanent kind + reason", async () => {
-    await persistDecode({
-      code: "333333333333",
-      kind: "no_result_receipt",
-      payload: JSON.stringify({ decision: { status: "needs_review" } }),
-      tier: "gpt_none",
-      createdAt: Date.now(),
-    });
-    const got = await getPersistedDecode("333333333333");
-    expect(got!.kind).toBe("no_result_receipt");
-    expect(got!.tier).toBe("gpt_none");
+  it("a legacy no_result_receipt row reads back as a MISS (owner 2026-08-20: receipts abolished)", async () => {
+    // Written directly to the file (persistDecode can no longer mint this kind) to simulate a row
+    // left behind from before the abolition.
+    fs.writeFileSync(tmpFile, JSON.stringify({
+      "333333333333": {
+        code: "333333333333",
+        kind: "no_result_receipt",
+        payload: JSON.stringify({ decision: { status: "needs_review" } }),
+        tier: "gpt_none",
+        createdAt: Date.now(),
+      },
+    }));
+    await expect(getPersistedDecode("333333333333")).resolves.toBeNull();
   });
 
-  it("forceRetry bypass overwrites a receipt with a fresh result", async () => {
-    await persistDecode({ code: "666666666666", kind: "no_result_receipt", payload: "old", tier: "gpt_none", createdAt: 1 });
-    // Simulates the route's forceRetry path: it recomputes, then overwrites unconditionally.
+  it("a fresh result overwrites a legacy receipt row", async () => {
+    fs.writeFileSync(tmpFile, JSON.stringify({
+      "666666666666": { code: "666666666666", kind: "no_result_receipt", payload: "old", tier: "gpt_none", createdAt: 1 },
+    }));
     await persistDecode({ code: "666666666666", kind: "result", payload: "new", tier: "verified", createdAt: 2 });
     const got = await getPersistedDecode("666666666666");
     expect(got!.kind).toBe("result");

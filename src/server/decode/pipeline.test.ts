@@ -482,9 +482,10 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     };
   }
   function makeReceipt(): PersistedDecode {
-    // A prior run exhausted the ladder and wrote a PERMANENT no_result_receipt (unresolved shape).
+    // A LEGACY pre-abolition row (owner 2026-08-20: no-candidate receipts no longer exist; the store
+    // reads them back as null). Cast simulates one reaching the pipeline through an out-of-date store.
     const unresolvedBody = { mode: "decode", providerNames: ["gpt"], results: [], evidences: [], decision: { status: "needs_review", confidence: 0, reason: "No rung resolved the code." }, reasonCode: "no_result", reasonText: "No rung resolved the code.", debug: {} };
-    return { code: "00848983006257", kind: "no_result_receipt", payload: JSON.stringify(unresolvedBody), tier: "gpt_none", createdAt: Date.now() - 86_400_000 };
+    return { code: "00848983006257", kind: "no_result_receipt", payload: JSON.stringify(unresolvedBody), tier: "gpt_none", createdAt: Date.now() - 86_400_000 } as unknown as PersistedDecode;
   }
 
   it("L1 fix: a code with a stale no_result_receipt resolves from the corpus (corpus heals receipts)", async () => {
@@ -3089,12 +3090,12 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     });
   });
 
-  // L2 HONESTY + FRUGALITY (owner 2026-08-19, "a failed search is an event, not an identity"): a
-  // no_result_receipt is no longer permanent (it expires on the cooldown and dies when the decode
-  // knowledge version moves), a free suggestion that paid rungs already failed to beat is recorded so
-  // the next instance never re-buys those same misses, and a stale non-verified row is re-evaluated
-  // with FREE rungs only. A verified row still replays regardless of version.
-  describe("L2 negative-cache cooldown, knowledge version, and the pay-once escalation marker", () => {
+  // L2 HONESTY + FRUGALITY (owner 2026-08-19; amended 2026-08-20: NO-CANDIDATE RECEIPTS ARE
+  // ABOLISHED - a failed decode stores nothing and legacy receipt rows are ignored everywhere). A
+  // free suggestion that paid rungs already failed to beat is recorded so the next instance never
+  // re-buys those same misses, and a stale non-verified row is re-evaluated with FREE rungs only. A
+  // verified row still replays regardless of version.
+  describe("L2 result staleness, legacy receipt abolition, and the pay-once escalation marker", () => {
     const GOUPC_API = "go-upc.com/api";
 
     // A row's payload carries its stamp inside debug.cache (no schema change). Pass version null to
@@ -3111,11 +3112,13 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         decision: { status: "needs_review", confidence: 0, reason: "No rung resolved the code." },
         reasonCode: "no_result", reasonText: "No rung resolved the code.", debug: { ladderPath: "none" },
       };
+      // LEGACY pre-abolition shape (owner 2026-08-20); cast because persistDecode/PersistedDecode can
+      // no longer express this kind. Simulates a leftover row reaching the pipeline.
       return {
         code, kind: "no_result_receipt",
         payload: stamped(body, opts.version === undefined ? getDecodeKnowledgeVersion() : opts.version),
         tier: "gpt_none", createdAt: Date.now() - (opts.ageMs ?? 0),
-      };
+      } as unknown as PersistedDecode;
     }
 
     function suggestionRow(code: string, opts: { version?: string | null; status?: string; name?: string; brand?: string; sourceTier?: "paid_rung" | null; ageMs?: number } = {}): PersistedDecode {
@@ -3171,39 +3174,36 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     const nonFreeCalls = (spy: ReturnType<typeof vi.fn>) =>
       spy.mock.calls.map(([u]) => String(u)).filter((u) => !FREE_HOSTS.some((h) => u.includes(h)));
 
-    it("a FRESH receipt (current version, inside the cooldown) still replays with zero provider work", async () => {
+    // ABOLITION (owner 2026-08-20): a legacy receipt row NEVER replays - fresh, aged, any version.
+    // The pipeline recomputes as if the row did not exist.
+    it("a legacy no_result_receipt row is ALWAYS a MISS: fresh, aged, or version-stale", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "100";
       vi.mocked(getPersistedDecode).mockResolvedValueOnce(receiptRow("00900000000300"));
+      expect((await runDecodePipeline(makeReq("900000000300"))).kind).toBe("computed");
 
-      const out = await runDecodePipeline(makeReq("900000000300"));
-
-      expect(out.kind).toBe("persisted");
-      expect(fetchSpy.mock.calls.length).toBe(0); // no rung ran at all
-    });
-
-    it("a receipt OLDER than the cooldown is a MISS: the ladder gets one honest new try", async () => {
-      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
-      process.env.DECODE_NEGATIVE_TTL_MS = "1000";
+      clearDecodeCache();
       vi.mocked(getPersistedDecode).mockResolvedValueOnce(receiptRow("00900000000317", { ageMs: 60_000 }));
-
-      const out = await runDecodePipeline(makeReq("900000000317"));
-
-      expect(out.kind).toBe("computed"); // recomputed, not replayed
-    }, 30000);
-
-    it("a receipt whose knowledge version differs (or is absent: a legacy row) is a MISS", async () => {
-      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
-      vi.mocked(getPersistedDecode).mockResolvedValueOnce(receiptRow("00900000000324", { version: "stale-version" }));
-      expect((await runDecodePipeline(makeReq("900000000324"))).kind).toBe("computed");
+      expect((await runDecodePipeline(makeReq("900000000317"))).kind).toBe("computed");
 
       clearDecodeCache();
       vi.mocked(getPersistedDecode).mockResolvedValueOnce(receiptRow("00900000000324", { version: null }));
       expect((await runDecodePipeline(makeReq("900000000324"))).kind).toBe("computed");
+    }, 60000);
+
+    it("an exhausted ladder persists NOTHING: no receipt row is written on a full miss", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      // Every rung misses (no keys configured beyond the free DBs; the free DBs return empty).
+      stubNoPaidCalls();
+
+      const out = await runDecodePipeline(makeReq("900000000287"));
+
+      expect(out.kind).toBe("computed");
+      expect(await getPersistedDecode("00900000000287")).toBeNull(); // nothing stored for the miss
     }, 30000);
 
-    // The receipt is COOLED DOWN here (not merely version-stale): only the cooldown lapsing buys the
-    // paid rungs a new try, so this is the setup in which a paid candidate can overwrite the receipt.
-    it("a recompute that finds a candidate OVERWRITES the stale receipt with a result row", async () => {
+    // The legacy receipt row is ignored outright (abolition); the recompute that finds a candidate
+    // persists a normal result row over it.
+    it("a recompute that finds a candidate OVERWRITES the legacy receipt with a result row", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "100";
       process.env.DECODE_NEGATIVE_TTL_MS = "1000";
       process.env.GO_UPC_API_KEY = "test-key";
@@ -3329,27 +3329,17 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect(nonFreeCalls(spy)).toEqual([]); // not one outbound call beyond the two free DBs
     }, 30000);
 
-    // F3 (money): a version bump means the FREE knowledge moved, so a stale receipt earns a FREE
-    // recompute - only the COOLDOWN buys paid rungs. The receipt is re-stamped but keeps its original
-    // createdAt so that cooldown still arrives on time.
-    it("a VERSION-stale receipt recomputes FREE-only and is re-persisted with the new version and its ORIGINAL createdAt", async () => {
+    // ABOLITION (owner 2026-08-20): a legacy version-stale receipt earns nothing special - the code
+    // recomputes like any miss (the ladder's own cost gates decide spend) and a miss persists NOTHING.
+    it("a legacy VERSION-stale receipt recomputes and a miss re-persists NOTHING", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "100";
-      process.env.GO_UPC_API_KEY = "test-key";
-      process.env.FIRECRAWL_API_KEY = "test-firecrawl-key";
-      const spy = stubNoPaidCalls();
-      const original = receiptRow("00900000000423", { version: "stale-version" });
-      vi.mocked(getPersistedDecode).mockResolvedValueOnce(original);
+      stubNoPaidCalls();
+      vi.mocked(getPersistedDecode).mockResolvedValueOnce(receiptRow("00900000000423", { version: "stale-version" }));
 
       const out = await runDecodePipeline(makeReq("900000000423"));
 
       expect(out.kind).toBe("computed"); // the honest unidentified payload, not a replay
-      expect(nonFreeCalls(spy)).toEqual([]);
-
-      const row = await getPersistedDecode("00900000000423");
-      expect(row?.kind).toBe("no_result_receipt");
-      expect(row?.createdAt).toBe(original.createdAt);
-      const payload = JSON.parse(row!.payload) as { debug: { cache?: { knowledgeVersion?: string } } };
-      expect(payload.debug.cache?.knowledgeVersion).toBe(getDecodeKnowledgeVersion());
+      expect(await getPersistedDecode("00900000000423")).toBeNull(); // no receipt resurrection
     }, 30000);
 
     // F7: a fresh FREE title is not automatically better than the stored answer. It replaces the stale

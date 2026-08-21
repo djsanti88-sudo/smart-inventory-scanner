@@ -26,7 +26,9 @@ function isValidPersistedDecode(v: unknown): v is PersistedDecode {
   return (
     typeof e.code === "string" &&
     e.code.length > 0 &&
-    (e.kind === "result" || e.kind === "no_result_receipt") &&
+    // Legacy "no_result_receipt" lines from pre-abolition backups (owner 2026-08-20) are skipped -
+    // restoring one would resurrect a no-candidate row.
+    e.kind === "result" &&
     typeof e.payload === "string" &&
     typeof e.tier === "string" &&
     typeof e.createdAt === "number"

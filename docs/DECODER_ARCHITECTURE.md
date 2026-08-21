@@ -71,16 +71,20 @@ fix the stale one rather than trusting it.
   path) bypasses both the read and the in-flight map.
 - **L2, Turso `decode_cache`** (`getPersistedDecode` / `persistDecode`, read in `pipeline.ts` on an L1
   miss and BEFORE the daily cap gate): a platform asset every tenant replays for $0, across serverless
-  instances. Two row kinds: `result` (a decode with an identity) and `no_result_receipt` (the ladder
-  ran and settled on nothing). No schema change was needed for the cooldown work: every row's payload
+  instances. ONE row kind exists: `result` (a decode with an identity). NO-CANDIDATE ROWS ARE
+  ABOLISHED (owner ruling 2026-08-20): a failed decode stores nothing, every rescan of an unresolved
+  code re-runs the full ladder, and legacy `no_result_receipt` rows read back as a plain miss at the
+  store AND are ignored by a belt-and-braces guard in the pipeline. Do not reintroduce negative-result
+  memory in any form. Every row's payload
   carries its stamp inside `payload.debug.cache` via `withCacheStamp` / `readCacheStamp`, holding
   `knowledgeVersion` and, when applicable, `paidEscalationExhausted: true`. The row's `source_tier`
   column (added 2026-08-19 by an idempotent ALTER; the file backend always had it as a JSON property)
   says which PAID stage produced a `result` and is what lets the write rules refuse to replace a paid
   identity with a bare free title.
-- **Cooldown.** `decodeNegativeTtlMs()` (`DECODE_NEGATIVE_TTL_MS`, default 7 days) is how long a stored
-  "no result", and a stored guess that paid rungs already failed to beat, stays authoritative. It is a
-  tuning value, not a product rule.
+- **Cooldown.** `decodeNegativeTtlMs()` (`DECODE_NEGATIVE_TTL_MS`, default 7 days) is how long a
+  stored guess that paid rungs already failed to beat stays authoritative before a full recompute
+  (paid rungs included) is allowed again. It applies to `result` rows only - there is no stored "no
+  result" anymore. It is a tuning value, not a product rule.
 - **Knowledge version.** `getDecodeKnowledgeVersion()` composes the hand-bumped `DECODE_LADDER_VERSION`
   with the `generated_at` stamp of the tire and retail corpus meta files (`v1|tire:...|retail:...`),
   memoized per process, degrading a missing meta file to `none`. Bump `DECODE_LADDER_VERSION` when a
@@ -88,9 +92,8 @@ fix the stale one rather than trusting it.
   that decides identity changes. Corpus rebuilds need no bump - their build stamps are already part of
   the composed version. Nothing else may mint a version string.
 - **Read rules** (`pipeline.ts`, the block that sets `staleRow` / `freeOnlyPass`):
-  - a `no_result_receipt` is treated as a MISS once it ages past the cooldown OR the knowledge version
-    moved (an absent stamp counts as stale, so legacy rows expire); the code then recomputes normally,
-    paid rungs included. A receipt is NOT permanent.
+  - any legacy `no_result_receipt` row is ALWAYS a MISS (abolition, owner 2026-08-20): the store
+    reads it back as null and the pipeline ignores any non-`result` kind that slips through.
   - a non-verified `result` (a guess, marker or not) whose version moved is re-evaluated with the paid
     rungs switched off for that pass (`freeOnlyPass`), because what changed is the FREE knowledge and
     the code was already paid for once.
@@ -109,9 +112,9 @@ fix the stale one rather than trusting it.
   - if the re-evaluation found nothing usable, the old guess is replayed with its stamp refreshed (and
     written back into L1), carrying its pay-once marker forward: a best guess already shown never
     regresses to "Unidentified".
-  - an exhausted ladder with no identity writes a `no_result_receipt`; a free corpus/cache win is
-    otherwise still not persisted, so a corpus correction is never masked by a stale row.
-- Caching and dedupe are enrichment only: no cache read, receipt, cooldown, or coalesced request can
+  - an exhausted ladder with no identity writes NOTHING (abolition, owner 2026-08-20); a free
+    corpus/cache win is still not persisted, so a corpus correction is never masked by a stale row.
+- Caching and dedupe are enrichment only: no cache read, cooldown, or coalesced request can
   stop a scanned row from appearing in the feed or counting (AGENTS.md TOP-LEVEL LAW).
 
 ## 3. Verified-only early exit (W1)

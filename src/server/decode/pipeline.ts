@@ -910,9 +910,8 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // SERVER-ONLY DETERMINISTIC TIRE KNOWLEDGE FIRST (Task 6: moved to the TOP of the pipeline, ahead of
   // the L2 persisted-decode peek below). An EXACT trusted-corpus barcode (or, for SKU-shaped codes, an
   // exact part number) resolves with NO AI call and NO page fetch - a FREE win. It must run BEFORE the
-  // persistedHit peek so that when the weekly corpus harvest adds a barcode that previously exhausted
-  // the ladder, the fresh corpus hit heals the stale permanent "no_result_receipt" instead of replaying
-  // "unresolved" forever. A corpus hit is never persisted to L2 (classifySourceTier returns null for
+  // persistedHit peek so a fresh corpus hit always beats any stored row for the code (receipts are
+  // abolished, owner 2026-08-20; historical "no_result_receipt" rows read back as a plain miss). A corpus hit is never persisted to L2 (classifySourceTier returns null for
   // tire-corpus) and never charges the daily cap. e2eMode() skips the peek exactly as before. forceRetry
   // is intentionally NOT special-cased: corpus runs first regardless (equivalent to today, where the
   // corpus stage inside computeDecode always ran even under forceRetry). The corpus is GROUNDING - the
@@ -1030,14 +1029,18 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   }
 
   // L2 PERSISTENT DECODE CACHE (Task 4): consulted on an L1 miss, BEFORE the daily cap check below -
-  // same guard window as the existing L1 peek, so a persisted "result" OR a permanent
-  // "no_result_receipt" never burns a daily slot. Never touched under E2E (tests/Playwright must
-  // never read/write the real store) and skipped entirely when the caller asks for forceRetry
-  // (owner manual override: bypasses the receipt here, and overwrites it once the fresh compute
-  // below finishes - see the write-through at the withDecodeCache call site).
+  // same guard window as the existing L1 peek, so a persisted "result" never burns a daily slot.
+  // Never touched under E2E (tests/Playwright must never read/write the real store) and skipped
+  // entirely when the caller asks for forceRetry (owner manual override; the fresh compute overwrites
+  // the row - see the write-through at the withDecodeCache call site). Only "result" rows exist:
+  // no-candidate receipts are abolished (owner 2026-08-20), a failed decode stores nothing.
   let persistedHit: PersistedDecode | null = null;
   if (!e2eMode() && !forceRetry && getDecodeCache(cacheKey) === undefined) {
     persistedHit = await getPersistedDecode(cacheKey);
+    // Belt and braces on the abolition (owner 2026-08-20): the store already reads legacy
+    // "no_result_receipt" rows back as null, but a row of any non-"result" kind that still reaches
+    // this point (out-of-date store layer, hand-written data) is a plain MISS, never a replay.
+    if (persistedHit && (persistedHit as { kind?: string }).kind !== "result") persistedHit = null;
   }
 
   // Hard server-side daily spend cap (auth DEFERRED): the cap must bound ONLY genuine PAID work (the
@@ -1052,9 +1055,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // matter the cap state.
   //
   // A persisted hit short-circuits with ZERO provider work: a "result" replays the prior
-  // verified/suggested decode; a "no_result_receipt" replays the prior unresolved shape so the
-  // ladder is never re-run for a code it has already exhausted (owner rule: no auto-retry - only
-  // forceRetry above bypasses this). A corrupted stored payload degrades to a miss (recompute).
+  // verified/suggested decode. A corrupted stored payload degrades to a miss (recompute).
   // Parse the persisted payload ONCE - reused both by the SEAM 1 re-validation just below and by the
   // replay return further down (never double-parsed).
   let parsedPayload: Record<string, unknown> | null = null;
@@ -1072,8 +1073,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // identity kept being served as an identity - bypassing the round-1 rung-0 seam guards entirely.
   // Re-validate here: for a "result" hit, read the cached identity (results[0].productName/brand) and,
   // if the code is a misread OR that identity is an example/test row, treat the hit as a cache MISS
-  // (null it) so control falls through to the honest recompute / rung-0 guards. A misread code also
-  // nulls a "no_result_receipt" hit (it must recompute rather than replay a stale unresolved shape).
+  // (null it) so control falls through to the honest recompute / rung-0 guards.
   // A LEGIT cached decode is untouched and still replays at zero cost - the cache stays fast for the
   // codes it should serve; only poisoned example/misread entries are rejected.
   if (persistedHit) {
@@ -1089,38 +1089,24 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     }
   }
 
-  // COOLDOWN + KNOWLEDGE VERSION (owner 2026-08-19, "a failed search is an event, not an identity").
-  // A stored row is only as good as the knowledge that produced it:
-  //   - a no_result_receipt is a MISS once it ages past the cooldown OR the knowledge version moved
-  //     (an absent stamp is a legacy row = stale). WHICH of the two expired decides what the recompute
-  //     may spend: only the COOLDOWN buys paid rungs (that lapse is exactly what earns the ladder one
-  //     honest new try). A version bump means the FREE knowledge moved, so it earns a FREE-only
-  //     recompute - the app already paid for this code once. A free pass that still finds nothing
-  //     re-persists the receipt under the new version but keeps its ORIGINAL createdAt, so the cooldown
-  //     still arrives on schedule instead of being pushed back by every corpus rebuild.
+  // COOLDOWN + KNOWLEDGE VERSION (owner 2026-08-19, "a failed search is an event, not an identity";
+  // amended by owner ruling 2026-08-20: NO-CANDIDATE ROWS ARE ABOLISHED - a failed decode stores
+  // nothing, so only "result" rows exist here and every unresolved code re-runs the full ladder on
+  // every scan). A stored result row is only as good as the knowledge that produced it:
   //   - a non-verified "result" (a guess, including a pay-once escalation marker) whose version moved
   //     is NOT replayed blindly: it is re-evaluated with the PAID rungs switched off for this pass
   //     (freeOnlyPass below), because what changed is the FREE knowledge, and the app already paid for
-  //     this code once. Once the cooldown itself lapses, paying again is permitted like any receipt.
+  //     this code once. Once the cooldown itself lapses, paying again is permitted.
   //     Either way the old guess is kept as the fallback: a best guess already shown must never
   //     regress to "Unidentified" (see the stale-row replay after the compute below).
   //   - a VERIFIED row replays regardless of version; forceRetry (above) remains its correction path.
   let staleRow: { row: PersistedDecode; payload: Record<string, unknown> } | null = null;
-  let staleReceipt: PersistedDecode | null = null;
   let freeOnlyPass = false;
   if (persistedHit && parsedPayload) {
     const versionStale = readCacheStamp(parsedPayload).knowledgeVersion !== getDecodeKnowledgeVersion();
     const cooledDown = Date.now() - persistedHit.createdAt > decodeNegativeTtlMs();
     const cachedStatus = (parsedPayload.decision as { status?: string } | undefined)?.status;
-    if (persistedHit.kind === "no_result_receipt") {
-      if (cooledDown) {
-        persistedHit = null; // full recompute, paid rungs included
-      } else if (versionStale) {
-        staleReceipt = persistedHit; // free-only recompute; the receipt is refreshed if nothing turns up
-        freeOnlyPass = true;
-        persistedHit = null;
-      }
-    } else if (cachedStatus !== "verified" && (versionStale || cooledDown)) {
+    if (cachedStatus !== "verified" && (versionStale || cooledDown)) {
       staleRow = { row: persistedHit, payload: parsedPayload };
       freeOnlyPass = !cooledDown;
       persistedHit = null;
@@ -1142,7 +1128,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       const priorDebug = (parsedPayload.debug as Record<string, unknown> | undefined) ?? {};
       appendDecodeOutcome({
         settledBy: (priorDebug.ladderPath as string | undefined) ?? null,
-        status: `cached:${persistedHit.kind === "no_result_receipt" ? "no_result_receipt" : (parsedPayload.decision as { status?: string } | undefined)?.status ?? "unknown"}`,
+        status: `cached:${(parsedPayload.decision as { status?: string } | undefined)?.status ?? "unknown"}`,
         reasons: (priorDebug.ladderReasons as Array<{ rung: string; reason: string }> | undefined) ?? [],
         sourceTier: persistedHit.sourceTier ?? null,
       });
@@ -1221,8 +1207,9 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       recordGptLadderCall({ storage: gptLadderStore }),
     ]);
     // TRANSIENT-FAILURE GUARD (found live 2026-07-06): an aborted/HTTP-failed/garbled rung call is
-    // NOT genuine exhaustion - the model never actually answered. Without this, one OpenAI hiccup
-    // wrote a PERMANENT no_result_receipt and froze the code forever. Only a real answer with an
+    // NOT genuine exhaustion - the model never actually answered. (Historically this once wrote a
+    // permanent no_result_receipt and froze the code; receipts are gone, the skip-vs-probed
+    // distinction still matters for provider status honesty.) Only a real answer with an
     // empty productName ("empty productName") counts as genuinely probed-and-empty; every other
     // "none" is surfaced as a skip (visible in providerStatuses) and stays retryable.
     if (r.tier === "none" && (r.aborted || (r.error && r.error !== "empty productName"))) {
@@ -1244,36 +1231,13 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     verified: false, strength: "none", matchedCode: "", matchedSources: [], reason: "gpt-5.5 self-report (not independently evidence-verified)",
   });
 
-  // Task 4: classify whether a ladder outcome represents GENUINE exhaustion (worth a permanent
-  // no_result_receipt) vs a TRANSIENT skip that must stay retryable on the next scan. Genuine
-  // exhaustion is exactly: the GPT rung actually ran and returned tier "none" (payload null, no skip
-  // reason - the rung was never short-circuited). (The old info_only tier is deleted per owner order
-  // 2026-07-06; every GPT answer with a productName now resolves as verified or suggested.)
-  // Every other skip is transient and must NOT create a receipt.
-  // DOCTRINE CORRECTION (review, supersedes Task 4's original "budget_exceeded is eligible" rule): a
-  // receipt certifies "the ladder was fully probed and every door came back empty." A code blocked by
-  // the ladder's OWN dollar budget was NEVER probed at all - it is exactly as unresolved as a missing
-  // API key or an e2e run, and the daily budget resets tomorrow. Treating "budget_exceeded" as eligible
-  // would permanently freeze every code unlucky enough to arrive right when the daily cap was tight,
-  // with no automatic recovery once the cap resets (only a manual forceRetry would ever revisit it).
-  // "budget_exceeded" therefore now falls into the same transient/not-eligible bucket as no_api_key,
-  // non_public_code_type, e2e_mode, and request_budget_exhausted (all `ladder.surfaceSkip === true`).
-  const classifyReceipt = (ladder: { payload: ReturnType<typeof gptResultToDecodePayload>; skipReason?: string; surfaceSkip: boolean }): { eligible: boolean; reason?: string } => {
-    if (ladder.payload) {
-      return { eligible: false }; // resolved by the ladder itself (verified or suggested)
-    }
-    if (ladder.surfaceSkip) return { eligible: false }; // transient: no key / non-public / e2e / request budget exhausted / OWN dollar budget exhausted
-    if (!ladder.skipReason) return { eligible: true, reason: "gpt_none" }; // ran, tier none
-    return { eligible: false }; // prior_status_already_decided (resolved before the ladder ran)
-  };
-  // Set by whichever computeDecode exit actually ran the ladder (Plan D early return or the final
-  // return below); read at the withDecodeCache call site to decide the L2 write-through. Declared
-  // outside computeDecode (per-request, not per-process) so it reflects THIS request's outcome only.
-  let receiptState: { eligible: boolean; reason?: string } = { eligible: false };
+  // NO-CANDIDATE RECEIPTS ARE ABOLISHED (owner ruling 2026-08-20): a genuinely exhausted ladder
+  // persists nothing, so there is no receipt classification anymore. Every unresolved code re-runs
+  // the full ladder on its next scan; the ladder's own cost gates still decide what each pass spends.
   // PAY-ONCE MARKER (owner 2026-08-19): set by the escalation branch when paid rungs genuinely ran on
   // top of a free suggestion and none of them beat it. Read at the write-through so the row records
   // "paying again buys nothing new" and the next instance replays the suggestion instead of re-buying
-  // the same misses. Declared per-request, exactly like receiptState.
+  // the same misses. Declared per-request (outside computeDecode) so it reflects THIS request only.
   let paidEscalationExhausted = false;
 
   // The expensive decode (fast path + deep fallback) is cached by code: once a barcode resolves to a
@@ -1318,8 +1282,8 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     }
 
     // Task 6: the SERVER-ONLY DETERMINISTIC TIRE KNOWLEDGE peek that used to sit here has moved to the
-    // TOP of runDecodePipeline (ahead of the L2 persisted-decode peek) so a corpus hit can heal a stale
-    // no_result_receipt. computeDecode is only ever reached on a corpus MISS now, so no corpus check
+    // TOP of runDecodePipeline (ahead of the L2 persisted-decode peek) so a corpus hit always wins.
+    // computeDecode is only ever reached on a corpus MISS now, so no corpus check
     // remains here - see corpusPayload + the early peek above.
 
     // RETAIL PRODUCT KNOWLEDGE INDEX (4M+ Open Food Facts products): exact barcode hit resolves
@@ -1911,9 +1875,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // itself a "verified" decision (only possible from goupc/fetchv2 - GPT never mints "verified", see
       // gptResultToDecodePayload) OR a suggestion whose confidence is STRICTLY HIGHER than the free
       // suggestion's own confidence; otherwise the free suggestion stands and the paid rung's reason is
-      // still recorded in the reasons list for transparency. receiptState stays {eligible:false} on this
-      // whole branch (no permanent no_result_receipt from an escalation attempt - see classifyReceipt,
-      // which only ever looks at gptLadderResult from the FINAL win, not this comparison).
+      // still recorded in the reasons list for transparency.
       //
       // PAY-ONCE (L12): each paid rung charges its cap slot exactly once, immediately before it runs,
       // and ONLY when it is genuinely capable of paying (mirrors the pre-existing goUpcCanPay pattern
@@ -2158,9 +2120,6 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       }
     }
 
-    // receiptState: only a GPT rung that genuinely ran + came back empty earns a permanent receipt.
-    receiptState = gptLadderResult ? classifyReceipt(gptLadderResult) : { eligible: false };
-
     // Assemble the response. A settled rung supplies its payload verbatim; an all-miss ladder falls back
     // to the stashed Plan D floor/suggestion (TASK T8b) so the user experience for a genuinely
     // unfindable code is unchanged; a Plan D stash always records its own attempt in providerStatuses so
@@ -2361,8 +2320,8 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // honesty relabel does NOT reopen a pay-twice hole. See pipeline.test.ts's "a demoted Go-UPC
   // 'suggested' settle STILL persists to L2..." regression test (Task 2).
   //
-  // A genuinely exhausted ladder (classifyReceipt, tracked in receiptState from whichever exit ran the
-  // ladder) -> permanent "no_result_receipt". Anything else (needs_review from a transient skip, or a
+  // A genuinely exhausted ladder persists NOTHING (owner 2026-08-20; receipts abolished). Anything
+  // else (needs_review from a transient skip, or a
   // conflict, with no paid-rung identity) is left untouched - it stays retryable exactly like today's
   // short-TTL L1 miss cache. forceRetry's fresh compute overwrites whatever was there (persistDecode is
   // an upsert by code).
@@ -2398,10 +2357,6 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     if (keepsStaleRow) {
       // The stored row won this pass; the STALE-ROW FALLBACK below re-persists it. Writing anything
       // here would clobber the very row we are keeping.
-    } else if (staleReceipt && !hasUsableIdentity) {
-      // A version-stale receipt whose FREE recompute still found nothing: refresh the stamp, keep the
-      // ORIGINAL createdAt so the cooldown (the only thing that buys paid rungs) still lapses on time.
-      await persistDecode({ code: cacheKey, kind: "no_result_receipt", payload: withCacheStamp(payload), tier: staleReceipt.tier, createdAt: staleReceipt.createdAt });
     } else if ((status === "verified" || status === "suggested") && (sourceTier || replacesStaleRow)) {
       await persistResult();
     } else if (sourceTier === "paid_rung" && hasUsableIdentity) {
@@ -2414,9 +2369,10 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // this pass already paid for. Nothing reads the marker back in the staleness decision - it is
       // carried forward on refresh so the row keeps saying it already exhausted its paid rungs.
       await persistResult({ paidEscalationExhausted: true });
-    } else if (receiptState.eligible) {
-      await persistDecode({ code: cacheKey, kind: "no_result_receipt", payload: withCacheStamp(payload), tier: receiptState.reason ?? "unknown", createdAt: Date.now() });
     }
+    // A genuinely exhausted ladder persists NOTHING (owner ruling 2026-08-20: no-candidate rows are
+    // abolished; the next scan of this code re-runs the full ladder). Never reintroduce a
+    // "no_result_receipt", cooldown, or any other negative-result memory here.
   }
 
   // STALE-ROW FALLBACK (owner 2026-08-19): the re-evaluation above ran because a cached guess had gone
