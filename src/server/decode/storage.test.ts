@@ -1,8 +1,26 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileDecodeStorage, tursoDecodeStorage, type DecodeOutcomeEntry, type TursoClientLike } from "./storage";
+
+const tursoClientMocks = vi.hoisted(() => ({
+  createTursoClient: vi.fn(),
+  tursoCredentialsFromEnv: vi.fn(),
+}));
+
+vi.mock("@/server/db/tursoClient", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/db/tursoClient")>();
+  return { ...actual, ...tursoClientMocks };
+});
+
+import {
+  __resetDecodeStorageSelectorForTests,
+  decodeStorage,
+  fileDecodeStorage,
+  tursoDecodeStorage,
+  type DecodeOutcomeEntry,
+  type TursoClientLike,
+} from "./storage";
 
 const outcome: DecodeOutcomeEntry = {
   code: "049000006346",
@@ -14,6 +32,16 @@ const outcome: DecodeOutcomeEntry = {
   sourceTier: "gpt_5_4_mini",
   createdAt: "2026-08-21T00:00:00.000Z",
 };
+
+beforeEach(() => {
+  tursoClientMocks.createTursoClient.mockReset();
+  tursoClientMocks.tursoCredentialsFromEnv.mockReset().mockReturnValue(null);
+  __resetDecodeStorageSelectorForTests();
+});
+
+afterEach(() => {
+  __resetDecodeStorageSelectorForTests();
+});
 
 describe("fileDecodeStorage", () => {
   const directories: string[] = [];
@@ -102,5 +130,46 @@ describe("tursoDecodeStorage", () => {
     await tursoDecodeStorage(fake.client).appendOutcome(outcome);
     expect(fake.outcomes).toHaveLength(1);
     expect(fake.outcomes[0]).toContain("gpt-5.4-mini");
+  });
+
+  it("retries table initialization after a transient database failure", async () => {
+    const execute = vi.fn()
+      .mockRejectedValueOnce(new Error("temporary Turso outage"))
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+    const storage = tursoDecodeStorage({ execute } as unknown as TursoClientLike);
+
+    await expect(storage.get("calls")).rejects.toThrow("temporary Turso outage");
+    await expect(storage.get("calls")).resolves.toBeNull();
+    expect(execute).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("decodeStorage selector", () => {
+  const directories: string[] = [];
+
+  afterEach(() => {
+    for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  });
+
+  it("retries Turso client construction after a transient failure", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "scanbin-decode-selector-"));
+    directories.push(directory);
+    const fake = fakeTurso();
+    tursoClientMocks.tursoCredentialsFromEnv.mockReturnValue({
+      url: "libsql://example.turso.io",
+      authToken: "test-token",
+    });
+    tursoClientMocks.createTursoClient
+      .mockRejectedValueOnce(new Error("temporary client failure"))
+      .mockResolvedValueOnce(fake.client);
+
+    const fallback = await decodeStorage(directory);
+    expect(await fallback.get("calls")).toBeNull();
+
+    const recovered = await decodeStorage(directory);
+    expect(await recovered.get("calls")).toBeNull();
+    expect(tursoClientMocks.createTursoClient).toHaveBeenCalledTimes(2);
   });
 });

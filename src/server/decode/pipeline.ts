@@ -353,7 +353,7 @@ export function classifyGptFailureDetail(rawError: string | undefined): string {
 }
 
 export function classifySourceTier(reasonCode: string, providerNames: string[]): "gpt_5_4_mini" | null {
-  return reasonCode === "gpt_decode" || providerNames.includes(GPT_PROVIDER) ? "gpt_5_4_mini" : null;
+  return reasonCode === "gpt_decode" && providerNames.includes(GPT_PROVIDER) ? "gpt_5_4_mini" : null;
 }
 
 function cachePayload(payload: DecodePayload): string {
@@ -370,6 +370,7 @@ function parsePersisted(row: PersistedDecode): DecodePayload | null {
   try {
     const payload = JSON.parse(row.payload) as DecodePayload;
     if (payload.mode !== "decode" || !Array.isArray(payload.results)) return null;
+    if (payload.reasonCode === "no_result") return null;
     const result = payload.results.find((candidate) => isUsableProductName(candidate.productName));
     if (!result) return null;
     if (isExampleOrTestRow(row.code, result.productName, result.brand)) return null;
@@ -597,7 +598,16 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
 
     if (!mock) {
       const coordinator = createPaidEgressCoordinator(() => settlePaidAuthorization(req, () => { paidComputeCharged = true; }));
-      await coordinator.authorize();
+      try {
+        await coordinator.authorize();
+      } catch (error) {
+        if (error instanceof DailyCapExceededError) throw error;
+        return noResultPayload(
+          req,
+          [status(GPT_PROVIDER, "skipped", { errorCode: "charge_unavailable" })],
+          "Live lookup is unavailable right now.",
+        );
+      }
     }
 
     const gptStartedAt = Date.now();
@@ -663,9 +673,12 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   try {
     const outcome = e2eMode()
       ? { value: await compute(), cached: false }
-      : await withDecodeCache(cacheKey, (value) => value.results.some((result) => isUsableProductName(result.productName)), compute, {
-          forceRefresh: req.forceRetry,
-        });
+      : await withDecodeCache(
+          cacheKey,
+          (value) => value.reasonCode === "gpt_decode" && value.results.some((result) => isUsableProductName(result.productName)),
+          compute,
+          { forceRefresh: req.forceRetry },
+        );
     payload = outcome.value;
     cached = outcome.cached;
     joined = Boolean((outcome as { joined?: true }).joined);

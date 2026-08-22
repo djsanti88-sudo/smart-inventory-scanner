@@ -108,26 +108,32 @@ export function tursoDecodeStorage(client: TursoClientLike): DecodeStorage {
   let tablesReady: Promise<void> | null = null;
 
   function ensureTables(): Promise<void> {
-    tablesReady ??= (async () => {
-      await client.execute({
-        sql: `CREATE TABLE IF NOT EXISTS ${TABLE_KV} (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
-        args: [],
+    if (!tablesReady) {
+      const pending = (async () => {
+        await client.execute({
+          sql: `CREATE TABLE IF NOT EXISTS ${TABLE_KV} (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+          args: [],
+        });
+        await client.execute({
+          sql: `CREATE TABLE IF NOT EXISTS ${TABLE_OUTCOMES} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL,
+            canonical_gtin TEXT NOT NULL,
+            settled_by TEXT,
+            status TEXT NOT NULL,
+            reasons TEXT NOT NULL,
+            duration_ms INTEGER NOT NULL,
+            source_tier TEXT,
+            created_at TEXT NOT NULL
+          )`,
+          args: [],
+        });
+      })();
+      tablesReady = pending;
+      void pending.catch(() => {
+        if (tablesReady === pending) tablesReady = null;
       });
-      await client.execute({
-        sql: `CREATE TABLE IF NOT EXISTS ${TABLE_OUTCOMES} (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          code TEXT NOT NULL,
-          canonical_gtin TEXT NOT NULL,
-          settled_by TEXT,
-          status TEXT NOT NULL,
-          reasons TEXT NOT NULL,
-          duration_ms INTEGER NOT NULL,
-          source_tier TEXT,
-          created_at TEXT NOT NULL
-        )`,
-        args: [],
-      });
-    })();
+    }
     return tablesReady;
   }
 
@@ -213,6 +219,8 @@ export function tursoDecodeStorage(client: TursoClientLike): DecodeStorage {
 }
 
 let cachedTursoStorage: DecodeStorage | null = null;
+// Missing credentials are stable for a warm instance. Client construction errors may be transient,
+// so they fall back only for the current request and are retried on the next one.
 let tursoUnavailable = false;
 
 async function getTursoDecodeStorage(): Promise<DecodeStorage | null> {
@@ -228,7 +236,6 @@ async function getTursoDecodeStorage(): Promise<DecodeStorage | null> {
     return cachedTursoStorage;
   } catch (error) {
     console.warn("[decode-storage] Turso unavailable, using local file storage:", (error as Error).message);
-    tursoUnavailable = true;
     return null;
   }
 }

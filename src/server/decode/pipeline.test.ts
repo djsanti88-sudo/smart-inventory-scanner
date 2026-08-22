@@ -51,6 +51,7 @@ import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowl
 import { lookupRetailBarcodeAsync } from "@/server/retail-knowledge/retailKnowledgeIndex";
 import { getLearnedProduct } from "@/server/learnedProducts";
 import { lookupMasterCatalog } from "@/server/catalog/masterLookup";
+import { prefixFloorNameFull } from "@/server/catalog/prefixIndexServer";
 import { getPersistedDecode, persistDecode } from "@/server/decodeCacheStore";
 import { decodeStorage } from "@/server/decode/storage";
 import {
@@ -147,12 +148,13 @@ beforeEach(() => {
   vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue(null);
   vi.mocked(getLearnedProduct).mockResolvedValue(null);
   vi.mocked(lookupMasterCatalog).mockResolvedValue({ kind: "miss" });
-  vi.mocked(getPersistedDecode).mockResolvedValue(null);
-  vi.mocked(decodeStorage).mockResolvedValue(storage);
-  vi.mocked(checkGptDecodeBudget).mockResolvedValue({ allowed: true, spentUsd: 0, capUsd: 3 });
-  vi.mocked(chargeDailySlotConditional).mockResolvedValue({ used: 1, limit: 10, granted: true });
-  vi.mocked(chargeDailySlotForAccountConditional).mockResolvedValue({ used: 1, granted: true });
-  vi.mocked(decodeWithGpt).mockResolvedValue(gpt());
+  vi.mocked(prefixFloorNameFull).mockReset().mockReturnValue(null);
+  vi.mocked(getPersistedDecode).mockReset().mockResolvedValue(null);
+  vi.mocked(decodeStorage).mockReset().mockResolvedValue(storage);
+  vi.mocked(checkGptDecodeBudget).mockReset().mockResolvedValue({ allowed: true, spentUsd: 0, capUsd: 3 });
+  vi.mocked(chargeDailySlotConditional).mockReset().mockResolvedValue({ used: 1, limit: 10, granted: true });
+  vi.mocked(chargeDailySlotForAccountConditional).mockReset().mockResolvedValue({ used: 1, granted: true });
+  vi.mocked(decodeWithGpt).mockReset().mockResolvedValue(gpt());
 });
 
 describe("runDecodePipeline", () => {
@@ -273,6 +275,82 @@ describe("runDecodePipeline", () => {
     expect(persistDecode).not.toHaveBeenCalled();
   });
 
+  it("does not cache a prefix-floor placeholder when GPT finds no product", async () => {
+    vi.mocked(prefixFloorNameFull).mockReturnValue({
+      name: "Coca-Cola / product unconfirmed",
+      brand: "Coca-Cola",
+    });
+    vi.mocked(decodeWithGpt).mockResolvedValue(gpt({
+      tier: "none",
+      productName: "",
+      error: "empty productName",
+      usdComputedFloor: 0.01,
+    }));
+
+    const first = await runDecodePipeline(request());
+    const second = await runDecodePipeline(request());
+
+    expect(first).toMatchObject({
+      kind: "computed",
+      cached: false,
+      payload: {
+        reasonCode: "no_result",
+        results: [{ productName: "Coca-Cola / product unconfirmed" }],
+      },
+    });
+    expect(second).toMatchObject({ kind: "computed", cached: false, payload: { reasonCode: "no_result" } });
+    expect(decodeWithGpt).toHaveBeenCalledTimes(2);
+    expect(persistDecode).not.toHaveBeenCalled();
+  });
+
+  it("ignores an already-persisted prefix-floor no-result and retries GPT", async () => {
+    const poisoned = {
+      ...cachedPayload("Coca-Cola / product unconfirmed"),
+      reasonCode: "no_result",
+    };
+    vi.mocked(getPersistedDecode).mockResolvedValue({
+      code: CODE,
+      kind: "result",
+      payload: JSON.stringify(poisoned),
+      tier: "suggested",
+      sourceTier: "gpt_5_4_mini",
+      createdAt: 1,
+    });
+
+    const out = await runDecodePipeline(request());
+
+    expect(out).toMatchObject({ kind: "computed", cached: false, payload: { reasonCode: "gpt_decode" } });
+    expect(decodeWithGpt).toHaveBeenCalledOnce();
+  });
+
+  it("skips paid decode without caching when the usage meter cannot write, then retries later", async () => {
+    vi.mocked(prefixFloorNameFull).mockReturnValue({
+      name: "Coca-Cola / product unconfirmed",
+      brand: "Coca-Cola",
+    });
+    vi.mocked(chargeDailySlotConditional)
+      .mockRejectedValueOnce(new Error("EROFS: read-only file system"))
+      .mockResolvedValueOnce({ used: 1, limit: 10, granted: true });
+
+    const unavailable = await runDecodePipeline(request());
+
+    expect(unavailable).toMatchObject({
+      kind: "computed",
+      cached: false,
+      paidComputeCharged: false,
+      payload: {
+        reasonCode: "no_result",
+        results: [{ productName: "Coca-Cola / product unconfirmed" }],
+      },
+    });
+    expect(decodeWithGpt).not.toHaveBeenCalled();
+    expect(persistDecode).not.toHaveBeenCalled();
+
+    const recovered = await runDecodePipeline(request());
+    expect(recovered).toMatchObject({ kind: "computed", cached: false, payload: { reasonCode: "gpt_decode" } });
+    expect(decodeWithGpt).toHaveBeenCalledOnce();
+  });
+
   it("leaves example and likely-misread codes free and reviewable", async () => {
     const example = await runDecodePipeline(request("4006381333931"));
     expect(example.kind === "computed" && example.payload.reasonCode).toBe("no_result");
@@ -358,6 +436,7 @@ describe("paid authorization and diagnostics", () => {
 
   it("classifies only the retained paid source and sanitizes provider failures", () => {
     expect(classifySourceTier("gpt_decode", ["gpt-5.4-mini"])).toBe("gpt_5_4_mini");
+    expect(classifySourceTier("no_result", ["gpt-5.4-mini"])).toBeNull();
     expect(classifySourceTier("ok", ["tire-corpus"])).toBeNull();
     expect(classifyGptFailureDetail("HTTP 429")).toBe("429");
     expect(classifyGptFailureDetail("HTTP 503")).toBe("5xx");
