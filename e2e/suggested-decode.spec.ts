@@ -21,11 +21,7 @@ const PROOF = "e2e/proof";
 const STATUS = {
   liveEnabled: true,
   autoDecodeOnScan: true,
-  geminiEnabled: true,
-  openaiEnabled: true,
-  geminiConfigured: true,
   openaiConfigured: true,
-  premiumFallback: false,
   mode: "aggressive",
   dailyLimit: 100,
   missingKeys: [],
@@ -38,7 +34,7 @@ const SUGGESTED_NAME = "Michelin Defender LTX M/S 275/60R20";
 function suggestedDecodeResponse(code: string) {
   return {
     mode: "decode",
-    providerNames: ["gemini", "openai"],
+    providerNames: ["gpt-5.4-mini"],
     results: [
       {
         productName: SUGGESTED_NAME, brand: "Michelin", category: "tires",
@@ -166,7 +162,7 @@ const NAME_9B = "Original Anchor Bar Hot Sauce";
 function lowConfSuggestedResponse(code: string) {
   return {
     mode: "decode",
-    providerNames: ["gpt-5.5-ladder"],
+    providerNames: ["gpt-5.4-mini"],
     results: [
       {
         productName: NAME_9B, brand: "Anchor Bar", category: "food",

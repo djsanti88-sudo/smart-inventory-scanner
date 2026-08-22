@@ -21,14 +21,14 @@ function makeGtin(payload: string): string {
   return payload + checkDigitFor(payload);
 }
 
-// The documented Gemini phantom (batch 1): Sailun prefix 884811 + last-6 of SKU BH4120176 + check.
+// A documented model phantom: Sailun prefix 884811 + last-6 of SKU BH4120176 + check.
 const PHANTOM_8848 = "8848111201761";
 // The documented REAL Sailun/Blackhawk UPC (tires.auto structured data, AM-11):
 // 695965 + last-6 of SKU 5546800V + check 7.
 const REAL_BLACKHAWK = "6959655468007";
 
-// Representative phantom fixture: same construction as the 16 Gemini fakes
-// (prefix 884811 + last-6 SKU digits + computed check). The exact 16 from the Gemini
+// Representative phantom fixture: same construction as the 16 model fakes
+// (prefix 884811 + last-6 SKU digits + computed check). The exact 16 from the original
 // output can be swapped in verbatim when the owner supplies them; the CONSTRUCTION is identical.
 const PHANTOM_SKU_TAILS = [
   "120176", "120177", "120183", "120190", "120204", "120211", "120228", "120235",

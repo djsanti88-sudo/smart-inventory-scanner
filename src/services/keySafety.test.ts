@@ -8,9 +8,7 @@ import { join } from "node:path";
 
 const CLIENT_DIRS = ["src/components", "src/stores", "src/app/(app)", "src/app/login", "src/lib"];
 const FORBIDDEN = [
-  "process.env.GEMINI_API_KEY",
   "process.env.OPENAI_API_KEY",
-  "process.env.GO_UPC_API_KEY",
   // Firebase Admin (service account / privileged SDK) must never be reachable from client code.
   // Patterns are precise so a prose mention in a comment is not a false positive:
   "@/lib/firebaseAdmin", // importing the server-only Admin client

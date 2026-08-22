@@ -67,7 +67,7 @@ const RATE_LIMIT_KEY_PREFIX = "ratelimit:";
 /**
  * Per-IP fixed-window rate limit. DURABLE when `opts.storage` is supplied: each fixed window is
  * modeled as a key `ratelimit:<scope-ip>:<windowStartMs>` (window start = now rounded down to a
- * `windowMs` boundary), using the SAME atomic `LadderStorage.increment`/`.get` seam as
+ * `windowMs` boundary), using the SAME atomic `DecodeStorage.increment`/`.get` seam as
  * chargeDailySlot/readDailyUsed (src/server/upc/storage.ts) - so a serverless multi-instance
  * deployment shares one real counter instead of each warm instance keeping its own in-memory bucket.
  * `resetAt` is always computed from the window boundary, never stored, so no extra key is needed for it.
@@ -130,7 +130,7 @@ function todayKey(now: Date = new Date()): string {
 // readDailyUsed is a pure READ (used by both route gates and the GET status endpoint - never
 // writes, so a blocked/rejected request can never inflate the counter). chargeDailySlot is the
 // ONLY write, and it delegates to storage.increment - an atomic in-storage counter (in-SQL
-// `used = used + 1` on Turso, exclusive-lock file update locally; see LadderStorage.increment in
+// `used = used + 1` on Turso, exclusive-lock file update locally; see DecodeStorage.increment in
 // src/server/upc/storage.ts) so concurrent serverless instances can never lose an increment to a
 // race. Callers MUST call chargeDailySlot exactly once, at the first paid provider call of a
 // request (never at the route gate) - see route.ts's LAZY DAILY CAP GATE.
@@ -142,7 +142,7 @@ export type DailyCapStorage = {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<void>;
   increment(key: string): Promise<number>;
-  /** Atomic conditional charge: increment ONLY while below `limit`; see LadderStorage.incrementIfBelow. */
+  /** Atomic conditional charge: increment ONLY while below `limit`; see DecodeStorage.incrementIfBelow. */
   incrementIfBelow(key: string, limit: number): Promise<{ value: number; granted: boolean }>;
 };
 
@@ -158,10 +158,8 @@ export async function readDailyUsed(storage: DailyCapStorage, dateKey: string = 
 }
 
 /**
- * Atomically charge one daily-cap slot. Call this ONLY at the moment the first paid provider call
- * of a request actually starts (Go-UPC lookup, paid Fetch V2 stage, or the GPT ladder rung -
- * whichever runs first) - never at the route gate, and never more than once per request (a
- * `charged` flag at the call site prevents a later rung in the same request from charging again).
+ * Atomically charge one daily-cap slot at the paid GPT egress boundary. Never call this from the
+ * route gate because deterministic and cached answers must remain available after a cap is reached.
  */
 export async function chargeDailySlot(
   storage: DailyCapStorage,
@@ -259,42 +257,42 @@ export async function chargeDailySlotForAccountConditional(
 }
 
 // ---------------------------------------------------------------------------
-// GPT ladder dollar guard (B1, 2026-07-20): migrated onto the SAME durable LadderStorage KV seam as
-// chargeDailySlot/readDailyUsed (get/set/increment - see DailyCapStorage above and LadderStorage in
-// src/server/upc/storage.ts). This is a DOLLAR cap, not a call counter, so it cannot use `increment`
+// GPT decode dollar guard on the same durable counter seam as the daily cap.
+// chargeDailySlot/readDailyUsed (get/set/increment - see DailyCapStorage above and DecodeStorage in
+// src/server/decode/storage.ts). This is a DOLLAR cap, not a call counter, so it cannot use `increment`
 // directly (that only atomically adds 1): dollar amounts are stored as INTEGER CENTS (a tenth-of-a-
 // cent would need fractional increments the storage seam does not support) and persisted via an
 // atomic get-then-set loop with a bounded retry, matching the file adapter's single-process
 // read-modify-write safety and accepting the same small race window the file adapter always had
 // (Turso is one round-trip; a genuine concurrent double-write here undercounts by at most one call's
-// worth of cents, which the worstCaseUsd headroom in checkGptLadderBudget already exists to absorb).
+// worth of cents, which the worstCaseUsd headroom in checkGptDecodeBudget already exists to absorb).
 // The file-based path (below) stays as the dev/no-storage fallback and is used whenever no `storage`
 // option is passed (matching checkRateLimit's fallback discipline: never fail-closed on missing/
 // erroring storage - fall back to file/memory instead).
 // ---------------------------------------------------------------------------
 
-type GptLadderState = { date: string; spentUsd: number };
-const memGptLadder = new Map<string, GptLadderState>();
+type GptDecodeState = { date: string; spentUsd: number };
+const memGptDecode = new Map<string, GptDecodeState>();
 
-function gptLadderKey(dateKey: string): string {
-  return `gptLadderUsd:${dateKey}`;
+function gptDecodeKey(dateKey: string): string {
+  return `gptDecodeUsd:${dateKey}`;
 }
 
 /**
- * Minimal storage surface the GPT ladder $-guard needs. `incrementBy` (Fix 2, P6 ultra-review) is
- * an atomic arbitrary-delta increment - required so recordGptLadderSpend never does a JS-side
+ * Minimal storage surface the GPT decode budget needs. `incrementBy` is
+ * an atomic arbitrary-delta increment - required so recordGptDecodeSpend never does a JS-side
  * get-then-set, which could silently lose one call's spend to a race between two concurrent GPT
- * ladder rungs writing to the same day's key.
+ * provider calls writing to the same day's key.
  */
-export type GptLadderStorage = {
+export type GptDecodeStorage = {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<void>;
   increment(key: string): Promise<number>;
   incrementBy(key: string, delta: number): Promise<number>;
 };
 
-const GPT_SPEND_CENTS_PREFIX = "gpt_ladder_usd_cents:";
-const GPT_CALLS_PREFIX = "gpt_ladder_calls:";
+const GPT_DECODE_SPEND_UNITS_PREFIX = "gpt_decode_usd_cents:";
+const GPT_DECODE_CALLS_PREFIX = "gpt_decode_calls:";
 
 /** usd -> integer TENTH-OF-A-CENT units (not whole cents): a searchless call can cost ~$0.003, and
  * rounding to whole cents would zero it out and permanently undercount real spend (cost-truth rule). */
@@ -306,17 +304,17 @@ function tenthCentsToUsd(tenthCents: number): number {
 }
 
 /**
- * Dedicated storage file for the GPT ladder dollar guard (dev/no-storage fallback only). Deliberately
+ * Dedicated storage file for the GPT decode dollar guard (dev/no-storage fallback only). Deliberately
  * its OWN file (not the daily cap's legacy path), same directory-resolution pattern (env override,
  * else path.resolve of a dotfile in cwd).
  */
-function gptLadderFile(): string {
-  return process.env.AI_LOOKUP_GPT_LADDER_FILE || path.resolve(".gpt-ladder-usage.json");
+function gptDecodeFile(): string {
+  return process.env.AI_LOOKUP_GPT_DECODE_FILE || path.resolve(".gpt-decode-usage.json");
 }
 
-function readGptLadderSpendFromFile(file: string, date: string, key: string): number {
+function readGptDecodeSpendFromFile(file: string, date: string, key: string): number {
   let spentUsd = 0;
-  const mem = memGptLadder.get(key);
+  const mem = memGptDecode.get(key);
   if (mem && mem.date === date) spentUsd = mem.spentUsd;
   try {
     const raw = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -329,53 +327,53 @@ function readGptLadderSpendFromFile(file: string, date: string, key: string): nu
 }
 
 /**
- * Daily DOLLAR guard for the paid GPT ladder rung. DURABLE when `opts.storage` is supplied: reads
+ * Daily dollar guard for GPT decode. Durable when `opts.storage` is supplied: reads
  * the integer-tenth-of-a-cent counter via `storage.get`. Falls back to the file/in-memory guard
  * (dev/no-storage, or on a storage error - fail OPEN to the fallback, never fail-closed) otherwise.
  */
-export async function checkGptLadderBudget(
-  opts: { capUsd?: number; file?: string; dateKey?: string; worstCaseUsd?: number; storage?: GptLadderStorage } = {}
+export async function checkGptDecodeBudget(
+  opts: { capUsd?: number; file?: string; dateKey?: string; worstCaseUsd?: number; storage?: GptDecodeStorage } = {}
 ): Promise<{ allowed: boolean; spentUsd: number; capUsd: number }> {
-  const capUsd = opts.capUsd ?? Number(process.env.GPT_LADDER_DAILY_USD ?? 3);
+  const capUsd = opts.capUsd ?? Number(process.env.GPT_DECODE_DAILY_USD ?? 3);
   const worstCaseUsd = opts.worstCaseUsd ?? 0.39;
   const date = opts.dateKey ?? todayKey();
-  const key = gptLadderKey(date);
+  const key = gptDecodeKey(date);
 
   let spentUsd: number;
   if (opts.storage) {
     try {
-      const raw = await opts.storage.get(GPT_SPEND_CENTS_PREFIX + date);
+      const raw = await opts.storage.get(GPT_DECODE_SPEND_UNITS_PREFIX + date);
       const tenthCents = raw ? Number(raw) : 0;
       spentUsd = Number.isFinite(tenthCents) && tenthCents >= 0 ? tenthCentsToUsd(tenthCents) : 0;
     } catch (err) {
-      console.warn("[checkGptLadderBudget] storage error, falling back to file/memory:", err);
-      spentUsd = readGptLadderSpendFromFile(opts.file ?? gptLadderFile(), date, key);
+      console.warn("[checkGptDecodeBudget] storage error, falling back to file/memory:", err);
+      spentUsd = readGptDecodeSpendFromFile(opts.file ?? gptDecodeFile(), date, key);
     }
   } else {
-    spentUsd = readGptLadderSpendFromFile(opts.file ?? gptLadderFile(), date, key);
+    spentUsd = readGptDecodeSpendFromFile(opts.file ?? gptDecodeFile(), date, key);
   }
 
   return { allowed: spentUsd + worstCaseUsd <= capUsd, spentUsd, capUsd };
 }
 
 /**
- * Records actual GPT ladder spend for the day. DURABLE when `opts.storage` is supplied: dollar
+ * Records the response-observable spend floor for the day. Durable when `opts.storage` is supplied: dollar
  * amounts are stored as integer tenth-of-a-cent units so the guard never rounds sub-cent spend to
  * zero. Uses the ATOMIC `incrementBy` (Fix 2, P6 ultra-review) - never a JS-side get-then-set - so
- * two concurrent GPT ladder rungs recording spend against the SAME day's key both land (summed),
+ * two concurrent GPT calls recording spend against the same day's key both land (summed),
  * instead of the loser's write silently clobbering the winner's under the old get-then-set. Falls
  * back to file/memory (dev/no-storage, or on a storage error).
  */
-export async function recordGptLadderSpend(
-  usd: number,
-  opts: { file?: string; dateKey?: string; storage?: GptLadderStorage } = {}
+export async function recordGptDecodeSpend(
+  usdComputedFloor: number,
+  opts: { file?: string; dateKey?: string; storage?: GptDecodeStorage } = {}
 ): Promise<void> {
   const date = opts.dateKey ?? todayKey();
-  const key = gptLadderKey(date);
+  const key = gptDecodeKey(date);
 
   if (opts.storage) {
-    const centsKey = GPT_SPEND_CENTS_PREFIX + date;
-    const tenthCentsDelta = usdToTenthCents(usd);
+    const centsKey = GPT_DECODE_SPEND_UNITS_PREFIX + date;
+    const tenthCentsDelta = usdToTenthCents(usdComputedFloor);
     try {
       await opts.storage.incrementBy(centsKey, tenthCentsDelta);
       return;
@@ -389,7 +387,7 @@ export async function recordGptLadderSpend(
       // ACCEPTED TRADE-OFF (adjudicated, agy review 2026-07-20): if the FIRST incrementBy succeeded
       // server-side but the client saw a timeout, this retry adds the delta AGAIN - a rare ack-lost
       // OVERCOUNT. Deliberate: the cost-truth rule is "never UNDERcount actual spend"; overcounting the
-      // $/day guard just stops the GPT rung early (conservative direction - no money lost), so we do
+      // The budget guard stops GPT early (conservative direction), so we do
       // not attempt idempotent dedup here.
       try {
         await opts.storage.incrementBy(centsKey, tenthCentsDelta);
@@ -401,27 +399,27 @@ export async function recordGptLadderSpend(
         console.error(
           JSON.stringify({
             src: "scanbin",
-            route: "aiSpendGuard.recordGptLadderSpend",
+            route: "aiSpendGuard.recordGptDecodeSpend",
             event: "spend_write_diverged",
             tenthCentsDelta,
             dateKey: date,
             ts: new Date().toISOString(),
-            detail: "durable GPT-ladder spend write failed twice; rerouted to file fallback (may no-op on read-only FS)",
+            detail: "durable GPT decode spend write failed twice; rerouted to file fallback (may no-op on read-only FS)",
           })
         );
-        console.warn("[recordGptLadderSpend] storage error, falling back to file/memory:", retryErr);
+        console.warn("[recordGptDecodeSpend] storage error, falling back to file/memory:", retryErr);
         // fall through to the file/memory path below
       }
     }
   }
 
-  const file = opts.file ?? gptLadderFile();
-  const existing = readGptLadderSpendFromFile(file, date, key);
+  const file = opts.file ?? gptDecodeFile();
+  const existing = readGptDecodeSpendFromFile(file, date, key);
   // Round to a TENTH OF A CENT (4 decimal places), not whole cents. A searchless GPT call can
   // cost as little as ~$0.003; rounding to 2 decimals would zero it out and permanently undercount
   // real spend against the daily dollar cap. Cost-truth rule: never undercount actual spend.
-  const spentUsd = Math.round((existing + usd) * 10000) / 10000;
-  memGptLadder.set(key, { date, spentUsd });
+  const spentUsd = Math.round((existing + usdComputedFloor) * 10000) / 10000;
+  memGptDecode.set(key, { date, spentUsd });
 
   let all: Record<string, unknown> = {};
   try {
@@ -437,15 +435,15 @@ export async function recordGptLadderSpend(
   }
 }
 
-function gptLadderCallsKey(dateKey: string): string {
-  return `gptLadderCalls:${dateKey}`;
+function gptDecodeCallsKey(dateKey: string): string {
+  return `gptDecodeCalls:${dateKey}`;
 }
 
-const memGptLadderCalls = new Map<string, number>();
+const memGptDecodeCalls = new Map<string, number>();
 
-function readGptLadderCallsFromFile(file: string, date: string, key: string): number {
+function readGptDecodeCallsFromFile(file: string, date: string, key: string): number {
   let calls = 0;
-  const mem = memGptLadderCalls.get(key);
+  const mem = memGptDecodeCalls.get(key);
   if (typeof mem === "number") calls = mem;
   try {
     const raw = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -458,47 +456,47 @@ function readGptLadderCallsFromFile(file: string, date: string, key: string): nu
 }
 
 /**
- * Read-only peek at today's GPT ladder call count. DURABLE when `opts.storage` is supplied (reads
+ * Read-only peek at today's GPT decode call count. Durable when `opts.storage` is supplied (reads
  * the atomic call-count key). Falls back to file/memory otherwise (dev/no-storage, or a storage error).
  */
-async function gptLadderCallCount(opts: { file?: string; dateKey?: string; storage?: GptLadderStorage } = {}): Promise<number> {
+async function gptDecodeCallCount(opts: { file?: string; dateKey?: string; storage?: GptDecodeStorage } = {}): Promise<number> {
   const date = opts.dateKey ?? todayKey();
-  const key = gptLadderCallsKey(date);
+  const key = gptDecodeCallsKey(date);
   if (opts.storage) {
     try {
-      const raw = await opts.storage.get(GPT_CALLS_PREFIX + date);
+      const raw = await opts.storage.get(GPT_DECODE_CALLS_PREFIX + date);
       const n = raw ? Number(raw) : 0;
       return Number.isFinite(n) && n >= 0 ? n : 0;
     } catch (err) {
-      console.warn("[gptLadderCallCount] storage error, falling back to file/memory:", err);
-      return readGptLadderCallsFromFile(opts.file ?? gptLadderFile(), date, key);
+      console.warn("[gptDecodeCallCount] storage error, falling back to file/memory:", err);
+      return readGptDecodeCallsFromFile(opts.file ?? gptDecodeFile(), date, key);
     }
   }
-  return readGptLadderCallsFromFile(opts.file ?? gptLadderFile(), date, key);
+  return readGptDecodeCallsFromFile(opts.file ?? gptDecodeFile(), date, key);
 }
 
 /**
- * Records one GPT ladder call for the day. DURABLE when `opts.storage` is supplied: uses the
+ * Records one GPT decode call for the day. Durable when `opts.storage` is supplied: uses the
  * ATOMIC `storage.increment` (a plain +1 counter, unlike the dollar guard - no cents math needed),
  * the exact same seam chargeDailySlot uses. Falls back to file/memory otherwise.
  */
-export async function recordGptLadderCall(opts: { file?: string; dateKey?: string; storage?: GptLadderStorage } = {}): Promise<void> {
+export async function recordGptDecodeCall(opts: { file?: string; dateKey?: string; storage?: GptDecodeStorage } = {}): Promise<void> {
   const date = opts.dateKey ?? todayKey();
-  const key = gptLadderCallsKey(date);
+  const key = gptDecodeCallsKey(date);
 
   if (opts.storage) {
     try {
-      await opts.storage.increment(GPT_CALLS_PREFIX + date);
+      await opts.storage.increment(GPT_DECODE_CALLS_PREFIX + date);
       return;
     } catch (err) {
-      console.warn("[recordGptLadderCall] storage error, falling back to file/memory:", err);
+      console.warn("[recordGptDecodeCall] storage error, falling back to file/memory:", err);
       // fall through to the file/memory path below
     }
   }
 
-  const file = opts.file ?? gptLadderFile();
-  const calls = readGptLadderCallsFromFile(file, date, key) + 1;
-  memGptLadderCalls.set(key, calls);
+  const file = opts.file ?? gptDecodeFile();
+  const calls = readGptDecodeCallsFromFile(file, date, key) + 1;
+  memGptDecodeCalls.set(key, calls);
 
   let all: Record<string, unknown> = {};
   try {
@@ -516,20 +514,20 @@ export async function recordGptLadderCall(opts: { file?: string; dateKey?: strin
 
 /**
  * Combined read-only status for the Settings spend panel + GET /api/ai-lookup: today's spend,
- * cap, call count, and whether the budget currently allows another ladder call. Composes the
+ * cap, call count, and whether the budget currently allows another GPT call. Composes the
  * existing budget check + call-count peek; makes NO writes and spends nothing.
  */
-export async function getGptLadderStatus(
-  opts: { capUsd?: number; file?: string; dateKey?: string; worstCaseUsd?: number; storage?: GptLadderStorage } = {}
+export async function getGptDecodeStatus(
+  opts: { capUsd?: number; file?: string; dateKey?: string; worstCaseUsd?: number; storage?: GptDecodeStorage } = {}
 ): Promise<{ spentUsd: number; capUsd: number; calls: number; allowed: boolean }> {
-  const budget = await checkGptLadderBudget(opts);
-  const calls = await gptLadderCallCount(opts);
+  const budget = await checkGptDecodeBudget(opts);
+  const calls = await gptDecodeCallCount(opts);
   return { spentUsd: budget.spentUsd, capUsd: budget.capUsd, calls, allowed: budget.allowed };
 }
 
 /** Test-only: clear in-memory state between cases. */
 export function __resetForTest(): void {
   ipBuckets.clear();
-  memGptLadder.clear();
-  memGptLadderCalls.clear();
+  memGptDecode.clear();
+  memGptDecodeCalls.clear();
 }

@@ -84,8 +84,8 @@ describe("tireJsonIndexStatus", () => {
       vi.doMock("@/lib/firebaseAdmin", () => ({
         getAdminDb: () => ({ collection: () => ({ limit: () => ({ get: async () => ({ docs: [] }) }) }) }),
       }));
-      vi.doMock("@/server/upc/storage", () => ({
-        ladderStorage: async () => ({ get: async () => null }),
+      vi.doMock("@/server/decode/storage", () => ({
+        decodeStorage: async () => ({ get: async () => null }),
       }));
       vi.resetModules();
       const mod = await import("./tireKnowledgeIndex");

@@ -167,7 +167,7 @@ export async function disputeCatalogEntry(
     });
 
     // L2 decode-cache purge (design §4 "independent replay layers below the master rung"): the
-    // ladder's persisted decode cache (src/server/decodeCacheStore.ts) is keyed by the SAME
+    // persisted decode cache (src/server/decodeCacheStore.ts) is keyed by the SAME
     // cacheKey the pipeline uses (canonicalGtin(code) ?? code - always the GTIN-canonical form for
     // a GTIN-shaped code, which is exactly what `canonical` already is here), so a stale pre-dispute
     // "result" entry there could keep replaying the wrong identity even after this catalogEntries

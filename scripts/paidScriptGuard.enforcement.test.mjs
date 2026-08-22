@@ -4,7 +4,7 @@
 // also referencing a provider key or a billed endpoint, unless it imports the shared guard (or is
 // on the small explicit allowlist below, each entry with a written reason).
 //
-// Background: scripts/model-bakeoff.mjs read .env.local's OPENAI_API_KEY on a bare invocation and
+// Background: a retired experiment read .env.local's OPENAI_API_KEY on a bare invocation and
 // fired live paid calls with no flag, causing a real owner charge (2026-07-26). It was fixed, but
 // 9 sibling scripts were found still doing the identical thing (TL2-1, 2026-08-13), plus 3 more
 // found re-verifying that list by hand. This test is what closes the CLASS, not just the instances.
@@ -78,16 +78,7 @@ const LOCAL_IMPORT_PATTERN = /(?:from\s+|require\(\s*|import\(\s*)["'](\.\.?\/[^
  * keyword WITHOUT importing the guard. Every entry needs a written reason. Keep this list short -
  * a growing allowlist defeats the point of the test.
  */
-const ALLOWLIST = {
-  // Owner-authorized 2026-07-20: copies already-configured key VALUES from .env.local straight into
-  // Vercel's preview/production env store via `vercel env add` (values never printed/logged). This
-  // is a key-provisioning utility, not a paid-API-calling script - it never itself calls
-  // api.openai.com/generativelanguage.googleapis.com/Firecrawl/etc, so the guard's --live/
-  // --yes-i-accept-cost spend gate does not apply to it. The billed-keyword match here is the
-  // Firecrawl/OpenAI/Brave var NAMES it copies, not a call it makes.
-  "scripts/stress/sync-preview-keys.mjs": "key-copy utility (Vercel env), no paid API call of its own",
-  "scripts/stress/sync-production-keys.mjs": "key-copy utility (Vercel env), no paid API call of its own",
-};
+const ALLOWLIST = {};
 
 function walk(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -203,7 +194,7 @@ describe("paid script guard enforcement (TL2-1 class-wide closure)", () => {
         `(directly or through a local helper module they import) without importing ` +
         `scripts/lib/paidScriptGuard.mjs:\n  - ${violations.join("\n  - ")}\n\n` +
         `Fix: either migrate the script onto requireLiveApproval()/requireDevToolingKey() from the ` +
-        `guard (see scripts/model-bakeoff.mjs or scripts/phase1-enrich-build.mjs for the pattern), ` +
+        `guard (see scripts/lib/paidScriptGuard.mjs for the pattern), ` +
         `delete the script if it's a finished one-off investigation, or add it to this test's ` +
         `ALLOWLIST with a written reason if it is a genuine, reviewed exception.`
       );

@@ -16,7 +16,7 @@
 //      `random() * delay`) when no `Retry-After` header is present, so a burst of simultaneous 429s
 //      does not retry in lockstep.
 //   3. Bounds total attempts (`maxAttempts`, default 2 - matches the pre-existing single-retry budget
-//      so paid-rung cost/latency does not silently grow) and returns the final (possibly still-429)
+//      so paid-call cost/latency does not silently grow) and returns the final (possibly still-429)
 //      Response to the caller once exhausted, rather than throwing - the caller decides what error/
 //      reason to surface, exactly as it did before this helper existed.
 //   4. Lets the caller inspect a 429 body via `onRetryDecision` (given a CLONED, unread Response) and

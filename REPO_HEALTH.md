@@ -1,10 +1,20 @@
 # Repo Health - sync truth
 
-Regenerate from real git output, don't hand-drift. Last updated: 2026-08-19 (root-docs refresh;
-every count below from `git branch`, `git rev-list --left-right --count`, `git worktree list` run
-that day). Older branch-sweep history (the 2026-07-29 and 2026-08-09 deletion passes, the 44-branch
-table) lives in this file's git history and in
-`docs/archive/PROGRESS_HISTORY_2026-07_2026-08.md`.
+Regenerate branch tables from real git output, don't hand-drift. Last updated: 2026-08-21. The
+branch/worktree inventory below remains the verified 2026-08-19 snapshot; it has not been
+destructively refreshed as part of the decoder change.
+
+## Current working tree 2026-08-21
+
+- Active branch: `fix/simple-gpt54-decode-audit`.
+- State: local, uncommitted, unpushed, and undeployed.
+- Scope: free corpus/cache/learned/master resolution plus a single GPT-5.4 mini paid decoder;
+  retired executable provider rungs and their current tooling/docs are removed.
+- Production truth is unchanged until an owner-approved merge/deploy. See `PROGRESS.md` for local
+  proof results and `docs/DEPLOY_TRUTH.md` for the release gate.
+
+Older branch-sweep history (the 2026-07-29 and 2026-08-09 deletion passes, the 44-branch table)
+lives in this file's git history and in `docs/archive/PROGRESS_HISTORY_2026-07_2026-08.md`.
 
 ## Branch truth 2026-08-19
 
@@ -78,11 +88,6 @@ Each pins its branch (a checked-out branch cannot be deleted). Triage the branch
 - Backup/recovery: VERIFIED 2026-08-07 (restore drill passed; weekly Sunday backup live, 28-day
   retention; see `docs/RECOVERY.md`, F-08 CLOSED).
 - F-01/F-07 Firestore rules/indexes redeploy pending, owner-gated.
-- `src/eval/eval.test.ts` still writes its mock-eval table to the deleted
-  `docs/decode/eval-baseline.md` path (harmless, resurrects the file untracked); retarget in a code
-  round.
-- `src/services/decode/{index.ts,contract.ts,README.md}` comments cite the deleted
-  `docs/decode/ARCHITECTURE.md`; repoint to `docs/DECODER_ARCHITECTURE.md` in a code round.
 - `/api/health` rate-limit key from `x-forwarded-for` is client-spoofable; each allowed hit does a
   real Firestore+Turso read (low cost, follow-up hardening).
 - `computeDollarVariance` drops reconcile lines whose `unitCost` is keyed by name-only identity

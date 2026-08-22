@@ -1,5 +1,5 @@
 // src/services/upc/gtin.ts
-// GTIN utilities for the decode ladder. Pure, no imports. One product = one canonical key,
+// GTIN utilities for decode and caching. Pure, no imports. One product = one canonical key,
 // so cache/corpus/billing never pay twice for the same product in two encodings.
 //
 // GTIN-14 semantics: a GTIN-14 with indicator digit >= 1 is a CASE PACK, a different

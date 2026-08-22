@@ -13,18 +13,20 @@ const base = {
   decision: { status: "verified", confidence: 0.9, exactCodeEvidenceVerifiedByApp: true, corroborationPath: "app_verified" },
   productName: "Michelin Defender LTX M/S 275/60R20 115T",
 };
+type AutoCountInput = Parameters<typeof canAutoCount>[0];
+const typedBase: AutoCountInput = base;
 
 describe("B5 auto-count adversarial battery - never count a doubtful identity", () => {
   it("control: fully verified + corroborated tire auto-counts", () => {
-    expect(canAutoCount(base as any).allowed).toBe(true);
+    expect(canAutoCount(typedBase).allowed).toBe(true);
   });
   // D6 core (2026-07-20): the gptTrusted escape hatch is DELETED - a bare gpt_self_report can never
   // auto-count, even on a public barcode shape. This is now a reject case, not a control.
   it("gpt self-report on a public barcode does NOT auto-count (gptTrusted escape hatch deleted)", () => {
     const d = { ...base, decision: { ...base.decision, corroborationPath: "gpt_self_report", exactCodeEvidenceVerifiedByApp: false } };
-    expect(canAutoCount(d as any).allowed).toBe(false);
+    expect(canAutoCount(d).allowed).toBe(false);
   });
-  const rejects: Array<[string, any, string]> = [
+  const rejects: Array<[string, AutoCountInput, string]> = [
     ["vendor label shape", { ...base, codeType: "vendor_label", decision: { ...base.decision, corroborationPath: "gpt_self_report", exactCodeEvidenceVerifiedByApp: false } }, "not app-corroborated"],
     ["confidence 0.79", { ...base, decision: { ...base.decision, confidence: 0.79 } }, "confidence below 0.8"],
     ["suggested status", { ...base, decision: { ...base.decision, status: "suggested" } }, "not app-corroborated"],

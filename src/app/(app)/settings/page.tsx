@@ -9,7 +9,7 @@ import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { ExportMenu } from "@/components/ExportMenu";
 import { CleanupRecommendations } from "@/components/CleanupRecommendations";
 import { OwnerPinSettings } from "@/components/OwnerPinSettings";
-import { GptLadderPanel } from "@/components/GptLadderPanel";
+import { GptDecodePanel } from "@/components/GptDecodePanel";
 import { KillSwitchBanner } from "@/components/KillSwitchBanner";
 import { requiresOwnerPin } from "@/services/security/destructiveGuard";
 import { getSession, onAuthChange } from "@/lib/auth";
@@ -269,7 +269,7 @@ export default function SettingsPage() {
             {aiStatus.openaiConfigured ? "Connected (key configured)" : "Not connected (key missing)"}
           </span>
         </Row>
-        <GptLadderPanel gptLadder={aiStatus.gptLadder} />
+        <GptDecodePanel gptDecode={aiStatus.gptDecode} />
         <Row label="Daily lookup count">
           <span className="text-sm text-zinc-600">
             {settings.dailyLookupCount}/{settings.dailyLookupLimit}

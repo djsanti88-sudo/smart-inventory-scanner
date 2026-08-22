@@ -7,7 +7,7 @@
 // stored key must equal what the runtime lookup computes from a scanned code).
 //
 // Scope: ONLY the tires / tire_part_numbers tables. Never touches retail / decode_cache /
-// goupc_* / decode_archive.
+// legacy provider tables / decode_archive.
 
 /** Column order for the Turso `tires` table — must match import-tires-turso.mjs's TIRES_COLUMNS. */
 export const TIRES_COLUMNS = [

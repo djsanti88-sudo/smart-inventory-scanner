@@ -61,14 +61,11 @@ here is approved to run yet; the owner picks items.
   (`runDecodePipeline`) per `CLAUDE.md`. Remaining thinning is optional polish, not a blocker.
 - [x] **Remove dead code**: `autoAcceptVerifiedDecodes` (types.ts + defaults; gated nothing) - done
   2026-07-12.
-- ~~Deprecate `decodeOrchestrator.ts`~~ - **DONE**: `CLAUDE.md` confirms it is types-only/deprecated,
-  superseded by the ladder in `src/server/decode/pipeline.ts`.
-- [ ] **Archive `geminiProvider.ts`**: `src/services/ai/geminiProvider.ts` still exists on disk
-  (verified 2026-07-29) even though `GEMINI_DECODE_DISABLED = true` permanently gates it out of
-  decode. Low priority - it survives intentionally for legacy lookup/correction re-check per
-  `CLAUDE.md`; only archive if that legacy path is also retired.
-- [ ] **Add missing unit tests**: `fetchV2/scoring.ts`, `fetchV2/siblingGuard.ts`,
-      `fetchV2/index.ts`, `tire/tirePrefixHints.ts` - not re-verified this pass; treat as still open.
+- ~~Consolidate unknown-code decode~~ - **DONE**: `src/server/decode/pipeline.ts` now owns the complete
+  free corpus/cache -> GPT-5.4 mini path. Retired provider clients, provider drivers, probes, and tests
+  were removed on 2026-08-21.
+- [ ] **Add missing unit tests**: re-evaluate `tire/tirePrefixHints.ts` coverage when that generated
+      map is next rebuilt.
 - [ ] **Full proof run**: `npm run proof:full` + `npm run test:e2e` + `npm run qa:bots` before any
       push decision - now a standing, repeatable gate (`npm run qa:revision` runs the full handoff
       gate in one command) rather than a one-time TIER 2 task.

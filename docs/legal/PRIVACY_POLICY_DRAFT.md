@@ -27,7 +27,7 @@ We do not intentionally collect sensitive personal data (such as government ID n
 We use collected information to:
 
 - Provide, operate, and maintain the Service, including scanning, counting, syncing, and inventory management features.
-- Resolve unknown product codes through the decode ladder, including AI-assisted lookup where enabled.
+- Resolve unknown product codes through free catalog/cache lookups and AI-assisted lookup where enabled.
 - Authenticate accounts and enforce tenant (business) data separation.
 - Monitor, secure, and improve the Service, including debugging and abuse prevention.
 - Communicate with you about your account, billing, and material changes to the Service.
@@ -45,11 +45,9 @@ We use the following categories of sub-processors to operate the Service. This l
 | Google Firebase | Authentication and database (Firestore) | Account credentials, business inventory data | Primary data store for accounts and tenant data |
 | Turso | Catalog and decode cache (libsql) | Product catalog lookups, decode cache entries | Does not store customer-identifying data |
 | OpenAI | AI-assisted product decode/lookup | Sanitized technical product fields only (see below) | Provider-stated retention approximately 30 days; used only for unresolved/unknown code enrichment |
-| Google Gemini | Legacy lookup / correction re-check (not used for primary decode) | Sanitized technical product fields only (see below) | Provider-stated retention approximately 30 days; permanently excluded from the primary decode ladder |
-| Firecrawl | Web page retrieval to verify product evidence | Publicly available product page content | Used for evidence verification, not customer PII |
 | Stripe | Payment processing (when billing is enabled) | Billing contact details, payment transaction data | Stripe handles and stores payment card data directly; we do not store full card numbers |
 
-**Sanitization before AI calls.** Before any data is sent to an AI provider (OpenAI or Google Gemini), a deterministic sanitizer removes or masks phone numbers, email addresses, obvious personal names, and cost/price/margin patterns. Only technical product identification fields (such as barcode values, brand, size, and model text) are sent to AI providers. AI providers are never sent full customer records, pricing, or contact information as part of the decode process.
+**Sanitization before AI calls.** Before any data is sent to OpenAI, a deterministic sanitizer removes or masks phone numbers, email addresses, obvious personal names, and cost/price/margin patterns. Only technical product identification fields (such as barcode values, brand, size, and model text) are sent. OpenAI is never sent full customer records, pricing, or contact information as part of the decode process.
 
 ## 5. Data Retention
 

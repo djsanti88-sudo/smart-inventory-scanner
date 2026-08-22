@@ -500,7 +500,7 @@ export function LiveScanFeed() {
                         <StatusBadge status={e.status} />
                       )}
                     </td>
-                    {/* STALE-NOTE FIX (goupc-cap-rootcause item 3): decodeNote is now cleared/refreshed by
+                    {/* Stale-note fix: decodeNote is now cleared/refreshed by
                         the store on every settle, so it should never read the in-flight note once the row
                         is done decoding. This guard is a defensive backstop against any future settle path
                         that forgets to clear it - the in-flight note is only ever honest while the row is

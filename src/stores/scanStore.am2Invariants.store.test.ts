@@ -76,7 +76,7 @@ describe("AM-2 invariant pins (suggested tier never self-counts; Phase-7 gate un
 const PHANTOM_CODE = "222333444553"; // valid-check-digit GTIN shape, routes through decode
 const PHANTOM_GTIN = "8848111201762"; // bad GS1 check digit - well-formed junk, must be scrubbed
 const SUGGESTED_WITH_PHANTOM_GTIN = {
-  providerNames: ["gemini"],
+  providerNames: ["gpt-5.4-mini"],
   results: [
     {
       productName: "Maybe Tire Thing",

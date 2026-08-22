@@ -23,9 +23,8 @@ import { test, expect, type Page } from "./fixtures";
 // ("PROVISIONAL-WRONG (Task 9 finding)").
 
 const AI_OFF = {
-  liveEnabled: false, autoDecodeOnScan: false, geminiEnabled: false, openaiEnabled: false,
-  geminiConfigured: false, openaiConfigured: false, premiumFallback: false, mode: "off",
-  dailyLimit: 200, missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"], e2e: true,
+  liveEnabled: false, autoDecodeOnScan: false, openaiConfigured: false, mode: "off",
+  dailyLimit: 200, missingKeys: ["OPENAI_API_KEY"], e2e: true,
 };
 
 const WRONG_CODE = "049000006346";

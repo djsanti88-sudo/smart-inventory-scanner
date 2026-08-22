@@ -10,11 +10,7 @@ const PROOF = "e2e/proof";
 const STATUS = {
   liveEnabled: true,
   autoDecodeOnScan: true,
-  geminiEnabled: true,
-  openaiEnabled: true,
-  geminiConfigured: true,
   openaiConfigured: true,
-  premiumFallback: true,
   mode: "aggressive",
   dailyLimit: 100,
   missingKeys: [],
@@ -31,17 +27,17 @@ function result(over: Record<string, unknown>) {
 
 const DECODE: Record<string, object> = {
   "878106003504": {
-    providerNames: ["gemini", "openai"], premiumUsed: false,
+    providerNames: ["gpt-5.4-mini"], premiumUsed: false,
     results: [result({ productName: "Coca-Cola Classic", brand: "Coca-Cola", upc: "878106003504", sourceUrls: ["https://gs1.org/878106003504"] })],
     decision: { status: "verified", confidence: 0.97, reason: "Verified AI Decode: providers agree, code confirmed in a snippet.", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "agree" } },
   },
   "111111111117": {
-    providerNames: ["gemini", "openai"], premiumUsed: true,
+    providerNames: ["gpt-5.4-mini"], premiumUsed: true,
     results: [result({ productName: "Maybe Energy Bar", brand: "Generic", upc: "111111111117" })],
     decision: { status: "suggested", confidence: 0.5, reason: "Suggested, not trusted. Evidence is weak.", evidenceStrength: "url_only", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "agree" } },
   },
   "222222222224": {
-    providerNames: ["gemini", "openai"], premiumUsed: false,
+    providerNames: ["gpt-5.4-mini"], premiumUsed: false,
     results: [result({ productName: "Creamer", brand: "Laird" }), result({ productName: "Receptacle", brand: "Leviton" })],
     decision: { status: "conflict", confidence: 0.2, reason: "Providers conflict on brand.", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "conflict" } },
   },

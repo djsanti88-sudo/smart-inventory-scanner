@@ -11,11 +11,7 @@ const PROOF = "e2e/proof/batch-approve";
 const AI_ON_STATUS = {
   liveEnabled: true,
   autoDecodeOnScan: true,
-  geminiEnabled: true,
-  openaiEnabled: true,
-  geminiConfigured: true,
   openaiConfigured: true,
-  premiumFallback: false,
   mode: "aggressive",
   dailyLimit: 100,
   missingKeys: [],
@@ -48,7 +44,7 @@ const CODES = Array.from({ length: 6 }, (_, i) => {
 // lands open + hasSuggestion in Needs Review, which is exactly the Suggested pile this screen targets.
 function suggestedPayload(code: string, n: number) {
   return {
-    providerNames: ["gemini"],
+    providerNames: ["gpt-5.4-mini"],
     results: [
       result({
         productName: `Batch Widget ${n}`,

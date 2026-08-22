@@ -64,7 +64,7 @@ export type AliasType =
 /** Where a record came from. "csv_import" (Task 3.6) = a human-uploaded onboarding CSV row; trusted
  *  like "manual" (aliases from it may be approved: true immediately), but tagged distinctly so the
  *  origin of a mapping stays auditable. */
-export type Source = "seed" | "manual" | "scan" | "human_review" | "ai_mock" | "ai_gemini" | "ai_openai" | "catalog" | "csv_import";
+export type Source = "seed" | "manual" | "scan" | "human_review" | "ai_mock" | "ai_openai" | "catalog" | "csv_import";
 
 /** Operations that get queued for idempotent sync. */
 export type SyncOperation =
@@ -306,7 +306,7 @@ export interface UnknownCodeReview {
    *  inputs never reach a customer's disk); a live review computes it from those inputs instead. */
   identityBand?: IdentityConfidenceBand;
   crossCheckDecision: string;
-  // Per-provider summaries (e.g. Gemini result, OpenAI result) shown in the review.
+  // Decode-source summaries shown in the platform review.
   decodeProviderSummaries?: { provider: string; productName: string; sources: number }[];
   // Prefix intelligence (platformOwner-only display): the brand the barcode prefix maps to, and the
   // anti-hallucination firewall's conflict reason (if any). Hints/evidence only, never identity truth.
@@ -314,7 +314,7 @@ export interface UnknownCodeReview {
   prefixConflictReason?: string;
   // platformOwner-only: the proposed product already exists in the shop's catalog under a different code.
   reverseUpcConflictNote?: string;
-  // Identity-merge (decode ladder Task 9) suggest_link: a decode that fuzzily matches an existing product
+  // Identity-merge suggest_link: a decode that fuzzily matches an existing product
   // (same brand + name similarity, or a plus-generation / tire-size difference on a GTIN match) attaches
   // that product id here so the UI can offer a one-tap "link to existing product?" instead of a duplicate.
   // A suggestion only - it never auto-links or counts. Cleared when the review is resolved.
@@ -337,7 +337,7 @@ export interface UnknownCodeReview {
   decisionUpdatedAt?: string;
   syncStatus: SyncStatus;
   idempotencyKey: string;
-  // Phase 6 correction recheck (Gemini Pro, correction-only). Display/diagnostic; never auto-saves or counts.
+  // Optional correction recheck. Display/diagnostic only; never auto-saves or counts.
   correctionRecheckStatus?: "requested" | "verified_correction" | "insufficient_evidence" | "conflict" | "unavailable";
   correctionRecheckedAt?: string | null;
   correctionRecheckMissingKeys?: string[];
@@ -519,8 +519,8 @@ export interface AiLookupResult {
   // Evidence channels (optional). The app verifies these independently - the model's claims here
   // are NOT trusted as truth.
   sourceSnippets?: string[]; // text snippets from sources / web-search results
-  groundingChunks?: string[]; // Gemini grounding chunk text
-  // Full text of a page the APP actually fetched and read for this result (page-fetch / firecrawl scrape).
+  groundingChunks?: string[]; // provider evidence text retained for backward-compatible records
+  // Full source text the app actually fetched and read for this result (legacy evidence compatibility).
   // This is the STRONGEST evidence channel: the EvidenceVerifier confirms the exact code in this real
   // page text. Kept on the result so its fetched_source provenance survives any re-verification via
   // evidenceOf() (it is never capped/sanitized into a snippet - it stays the raw fetched source).
@@ -603,18 +603,16 @@ export interface AiStatus {
   lastAttemptAt: string | null;
   lastProvider: string;
   lastFailureReason: string;
-  /** GPT-5.5 ladder rung's own daily dollar/call status (Task 6 Settings spend panel). Optional
+  /** GPT-5.4 mini daily dollar/call status. Optional
    *  because it is a newer server field; a stale/mocked GET response without it is still valid. */
-  gptLadder?: {
+  gptDecode?: {
     spentTodayUsd: number;
     capUsd: number;
     callsToday: number;
     enabled: boolean;
   };
-  /** Task 8: the real decode ladder order (MASTER BASELINE v1). Gemini is never in it - decode is
-   *  corpus -> Go-UPC -> Fetch V2 -> GPT only. Optional because it is a newer server field; a stale
-   *  GET response without it is still valid. */
-  decodeLadder?: string[];
+  /** Current decode path, free sources first and GPT last. */
+  decodePath?: string[];
   /** Spec 2 (M1): SERVER kill switch (AI_LOOKUP_KILL_SWITCH env var). Distinct from `emergencyStop`
    *  above, which is a CLIENT preference the shop owner toggles locally - this one reflects a server
    *  operator's total-stop that the shop owner cannot turn off themselves. */

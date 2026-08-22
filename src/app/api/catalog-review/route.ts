@@ -5,14 +5,14 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS } from "@/services/db/types";
 import { accessLevelServer } from "@/services/security/roleAccess";
 import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
-import { ladderStorage } from "@/server/upc/storage";
+import { decodeStorage } from "@/server/decode/storage";
 import { logServerEvent } from "@/server/log";
 
 export const runtime = "nodejs";
 
 // Task 3 (owner step 3): platform-owner-only listing of reviewable catalogEntries for human approval.
 // GET only - lists TWO reviewable shapes from the top-level (shared, cross-tenant) `catalogEntries`
-// collection, paginated: legacy verificationStatus "pending" docs AND ladder-written docs
+// collection, paginated: legacy verificationStatus "pending" docs AND decoder-written docs
 // (verificationStatus "verified" + provenanceTier "ladder_verified_strong" - masterAppend.ts never
 // writes "pending", so a pending-only query left this queue permanently empty). Each entry carries
 // pendingKind ("pending" | "ladder_verified") so the client can tell them apart. human_verified and
@@ -42,7 +42,7 @@ function authConfigurationError(error: unknown): boolean {
 }
 
 // Pagination cursor: the two queue queries order by DIFFERENT fields (pending -> firstSeenAt,
-// ladder -> updatedAt) and any given doc carries only one of them, so a single shared cursor doc
+// decoder -> updatedAt) and any given doc carries only one of them, so a single shared cursor doc
 // snapshot cross-applied to both queries would make the Admin SDK throw ("Field ... is missing in
 // the provided DocumentSnapshot"). Each stream therefore keeps its OWN cursor doc id, packed into
 // one opaque base64url token; each is applied only to its own query. A malformed token is treated
@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
     // client IP even though each route configures its own distinct rate-limit env var.
     const rl = await checkRateLimit(`CATALOG_REVIEW:${ip}`, {
       limit: intEnv(process.env.CATALOG_REVIEW_RATE_LIMIT, CATALOG_REVIEW_RATE_LIMIT),
-      storage: await ladderStorage(),
+      storage: await decodeStorage(),
     });
     if (!rl.allowed) {
       logServerEvent({ route: "/api/catalog-review", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
@@ -149,7 +149,7 @@ export async function GET(request: NextRequest) {
     const db = getAdminDb();
 
     // Firestore has no OR across the two reviewable shapes' different field pairs, so each branch
-    // runs one query per shape (pending / ladder-written) and merges, tagging pendingKind.
+    // runs one query per shape (pending / decoder-written) and merges, tagging pendingKind.
     const tag = (
       docs: FirebaseFirestore.QueryDocumentSnapshot[],
       pendingKind: "pending" | "ladder_verified",
@@ -173,7 +173,7 @@ export async function GET(request: NextRequest) {
       return json({ entries, nextCursor: null });
     }
 
-    // Legacy pending docs carry firstSeenAt; ladder-written docs are stamped updatedAt by
+    // Legacy pending docs carry firstSeenAt; decoder-written docs are stamped updatedAt by
     // masterAppend.ts, so each query orders by the field its own docs are keyed on and the merge
     // sorts each entry by ITS stream's field, newest first.
     let pendingQuery = db
@@ -219,8 +219,8 @@ export async function GET(request: NextRequest) {
     const pendingDocs = pendingResult.status === "fulfilled" ? pendingResult.value.docs : [];
     const ladderDocs = ladderResult.status === "fulfilled" ? ladderResult.value.docs : [];
     // Kind-aware sort key: each entry sorts by the SAME field its stream's query ordered by
-    // (pending -> firstSeenAt, ladder -> updatedAt). masterAppend.ts upserts with merge:true, so a
-    // legacy pending doc a strong ladder decode upgrades keeps its old firstSeenAt while gaining a
+    // (pending -> firstSeenAt, decoder -> updatedAt). masterAppend.ts upserts with merge:true, so a
+    // legacy pending doc a strong decode upgrades keeps its old firstSeenAt while gaining a
     // fresh updatedAt - keying such a doc by firstSeenAt would push it below its cursor position
     // and page 2's startAfter would skip it forever.
     const timestampOf = (e: { pendingKind: "pending" | "ladder_verified" } & Record<string, unknown>): string => {

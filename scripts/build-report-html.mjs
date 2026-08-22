@@ -128,18 +128,17 @@ function applyScanHealth(data, outDir) {
   let sh;
   try { sh = JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return data; }
   const per = Array.isArray(sh.perCode) ? sh.perCode : [];
-  const tires = per.filter((r) => r.shouldAutoCount !== false);
-  const found = tires.filter((r) => r.brandHit).length;
-  const idAcc = tires.length ? Math.round((found / tires.length) * 100) : (sh.identificationAccuracyPct || 0);
+  const found = per.filter((row) => row.expectedBrand && String(row.productName || '').toLowerCase().includes(String(row.expectedBrand).toLowerCase())).length;
+  const idAcc = per.length ? Math.round((found / per.length) * 100) : 0;
   const fmtMs = (ms) => (ms >= 1000 ? (ms / 1000).toFixed(ms >= 10000 ? 0 : 1) + 's' : ms + 'ms');
   data.headline = `Decode finds the right tire ${idAcc}% of the time, but auto-verifies ${sh.decodeSuccessPct}%. That is the gap to close.`;
   data.scanHealth = [
-    { n: idAcc + '%', k: 'Found the right tire', s: `correct brand on ${found} of ${tires.length}` },
-    { n: sh.decodeSuccessPct + '%', k: 'Auto-verified', s: 'counted with no human (the gap)' },
+    { n: idAcc + '%', k: 'Found the expected brand', s: `brand matched on ${found} of ${per.length}` },
+    { n: sh.decodeSuccessPct + '%', k: 'Resolved', s: `${sh.needsReviewPct}% remained in Needs Review` },
     { n: 'p50 ' + fmtMs(sh.latencyMs.p50), k: 'Decode speed', s: `p95 ${fmtMs(sh.latencyMs.p95)}, max ${fmtMs(sh.latencyMs.max)}` },
   ];
-  data.scanNote = `${tires.length} FRESH tire codes through the live pipeline this week (new codes each run, so the cache cannot fake the speed). It identified the correct brand ${idAcc}% of the time, but auto-verified ${sh.decodeSuccessPct}% - every found tire was routed to needs-review as a "suggestion" instead of being counted. False auto-counts: ${sh.falseAutoCounts} (safe). The gap is the verify gate, not the finding.`;
-  data.scanCostLine = `Decode spend this run: about $${sh.cost.estUsd} for ${per.length} codes (mini models: ${sh.cost.firecrawlCredits} firecrawl credits, ${sh.cost.geminiCalls} gemini, ${sh.cost.openaiCalls} openai calls). Codes already in your database cost $0.`;
+  data.scanNote = `${per.length} rotated tire codes ran through the current free-first decoder. Expected-brand identity matched ${idAcc}% of rows and ${sh.needsReviewPct}% remained in Needs Review. Corpus and positive-cache hits made no paid call.`;
+  data.scanCostLine = `${sh.cost.gptDecodeCalls} GPT-5.4 mini calls and up to ${sh.cost.webSearchCallsReserved} web-search calls were recorded. True spend is not inferred from response metadata; reconcile it in the OpenAI provider console.`;
   return data;
 }
 

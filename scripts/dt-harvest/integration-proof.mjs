@@ -1,6 +1,6 @@
 // DT harvest Task 6 Step 2: integration proof - 10 newly-added Discount Tire GTINs
 // resolve through the REAL decode route at the FREE corpus rung ($0, no paid provider).
-// Run against a dev server started with paid-provider keys BLANKED, so a paid rung is
+// Run against a dev server started with the OpenAI key blanked, so paid decode is
 // impossible: any resolution MUST come from the local corpus. Proves the applied rows
 // are live in production's rung-1 path, not just present in the DB file.
 import { readFile } from "node:fs/promises";

@@ -33,8 +33,8 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   getAdminDb: () => ({ doc: () => ({ get: (...args: unknown[]) => memberGet(...args) }) }),
 }));
 
-const ladderStorage = vi.fn();
-vi.mock("@/server/upc/storage", () => ({ ladderStorage: (...args: unknown[]) => ladderStorage(...args) }));
+const decodeStorage = vi.fn();
+vi.mock("@/server/decode/storage", () => ({ decodeStorage: (...args: unknown[]) => decodeStorage(...args) }));
 
 const legacyRateLimit = vi.fn();
 const killSwitch = vi.fn();
@@ -88,7 +88,7 @@ beforeEach(() => {
   trustedExactCheck.mockReset().mockReturnValue({ allowed: true, retryAfterMs: 0 });
   logServerEvent.mockReset();
   runDecodePipeline.mockReset().mockResolvedValue({ kind: "computed", payload: { debug: {} }, cached: false, paidComputeCharged: false });
-  ladderStorage.mockReset().mockResolvedValue({});
+  decodeStorage.mockReset().mockResolvedValue({});
   legacyRateLimit.mockReset().mockResolvedValue({ allowed: true, retryAfterMs: 0 });
   killSwitch.mockReset().mockReturnValue(false);
   readDailyUsedForAccount.mockReset().mockResolvedValue(0);
@@ -155,7 +155,9 @@ describe("god account server bypass on /api/ai-lookup", () => {
   });
 
   it("god bypasses the decode per-account daily cap; a non-god identical request is 429'd account_daily_cap", async () => {
-    readDailyUsedForAccount.mockResolvedValue(999_999); // far over any default cap
+    runDecodePipeline.mockImplementation(async (request: { god?: boolean }) => request.god
+      ? { kind: "computed", payload: { debug: {} }, cached: false, paidComputeCharged: false }
+      : { kind: "cap_blocked", message: "cap reached", reasonCode: "account_daily_cap" });
     const { POST } = await import("./route");
 
     const godRes = await POST(decodeRequest());

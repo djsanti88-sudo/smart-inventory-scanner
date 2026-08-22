@@ -1,7 +1,6 @@
 // Weekly intelligence pipeline (permanent): ensure a real dev server -> live tire decode scan on FRESH
-// codes (speed + accuracy + cost) -> clean tire-focused report -> PDF -> email. Runs on the Claude
-// subscription for judgment; the live tire decode uses your mini-model keys (a few cents per run).
-// Usage: node scripts/weekly-intel.mjs   (or: npm run intel:now)
+// codes (speed + accuracy + provider-console reconciliation) -> report -> PDF -> email.
+// Usage: node scripts/weekly-intel.mjs --allow-paid
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,6 +15,7 @@ const BASE = `http://localhost:${PORT}`;
 const COUNT = Number(process.env.INTEL_TIRE_COUNT || 15);
 const date = new Date().toISOString().slice(0, 10);
 const reportDir = `reports/product-intel/${date}`;
+const allowPaid = process.argv.includes('--allow-paid');
 
 const sh = (cmd) => { console.log('> ' + cmd); execSync(cmd, { stdio: 'inherit' }); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -23,11 +23,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function serverReady() {
   try {
     const s = await (await fetch(BASE + '/api/ai-lookup')).json();
-    return !s.e2e && (s.openaiConfigured || s.goUpc?.configured);
+    return !s.e2e && s.openaiConfigured;
   } catch { return false; }
 }
 
 (async () => {
+  if (!allowPaid) throw new Error('Refusing a potentially paid report. Re-run with --allow-paid after confirming the GPT budget and provider console.');
   let started = null;
   if (!(await serverReady())) {
     console.log(`Starting dev server on :${PORT} for live decode ...`);
@@ -41,7 +42,7 @@ async function serverReady() {
   }
   try {
     // 1. Live tire decode scan on FRESH rotated codes (writes scan-health.json).
-    try { sh(`node scripts/weekly-tire-scan.ts --base=${BASE} --count=${COUNT} --date=${date}`); }
+    try { sh(`node scripts/weekly-tire-scan.ts --allow-paid --base=${BASE} --count=${COUNT} --date=${date}`); }
     catch (e) { console.warn('Tire scan failed; report will show placeholder scan health. ' + e); }
     // 2. Build the clean tire-focused report (reads scan-health.json).
     sh(`node scripts/build-report-html.mjs ${reportDir}`);

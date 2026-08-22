@@ -11,7 +11,7 @@ const HANKOOK_CODE = "715459332915";
 
 // FAST hot path (mode:"decode"): grounded but NOT app-strong -> suggested (matches the proven live shape).
 const HANKOOK_FAST_SUGGESTED = {
-  providerNames: ["gemini"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{
     productName: "Hankook Dynapro AT2 LT265/70R17 121S", brand: "Hankook", category: "Tire",
     specsShort: "LT265/70R17 121S", specsFull: "", primarySku: "", primaryBarcode: HANKOOK_CODE, gtin: "",
@@ -23,7 +23,7 @@ const HANKOOK_FAST_SUGGESTED = {
 
 // DEEP path (mode:"decode-deep" + scanContext:"tire"): page-fetched + app-verified exact code -> verified.
 const HANKOOK_DEEP_VERIFIED = {
-  providerNames: ["gemini"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{
     productName: "Hankook Dynapro AT2 LT265/70R17 121S", brand: "Hankook", category: "Tire",
     specsShort: "LT265/70R17 121S", specsFull: "", primarySku: "", primaryBarcode: HANKOOK_CODE, gtin: "",
@@ -66,7 +66,7 @@ function tireAiStore() {
 const COOPER_CODE = "029142753568";
 
 const COOPER_FAST_SUGGESTED = {
-  providerNames: ["gemini"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{
     productName: "Cooper Discoverer AT3 245/75R16", brand: "Cooper", category: "Tire",
     specsShort: "245/75R16", specsFull: "", primarySku: "", primaryBarcode: COOPER_CODE, gtin: "",
@@ -77,7 +77,7 @@ const COOPER_FAST_SUGGESTED = {
 };
 
 const COOPER_DEEP_VERIFIED = {
-  providerNames: ["gemini"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{
     productName: "Cooper Discoverer AT3 245/75R16", brand: "Cooper", category: "Tire",
     specsShort: "245/75R16", specsFull: "", primarySku: "", primaryBarcode: COOPER_CODE, gtin: "",

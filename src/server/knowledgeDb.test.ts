@@ -12,6 +12,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 
 import {
   __resetKnowledgeDbForTests,
@@ -74,8 +75,7 @@ describe("knowledgeDb resolveDbPath fail-loud temp staleness gate", () => {
   });
 
   it("preserves production behavior: gz decompress path still writes+returns TMP_DB_PATH, never treated as stale on first write", () => {
-    const gzip = require("node:zlib").gzipSync as (b: Buffer) => Buffer;
-    fs.writeFileSync(gzPath, gzip(Buffer.from("decompressed-db-contents")));
+    fs.writeFileSync(gzPath, gzipSync(Buffer.from("decompressed-db-contents")));
 
     const resolved = __resolveDbPathForTests({ dbPath, gzPath, tmpDbPath });
     expect(resolved).toBe(tmpDbPath);

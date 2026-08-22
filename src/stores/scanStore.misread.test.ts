@@ -29,7 +29,7 @@ function stubFetch(resp: object) {
 }
 
 const VERIFIED = {
-  providerNames: ["gemini", "openai"],
+  providerNames: ["gpt-5.4-mini"],
   results: [
     {
       productName: "Coca-Cola Classic",

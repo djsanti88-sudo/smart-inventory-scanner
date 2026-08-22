@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS } from "@/stores/scanStore";
+import { DEFAULT_SETTINGS } from "@/stores/scanDefaults";
 import type { SessionHistoryEntry } from "@/services/sessions/sessionHistory";
 import type { CountSnapshot } from "@/services/reports/varianceReport";
 import type {

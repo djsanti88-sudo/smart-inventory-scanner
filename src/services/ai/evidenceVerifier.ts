@@ -52,7 +52,7 @@ export function looksInvalidating(text: string): boolean {
 // Such a page must NOT count as verifying evidence - it can still name a Suggested candidate downstream,
 // but it can never auto-verify permanent truth + an approved alias. (Clean single-product pages, which do
 // not carry this multi-product marker, are unaffected and still verify.)
-// NUTRITION-FACTS DBs are the SINGLE-PRODUCT variant of the same disease (2026-07-04 ladder dry run):
+// NUTRITION-FACTS DBs are the single-product variant of the same false-evidence pattern:
 // they index recycled UPCs against the wrong same-brand product - "nutrition facts and analysis" pages
 // returned Lay's for a Munchies code and vice versa (identities swapped between two codes in one batch).
 // The page text has no self-contradiction to detect, so the page CLASS is distrusted for identity.

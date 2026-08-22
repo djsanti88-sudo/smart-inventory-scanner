@@ -1,10 +1,10 @@
 // e2e/teach/lessonHelpers.test.mjs
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildWedgeKeys, median, feedRowsFromCount, attachLadderCapture } from './lessonHelpers.mjs';
+import { buildWedgeKeys, median, feedRowsFromCount, attachDecodeTraceCapture } from './lessonHelpers.mjs';
 
 // ---------------------------------------------------------------------------
-// Fake Playwright page/response/request objects for attachLadderCapture unit
+// Fake Playwright page/response/request objects for attachDecodeTraceCapture unit
 // tests - just enough of the API surface the handler actually calls:
 // page.on/off('response', handler), response.request(), response.url(),
 // response.json(), request.method(), request.postData(), request.timing().
@@ -42,8 +42,8 @@ function makeFakeLimits() {
   const calls = { recordPaidLookup: [], recordRequest: 0 };
   return {
     calls,
-    recordPaidLookup(rung) {
-      calls.recordPaidLookup.push(rung);
+    recordPaidLookup(source) {
+      calls.recordPaidLookup.push(source);
     },
     recordRequest() {
       calls.recordRequest += 1;
@@ -95,17 +95,17 @@ describe('feedRowsFromCount', () => {
   });
 });
 
-describe('attachLadderCapture timing + call coverage', () => {
+describe('attachDecodeTraceCapture timing + call coverage', () => {
   test('records latencyMs from responseEnd on an ai-lookup trace', async () => {
     const page = makeFakePage();
     const limits = makeFakeLimits();
-    const capture = attachLadderCapture(page, limits);
+    const capture = attachDecodeTraceCapture(page, limits);
 
     await page.fire(
       makeFakeResponse({
         url: 'https://app.example/api/ai-lookup',
         postData: JSON.stringify({ code: '012345678905' }),
-        jsonBody: { debug: { ladderPath: 'gpt' } },
+        jsonBody: { providerNames: ['gpt-5.4-mini'], providerStatuses: [{ provider: 'gpt-5.4-mini', status: 'ok' }] },
         timing: { responseStart: 400, responseEnd: 842 },
       })
     );
@@ -118,7 +118,7 @@ describe('attachLadderCapture timing + call coverage', () => {
   test('falls back to responseStart when responseEnd is -1/unavailable', async () => {
     const page = makeFakePage();
     const limits = makeFakeLimits();
-    const capture = attachLadderCapture(page, limits);
+    const capture = attachDecodeTraceCapture(page, limits);
 
     await page.fire(
       makeFakeResponse({
@@ -136,7 +136,7 @@ describe('attachLadderCapture timing + call coverage', () => {
   test('latencyMs is null when timing() returns null/unavailable', async () => {
     const page = makeFakePage();
     const limits = makeFakeLimits();
-    const capture = attachLadderCapture(page, limits);
+    const capture = attachDecodeTraceCapture(page, limits);
 
     await page.fire(
       makeFakeResponse({
@@ -151,16 +151,19 @@ describe('attachLadderCapture timing + call coverage', () => {
     capture.stop();
   });
 
-  test('rows() includes latencyMs via ladderTableRow', async () => {
+  test('rows() includes latencyMs via decodeTraceTableRow', async () => {
     const page = makeFakePage();
     const limits = makeFakeLimits();
-    const capture = attachLadderCapture(page, limits);
+    const capture = attachDecodeTraceCapture(page, limits);
 
     await page.fire(
       makeFakeResponse({
         url: 'https://app.example/api/ai-lookup',
         postData: JSON.stringify({ code: '012345678905' }),
-        jsonBody: { debug: { ladderPath: 'gpt' } },
+        jsonBody: {
+          providerNames: ['gpt-5.4-mini'],
+          providerStatuses: [{ provider: 'gpt-5.4-mini', status: 'ok' }],
+        },
         timing: { responseStart: 10, responseEnd: 500 },
       })
     );
@@ -172,7 +175,7 @@ describe('attachLadderCapture timing + call coverage', () => {
   test('apiCalls() records every /api/* response, not just ai-lookup', async () => {
     const page = makeFakePage();
     const limits = makeFakeLimits();
-    const capture = attachLadderCapture(page, limits);
+    const capture = attachDecodeTraceCapture(page, limits);
 
     await page.fire(
       makeFakeResponse({
@@ -218,7 +221,7 @@ describe('attachLadderCapture timing + call coverage', () => {
   test('apiCalls() ignores non-api responses', async () => {
     const page = makeFakePage();
     const limits = makeFakeLimits();
-    const capture = attachLadderCapture(page, limits);
+    const capture = attachDecodeTraceCapture(page, limits);
 
     await page.fire(
       makeFakeResponse({
@@ -236,20 +239,23 @@ describe('attachLadderCapture timing + call coverage', () => {
   test('existing ai-lookup parsing and limits charging is unaffected by the new capture', async () => {
     const page = makeFakePage();
     const limits = makeFakeLimits();
-    const capture = attachLadderCapture(page, limits);
+    const capture = attachDecodeTraceCapture(page, limits);
 
     await page.fire(
       makeFakeResponse({
         url: 'https://app.example/api/ai-lookup',
         postData: JSON.stringify({ code: '012345678905' }),
-        jsonBody: { debug: { ladderPath: 'goupc' } },
+        jsonBody: {
+          providerNames: ['gpt-5.4-mini'],
+          providerStatuses: [{ provider: 'gpt-5.4-mini', status: 'ok' }],
+        },
         timing: { responseStart: 0, responseEnd: 111 },
       })
     );
 
     assert.equal(capture.traces[0].code, '012345678905');
-    assert.equal(capture.traces[0].parsed.settledRung, 'goupc');
-    assert.deepEqual(limits.calls.recordPaidLookup, ['goupc']);
+    assert.equal(capture.traces[0].parsed.settledSource, 'gpt_5_4_mini');
+    assert.deepEqual(limits.calls.recordPaidLookup, ['gpt']);
     assert.equal(limits.calls.recordRequest, 1);
     capture.stop();
   });
@@ -257,7 +263,7 @@ describe('attachLadderCapture timing + call coverage', () => {
   test('a broken response (json() throws) still gets recorded in apiCalls defensively', async () => {
     const page = makeFakePage();
     const limits = makeFakeLimits();
-    const capture = attachLadderCapture(page, limits);
+    const capture = attachDecodeTraceCapture(page, limits);
     const badResponse = {
       url: () => 'https://app.example/api/ai-lookup',
       status: () => 500,

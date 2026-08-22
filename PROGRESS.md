@@ -36,24 +36,37 @@ Earlier this cycle: PR #40/#41 consolidation (one decode mode, Gemini deleted, c
 free identity, `source_tier` on Turso, CI runs proof:all) and PR #42 root-docs refresh - history in
 `docs/archive/PROGRESS_HISTORY_2026-07_2026-08.md`.
 
-## Next (owner decides, none started)
+**PR #45 decoder simplification is under review on `fix/simple-gpt54-decode-audit`.** It retains one
+decode path: tire corpus, retail corpus, platform learned products, master catalog, positive caches,
+then one paid GPT-5.4 mini request when every free source misses.
 
-1. Open decisions in DECISIONS.md 2026-08-19: (a) retail corpus = truth vs high-trust suggestion;
-   (b) tenant approvals promoting into the platform learned tier.
-2. Deep-verify multi-variant auto-apply gap (`backgroundVerifyDeep`) - small separate PR
-   (DECISIONS.md FOLLOW-UP).
-3. `scanStore.ts` `canon` TEMP stub (pre-existing on master since `0570ca9e`) disables the
-   canonical-GTIN orphan dedup it documents - separate ticket.
-4. Branch triage: 10+ unmerged local branches listed in `REPO_HEALTH.md` - decide deliberately,
-   never drive-by.
-5. Tier-3 followups backlog: `docs/superpowers/plans/2026-08-09-tier3-followups.md` (items 2-9,
-   plus 10 charge-settlement hardening and 11 honest cap-scope reason code).
-6. Deep-review residuals (a)-(e) recorded, not fixed, in DECISIONS.md "Consolidation pass" entry.
+All other executable provider rungs, clients, provider-specific scripts, environment switches,
+and current operational docs were removed. GPT suggestions remain unverified until app evidence or
+human approval verifies them. Negative results are not cached, every scan still counts before
+decode, and charge/cap settlement happens at actual paid egress.
+
+Local verification completed on this branch:
+
+- `npm run proof:all`: passed (3,482 Vitest tests passed, 99 skipped; 117 Node tests passed,
+  125 local-data skips; 268 teach tests passed; import graph and orphan checks passed).
+- `npm run build`: passed.
+- `npm run test:ledger`: passed (40 tests).
+- `npm run test:firebase`: passed (136 tests).
+- Focused customer-path Playwright proof: passed (8 tests covering GPT burst coalescing, mixed-tier
+  count law, current decoder UI states, decode, IndexedDB persistence, and offline retry/idempotency).
+
+## Next (owner-gated, none performed)
+
+1. Review and commit this branch.
+2. Push/open a PR only with explicit owner approval.
+3. Remove retired provider credentials from the real deployment environment and deploy only with
+   explicit owner approval. The local environment manifest now rejects those keys.
+4. Run authenticated production smoke and billing-console reconciliation after deployment.
 
 ## Standing hazards
 
-- `benchmark-tire-db-automation` is PARKED - do NOT delete or merge (merging deletes ~152k lines
-  including the poison guard). Standing owner order; also in `REPO_HEALTH.md` CRITICAL callouts.
+- `benchmark-tire-db-automation` is PARKED - do NOT delete or merge. Standing owner order; also in
+  `REPO_HEALTH.md` CRITICAL callouts.
 - Merging or pushing to `master` auto-deploys production - owner-gated, every time
   (`docs/DEPLOY_TRUTH.md`).
 

@@ -1,7 +1,7 @@
 import type { AiLookupResult, CodeType, DecodeDecision, EvidenceResult } from "@/types";
 import { crossCheck } from "@/services/ai/crossCheckEngine";
 import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerifier";
-import { isTireContext, hasRequiredTireSpecs, hasCountableTireIdentity } from "@/services/ai/tireSpecs";
+import { isTireContext, hasCountableTireIdentity } from "@/services/ai/tireSpecs";
 import { isBrandInPrefixFamily } from "@/services/tire/tirePrefixLookup";
 import { isTrustedProductHost } from "@/services/ai/trustedProductHosts";
 
@@ -13,7 +13,7 @@ import { isTrustedProductHost } from "@/services/ai/trustedProductHosts";
 //   - non-empty product identity
 //   - confidence >= threshold (baseline 0.8)
 //   - NO catalog-derived brand-prefix conflict
-// A SINGLE source is ENOUGH: one provider (e.g. Gemini Flash) whose result the app independently
+// A single source can be enough when the app independently
 // verified to contain the EXACT code in strong evidence auto-counts ("one source is enough") - no
 // second provider and no trusted-host requirement (singleSourceVerified). Two providers that AGREE
 // also verify (canVerify). What is NEVER trusted is a provider's own self-claim of evidence - only
@@ -62,7 +62,7 @@ const HEDGE_TAIL = /\s*[-–—]\s*(?:exact variant unknown|variant unknown|unve
 
 // Barcode-site / search / error / store-nav titles that are NOT products.
 // "search for", "suchergebnisse" (German search results), "codecheck", "upc database" observed live
-// verifying as products in the 2026-07-04 ladder dry run (barcode-list.com "Search For:<code>",
+// verifying as products in an earlier evidence dry run (barcode-list.com "Search For:<code>",
 // codecheck.info "CodeCheck - Suchergebnisse", upcdatabase.org "UPC Database | <code>").
 const SITE_BLOCKLIST =
   /\b(upc barcode search|barcode lookup|look ?up any (upc|ean|isbn)|go-?upc|upcitemdb|barcodefinder|barcode finder|barcodespider|barcodes? database|barcode database|upc database|ean-?search|eandata|barcodes?\.(com|net|org)|gtin ?lookup|buy ?upc|product ?lookup|barcode ?india|barcodable|scandit|codecheck|search results|search for|suchergebnisse?|results for|page not found|404 (not found|error)|error 404|add to cart|your cart|shopping cart|all categories)\b/i;
@@ -266,7 +266,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     cc.decision === "agree";
 
   // SINGLE SOURCE (owner policy, supersedes the old two-provider / trusted-only rules): one provider
-  // (e.g. Gemini Flash) is enough to auto-count when the app independently verified the EXACT code in
+  // is enough to auto-count when the app independently verified the exact code in
   // strong evidence (the code appears in a real snippet / grounding chunk / fetched page) - ANY source,
   // not just a trusted-tier site. Catalog-miss fallback for ANY item. Still rejects vendor/label code
   // types, weak/unverified evidence, and below-threshold (those stay "suggested" -> human review). The
@@ -283,7 +283,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
   // OPTION 3 (owner) - NON-PUBLIC single trusted source. A SKU/part-number/vendor/internal/FNSKU/alphanumeric
   // code auto-verifies when the app independently confirmed the EXACT code in a real source - INCLUDING a
   // single TRUSTED retailer / barcode-DB url_only (verifyEvidence returns verified:true for trusted hosts),
-  // so a product found on Amazon/Walmart/Go-UPC etc. is enough ("found it on Amazon = enough"). Uses
+  // so a product found on a commercial listing can be enough. Uses
   // bestEvidence.verified (NOT isStrongEvidence) so a trusted-host url_only counts. Same hard floors as the
   // public path: >= threshold, non-empty identity, NO brand-prefix conflict, single/agreeing provider. An
   // evidence-LESS guess (verified===false) never reaches it, so Velvet Torch stays dead. Off unless the owner
@@ -382,7 +382,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     // computed (a stronger signal must never be pulled down to the floor). The floor applies ONLY
     // when ALL of these hold simultaneously:
     //   - evidence strength is "fetched_source" (the app actually retrieved and read the page -
-    //     "strong association" for the fetchv2 rung specifically, since fetchv2's own scoring
+    //     "strong association" for a fetched-source result, since earlier source scoring
     //     (scoring.ts) only ever emits a verified fetched_source evidence off a strong-association
     //     winner - a snippet/grounding_chunk/url_only match never qualifies, no matter how trusted
     //     the host, because the app never actually fetched and read that page);

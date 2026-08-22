@@ -60,7 +60,7 @@ const NAV = /\b(add to cart|your cart|shopping cart|view cart|all categories|sho
 const SEARCH = /\b(search results|results for|page not found|404 (not found|error)|error 404|no results)\b/i;
 const GENERIC = /^\s*(product|item|misc|miscellaneous|stuff|thing|generic|unknown item)\s*$/i;
 const DOMAINISH = /\b[a-z0-9-]+\.(com|net|org|io)\b/i;
-const AI_SOURCES = new Set(["ai_mock", "ai_gemini", "ai_openai"]);
+const AI_SOURCES = new Set(["ai_mock", "ai_openai", "ai_openai"]);
 
 const normName = (n: string) => n.trim().toLowerCase().replace(/\s+/g, " ");
 function isProtected(p: Product): boolean {

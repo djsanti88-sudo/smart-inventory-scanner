@@ -64,7 +64,7 @@ const realProvisionalProduct = {
   location: "",
   notes: "",
   status: "active",
-  source: "ai_gemini",
+  source: "ai_openai",
   confidence: 0,
   verified: false,
   provisional: true,

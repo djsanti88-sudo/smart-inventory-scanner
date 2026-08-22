@@ -1,5 +1,5 @@
 // REUSABLE 30-code REAL-decode proof harness (owner-mandated).
-// Drives the REAL scan input on localhost:3000 (real Gemini/OpenAI keys, NOT the IS_E2E mock),
+// Drives the real scan input on localhost:3000 (real GPT-5.4 mini path, not the IS_E2E mock),
 // scans all 30 codes, waits for each decode to SETTLE, then asserts the owner's 14 checks against
 // the real persisted store (sis-scan-v1) and writes a per-code report + full-page screenshot.
 //

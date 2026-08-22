@@ -4,7 +4,7 @@
 // intentionally never runs `vercel env pull` and never inspects a var's VALUE - only whether the
 // NAME is present in the right Vercel environment(s)).
 //
-// Prevents: a required var (e.g. GO_UPC_API_KEY) silently absent from an environment before a
+// Prevents a required variable from being silently absent from an environment before a
 // deploy, and a var that must NEVER exist in Preview (e.g. NEXT_PUBLIC_FIREBASE_*, which would let
 // a preview build reach real cloud/tenancy) silently being present there.
 //

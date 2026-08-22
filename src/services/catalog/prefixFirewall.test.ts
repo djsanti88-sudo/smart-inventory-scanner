@@ -11,7 +11,7 @@ const BUCKET = "051596320812"; // United Solutions prefix (housewares/bucket)
 const bucketPrefix = lookupPrefix(BUCKET);
 
 describe("prefixFirewall (evidence-weighted, false-reject-safe)", () => {
-  it("BLOCKS the Gemini-style hallucination: a ceiling fan claimed for a bucket-maker prefix", () => {
+  it("blocks a model hallucination: a ceiling fan claimed for a bucket-maker prefix", () => {
     const v = evaluatePrefixFirewall({
       code: BUCKET,
       prefix: bucketPrefix,

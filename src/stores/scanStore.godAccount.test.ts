@@ -15,7 +15,7 @@ const FIXED_NOW_ISO = "2026-06-12T10:00:00.000Z";
 const FIXED_NOW_MS = Date.parse(FIXED_NOW_ISO);
 
 const VERIFIED = {
-  providerNames: ["gemini", "openai"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{ productName: "Coca-Cola Classic", brand: "Coca-Cola", upc: "878106003504", sourceUrls: ["https://gs1.org/878106003504"], verifiedFacts: [], guesses: [], aliases: [], confidence: 0.97 }],
   decision: { status: "verified", confidence: 0.97, reason: "Verified AI Decode", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "agree" } },
 };

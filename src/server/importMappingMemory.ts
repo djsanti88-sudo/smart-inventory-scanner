@@ -3,9 +3,9 @@ import "server-only";
 
 import type { ColumnMapping, ImportField } from "@/services/importSchema";
 import { IMPORT_FIELD_ORDER } from "@/services/importSchema";
-import { ladderStorage, type LadderStorage } from "@/server/upc/storage";
+import { decodeStorage, type DecodeStorage } from "@/server/decode/storage";
 
-export type MappingKv = Pick<LadderStorage, "get" | "set">;
+export type MappingKv = Pick<DecodeStorage, "get" | "set">;
 
 export interface ImportMappingMemoryRecord {
   businessId: string;
@@ -39,7 +39,7 @@ export async function getImportMappingMemory(
   sourceSignature: string,
   storage?: MappingKv,
 ): Promise<ImportMappingMemoryRecord | null> {
-  const kv = storage ?? await ladderStorage();
+  const kv = storage ?? await decodeStorage();
   const raw = await kv.get(mappingMemoryKey(businessId, sourceSignature));
   if (!raw) return null;
   try {
@@ -59,6 +59,6 @@ export async function putImportMappingMemory(
   if (!record.businessId || !record.sourceSignature || !validMapping(record.mapping)) {
     throw new Error("Invalid import mapping memory record.");
   }
-  const kv = storage ?? await ladderStorage();
+  const kv = storage ?? await decodeStorage();
   await kv.set(mappingMemoryKey(record.businessId, record.sourceSignature), JSON.stringify(record));
 }

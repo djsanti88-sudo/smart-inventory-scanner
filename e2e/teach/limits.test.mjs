@@ -1,7 +1,7 @@
 // e2e/teach/limits.test.mjs
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { RunLimits, RUNG_WORST_CASE_USD } from './limits.mjs';
+import { RunLimits, SOURCE_WORST_CASE_USD } from './limits.mjs';
 
 describe('RunLimits defaults from env', () => {
   test('uses env values when fields are unset', () => {
@@ -70,22 +70,22 @@ describe('paid lookup accrual and cap', () => {
     limits.start();
     assert.equal(limits.canPaidLookup(), true);
 
-    limits.recordPaidLookup('goupc');
+    limits.recordPaidLookup('gpt');
     assert.equal(limits.paidLookups, 1);
-    assert.equal(limits.upperUsdAccrued, RUNG_WORST_CASE_USD.goupc);
+    assert.equal(limits.upperUsdAccrued, SOURCE_WORST_CASE_USD.gpt);
     assert.equal(limits.canPaidLookup(), true);
 
-    limits.recordPaidLookup('fetchv2');
+    limits.recordPaidLookup('gpt');
     assert.equal(limits.paidLookups, 2);
     assert.equal(limits.paidLookupsExceeded(), true);
     assert.equal(limits.canPaidLookup(), false);
     assert.equal(limits.reason(), 'paid_lookup_cap');
   });
 
-  test('unknown rung is treated as gpt worst case', () => {
+  test('unknown source is treated as gpt worst case', () => {
     const limits = new RunLimits({ maxPaidLookups: 10 });
-    limits.recordPaidLookup('mystery-rung');
-    assert.equal(limits.upperUsdAccrued, RUNG_WORST_CASE_USD.gpt);
+    limits.recordPaidLookup('mystery-source');
+    assert.equal(limits.upperUsdAccrued, SOURCE_WORST_CASE_USD.gpt);
   });
 });
 
@@ -138,8 +138,8 @@ describe('estimateSpend', () => {
     limits.recordPaidLookup('gpt');
     const one = limits.estimateSpend();
     assert.ok(one.floorUsd < one.upperUsd);
-    assert.equal(one.upperUsd, RUNG_WORST_CASE_USD.gpt);
-    assert.equal(one.floorUsd, RUNG_WORST_CASE_USD.gpt / 2);
+    assert.equal(one.upperUsd, SOURCE_WORST_CASE_USD.gpt);
+    assert.equal(one.floorUsd, SOURCE_WORST_CASE_USD.gpt / 2);
 
     limits.recordPaidLookup('gpt');
     const two = limits.estimateSpend();
@@ -148,11 +148,11 @@ describe('estimateSpend', () => {
     assert.equal(two.paidLookups, 2);
   });
 
-  test('unknown rung counted as gpt in estimateSpend', () => {
+  test('unknown source counted as gpt in estimateSpend', () => {
     const limits = new RunLimits({ maxPaidLookups: 100 });
     limits.recordPaidLookup('totally-unknown');
     const spend = limits.estimateSpend();
-    assert.equal(spend.upperUsd, RUNG_WORST_CASE_USD.gpt);
+    assert.equal(spend.upperUsd, SOURCE_WORST_CASE_USD.gpt);
   });
 });
 
@@ -160,7 +160,7 @@ describe('spendLine', () => {
   test('mentions provider console and does not claim exactness', () => {
     const limits = new RunLimits({ maxPaidLookups: 100 });
     limits.start();
-    limits.recordPaidLookup('goupc');
+    limits.recordPaidLookup('gpt');
     const line = limits.spendLine();
     assert.match(line, /provider console/i);
     assert.match(line, /NOT exact/);
@@ -221,7 +221,7 @@ describe('snapshot', () => {
     const limits = new RunLimits({ maxPaidLookups: 5, maxRequests: 5, maxMinutes: 5 });
     limits.start();
     limits.recordRequest();
-    limits.recordPaidLookup('goupc');
+    limits.recordPaidLookup('gpt');
     const snap = limits.snapshot();
     assert.deepEqual(Object.keys(snap).sort(), ['counters', 'limits', 'reason', 'spend']);
     assert.equal(snap.counters.requests, 1);

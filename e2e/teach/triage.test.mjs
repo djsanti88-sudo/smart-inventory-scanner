@@ -106,7 +106,7 @@ test("buildFinding: throws on invalid triageClass", () => {
 test("buildFinding: flags needsSolutionOptions true when options empty", () => {
   const finding = buildFinding({
     title: "Scan row missing",
-    category: "ladder",
+    category: "decodeTrace",
     severity: "high",
     triageClass: "confirmed_app_bug",
   });
@@ -117,7 +117,7 @@ test("buildFinding: flags needsSolutionOptions true when options empty", () => {
 test("buildFinding: needsSolutionOptions false when options provided", () => {
   const finding = buildFinding({
     title: "Scan row missing",
-    category: "ladder",
+    category: "decodeTrace",
     severity: "high",
     triageClass: "confirmed_app_bug",
     options: ["fix A", "fix B"],

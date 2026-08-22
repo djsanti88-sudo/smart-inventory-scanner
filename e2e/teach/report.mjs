@@ -107,21 +107,21 @@ function categorySection(title, findings, category) {
   return [`## ${title}`, '', matches.map(findingBlock).join('\n\n')].join('\n');
 }
 
-function ladderSection(ladderRows) {
-  const rows = Array.isArray(ladderRows) ? ladderRows : [];
-  if (rows.length === 0) return '## Ladder diagnosis\n\n(no ladder traces captured this run)';
-  const header = '| code | settledRung | reachedGpt | gptSkipReason | partialIdentity | confidence |\n|---|---|---|---|---|---|';
+function decodeTraceSection(decodeTraceRows) {
+  const rows = Array.isArray(decodeTraceRows) ? decodeTraceRows : [];
+  if (rows.length === 0) return '## DecodeTrace diagnosis\n\n(no decodeTrace traces captured this run)';
+  const header = '| code | settledSource | reachedGpt | gptSkipReason | partialIdentity | confidence |\n|---|---|---|---|---|---|';
   const body = rows
     .map(
       (r) =>
-        `| ${r.code ?? '?'} | ${r.settledRung ?? 'none'} | ${r.reachedGpt ? 'yes' : 'no'} | ${r.gptSkipReason ?? '-'} | ${r.partialIdentity ? 'yes' : 'no'} | ${r.confidence ?? '-'} |`
+        `| ${r.code ?? '?'} | ${r.settledSource ?? 'none'} | ${r.reachedGpt ? 'yes' : 'no'} | ${r.gptSkipReason ?? '-'} | ${r.partialIdentity ? 'yes' : 'no'} | ${r.confidence ?? '-'} |`
     )
     .join('\n');
-  return `## Ladder diagnosis\n\n${header}\n${body}`;
+  return `## DecodeTrace diagnosis\n\n${header}\n${body}`;
 }
 
 /**
- * Render every observed backend API call (from attachLadderCapture's
+ * Render every observed backend API call (from attachDecodeTraceCapture's
  * apiCalls()) as a markdown table, sorted slowest-first, so a human reading
  * the report can immediately see the load-timing tail. Rows with an unknown
  * (null/non-numeric) latencyMs sort after every timed row and render '-'.
@@ -155,7 +155,7 @@ export function timingSection(apiCalls) {
  * identity (ground truth from the app's own product corpus), the identity the
  * running app actually returned, and whether they matched. A run of misses here
  * flags a real bug class (e.g. a corpus code re-scanning as suggested/
- * unidentified). Pure array-to-markdown, mirroring timingSection/ladderSection.
+ * unidentified). Pure array-to-markdown, mirroring timingSection/decodeTraceSection.
  *
  * Each result row is shaped { code, expected, observed, match, reason? } where
  * expected/observed are display strings (or {name,brand} objects).
@@ -237,7 +237,7 @@ export function buildReportMarkdown(model) {
     '',
     categorySection('Nice-to-haves', findings, 'nice_to_have'),
     '',
-    ladderSection(model.ladderRows),
+    decodeTraceSection(model.decodeTraceRows),
     '',
     timingSection(model.apiCalls),
     '',

@@ -12,7 +12,7 @@
 // files, this file deliberately does NOT statically import any of those four
 // modules - it dynamically imports them from inside main(), after deciding
 // (and, for self-check, setting) TEACH_KNOWLEDGE_BASE. Every other sibling
-// module here (curriculum, limits, ladder, sheets, triage, lessonHelpers) is
+// module here (curriculum, limits, decodeTrace, sheets, triage, lessonHelpers) is
 // path-independent and is imported statically as usual.
 
 import { execSync } from 'node:child_process';
@@ -32,7 +32,7 @@ const SLOWMO_MS = Number.isFinite(Number(process.env.TEACH_SLOWMO_MS)) ? Number(
 // TEACH_HEADLESS=1 runs every persona browser headless (CI / orchestrated runs); default stays
 // headed so a human can watch. Headless runs should usually also set TEACH_SLOWMO_MS=0.
 const TEACH_HEADLESS = process.env.TEACH_HEADLESS === '1';
-import * as ladder from './ladder.mjs';
+import * as decodeTrace from './decodeTrace.mjs';
 import * as sheets from './sheets.mjs';
 import * as triage from './triage.mjs';
 
@@ -85,7 +85,7 @@ Flags:
                           Target specific lesson(s) instead of the normal
                           cumulative curriculum. Accepts a numeric level
                           (e.g. 7) or a lesson id/slug (e.g.
-                          live-decode-ladder-trace), a comma list, and/or the
+                          live-decode-trace), a comma list, and/or the
                           flag repeated. The run plan becomes exactly the
                           requested lesson(s), ordered by level - the normal
                           runNumber selection and exploration pick are
@@ -478,7 +478,7 @@ async function runLessonsForPersona({
         deploymentMode: mode,
         limits,
         h,
-        ladder,
+        decodeTrace,
         sheets,
         triage,
         artifactsDir: runDir,
@@ -556,8 +556,8 @@ async function buildRunModel({
   const planLevels = new Set(plan.map((l) => l.level));
   const coverageDelta = computeCoverageDelta(k.coverage, planLevels);
   const findings = personaResults.flatMap((pr) => pr.lessons.flatMap((l) => l.findings ?? []));
-  const ladderRows = personaResults.flatMap((pr) =>
-    pr.lessons.flatMap((l) => (Array.isArray(l.learned?.ladderRows) ? l.learned.ladderRows : []))
+  const decodeTraceRows = personaResults.flatMap((pr) =>
+    pr.lessons.flatMap((l) => (Array.isArray(l.learned?.decodeTraceRows) ? l.learned.decodeTraceRows : []))
   );
   return {
     runId,
@@ -574,7 +574,7 @@ async function buildRunModel({
     deploymentMode,
     personaResults,
     findings,
-    ladderRows,
+    decodeTraceRows,
     limits: {
       snapshot: limits.snapshot(),
       spendLine: limits.spendLine(),
@@ -670,7 +670,7 @@ async function persistRunArtifacts({ knowledge, report, runId, model, plan, k })
  * PAID decode spend across the WHOLE loop, not per round - an unattended
  * loop must never run unbounded paid spend. Free/UI lessons are unaffected:
  * `limits.canPaidLookup()` (checked inside individual lessons) is the only
- * gate on paid rungs; it never blocks free lessons.
+ * gate on paid sources; it never blocks free lessons.
  */
 async function runOneWindow({ target, runId, knowledge, manifest, personas, report, limits, personaKey, loop, lessonOverride = null, accountReuse = null }) {
   const { readKnowledge, PATHS } = knowledge;
@@ -1039,7 +1039,7 @@ async function runPlanForPersona({ persona, page, mode, businessId, otherTenantI
         deploymentMode: mode,
         limits,
         h,
-        ladder,
+        decodeTrace,
         sheets,
         triage,
         artifactsDir: runDir,
@@ -1203,8 +1203,8 @@ async function runLive({ target, runId, knowledge, manifest, personas, report, l
     const deploymentMode = modesSeen.size === 1 ? [...modesSeen][0] : (modesSeen.size === 0 ? 'unknown' : 'mixed');
 
     const findings = personaResults.flatMap((pr) => pr.lessons.flatMap((l) => l.findings ?? []));
-    const ladderRows = personaResults.flatMap((pr) =>
-      pr.lessons.flatMap((l) => (Array.isArray(l.learned?.ladderRows) ? l.learned.ladderRows : []))
+    const decodeTraceRows = personaResults.flatMap((pr) =>
+      pr.lessons.flatMap((l) => (Array.isArray(l.learned?.decodeTraceRows) ? l.learned.decodeTraceRows : []))
     );
 
     const manifestNow = await readManifest(runId);
@@ -1227,7 +1227,7 @@ async function runLive({ target, runId, knowledge, manifest, personas, report, l
       deploymentMode,
       personaResults,
       findings,
-      ladderRows,
+      decodeTraceRows,
       limits: {
         snapshot: limits.snapshot(),
         spendLine: limits.spendLine(),

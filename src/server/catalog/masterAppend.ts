@@ -4,9 +4,9 @@ import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { canonicalGtin } from "@/services/upc/gtin";
 import { COLLECTIONS, type CatalogEntry as DbCatalogEntry } from "@/services/db/types";
-import { ladderStorage, type LadderStorage } from "@/server/upc/storage";
+import { decodeStorage, type DecodeStorage } from "@/server/decode/storage";
 
-// P5b Task 1 (master-truth write path, GC3/GC5/GC6/GC7/GC8): a strong app-verified ladder decode on a
+// Master-truth write path: a strong app-verified decode on a
 // PUBLIC barcode shape appends (idempotently) to the top-level Firestore `catalogEntries` master
 // catalog via the Admin SDK. This module is SERVER-ONLY ("server-only" is the FIRST import so a build
 // fails if it is ever pulled into a client bundle - mirrors src/server/upc/*).
@@ -62,7 +62,7 @@ export function buildMasterCatalogEntry(input: MasterAppendInput): DbCatalogEntr
 
   const id = `gtin_${canonical}`;
 
-  // GC5: app-verified ladder decode -> "ladder_verified_strong". No other tier is minted by this phase.
+  // App-verified decode -> the legacy-compatible "ladder_verified_strong" provenance value.
   const candidate: DbCatalogEntry = {
     id,
     normalizedBarcode,
@@ -86,7 +86,7 @@ export function buildMasterCatalogEntry(input: MasterAppendInput): DbCatalogEntr
 
 export interface MasterAppendDeps {
   db?: FirebaseFirestore.Firestore;
-  storage?: LadderStorage;
+  storage?: DecodeStorage;
 }
 
 export type MasterAppendResult = "written" | "skipped_human" | "skipped_rejected" | "error";
@@ -94,8 +94,8 @@ export type MasterAppendResult = "written" | "skipped_human" | "skipped_rejected
 // Task 2 (owner steps 1+2, outcome visibility): appendMasterCatalogEntry used to swallow every
 // failure into a bare "error" with no durable signal anywhere - zero catalogEntries had been
 // created since June 26 despite hundreds of July decodes, and nothing surfaced that silently.
-// This counter reuses the existing ladderStorage()/ladder_kv KV pattern (same seam the daily AI
-// spend cap and Go-UPC usage counters already use) so the written/skipped_human/skipped_rejected/error tally, the
+// This counter reuses the existing decodeStorage()/decode_kv KV pattern (same seam the daily AI
+// spend cap counters already use) so the written/skipped_human/skipped_rejected/error tally, the
 // last error reason, and its timestamp are all durable and inspectable without adding a new store.
 const KV_KEY_WRITTEN = "master_catalog_append:written";
 const KV_KEY_SKIPPED_HUMAN = "master_catalog_append:skipped_human";
@@ -109,11 +109,11 @@ let firstErrorLoggedThisProcess = false;
 
 async function recordOutcome(
   outcome: MasterAppendResult,
-  storage: LadderStorage | undefined,
+  storage: DecodeStorage | undefined,
   errorReason?: string,
 ): Promise<void> {
   try {
-    const store = storage ?? (await ladderStorage());
+    const store = storage ?? (await decodeStorage());
     const key =
       outcome === "written" ? KV_KEY_WRITTEN
       : outcome === "skipped_human" ? KV_KEY_SKIPPED_HUMAN
@@ -138,7 +138,7 @@ export function __resetMasterAppendErrorLatchForTests(): void {
 /**
  * Admin-SDK idempotent upsert (GC6). Retries land on the SAME doc id (merge semantics). The
  * human_verified no-downgrade check runs INSIDE the transaction (review F6) - if an existing doc
- * already carries provenanceTier "human_verified", a ladder-verified append must never downgrade it.
+ * already carries provenanceTier "human_verified", an app-verified append must never downgrade it.
  * deps.db is injectable so unit tests never touch a live Firestore instance.
  */
 export async function appendMasterCatalogEntry(
@@ -156,14 +156,14 @@ export async function appendMasterCatalogEntry(
           return "skipped_human" as const;
         }
         // Re-append trap: an owner-REJECTED entry is a human decision too (catalog-review reject
-        // writes verificationStatus "rejected"). A later strong ladder decode of the same code must
+        // writes verificationStatus "rejected"). A later strong decode of the same code must
         // never silently flip it back to verified - skip with its own honest outcome.
         if (existing?.verificationStatus === "rejected") {
           return "skipped_rejected" as const;
         }
         // Re-append trap (catalog revocation round, design §2.4b): a "disputed" doc (a shop reported
         // the identity was wrong - see catalogDispute.ts) must never be silently re-verified by the
-        // very next strong ladder decode of the same code either. Unlike "rejected" (fully skipped),
+        // very next strong decode of the same code either. Unlike "rejected" (fully skipped),
         // the fresh decode result IS useful evidence, so it lands as a "pending" re-candidate for the
         // reviewing human instead of being discarded - but verificationStatus is demoted from the
         // entry's own "verified" to "pending" and the dispute history (disputeCount) is preserved

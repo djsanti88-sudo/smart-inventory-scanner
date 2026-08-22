@@ -22,8 +22,8 @@ vi.mock("@/server/tire-knowledge/tireExactIndex", () => ({
   getTireExactIndexFingerprint: async () => ({ schemaVersion: 1, contentDigest: "digest" }),
 }));
 
-vi.mock("@/server/upc/storage", () => ({
-  ladderStorage: async () => ({}),
+vi.mock("@/server/decode/storage", () => ({
+  decodeStorage: async () => ({}),
 }));
 
 vi.mock("@/server/catalog/masterAppend", () => ({

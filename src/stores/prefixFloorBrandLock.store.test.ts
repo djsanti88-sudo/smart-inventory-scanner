@@ -42,7 +42,7 @@ describe("prefix floor brand must never lock out a later decode's real identity"
     // Decode lands with a REAL, usable product name but NO brand field of its own (the exact owner-
     // reported shape: a name-only decode payload) - and that name shares NOTHING with "United Solutions".
     const DECODE_RESP = {
-      providerNames: ["gemini"],
+      providerNames: ["gpt-5.4-mini"],
       results: [{
         productName: "Entry Level All Season Passenger Tire 205/55R16",
         brand: "", category: "", specsShort: "", specsFull: "",

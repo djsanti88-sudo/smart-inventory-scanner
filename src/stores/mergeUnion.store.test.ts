@@ -67,7 +67,7 @@ describe("D3 site 1: runLiveDecodeOnce fast-decode auto-link merge unions the pl
     globalThis.fetch = vi.fn(async () => ({
       ok: true,
       json: async () => ({
-        providerNames: ["gemini"],
+        providerNames: ["gpt-5.4-mini"],
         results: [{
           productName: "Duracell AA 4pk", brand: "Duracell", category: "Battery", specsShort: "", specsFull: "",
           primarySku: "", primaryBarcode: "036000291452", gtin: "0036000291452", upc: "", ean: "", aliases: [],
@@ -124,9 +124,9 @@ describe("D3 site 2: backgroundVerifyDeep merge unions the placeholder's history
     globalThis.fetch = vi.fn(async (_url: unknown, init?: { body?: string }) => {
       const body = init?.body ? JSON.parse(init.body) : {};
       if (body.mode === "decode-deep") {
-        return { ok: true, json: async () => ({ providerNames: ["gemini"], results: [identity], decision: { status: "verified", confidence: 0.92, reason: "Verified: exact code on page.", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" } } }) };
+        return { ok: true, json: async () => ({ providerNames: ["gpt-5.4-mini"], results: [identity], decision: { status: "verified", confidence: 0.92, reason: "Verified: exact code on page.", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" } } }) };
       }
-      return { ok: true, json: async () => ({ providerNames: ["gemini"], results: [{ ...identity, confidence: 0.6, sourceUrls: ["https://www.upcitemdb.com/upc/715459332915"] }], decision: { status: "suggested", confidence: 0.6, reason: "Grounded, not app-verified.", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider" } } }) };
+      return { ok: true, json: async () => ({ providerNames: ["gpt-5.4-mini"], results: [{ ...identity, confidence: 0.6, sourceUrls: ["https://www.upcitemdb.com/upc/715459332915"] }], decision: { status: "suggested", confidence: 0.6, reason: "Grounded, not app-verified.", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider" } } }) };
     }) as unknown as typeof fetch;
     try {
       store.getState().processScan("HANKOOK-PN-77");

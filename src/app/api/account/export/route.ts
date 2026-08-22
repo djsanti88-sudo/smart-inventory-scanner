@@ -6,7 +6,7 @@ import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { isLiveAuth } from "@/services/auth/authMode";
 import { isAuthBypassEnabled } from "@/services/auth/authBypass";
 import { intEnv, checkRateLimit } from "@/services/security/aiSpendGuard";
-import { ladderStorage } from "@/server/upc/storage";
+import { decodeStorage } from "@/server/decode/storage";
 import { logServerEvent } from "@/server/log";
 
 export const runtime = "nodejs";
@@ -78,7 +78,7 @@ async function exportCollection(
     .collection(`${COLLECTIONS.businesses}/${businessId}/${name}`)
     .limit(maxDocs + 1)
     .get();
-  // Fix (Gemini Pro review): id must come AFTER the spread of d.data() so the authoritative
+  // id must come AFTER the spread of d.data() so the authoritative
   // Firestore doc id always wins over a same-named "id" field that might exist inside the stored
   // document payload (spread order previously let payload.id silently overwrite the true doc id).
   const docs = snap.docs.slice(0, maxDocs).map((d) => ({ ...d.data(), id: d.id }));
@@ -180,7 +180,7 @@ export async function POST(request: NextRequest) {
     const rl = await checkRateLimit(`EXPORT:${requestedBusinessId}:${uid}`, {
       limit: intEnv(process.env.ACCOUNT_EXPORT_RATE_LIMIT, 10),
       windowMs: intEnv(process.env.ACCOUNT_EXPORT_RATE_WINDOW_MS, 60_000),
-      storage: await ladderStorage(),
+      storage: await decodeStorage(),
       failClosedOnStorageError: true,
     });
     if (!rl.allowed) {

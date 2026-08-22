@@ -12,7 +12,7 @@ const NOW = "2026-06-14T00:00:00.000Z";
 const CODE = "111222333446"; // not a seed alias -> resolver returns needs_review
 
 const SUGGESTED = {
-  providerNames: ["gemini", "openai"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{ productName: "Maybe Snack", brand: "Generic", sourceUrls: [], verifiedFacts: [], guesses: ["g"], aliases: [], confidence: 0.5 }],
   decision: { status: "suggested", confidence: 0.5, reason: "Suggested", evidenceStrength: "url_only", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "agree" } },
 };
@@ -69,7 +69,7 @@ describe("catalog-first lookup (saves AI tokens; offline-first)", () => {
 
   it("FIX 3: a low-confidence / no-match fast decode flips the feed badge OFF 'suggested' to 'needs_review'", async () => {
     const NO_MATCH = {
-      providerNames: ["gemini", "openai"],
+      providerNames: ["gpt-5.4-mini"],
       results: [{ productName: "", brand: "", category: "", gtin: "", upc: "", ean: "", sourceUrls: [], verifiedFacts: [], guesses: [], aliases: [], confidence: 0.2 }],
       decision: { status: "needs_review", confidence: 0.2, reason: "No match found", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "weak" } },
     };

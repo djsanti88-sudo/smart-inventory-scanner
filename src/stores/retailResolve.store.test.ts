@@ -46,13 +46,13 @@ function storeWithRetail(lookup: (codes: string[]) => Promise<CatalogEntry | nul
 
 // AI response that would offer the historical WRONG product with NO safe evidence. It must never be trusted.
 const DRESS_NO_EVIDENCE = {
-  providerNames: ["gemini", "openai"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{ productName: "Velvet Torch Womens Lace Strapless Dress", brand: "", category: "", sourceUrls: [], verifiedFacts: [], guesses: ["guess"], aliases: [], confidence: 0.5 }],
   decision: { status: "suggested", confidence: 0.5, reason: "Suggested", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider" } },
 };
 // AI response with no usable product at all.
 const NOPRODUCT = {
-  providerNames: ["gemini", "openai"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{ productName: "", brand: "", category: "", sourceUrls: [], verifiedFacts: [], guesses: [], aliases: [], confidence: 0 }],
   decision: { status: "needs_review", confidence: 0, reason: "No product", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider" } },
 };

@@ -1,14 +1,11 @@
 import type { AiLookupResult } from "@/types";
 import { sanitizeForAiLookup } from "@/services/sanitizer";
 import { detectCodeType } from "@/services/codeTypeDetector";
-import { killSwitchOn, checkRateLimit, readDailyUsed, readDailyUsedForAccount, intEnv, getGptLadderStatus } from "@/services/security/aiSpendGuard";
-import { GPT_LADDER_WORST_CASE_USD, type GptFromScratchResult } from "@/services/ai/gptFromScratch";
-import { goUpcUsage } from "@/server/upc/goUpcUsage";
-import { ladderStorage } from "@/server/upc/storage";
-// PURE EXTRACTION (Task 2.4): the whole decode pipeline (computeDecode, the ladder rung runners, the
-// cap/breaker gating and the L1/L2 cache write-through) now lives in @/server/decode/pipeline. This
-// route keeps only HTTP concerns: request parsing, the abuse/mock-mode guards, response shaping, and
-// the GET status endpoint. e2eMode is shared from the pipeline.
+import { killSwitchOn, checkRateLimit, readDailyUsed, intEnv, getGptDecodeStatus } from "@/services/security/aiSpendGuard";
+import { GPT_DECODE_WORST_CASE_USD, type GptDecodeResult } from "@/services/ai/gptDecodeClient";
+import { decodeStorage } from "@/server/decode/storage";
+// The route owns HTTP/auth/rate-limit concerns. The server pipeline owns deterministic resolution,
+// cache replay, the lazy paid authorization, and the single GPT-5.4 mini provider call.
 import { runDecodePipeline, e2eMode } from "@/server/decode/pipeline";
 import { clampDecodeBudgetMs } from "@/services/ai/decodeBudget";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
@@ -30,7 +27,7 @@ import { isDecodeChargeMode, type AiLookupRequestMode } from "./decodeMode";
 //     exactCodeEvidence claim is NOT used to decide truth).
 //
 // CONSOLIDATION A1 (2026-08-19): the legacy single-provider "lookup" mode is DELETED. It charged two
-// daily-cap slots before doing any work, it was the last live paid Gemini call in the product (Gemini
+// daily-cap slots before doing any work, it was the last independent paid correction call in the product
 // is permanently out of decode), and it had no UI caller. Any other `mode` value, including a missing
 // one, is now an explicit 400 instead of a silent, billable fall-through.
 //
@@ -140,14 +137,14 @@ export async function GET(request: Request) {
       request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
       request.headers.get("x-real-ip") ||
       "local";
-    // B1: durable, storage-backed rate limiting (LadderStorage - Turso in production, so a
+    // B1: durable, storage-backed rate limiting (DecodeStorage - Turso in production, so a
     // multi-instance deployment shares one real counter instead of each instance's own in-memory bucket).
     //
-    // FINDING C (P6 fix wave): wrapped fail-open so a storage INIT throw (`await ladderStorage()` itself
+    // FINDING C (P6 fix wave): wrapped fail-open so a storage INIT throw (`await decodeStorage()` itself
     // rejecting) never turns the status endpoint into a raw 500 - it logs rate_limit_unavailable and falls
     // through unthrottled, matching the export route's pattern and the POST handler below.
     try {
-      const rl = await checkRateLimit(`GET:${ip}`, { limit: intEnv(process.env.AI_LOOKUP_GET_RATE_LIMIT, 120), storage: await ladderStorage() });
+      const rl = await checkRateLimit(`GET:${ip}`, { limit: intEnv(process.env.AI_LOOKUP_GET_RATE_LIMIT, 120), storage: await decodeStorage() });
       if (!rl.allowed) {
         logServerEvent({ route: "/api/ai-lookup", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
         return Response.json(
@@ -160,26 +157,14 @@ export async function GET(request: Request) {
     }
   }
   const openaiConfigured = !!process.env.OPENAI_API_KEY;
-  // firecrawlConfigured gates the Stage-2 open-web fallback. Absent is NOT a blocker (decode still
-  // works via barcode DBs + AI-cited URLs); the client just knows open-web discovery is unavailable.
-  const firecrawlConfigured = !!process.env.FIRECRAWL_API_KEY;
   const missingKeys: string[] = [];
   if (!openaiConfigured) missingKeys.push("OPENAI_API_KEY");
-  if (!firecrawlConfigured) missingKeys.push("FIRECRAWL_API_KEY");
-  // Task 6: read-only GPT ladder spend/call status for the Settings panel. getGptLadderStatus makes
-  // no writes and spends nothing (it composes checkGptLadderBudget's peek + the call-count peek).
-  // B1: reads through the same durable LadderStorage seam as the daily cap / rate limit.
-  const gptLadderStatus = await getGptLadderStatus({ worstCaseUsd: GPT_LADDER_WORST_CASE_USD, storage: await ladderStorage() });
-  // Task 16: Go-UPC monthly quota visibility for the Settings panel. canSpend() only READS the usage
-  // counter (no record()), so this GET spends nothing. Booleans + numbers ONLY - never the key value.
-  // ladderStorage() selects Turso in production (TURSO_DATABASE_URL/TURSO_AUTH_TOKEN set), else the
-  // file adapter next to .go-upc-usage.json (process.cwd()) for local dev + preview.
-  const goUpcConfigured = Boolean(process.env.GO_UPC_API_KEY);
-  const goUpcSpend = await goUpcUsage(await ladderStorage()).canSpend();
+  // Read-only GPT spend/call status. This makes no provider calls and performs no counter writes.
+  const gptDecodeStatus = await getGptDecodeStatus({ worstCaseUsd: GPT_DECODE_WORST_CASE_USD, storage: await decodeStorage() });
   // Task 1 (v2 daily cap): read-only peek at today's atomic, storage-backed usage - makes NO writes
   // (readDailyUsed never increments), so this GET never inflates the counter it is reporting on.
   const dailyLimit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 2000);
-  const dailyUsed = await readDailyUsed(await ladderStorage());
+  const dailyUsed = await readDailyUsed(await decodeStorage());
   // Spec 2 (M1, kill-switch visibility): the POST handler already 503s every request when the SERVER
   // kill switch is on (line ~234 below); this GET status endpoint must say so too, or Settings looks
   // healthy (missingKeys empty, liveEnabled true) while every scan silently fails to decode.
@@ -188,34 +173,20 @@ export async function GET(request: Request) {
     liveEnabled: process.env.ENABLE_LIVE_AI_LOOKUP !== "false",
     autoDecodeOnScan: process.env.ENABLE_AUTO_DECODE_ON_SCAN !== "false",
     openaiConfigured,
-    firecrawlConfigured,
     freeDecodeAvailable: true,
-    openWebFallback: firecrawlConfigured,
-    pageFetchAndRead: true,
     dailyLimit: dailyLimit,
     missingKeys,
     e2e: e2eMode(),
-    gptLadder: {
-      spentTodayUsd: gptLadderStatus.spentUsd,
-      capUsd: gptLadderStatus.capUsd,
-      callsToday: gptLadderStatus.calls,
-      enabled: openaiConfigured && gptLadderStatus.allowed,
-    },
-    goUpc: {
-      configured: goUpcConfigured,
-      used: goUpcSpend.used,
-      // Infinity is not JSON-serializable (JSON.stringify -> null), so an unlimited (subscription) cap
-      // is reported as limit:null + unlimited:true; a configured numeric cap reports the number.
-      limit: Number.isFinite(goUpcSpend.limit) ? goUpcSpend.limit : null,
-      unlimited: !Number.isFinite(goUpcSpend.limit),
-      warn: goUpcSpend.warn,
+    gptDecode: {
+      spentTodayUsd: gptDecodeStatus.spentUsd,
+      capUsd: gptDecodeStatus.capUsd,
+      callsToday: gptDecodeStatus.calls,
+      enabled: openaiConfigured && gptDecodeStatus.allowed,
     },
     // Task 1 (v2 daily cap): exposes the SAME atomic, storage-backed counter the route gates and
-    // the paid-rung charge site use - a read-only peek, never incremented by this GET.
+    // the paid-decode charge site uses - a read-only peek, never incremented by this GET.
     daily: { used: dailyUsed, limit: dailyLimit },
-    // Task 8: the real decode ladder order (MASTER BASELINE v1). Gemini is permanently out of decode;
-    // it is corpus -> Go-UPC -> Fetch V2 -> GPT only, and no Gemini flag/model/key is reported here.
-    decodeLadder: ["corpus", "go_upc", "fetch_v2", "gpt"],
+    decodePath: ["tire_corpus", "retail_corpus", "learned_products", "master_catalog", "persisted_cache", "memory_cache", "gpt_5_4_mini"],
     // Spec 2 (M1): SERVER-side emergency stop (AI_LOOKUP_KILL_SWITCH env var). Distinct from the
     // client-side `emergencyStop` preference in aiStatus - this one the shop owner cannot toggle
     // themselves, so Settings must show it as a separate, clearly-labeled condition.
@@ -233,10 +204,10 @@ export async function POST(request: Request) {
     budgetMs?: number;
     scanContext?: "any" | "tire"; // Phase 8B: app-derived, non-authoritative prompt hint
     autoCountNonPublicWithEvidence?: boolean; // Option 3 (owner): allow a non-public code (SKU/vendor/FNSKU) to auto-verify from a single trusted source. Default true.
-    // Playwright test hook ONLY: under IS_E2E, a request carrying this fixture runs the GPT ladder
+    // Playwright test hook ONLY: under IS_E2E, a request carrying this fixture runs the GPT decode
     // rung's mapping logic with ZERO network so E2E can prove the rung's UI/decision wiring
     // deterministically. Ignored entirely outside E2E.
-    mockGptLadder?: Partial<GptFromScratchResult>;
+    mockGptDecode?: Partial<GptDecodeResult>;
     // Task 4 (owner manual override): skips the L1/L2 cache peeks AND overwrites the stored row once the
     // fresh compute finishes. Also forces a fresh compute past the in-memory L1 cache (forceRefresh).
     forceRetry?: boolean;
@@ -364,7 +335,7 @@ export async function POST(request: Request) {
   const codeType = detectCodeType(code);
   // D4 (full surface): scanContext and autoCountNonPublicWithEvidence are DECISION inputs, not hints.
   // scanContext === "tire" unlocks three extra auto-verify paths in decideDecode (decode.ts:285/304/323)
-  // and allowNonPublicAutoCount unlocks nonPublicTrustedVerified (decode.ts:269) - the ladder-1225
+  // and allowNonPublicAutoCount unlocks nonPublicTrustedVerified (decode.ts:269) - the decode-1225
   // hallucinated-auto-count class. LIVE mode: server policy decides, the client's values are ignored
   // (AI_LIVE_SCAN_CONTEXT=tire opts a deployment into the tire context; default "any" unlocks nothing;
   // AI_ALLOW_NONPUBLIC_AUTOCOUNT=1 opts into non-public auto-count; default off). MOCK mode: the client
@@ -409,12 +380,12 @@ export async function POST(request: Request) {
       if (!index || (exact.sourceScope === "authenticated_boss_corpus" && !canonicalId)) {
         // L16 (probes never dead-end): the shard returned a hit but its integrity fingerprint cannot be
         // verified, so the hit is untrustworthy. The deterministicOnly probe reports the honest
-        // unavailable signal; the FULL decode path falls through to the ladder rather than dead-ending
+        // unavailable signal; the full decode path continues rather than dead-ending
         // this (and, under Option A, every) code to Needs Review on an index-integrity gap.
         if (body.deterministicOnly === true) {
           return Response.json(deterministicMissBody("exact_index_unavailable", "Trusted exact index verification is unavailable.", "trusted_exact_unavailable"));
         }
-        // else: fall through to the full ladder (skip returning the unverifiable hit).
+        // else: fall through to the full decode path (skip returning the unverifiable hit).
       } else {
       const result = exact.result.results[0];
       return Response.json({
@@ -480,11 +451,11 @@ export async function POST(request: Request) {
       // trusted path, so a missing/rotated HMAC key or a failed shard SHA must NOT short-circuit EVERY
       // customer's decode to Needs Review. The deterministicOnly PROBE still returns its honest
       // unavailable signal (so the client knows the index could not be consulted); the FULL decode path
-      // FALLS THROUGH to the cost-ordered ladder (Go-UPC/Fetch/GPT/corpus) so codes still resolve.
+      // Falls through to the ordinary free-first decode path so codes can still resolve.
       if (body.deterministicOnly === true) {
         return Response.json(deterministicMissBody("exact_index_unavailable", "Trusted exact lookup requires review.", "trusted_exact_unavailable"));
       }
-      // else: do not return - continue to the full ladder below.
+      // else: do not return - continue to the full decode path below.
     }
   }
 
@@ -520,7 +491,7 @@ export async function POST(request: Request) {
         // catalog-review/[id]), so a bulk-scan session hammering ai-lookup could exhaust an
         // unrelated catalog route's limit for the same client IP, and vice versa, even though each
         // route configures its own distinct rate-limit env var.
-        const rl = await checkRateLimit(`POST:${clientIp}`, { storage: await ladderStorage() });
+        const rl = await checkRateLimit(`POST:${clientIp}`, { storage: await decodeStorage() });
         if (!rl.allowed) {
           logServerEvent({ route: "/api/ai-lookup", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
           return Response.json(
@@ -536,41 +507,13 @@ export async function POST(request: Request) {
 
   const threshold = clampConfidenceThreshold(body.confidenceThreshold);
 
-  // GC-A (P6 Task A2): per-account decode cap is the TENANT GATE, checked here before the pipeline
-  // runs. Read-only gate (the pipeline owns the single global charge). The account counter is
-  // charged below ONLY when the pipeline reports a genuine paid compute. When this gate passes for
-  // an authed tenant, accountCapCleared is threaded into the pipeline so its OWN internal global cap
-  // gate compares against the high platform-wide BACKSTOP instead of the plain daily limit - the
-  // pipeline must never independently 429 an authed tenant who is under their own account limit.
-  // Anonymous/uncleared requests keep today's behavior byte-identical (accountCapCleared stays false,
-  // the pipeline's internal gate uses the plain AI_LOOKUP_DAILY_LIMIT exactly as before).
-  let accountCapCleared = false;
-  if (authedBusinessId && !e2eMode()) {
-    const ladderStore = await ladderStorage();
-    const acctUsed = await readDailyUsedForAccount(ladderStore, authedBusinessId);
-    const acctLimit = intEnv(process.env.AI_LOOKUP_ACCOUNT_DAILY_LIMIT, intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 2000));
-    // GOD ACCOUNT: never BLOCKED by the decode per-account cap. The pipeline's chargePaidSlot still
-    // charges the slot on a genuine paid compute (god:true only lifts the throw, not the charge), so
-    // god decode spend is still recorded. accountCapCleared stays true so nothing downstream re-gates.
-    if (acctUsed >= acctLimit && !isGod) {
-      logServerEvent({
-        route: "/api/ai-lookup",
-        event: "cap_blocked",
-        reasonCode: "account_daily_cap",
-        businessId: authedBusinessId,
-        status: 429,
-      });
-      return Response.json(
-        { error: `Your daily AI lookup cap is reached (${acctUsed}/${acctLimit}).`, reasonCode: "account_daily_cap" },
-        { status: 429 }
-      );
-    }
-    accountCapCleared = true;
-  }
+  // Account and global paid caps are deliberately enforced inside the pipeline at the exact paid
+  // egress boundary. Keeping the route free of a pre-cap preserves all zero-cost corpus/cache hits.
+  const accountLimit = intEnv(
+    process.env.AI_LOOKUP_ACCOUNT_DAILY_LIMIT,
+    intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 2000),
+  );
 
-  // DECODE PIPELINE (Task 2.4): the entire cost-ordered ladder + cache/cap machinery lives in
-  // @/server/decode/pipeline now. This handler only parses/sanitizes the request and shapes the
-  // pipeline's settled result into an HTTP response - behavior is byte-for-byte what it was inline.
   const outcome = await runDecodePipeline({
     code,
     codeType,
@@ -580,24 +523,14 @@ export async function POST(request: Request) {
     allowNonPublicAutoCount,
     forceRetry,
     scanContext,
-    mockGptLadder: body.mockGptLadder,
+    mockGptDecode: body.mockGptDecode,
     // Server-side clamp (review hardening 2026-07-15): the client already clamps, but a hand-crafted
-    // request must not be able to stretch the ladder deadline via a huge budgetMs.
+    // request must not be able to stretch the decode deadline via a huge budgetMs.
     budgetMs: typeof body.budgetMs === "number" ? clampDecodeBudgetMs(body.budgetMs) : undefined,
-    // GC-A: undefined for anonymous traffic (pipeline default behavior unchanged); set for authed
-    // traffic once the per-account gate above has run (accountCapCleared reflects the gate's outcome).
-    // accountLimit is threaded so the pipeline's ATOMIC-CONDITIONAL per-account charge (item 1) uses
-    // the SAME limit this route's read-gate used - one source of the formula, no drift.
     capContext: authedBusinessId
-      ? {
-          authedBusinessId,
-          accountCapCleared,
-          accountLimit: intEnv(process.env.AI_LOOKUP_ACCOUNT_DAILY_LIMIT, intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 2000)),
-        }
+      ? { authedBusinessId, accountLimit }
       : undefined,
-    // GOD ACCOUNT: lifts the pipeline's paid-ladder BLOCK gates (chargePaidSlot throw, GPT $/day
-    // budget, Go-UPC monthly cap) while every charge/record still fires (cost-truth). Server-verified
-    // above; never a client value.
+    // Server-verified only. This bypasses blocking caps but never the usage/spend accounting writes.
     god: isGod,
   });
   if (outcome.kind === "persisted") {
@@ -611,19 +544,14 @@ export async function POST(request: Request) {
     return Response.json(outcome.body);
   }
   if (outcome.kind === "cap_blocked") {
-    // Daily cap blocked the paid ladder: same 429 daily_cap shape the route has always returned, now
-    // carrying the $0 prefix floor (P2) when the GS1 prefix knows the company, so the client names the
-    // row "<Brand> / product unconfirmed" instead of a bare "Unidentified item". Absent (undefined)
-    // when the code isn't a public barcode or the prefix maps to no confident brand - unchanged there.
-    // NEVER fires the master-append hook here (GC7/review F4): no decision was ever settled.
     logServerEvent({
       route: "/api/ai-lookup",
-      event: "daily_cap_exhausted",
-      reasonCode: "daily_cap",
+      event: "paid_cap_exhausted",
+      reasonCode: outcome.reasonCode,
       businessId: authedBusinessId ?? undefined,
       status: 429,
     });
-    return Response.json({ error: outcome.message, reasonCode: "daily_cap", floor: outcome.floor }, { status: 429 });
+    return Response.json({ error: outcome.message, reasonCode: outcome.reasonCode, floor: outcome.floor }, { status: 429 });
   }
   // computed: echo the L1/L2 `cached` flag into debug exactly as before. FINDING B (P6 fix wave): the
   // per-account charge USED to happen here, gated on outcome.paidComputeCharged, AFTER the pipeline

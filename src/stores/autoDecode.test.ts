@@ -7,17 +7,17 @@ import { MockDb } from "@/services/mockDb";
 // drive that behavior with mocked network so no live tokens are spent.
 
 const VERIFIED = {
-  providerNames: ["gemini", "openai"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{ productName: "Coca-Cola Classic", brand: "Coca-Cola", upc: "878106003504", sourceUrls: ["https://gs1.org/878106003504"], verifiedFacts: [], guesses: [], aliases: [], confidence: 0.97 }],
   decision: { status: "verified", confidence: 0.97, reason: "Verified AI Decode", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "agree" } },
 };
 const SUGGESTED = {
-  providerNames: ["gemini", "openai"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{ productName: "Maybe Snack", brand: "Generic", sourceUrls: [], verifiedFacts: [], guesses: ["guess"], aliases: [], confidence: 0.5 }],
   decision: { status: "suggested", confidence: 0.5, reason: "Suggested, not trusted.", evidenceStrength: "url_only", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "agree" } },
 };
 const CONFLICT = {
-  providerNames: ["gemini", "openai"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{ productName: "Creamer", brand: "Laird", sourceUrls: [], verifiedFacts: [], guesses: [], aliases: [], confidence: 0.5 }],
   decision: { status: "conflict", confidence: 0.2, reason: "Providers conflict.", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "conflict" } },
 };
@@ -207,31 +207,31 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
     expect(s.dailyLookupLimit).toBe(200);    // adopts AI_LOOKUP_DAILY_LIMIT from the server
   });
 
-  it("refreshAiStatus (Task 6) adopts the GET response's gptLadder spend/call status", async () => {
+  it("refreshAiStatus (Task 6) adopts the GET response's gptDecode spend/call status", async () => {
     const store = createTestScanStore({ db: new MockDb() });
     const { restore } = stub({
       liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true,
       dailyLimit: 200, missingKeys: [],
-      gptLadder: { spentTodayUsd: 0.42, capUsd: 3, callsToday: 5, enabled: true },
+      gptDecode: { spentTodayUsd: 0.42, capUsd: 3, callsToday: 5, enabled: true },
     });
     try {
       await store.getState().refreshAiStatus();
     } finally {
       restore();
     }
-    expect(store.getState().aiStatus.gptLadder).toEqual({ spentTodayUsd: 0.42, capUsd: 3, callsToday: 5, enabled: true });
+    expect(store.getState().aiStatus.gptDecode).toEqual({ spentTodayUsd: 0.42, capUsd: 3, callsToday: 5, enabled: true });
   });
 
-  it("refreshAiStatus keeps the PRIOR gptLadder value when a GET response omits the field (older/mocked server)", async () => {
+  it("refreshAiStatus keeps the PRIOR gptDecode value when a GET response omits the field (older/mocked server)", async () => {
     const store = createTestScanStore({ db: new MockDb() });
-    store.setState((s) => ({ aiStatus: { ...s.aiStatus, gptLadder: { spentTodayUsd: 1, capUsd: 3, callsToday: 2, enabled: true } } }));
+    store.setState((s) => ({ aiStatus: { ...s.aiStatus, gptDecode: { spentTodayUsd: 1, capUsd: 3, callsToday: 2, enabled: true } } }));
     const { restore } = stub({ liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true, dailyLimit: 200, missingKeys: [] });
     try {
       await store.getState().refreshAiStatus();
     } finally {
       restore();
     }
-    expect(store.getState().aiStatus.gptLadder).toEqual({ spentTodayUsd: 1, capUsd: 3, callsToday: 2, enabled: true });
+    expect(store.getState().aiStatus.gptDecode).toEqual({ spentTodayUsd: 1, capUsd: 3, callsToday: 2, enabled: true });
   });
 
   // Spec 2 (M1, kill-switch visibility): refreshAiStatus must adopt the GET response's killSwitchOn

@@ -9,14 +9,11 @@ const STRONG_CODE = "111222333446";
 const WEAK_CODE = "999888777664";
 
 const STATUS = {
-  liveEnabled: true, autoDecodeOnScan: true, geminiEnabled: true, openaiEnabled: true,
-  geminiConfigured: true, openaiConfigured: true, geminiSearchGrounding: true, openaiWebSearch: true,
-  geminiModel: "gemini-flash-latest", openaiModel: "gpt-5-mini", pageFetchAndRead: true,
-  premiumFallback: false, mode: "aggressive", dailyLimit: 100, missingKeys: [], e2e: true,
+  liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true, mode: "aggressive", dailyLimit: 100, missingKeys: [], e2e: true,
 };
 
 const strongResp = (code: string) => ({
-  mode: "decode", providerNames: ["gemini", "openai"],
+  mode: "decode", providerNames: ["gpt-5.4-mini"],
   results: [{
     productName: "BIC Classic Pocket Lighter", brand: "BIC", category: "Lighters", specsShort: "", specsFull: "",
     primarySku: "", primaryBarcode: code, gtin: "", upc: code, ean: "", aliases: [], imageUrl: "", productUrl: "",
@@ -33,7 +30,7 @@ const strongResp = (code: string) => ({
 
 // No usable product at all -> the genuinely-bad case that still goes to Needs Review.
 const weakResp = () => ({
-  mode: "decode", providerNames: ["gemini", "openai"],
+  mode: "decode", providerNames: ["gpt-5.4-mini"],
   results: [{
     productName: "", brand: "", category: "", specsShort: "", specsFull: "", primarySku: "",
     primaryBarcode: "", gtin: "", upc: "", ean: "", aliases: [], imageUrl: "", productUrl: "",

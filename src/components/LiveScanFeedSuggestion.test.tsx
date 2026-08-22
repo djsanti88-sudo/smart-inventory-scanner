@@ -90,7 +90,7 @@ const CODE9B = "0792080004312";
 
 function suggested9bResponse(confidence = 0.3) {
   return {
-    providerNames: ["gpt-5.5-ladder"],
+    providerNames: ["gpt-5.4-mini"],
     results: [
       {
         productName: "Original Anchor Bar Hot Sauce", brand: "Anchor Bar", category: "food",

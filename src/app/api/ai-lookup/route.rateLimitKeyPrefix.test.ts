@@ -26,14 +26,14 @@ vi.mock("@/server/catalog/masterLookup", () => ({
   lookupMasterCatalog: async () => ({ kind: "miss" as const }),
 }));
 
-// Redirect ladderStorage() at a per-process tmp dir (same reasoning as route.test.ts: route.ts
-// calls ladderStorage() with no dir arg, defaulting to the real repo root).
-vi.mock("@/server/upc/storage", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/server/upc/storage")>();
+// Redirect decodeStorage() at a per-process tmp dir (same reasoning as route.test.ts: route.ts
+// calls decodeStorage() with no dir arg, defaulting to the real repo root).
+vi.mock("@/server/decode/storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/decode/storage")>();
   const tmpLadderDir = path.join(os.tmpdir(), `ladder-storage-route-prefix-test-${process.pid}`);
   return {
     ...actual,
-    ladderStorage: async () => actual.fileLadderStorage(tmpLadderDir),
+    decodeStorage: async () => actual.fileDecodeStorage(tmpLadderDir),
   };
 });
 
@@ -61,9 +61,9 @@ function makeRequest(body: object, ip = "9.9.9.9") {
 
 describe("POST /api/ai-lookup decode-path rate-limit key prefix", () => {
   const saved: Record<string, string | undefined> = {};
-  const keys = ["IS_E2E", "AI_LOOKUP_KILL_SWITCH", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "BRAVE_SEARCH_API_KEY", "AI_LOOKUP_COUNTER_FILE", "AI_LOOKUP_GPT_LADDER_FILE", "DECODE_CACHE_FILE", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "GO_UPC_API_KEY", "GO_UPC_MONTHLY_LIMIT"];
+  const keys = ["IS_E2E", "AI_LOOKUP_KILL_SWITCH", "AI_LOOKUP_DAILY_LIMIT", "OPENAI_API_KEY", "AI_LOOKUP_COUNTER_FILE", "AI_LOOKUP_GPT_DECODE_FILE", "DECODE_CACHE_FILE", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"];
   let tmpCounter: string;
-  let tmpGptLadderFile: string;
+  let tmpGptDecodeFile: string;
   let tmpDecodeCacheFile: string;
   const ladderKvFile = () => path.join(os.tmpdir(), `ladder-storage-route-prefix-test-${process.pid}`, ".ladder-kv.json");
 
@@ -72,20 +72,15 @@ describe("POST /api/ai-lookup decode-path rate-limit key prefix", () => {
     try { fs.unlinkSync(ladderKvFile()); } catch {}
     for (const k of keys) saved[k] = process.env[k];
     delete process.env.IS_E2E;
-    delete process.env.GEMINI_API_KEY;
     delete process.env.OPENAI_API_KEY;
-    delete process.env.FIRECRAWL_API_KEY;
-    delete process.env.BRAVE_SEARCH_API_KEY;
     delete process.env.AI_LOOKUP_KILL_SWITCH;
     delete process.env.TURSO_DATABASE_URL;
     delete process.env.TURSO_AUTH_TOKEN;
-    delete process.env.GO_UPC_API_KEY;
-    delete process.env.GO_UPC_MONTHLY_LIMIT;
     process.env.AI_LOOKUP_DAILY_LIMIT = "100";
     tmpCounter = path.join(os.tmpdir(), `ai-usage-route-prefix-${process.pid}-${Math.floor(Math.random() * 1e9)}.json`);
     process.env.AI_LOOKUP_COUNTER_FILE = tmpCounter;
-    tmpGptLadderFile = path.join(os.tmpdir(), `gpt-ladder-usage-route-prefix-${process.pid}-${Math.floor(Math.random() * 1e9)}.json`);
-    process.env.AI_LOOKUP_GPT_LADDER_FILE = tmpGptLadderFile;
+    tmpGptDecodeFile = path.join(os.tmpdir(), `gpt-decode-usage-route-prefix-${process.pid}-${Math.floor(Math.random() * 1e9)}.json`);
+    process.env.AI_LOOKUP_GPT_DECODE_FILE = tmpGptDecodeFile;
     tmpDecodeCacheFile = path.join(os.tmpdir(), `decode-cache-route-prefix-${process.pid}-${Math.floor(Math.random() * 1e9)}.json`);
     process.env.DECODE_CACHE_FILE = tmpDecodeCacheFile;
     globalThis.fetch = vi.fn(async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
@@ -94,7 +89,7 @@ describe("POST /api/ai-lookup decode-path rate-limit key prefix", () => {
   afterEach(() => {
     for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
     try { fs.unlinkSync(tmpCounter); } catch {}
-    try { fs.unlinkSync(tmpGptLadderFile); } catch {}
+    try { fs.unlinkSync(tmpGptDecodeFile); } catch {}
     try { fs.unlinkSync(tmpDecodeCacheFile); } catch {}
     vi.restoreAllMocks();
   });

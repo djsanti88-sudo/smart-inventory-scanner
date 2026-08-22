@@ -57,13 +57,13 @@ describe("decodeCacheStore (Turso backend via fake libsql client)", () => {
     kind: "result",
     payload: JSON.stringify({ decision: { status: "suggested" } }),
     tier: "suggested",
-    sourceTier: "paid_rung",
+    sourceTier: "gpt_5_4_mini",
     createdAt: 1_700_000_000_000,
   };
 
   it("persists sourceTier in the source_tier column and reads it back (paid identity stays paid)", async () => {
     await persistDecode(paidRow);
-    expect(fake.rows.get(paidRow.code)?.source_tier).toBe("paid_rung");
+    expect(fake.rows.get(paidRow.code)?.source_tier).toBe("gpt_5_4_mini");
     const back = await getPersistedDecode(paidRow.code);
     expect(back).toEqual(paidRow);
   });
@@ -87,7 +87,7 @@ describe("decodeCacheStore (Turso backend via fake libsql client)", () => {
     // A second write in the same process does not re-run the ALTER (table readiness is latched).
     await persistDecode({ ...paidRow, code: "00900000000027" });
     expect(fake.executed.filter((s) => s.startsWith("ALTER TABLE")).length).toBe(1);
-    expect((await getPersistedDecode(paidRow.code))?.sourceTier).toBe("paid_rung");
+    expect((await getPersistedDecode(paidRow.code))?.sourceTier).toBe("gpt_5_4_mini");
   });
 
   it("a lost ALTER race (duplicate column) is treated as migrated, not as a storage failure", async () => {
@@ -103,8 +103,8 @@ describe("decodeCacheStore (Turso backend via fake libsql client)", () => {
       return original(stmt);
     };
     await persistDecode(paidRow);
-    expect(fake.rows.get(paidRow.code)?.source_tier).toBe("paid_rung");
-    expect((await getPersistedDecode(paidRow.code))?.sourceTier).toBe("paid_rung");
+    expect(fake.rows.get(paidRow.code)?.source_tier).toBe("gpt_5_4_mini");
+    expect((await getPersistedDecode(paidRow.code))?.sourceTier).toBe("gpt_5_4_mini");
   });
 
   it("does not ALTER when the column already exists", async () => {

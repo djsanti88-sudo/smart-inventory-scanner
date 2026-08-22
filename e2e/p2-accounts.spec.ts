@@ -15,9 +15,8 @@ const VIEWPORTS = [
 // stray scan row mid-test. GET returns the capability check (auto-decode gate fails on hasKey -> no POST
 // fires); a POST, if it ever did, resolves to {} and mutates nothing.
 const NO_AI_STATUS = {
-  liveEnabled: false, autoDecodeOnScan: false, geminiEnabled: false, openaiEnabled: false,
-  geminiConfigured: false, openaiConfigured: false, premiumFallback: false, mode: "off",
-  dailyLimit: 200, missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"], e2e: true,
+  liveEnabled: false, autoDecodeOnScan: false, openaiConfigured: false, mode: "off",
+  dailyLimit: 200, missingKeys: ["OPENAI_API_KEY"], e2e: true,
 };
 
 async function mockAiLookup(route: Route) {

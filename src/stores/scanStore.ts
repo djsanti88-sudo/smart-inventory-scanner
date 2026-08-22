@@ -26,7 +26,7 @@ import { resolveScan } from "@/services/resolver";
 import { isLikelyMisreadGtin } from "@/services/upc/misread";
 import { gradeBarcode } from "@/services/upc/barcodeTrust";
 import { canonicalGtin } from "@/services/upc/gtin";
-import { clampDecodeBudgetMs, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
+import { clampDecodeBudgetMs } from "@/services/ai/decodeBudget";
 import { fetchWithBackoff } from "@/services/net/fetchWithBackoff";
 import { hashPin, verifyPin, isValidPinFormat } from "@/services/security/pinLock";
 import { isPlatformOwnerClient } from "@/services/security/roleAccess";
@@ -95,6 +95,8 @@ import { buildPersistedScanState, type PersistableScanState } from "@/stores/sca
 import { createCoalescedFailSoftPersistStorage, createAsyncCoalescedFailSoftPersistStorage } from "@/stores/scanPersistStorage";
 import { createIdbBacking } from "@/stores/idbBacking";
 import { emptyTenantState } from "@/stores/scanReset";
+import { DEFAULT_SETTINGS } from "@/stores/scanDefaults";
+export { DEFAULT_SETTINGS } from "@/stores/scanDefaults";
 import { clearSelectedBusinessId } from "@/lib/selectedBusiness";
 import {
   persistKeyForUid,
@@ -230,7 +232,7 @@ export class DailyCapReachedError extends Error {
 /**
  * AM-1(a) (owner-reported 36-70s browser blocks): thrown when the client-side decode fetch is
  * aborted by our own AbortController (timeout = decodeBudgetMs + 7000ms margin). The server-side
- * ladder deadline (L2, see pipeline.ts) is the primary fix - it bounds the SUM of every rung so the
+ * server decode deadline (L2, see pipeline.ts) is the primary fix - it bounds total work so the
  * request itself finishes fast - but the client must never trust the network to behave: an abort
  * here is NOT a retry case (the decode keeps running server-side; there is nowhere to retry TO), it
  * is an honest "still working, check back" signal that keeps the scan row open and reviewable.
@@ -291,7 +293,7 @@ function evaluateAutoDecode(p: {
   const freeDecodeAvailable = p.status.freeDecodeAvailable === true;
   // When the server advertises free/local decode rungs (tire corpus, retail corpus, caches), do not
   // client-block solely on paid-provider keys or a spent cap: the server will answer $0 hits before
-  // applying paid-rung gates. Older/mocked status payloads omit this flag, so they keep the legacy
+  // applying paid-decode gates. Older/mocked status payloads omit this flag, so they keep the legacy
   // key/cap client gate and existing tests do not accidentally start real/network decode attempts.
   if (!freeDecodeAvailable && !p.status.openaiConfigured) {
     const missing = p.status.missingKeys.join(", ") || "OPENAI_API_KEY";
@@ -699,40 +701,6 @@ export interface ScanStoreDeps extends DatabaseService {
   now: () => string;
   persistName: string | null; // null disables persistence (used by tests)
 }
-
-export const DEFAULT_SETTINGS: Settings = {
-  businessId: DEMO_BUSINESS_ID,
-  ownerPinHash: "", // no owner PIN set until the owner chooses one in Settings
-
-  // Internal lookup is ALWAYS-ON by default: unknown codes auto-attempt the internal decode pipeline
-  // (when configured server-side) before going to Needs Review. The toggle remains platformOwner-only.
-  aiLookupEnabled: true,
-  dailyLookupLimit: 200, // fallback if the server cap (AI_LOOKUP_DAILY_LIMIT) is unreachable
-  dailyLookupCount: 0,
-  lastResetDate: "1970-01-01",
-  requireHumanApprovalForMerges: true,
-  allowImageSuggestions: true,
-  allowProductUrlSuggestions: true,
-  scannerSubmitMode: "both",
-  scannerDebounceMs: 80,
-  enablePendingSyncQueue: true,
-  enableIdempotentSync: true,
-  autoSuggestUnknowns: false,
-  autoAddDecodedProducts: true,
-  // AM-9 (2026-07-15): the server has always clamped decode budget to [5000, 8000] (owner cost rule
-  // 2026-06-28); this default previously drifted to 13000, which the server silently clamped down to
-  // 8000 on every request. New installs now get the real default. Existing installs with a persisted
-  // 13000 are NOT reset here (persist migrate would also wipe learned products/aliases per CLAUDE.md -
-  // never trigger that just to fix a settings number) - instead every read site below clamps at
-  // consumption time via clampDecodeBudgetMs, so a stale persisted value can never leave [5000, 8000].
-  decodeBudgetMs: DECODE_BUDGET_DEFAULT_MS,
-  autoCatalogLearningEnabled: true,
-  autoVerifyConfidenceThreshold: 80,
-  scanContext: "tire", // Phase 9: default to Tires so the category firewall protects from day one (no setup)
-  trustedSourceAutoVerifyEnabled: true,
-  aiOnlyAutoVerifyAllowed: false,
-  autoCountNonPublicWithEvidence: true,
-};
 
 const AUTO_SESSION_INACTIVITY_MINUTES = 30;
 const RECENT_LOCATIONS_CAP = 8;
@@ -1650,7 +1618,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
     let trustedExactProbeGeneration = 0;
     // TASK T3 fix (2026-08-06, audit-9 finding B): the deterministicOnly probe's reasonCode
     // "trusted_exact_not_available" (server allowlist not configured / this business is not in it)
-    // must not be swallowed if the ladder it then continues into also misses. This set remembers
+    // must not be swallowed if the decode path it then continues into also misses. This set remembers
     // (by reviewId, which materializeTrustedExactMiss/the continuation call always reuse - see
     // materializeTrustedExactMiss below) which in-flight reviews had that specific config-gap probe
     // outcome, so the eventual settle site can compose an honest reason instead of the generic
@@ -3787,8 +3755,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           platformOwner: isPlatformOwnerForGateBypass(get().userId),
         });
         // A3 (owner-ratified 2026-07-15, narrowed by AM-2): a code whose GS1 check digit fails can
-        // never decode via any GTIN rung (Go-UPC/fetchV2/GPT all key off the code) - dispatching the
-        // ladder here only burns time and cap budget chasing a doomed lookup. Skip auto-decode
+        // never decode correctly because every downstream identity lookup keys off the code - dispatching the
+        // decode here only burns time and cap budget chasing a doomed lookup. Skip auto-decode
         // entirely; the row stays a normal, aliasable needs_review row (never "decoding") with the
         // additive misread reason already set by the resolver. Overriding here (rather than after
         // row creation) keeps decodeStatus honest from the very first render - never "decoding" then
@@ -4185,24 +4153,23 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 openaiConfigured: Boolean(d.openaiConfigured),
                 dailyLimit: typeof d.dailyLimit === "number" ? d.dailyLimit : s.aiStatus.dailyLimit,
                 missingKeys: Array.isArray(d.missingKeys) ? d.missingKeys : s.aiStatus.missingKeys,
-                // Task 8: the real ladder order. Gemini is permanently out of decode and the server no
-                // longer reports any Gemini flag, model, or key.
-                decodeLadder: Array.isArray(d.decodeLadder) ? d.decodeLadder : s.aiStatus.decodeLadder,
+                // The server reports the real free-first decode order.
+                decodePath: Array.isArray(d.decodePath) ? d.decodePath : s.aiStatus.decodePath,
                 // Spec 2 (M1): server-authoritative, same as every other flag in this block - a stale
                 // client value must never mask a live server kill switch, and an omitted field (older/
                 // mocked GET response) correctly defaults to false (not on).
                 killSwitchOn: Boolean(d.killSwitchOn),
                 // A successful refresh always confirms fresh truth - clear any prior unknown/stale flag.
                 killSwitchStatusUnknown: false,
-                gptLadder:
-                  d.gptLadder && typeof d.gptLadder === "object"
+                gptDecode:
+                  d.gptDecode && typeof d.gptDecode === "object"
                     ? {
-                        spentTodayUsd: Number(d.gptLadder.spentTodayUsd) || 0,
-                        capUsd: Number(d.gptLadder.capUsd) || 0,
-                        callsToday: Number(d.gptLadder.callsToday) || 0,
-                        enabled: Boolean(d.gptLadder.enabled),
+                        spentTodayUsd: Number(d.gptDecode.spentTodayUsd) || 0,
+                        capUsd: Number(d.gptDecode.capUsd) || 0,
+                        callsToday: Number(d.gptDecode.callsToday) || 0,
+                        enabled: Boolean(d.gptDecode.enabled),
                       }
-                    : s.aiStatus.gptLadder,
+                    : s.aiStatus.gptDecode,
               },
               // Live AI config is SERVER-AUTHORITATIVE so a stale persisted client value can't disable lookup
               // or pin an old daily cap. When the server confirms a provider key, force lookup ON (always-on)
@@ -4434,7 +4401,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           };
           const blockStatus: AiLookupLog["status"] = blockStatusByReason[gate.reason];
           // OWNER RULE follow-up (2026-08-05): a non-deterministic call blocked at THIS gate (e.g. the
-          // trusted-exact continuation handing off into the ordinary ladder while the daily cap is
+          // trusted-exact continuation handing off into the ordinary decode path while the daily cap is
           // genuinely spent) must resolve the row honestly instead of leaving it stuck at decodeStatus
           // "decoding" forever - this gate returns before any fetch, so nothing downstream ever touches
           // the row again otherwise. A deterministic probe never flips decodeStatus to "decoding" in the
@@ -4523,7 +4490,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         try {
           // AM-1(a) (owner-reported 36-70s browser blocks): the decode fetch had no client-side
           // timeout at all - a slow/hung server response could block the scan row (and the browser
-          // connection) indefinitely. Timeout margin gives the server-side L2 ladder deadline
+          // connection) indefinitely. Timeout margin gives the server-side decode deadline
           // (DECODE_LADDER_TOTAL_MS, see pipeline.ts) room to finish and reply honestly before the
           // client gives up; the abort is a client-local giveup only - the server keeps computing and
           // caches its answer for the next scan, so nothing is lost.
@@ -4684,8 +4651,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             const currentSettings = current.settings;
             const currentNow = new Date(now()).getTime();
             // OWNER RULE (2026-08-05): a trusted-exact miss is never a dead end. The code continues into
-            // the ordinary ladder in every environment unless the ordinary ladder's own gate blocks it.
-            // dailyCount is intentionally forced to 0 so paid-rung cap math stays server-side while the
+            // the ordinary decode path in every environment unless its own gate blocks it.
+            // dailyCount is intentionally forced to 0 so paid-decode cap math stays server-side while the
             // free corpus/cache rungs still run. GTIN shape and misread-likelihood never suppress the handoff.
             const continuationGate = evaluateAutoDecode({
               aiEnabled: currentSettings.aiLookupEnabled,
@@ -4724,7 +4691,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               } else {
                 // Hardening: materializeTrustedExactMiss found neither the in-flight probe nor a
                 // needsReviewQueue entry for this id (e.g. the session/cache was cleared mid-flight).
-                // There is nothing left to continue into the ladder for - resolve honestly instead of
+                // There is nothing left to continue into decode for - resolve honestly instead of
                 // silently doing nothing and leaving a stale row behind.
                 const fallbackReason = decision?.reason || "No trusted exact match was found.";
                 set((state) => ({
@@ -4777,7 +4744,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           }
           // TASK T3 fix (2026-08-06, audit-9 finding B): if the trusted-exact probe for THIS review
           // reported reasonCode trusted_exact_not_available (the server allowlist is not configured /
-          // does not include this business) and the ladder we then continued into settles on the
+          // does not include this business) and the decode path we then continued into settles on the
           // generic all-miss bucket (MISS_REASON_TEXT.product_not_found), that generic text is
           // dishonest - it is indistinguishable from a code that genuinely does not exist anywhere.
           // Compose the specific, customer-safe, denylist-clean reason instead. A genuine
@@ -4806,9 +4773,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             ? "app_verified"
             : decision?.corroborationPath === "gpt_self_report"
               ? "ai_self_report"
-              : providerNamesArr.includes("go-upc")
-                ? "db_self_report"
-                : undefined;
+              : undefined;
           const decodeProviderSummaries = results.map((r, i) => ({
             provider: providerNamesArr[i] ?? "?",
             productName: r.productName,
@@ -4826,17 +4791,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             : { conflict: false, knownUpcs: [] as string[] };
           const reverseUpcConflictNote = shopRev.conflict ? `Already in your catalog under: ${shopRev.knownUpcs.slice(0, 3).join(", ")}` : "";
 
-          // GPT LADDER (owner order 2026-07-06): the info_only tier is DELETED - every GPT answer
-          // with a productName now arrives as a normal verified/suggested result and populates the
-          // candidate fields like any other suggestion. Only the skip-reason transparency remains:
-          // the route may append a {provider:"gpt-5.5-ladder", status:"skipped", errorCode} entry to
-          // providerStatuses whenever the paid rung did not run at all. Surface WHY in decodeNote.
+          // Surface why the one paid decode was skipped without leaking the reason into verification.
           const gptSkipEntry = Array.isArray(data.providerStatuses)
             ? (data.providerStatuses as Array<{ provider?: string; status?: string; errorCode?: string }>).find(
-                (p) => p?.provider === "gpt-5.5-ladder" && p?.status === "skipped",
+                (p) => p?.provider === "gpt-5.4-mini" && p?.status === "skipped",
               )
             : undefined;
-          const gptSkipNote = gptSkipEntry?.errorCode ? `gpt-5.5-ladder skipped: ${gptSkipEntry.errorCode}` : "";
+          const gptSkipNote = gptSkipEntry?.errorCode ? `gpt-5.4-mini skipped: ${gptSkipEntry.errorCode}` : "";
           const decodeNoteUpdate = gptSkipNote || undefined;
 
           const suggestedPartNumberForGate = tireFields?.partNumber ?? best?.primarySku;
@@ -4916,10 +4877,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 // BADGE/REASON INVARIANT: never write a "Verified...No AI lookup needed" reason under a
                 // non-verified badge (see honestReasonForBadge above - the owner-caught contradiction).
                 reason: honestReasonForBadge(finalDecisionReason, decision?.status, displayedBadge) || e.reason,
-                // STALE-NOTE FIX (goupc-cap-rootcause item 3): decodeNote was set once at scan time to the
+                // Stale-note fix: decodeNote was set once at scan time to the
                 // in-flight "Decoding with AI..." note and never refreshed - platformOwner saw that note
                 // forever on every settled row. The decode has now settled, so replace the in-flight note
-                // with the honest post-decode transparency note (the skipped-paid-rung note when present),
+                // with the honest post-decode transparency note (the skipped-paid note when present),
                 // or clear it. Never leave "Decoding with AI..." on a row that is no longer decoding.
                 decodeNote: decodeNoteUpdate || undefined,
               };
@@ -4997,7 +4958,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // True exactly when the category conflict was CLEARED by verification -> the row still counts but
           // is tagged "Off-category item" so the operator sees it is not a tire.
           const offCategory = detectOffCategoryAdvisory(firewallParams);
-          // PHASE-7 EVIDENCE GATE + GPT-ladder trust tier + T20/code-1225 public-barcode firewall, now in
+          // PHASE-7 EVIDENCE GATE + GPT decode trust tier + T20/code-1225 public-barcode firewall, now in
           // one pure function (src/stores/scanGates.ts) shared with backgroundVerifyDeep so the two paths
           // cannot drift. tireOk + contextConflict are computed here (they need store services) and passed in.
           const evidenceGatePassed = canAutoCount({
@@ -5180,7 +5141,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     sessionId: cur.sessionId,
                     idFactory,
                     now,
-                    source: "ai_gemini",
+                    source: "ai_openai",
                     createdBy: "ai",
                   });
                   if (built.aliases.length > 0) {
@@ -5245,7 +5206,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   category: mintEnriched.category, specsShort: mintEnriched.specsShort, specsFull: mintEnriched.specsFull,
                   primarySku: best?.primarySku ?? "", primaryBarcode: mintedBarcode, gtin: best?.gtin ?? "", upc: best?.upc ?? "",
                   ean: best?.ean ?? "", vendorCodes: [], aliases: [], imageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? "") : "",
-                  productUrl: best?.productUrl ?? "", location: "", notes: "", status: "active", source: "ai_gemini",
+                  productUrl: best?.productUrl ?? "", location: "", notes: "", status: "active", source: "ai_openai",
                   confidence: decision?.confidence ?? 0, verified: false, provisional: true, provenanceTier: "provisional", createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
                   ...(mintEnriched.structuredModel ? { structuredModel: mintEnriched.structuredModel, structuredBy: "deterministic" as const } : {}),
                 };
@@ -5432,7 +5393,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // identity was ALREADY applied onto the provisional row in place a few lines up (the
             // hasUsableName enrich branch runs regardless of this gate) - the only thing left is to close
             // the review instead of leaving it open, when confidence >= 0.8 OR this is an app-verified
-            // exact decode (Go-UPC exact class: status "verified" + exactCodeEvidenceVerifiedByApp true).
+            // exact app-verified decode (status "verified" + exactCodeEvidenceVerifiedByApp true).
             // TRUST RULES: no alias is created here, the product stays provisional:true/verified:false,
             // and the feed badge stays "suggested" (never "verified") - markFeedRowVerified is not called.
             // MULTI-VARIANT GATE (Group C): a listing naming several distinct speed ratings for one
@@ -5594,7 +5555,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             const provProduct: Product = {
               id: provId, businessId: cur.businessId, name: fbName, brand: floor?.brand ?? "", category: "", specsShort: "",
               specsFull: "", primarySku: "", primaryBarcode: code, gtin: "", upc: "", ean: "", vendorCodes: [],
-              aliases: [], imageUrl: "", productUrl: "", location: "", notes: "", status: "active", source: "ai_gemini",
+              aliases: [], imageUrl: "", productUrl: "", location: "", notes: "", status: "active", source: "ai_openai",
               confidence: 0, verified: false, provisional: true, provenanceTier: "provisional", createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
             };
             set((st) => ({ products: [...st.products, provProduct] }));
@@ -5766,7 +5727,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const provProduct: Product = {
           id: provId, businessId: st0.businessId, name: fbName, brand: floor?.brand ?? "", category: "", specsShort: "",
           specsFull: "", primarySku: "", primaryBarcode: code, gtin: "", upc: "", ean: "", vendorCodes: [],
-          aliases: [], imageUrl: "", productUrl: "", location: "", notes: "", status: "active", source: "ai_gemini",
+          aliases: [], imageUrl: "", productUrl: "", location: "", notes: "", status: "active", source: "ai_openai",
           confidence: 0, verified: false, provisional: true, provenanceTier: "provisional", createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
         };
         const ev = st0.scanFeed.find((e) => e.cleanCode === code && e.status !== "known");
@@ -5984,7 +5945,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   ...e,
                   decodeStatus: "verified" as ScanEvent["decodeStatus"],
                   reason: reason || e.reason,
-                  // STALE-NOTE FIX (goupc-cap-rootcause item 3): the row just settled to verified - drop
+                  // Stale-note fix: the row just settled to verified - drop
                   // any leftover in-flight "Decoding with AI..." note (see the main settle block above).
                   decodeNote: undefined,
                   // P5 Task 5: additive, optional. Only set when the caller passed one (see the
@@ -6321,7 +6282,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // AUTO-SUGGEST-APPLY (owner order 2026-07-10, kept in sync with the same gate in liveDecode):
           // a verified deep decode that missed the full auto-count gate above (e.g. tireOk failed) can
           // still skip Needs Review as a SUGGESTION when confidence >= 0.8, OR this is an app-verified
-          // exact decode (Go-UPC exact class). Apply the identity onto the existing provisional row IN
+          // exact app-verified decode. Apply the identity onto the existing provisional row in
           // PLACE - product stays provisional:true/verified:false - and close the review. TRUST RULES:
           // no alias created, markFeedRowVerified never called, feed badge stays "suggested".
           const autoSuggestApplied = autoSuggestApplyOk({
@@ -6375,7 +6336,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   sessionId: state.sessionId,
                   idFactory,
                   now,
-                  source: "ai_gemini",
+                  source: "ai_openai",
                   createdBy: "ai",
                 });
                 if (built.aliases.length > 0) {
@@ -6631,7 +6592,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           }
           if (provOrphanId) matchedIds.delete(provOrphanId); // never let the placeholder count as an owner
 
-          // IDENTITY-MERGE (decode ladder Task 9): when the deterministic dedup above finds NO owner, still
+          // Identity merge: when the deterministic dedup above finds no owner, still
           // check whether this decoded identity is the SAME countable product as one already in the shop, by
           // canonical GTIN (auto_link) or a fuzzy brand+name match (suggest_link). This links two DIFFERENT
           // scannable codes that resolve to the same product across encodings, so a second scan increments
@@ -8263,8 +8224,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "correction_recheck_requested", metadata: { code: review.cleanCode, reason: opts?.reason ?? "" } });
 
         // Decode unavailable: do NOT fail the correction. Mark unavailable and keep it in Needs Review.
-        // The recheck runs the SAME decode pipeline as a normal scan (corpus -> Go-UPC -> Fetch V2 -> GPT,
-        // never Gemini), and that pipeline has free rungs, so a missing provider key is NOT a blocker. The
+        // The recheck runs the same free-first/GPT decode pipeline as a normal scan, so a missing paid
+        // key is not a blocker for free knowledge. The
         // only conditions that stop it running at all are the server kill switch and the server-side
         // live-AI disable - the same two server flags the normal decode path honors. Key NAMES only.
         if (ai.killSwitchOn || !ai.liveEnabled) {
@@ -8780,7 +8741,7 @@ function deleteProductsInternal(
       name: code ? provisionalPlaceholderName(code) : "Unidentified item (deleted product)",
       brand: floor?.brand ?? "", category: "", specsShort: "", specsFull: "", primarySku: "",
       primaryBarcode: code, gtin: "", upc: "", ean: "", vendorCodes: [], aliases: [], imageUrl: "",
-      productUrl: "", location: "", notes: "", status: "active", source: "ai_gemini", confidence: 0,
+      productUrl: "", location: "", notes: "", status: "active", source: "ai_openai", confidence: 0,
       verified: false, provisional: true, provenanceTier: "provisional",
       createdAt: now(), createdBy: "human", updatedAt: now(), updatedBy: "human",
     });

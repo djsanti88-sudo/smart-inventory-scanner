@@ -22,7 +22,7 @@ const CODE_3 = "333444555660";
 // suggest_link on the SECOND decode, which is exactly the no-op condition under test.
 function verifiedResponseFor(code: string) {
   return {
-    providerNames: ["gemini"],
+    providerNames: ["gpt-5.4-mini"],
     results: [
       {
         productName: "Aurora Max Wireless Earbuds",
@@ -64,7 +64,7 @@ function verifiedResponseFor(code: string) {
 const SHARED_GTIN = "00099988877704"; // valid GS1 check digit (GTIN-14)
 function conflictResponseFor(code: string, name: string) {
   return {
-    providerNames: ["gemini"],
+    providerNames: ["gpt-5.4-mini"],
     results: [
       {
         productName: name,

@@ -1,16 +1,16 @@
 // Persistent decode cache (L2). The in-memory decodeCache (src/services/ai/decodeCache.ts) is L1 and
 // stays exactly as-is: fast, but per-process and gone on every serverless cold start. On Vercel every
-// new instance re-runs the WHOLE free+paid ladder for a code someone already scanned minutes ago on a
+// new instance re-runs free resolution and paid decode for a code someone already scanned minutes ago on a
 // different instance. This module is the durable layer consulted on an L1 miss (see route.ts):
 //   - "result" entries replay a prior verified/suggested decode with zero provider work.
 //   - NO-CANDIDATE ROWS ARE ABOLISHED (owner ruling 2026-08-20): a failed decode stores NOTHING.
-//     Every rescan of an unresolved code re-runs the full ladder. Do not reintroduce "no_result_receipt"
+//     Every rescan of an unresolved code re-runs the decode path. Do not reintroduce "no_result_receipt"
 //     rows, cooldowns, or any other negative-result memory here - legacy rows of that kind read back as
 //     a plain miss below.
 //
 // Backing store: Turso/libsql when TURSO_DATABASE_URL + TURSO_AUTH_TOKEN are configured (same client
 // construction pattern as src/server/retail-knowledge/retailKnowledgeIndex.ts), else a best-effort JSON
-// file next to .ai-lookup-usage.json / .gpt-ladder-usage.json. Every exported function is corruption-
+// file next to the local decode usage files. Every exported function is corruption-
 // and failure-tolerant: a broken file, a bad row shape, or a dead Turso connection degrades to a null
 // read / a swallowed write - it NEVER throws and never crashes the decode route.
 import fs from "node:fs";
@@ -21,30 +21,17 @@ export interface PersistedDecode {
   code: string;
   kind: "result";
   payload: string; // JSON string of the route's cached decode response
-  /** Diagnostic-only, never read back for decision logic: decision.status ("verified"/"suggested").
+  /** Diagnostic-only: decision.status ("verified"/"suggested").
    *  Disambiguated from `sourceTier` below, which answers a different question ("which stage paid for
-   *  this"), not "what did the ladder decide". */
+   *  this"), not "what did the resolver decide". */
   tier: string;
-  /** Result-only (never set on a "no_result_receipt"): which PAID stage produced this "result" -
-   *  "gpt_ladder" (the GPT-5.5 ladder rung), "paid_ai" (historical rows from the retired legacy
-   *  Gemini/OpenAI path), or "paid_rung" (the Go-UPC or Fetch V2 ladder rung - PAY-ONCE rule, owner
-   *  2026-07-14: persists on a verified win AND on a paid suggestion, e.g. goupc_inferred, since the
-   *  paid call already happened either way). A free suggestion that paid rungs failed to beat persists
-   *  WITHOUT a sourceTier (pay-once marker lives in the payload). pipeline.ts reads this back to keep
-   *  "a bare free title must not overwrite an identity the app already bought" honest, so BOTH
-   *  backends must persist it: the file backend as a JSON property, Turso in the `source_tier`
-   *  column (added 2026-08-19 as an idempotent ALTER; before that Turso dropped it and the rule was
-   *  silently inverted in production).
-   */
-  sourceTier?: "paid_ai" | "gpt_ladder" | "paid_rung";
+  /** The one paid source that produced this positive result. */
+  sourceTier?: "gpt_5_4_mini";
   createdAt: number;
 }
 
-// A NULL column (rows written before the source_tier ALTER) and an unrecognized string both read back
-// as undefined, i.e. "unknown tier", exactly the pre-column behavior for that row.
-const SOURCE_TIERS = ["paid_ai", "gpt_ladder", "paid_rung"] as const;
 function asSourceTier(v: unknown): PersistedDecode["sourceTier"] {
-  return SOURCE_TIERS.find((tier) => tier === v);
+  return v === "gpt_5_4_mini" ? v : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +146,7 @@ export async function getPersistedDecode(code: string): Promise<PersistedDecode 
       const row = result.rows[0];
       if (!row) return null;
       // Legacy "no_result_receipt" rows are a plain MISS (owner ruling 2026-08-20: no-candidate rows
-      // are abolished; a failed search stores nothing and every rescan re-runs the full ladder).
+      // are abolished; a failed search stores nothing and every rescan re-runs the decode path).
       if (row.kind === "no_result_receipt") return null;
       const sourceTier = asSourceTier(row.source_tier);
       const entry: PersistedDecode = {
@@ -174,7 +161,9 @@ export async function getPersistedDecode(code: string): Promise<PersistedDecode 
     }
     const store = readFileStore();
     const entry = store[key];
-    return isValidEntry(entry) ? entry : null;
+    if (!isValidEntry(entry)) return null;
+    const sourceTier = asSourceTier((entry as { sourceTier?: unknown }).sourceTier);
+    return { ...entry, ...(sourceTier ? { sourceTier } : { sourceTier: undefined }) };
   } catch (e) {
     console.warn("[decode-cache-store] getPersistedDecode failed:", (e as Error).message);
     return null;

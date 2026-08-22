@@ -106,7 +106,7 @@ describe('loadOracle', () => {
     const dir = mkdtempSync(join(tmpdir(), 'oracle-test-'));
     const p = join(dir, 'oracle-codes.json');
     const fixture = [
-      { code: '070330645936', expectedName: 'BIC Pocket Lighter', expectedBrand: 'BIC', source: 'go-upc.com' },
+      { code: '070330645936', expectedName: 'BIC Pocket Lighter', expectedBrand: 'BIC', source: 'verified fixture' },
     ];
     writeFileSync(p, JSON.stringify(fixture), 'utf8');
     try {

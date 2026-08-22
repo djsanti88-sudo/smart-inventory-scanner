@@ -102,9 +102,9 @@ test('parseArgs: --lesson 2,7 parses a comma list to ["2", "7"]', () => {
   assert.deepEqual(args.lessons, ['2', '7']);
 });
 
-test('parseArgs: --lesson live-decode-ladder-trace parses the slug form', () => {
-  const args = parseArgs(['--lesson', 'live-decode-ladder-trace']);
-  assert.deepEqual(args.lessons, ['live-decode-ladder-trace']);
+test('parseArgs: --lesson live-decode-trace parses the slug form', () => {
+  const args = parseArgs(['--lesson', 'live-decode-trace']);
+  assert.deepEqual(args.lessons, ['live-decode-trace']);
 });
 
 test('parseArgs: repeated --lesson flags accumulate', () => {

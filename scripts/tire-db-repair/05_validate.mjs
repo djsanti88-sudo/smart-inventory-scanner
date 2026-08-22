@@ -545,7 +545,7 @@ async function main() {
   reportLines.push(`| model | ${b6Model} | 264 |`);
   reportLines.push(`| size | ${b6Size} | 275 |`);
   reportLines.push("");
-  reportLines.push(`Total \`codex_enrichment_fill\` audit rows (this run, live): ${b6Total} (expected 676 per B6_ENRICHMENT_REPORT.md). Review queue: 179 rows (161 below-gate + 18 placeholder_barcode exclusions) per B6's own report - not independently re-derivable from this DB since the review CSV lives outside the tables this validator queries. Firecrawl: 0 operations used (skipped per rule, threshold not met, per B6's report).`);
+  reportLines.push(`Total \`codex_enrichment_fill\` audit rows (this run, live): ${b6Total} (expected 676 per B6_ENRICHMENT_REPORT.md). Review queue: 179 rows (161 below-gate + 18 placeholder_barcode exclusions) per B6's own report - not independently re-derivable from this DB since the review CSV lives outside the tables this validator queries.`);
   reportLines.push("");
 
   reportLines.push("## Drift notes");

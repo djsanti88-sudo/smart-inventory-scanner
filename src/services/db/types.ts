@@ -164,8 +164,8 @@ export interface CatalogEntry {
   // doc into a "pending" re-candidate rather than silently re-verifying it.
   verificationStatus?: "verified" | "pending" | "conflict" | "rejected" | "disputed";
   // GC5 (P5b): mirrors Product.provenanceTier (src/types.ts:89-94). Master-truth appends (P5b Task 1)
-  // stamp "ladder_verified_strong" for a strong app-verified ladder decode; no other tier is minted by
-  // this phase. Optional so every pre-existing CatalogEntry (no tier yet) stays valid.
+  // stamp the legacy-compatible "ladder_verified_strong" value for a strong app-verified decode.
+  // Optional so every pre-existing CatalogEntry (no tier yet) stays valid.
   provenanceTier?: ProvenanceTier;
   // Written by /api/catalog-review/[id] (approve/reject) - declared here to close a pre-existing type
   // gap (these fields were already written ad hoc, undeclared). Untouched by this round except for

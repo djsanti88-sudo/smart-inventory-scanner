@@ -100,12 +100,12 @@ describe("ai-lookup master-append hook wiring (P5b Task 2)", () => {
   });
 
   it("never calls the append hook on cap_blocked (no decision was ever settled)", async () => {
-    runDecodePipeline.mockResolvedValue({ kind: "cap_blocked" as const, message: "cap reached" });
+    runDecodePipeline.mockResolvedValue({ kind: "cap_blocked" as const, message: "cap reached", reasonCode: "daily_cap" });
     const { POST } = await import("./route");
     const res = await POST(decodeReq());
     expect(res.status).toBe(429);
     expect(logServerEvent).toHaveBeenCalledWith(expect.objectContaining({
-      event: "daily_cap_exhausted",
+      event: "paid_cap_exhausted",
       reasonCode: "daily_cap",
       status: 429,
     }));

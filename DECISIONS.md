@@ -495,3 +495,17 @@ Why each choice was made. Newest decisions at the bottom of each section.
   from the `LadderStorage` seam, and the production Turso `goupc_miss_cache` table (409 rows) is
   DROPPED. Every confirmed Go-UPC miss is re-checked with a fresh billed call on the next scan, and
   every real egress is still metered.
+
+## Single paid decoder: free knowledge and positive cache, then GPT-5.4 mini (2026-08-21)
+
+- **Current order:** tire corpus -> retail corpus -> learned products -> owner-approved master catalog
+  -> positive persisted cache -> in-process positive cache/coalescing -> one GPT-5.4 mini call.
+- **Supersedes all earlier provider-rung decisions.** Retired API clients, discovery engines, rung
+  drivers, usage stores, provider-specific live probes, and model bakeoffs are deleted. Historical
+  decision text above remains evidence, not current architecture.
+- **Trust:** GPT output is suggestion-only. App-owned deterministic evidence or human approval is still
+  required for verified identity and alias creation.
+- **Money boundary:** global/account authorization settles once immediately before GPT egress. Aborts
+  reserve worst case. Response metadata is a computed floor; true spend comes from the provider console.
+- **Persistence:** only usable positive GPT results persist. Misses never persist. Current free truth is
+  evaluated before an older cached GPT suggestion.

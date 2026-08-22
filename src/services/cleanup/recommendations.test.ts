@@ -61,7 +61,7 @@ describe("buildCleanupRecommendations", () => {
   it("flags generic + low-evidence AI names as medium-confidence, unchecked by default", () => {
     const products = [
       product("p-generic", "Item"),
-      product("p-ai", "Some Faint Guess", { source: "ai_gemini", confidence: 0.4 }),
+      product("p-ai", "Some Faint Guess", { source: "ai_openai", confidence: 0.4 }),
     ];
     const counts = [count("c-generic", "p-generic"), count("c-ai", "p-ai")];
     const { recommendations } = buildCleanupRecommendations({ finalCounts: counts, products, aliases: [] });

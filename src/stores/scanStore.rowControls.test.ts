@@ -14,7 +14,7 @@ const CODE = "0792080004312";
 
 /** A WEAK decode: honest status "needs_review" (not "suggested"), but with a usable product name. */
 const WEAK_NEEDS_REVIEW = {
-  providerNames: ["gpt-5.5-ladder"],
+  providerNames: ["gpt-5.4-mini"],
   results: [
     {
       productName: "Original Anchor Bar Hot Sauce", brand: "Anchor Bar", category: "food",

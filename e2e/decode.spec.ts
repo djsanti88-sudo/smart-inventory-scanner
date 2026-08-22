@@ -33,7 +33,7 @@ function result(over: Record<string, unknown>) {
 // Mocked decode responses keyed by scanned cleanCode.
 const RESPONSES: Record<string, object> = {
   "049000111222": {
-    providerNames: ["gemini", "openai"],
+    providerNames: ["gpt-5.4-mini"],
     results: [result({ productName: "Coca-Cola Classic", brand: "Coca-Cola", upc: "049000111222", sourceUrls: ["https://gs1.org/049000111222"] })],
     decision: {
       status: "verified",
@@ -45,7 +45,7 @@ const RESPONSES: Record<string, object> = {
     },
   },
   "049000999888": {
-    providerNames: ["gemini", "openai"],
+    providerNames: ["gpt-5.4-mini"],
     results: [result({ productName: "Mystery Snack", brand: "Generic", upc: "049000999888" })],
     decision: {
       status: "suggested",
@@ -57,7 +57,7 @@ const RESPONSES: Record<string, object> = {
     },
   },
   "049000777666": {
-    providerNames: ["gemini", "openai"],
+    providerNames: ["gpt-5.4-mini"],
     results: [result({ productName: "Creamer", brand: "Laird" }), result({ productName: "Receptacle", brand: "Leviton" })],
     decision: {
       status: "conflict",
@@ -69,7 +69,7 @@ const RESPONSES: Record<string, object> = {
     },
   },
   X004DY7YUT: {
-    providerNames: ["gemini", "openai"],
+    providerNames: ["gpt-5.4-mini"],
     results: [result({ productName: "Amazon FBA Label", brand: "Amazon", confidence: 0.95 })],
     decision: {
       status: "suggested",
@@ -96,7 +96,7 @@ test("live decode: verified vs suggested vs conflict vs vendor label, all mocked
   await page.route("**/api/ai-lookup", async (route: Route) => {
     // GET is the capability/status check (no keys in this test) - not an AI lookup, not counted.
     if (route.request().method() === "GET") {
-      await route.fulfill({ json: { liveEnabled: true, autoDecodeOnScan: true, geminiConfigured: false, openaiConfigured: false, missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"], mode: "aggressive", dailyLimit: 100 } });
+      await route.fulfill({ json: { liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: false, missingKeys: ["OPENAI_API_KEY"], mode: "aggressive", dailyLimit: 100 } });
       return;
     }
     aiRouteHits++;

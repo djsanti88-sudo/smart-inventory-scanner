@@ -6,7 +6,7 @@ import type { FeedDecodeStatus, MatchType, ScanStatus, SyncStatus } from "@/type
 // self-report can never mint an app-verified identity (resolver-trust law). This signal lets the
 // badge SHOW that distinction honestly: "app_verified" = the app itself fetched/matched the exact
 // code (EvidenceVerifier / decideDecode's verify paths); "ai_self_report" = a bare GPT self-report
-// (corroborationPath "gpt_self_report"); "db_self_report" = a bare Go-UPC (paid-DB) self-report.
+// (corroborationPath "gpt_self_report"); legacy database self-reports retain their historical badge.
 // Additive + optional - a row/caller with no provenance signal renders the pre-existing plain
 // label so nothing already shipped breaks.
 export type DecodeProvenance = "app_verified" | "ai_self_report" | "db_self_report";

@@ -8,8 +8,7 @@ import { test, expect, type Page, type Route } from "@playwright/test";
 const PROOF = "e2e/proof";
 
 const STATUS = {
-  liveEnabled: true, autoDecodeOnScan: true, geminiEnabled: true, openaiEnabled: true,
-  geminiConfigured: true, openaiConfigured: true, premiumFallback: true, mode: "aggressive",
+  liveEnabled: true, autoDecodeOnScan: true, openaiConfigured: true, mode: "aggressive",
   dailyLimit: 100, missingKeys: [], e2e: true,
 };
 
@@ -23,7 +22,7 @@ function result(over: Record<string, unknown>) {
 
 const DECODE: Record<string, object> = {
   "745125495781": {
-    providerNames: ["gemini", "openai"], premiumUsed: false,
+    providerNames: ["gpt-5.4-mini"], premiumUsed: false,
     results: [result({
       productName: "Falken Wildpeak AT3W 275/55R20 113T", brand: "Falken", specsShort: "275/55R20 113T",
       upc: "745125495781", aliases: ["PNQR7788"], // <-- extra identifier surfaced by the decode (discovered)

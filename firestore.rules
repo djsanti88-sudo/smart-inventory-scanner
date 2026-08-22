@@ -54,7 +54,7 @@ service cloud.firestore {
         && !('unitCost' in data)
         && (!('aliases' in data) || data.aliases.size() == 0)
         && (!('provenanceTier' in data) || data.provenanceTier == 'provisional')
-        && (!('source' in data) || data.source == 'ai_gemini')
+        && (!('source' in data) || data.source == 'ai_openai')
         && (!('createdBy' in data) || data.createdBy == 'ai')
         && (!('updatedBy' in data) || data.updatedBy == 'ai')
         && (!('structuredBy' in data) || data.structuredBy != 'human');
@@ -245,7 +245,7 @@ service cloud.firestore {
         && request.resource.data.payloadHash is string
         && request.resource.data.at == request.time;
     }
-    // Panel MUST-FIX 4 (Gemini C4, Phase-1-blocking): this marker check used to re-require the POST-write
+    // Historical review fix: this marker check used to re-require the POST-write
     // product to still satisfy counterProductDataOk (verified==false), but legit trusted-exact
     // settlement writes verified:true in the SAME transaction as this marker create - transactions are
     // atomic, so that made the WHOLE settlement fail, not just narrow a field. Authorization for the

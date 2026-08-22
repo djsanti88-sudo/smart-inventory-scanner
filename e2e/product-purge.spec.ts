@@ -13,7 +13,7 @@ function poisonedV4Cache() {
     id: `poison-${i}`, businessId: "demo-business", name: "Manstel 200 Pcs Aluminum Rivet Screw Kit", brand: "Manstel",
     category: "Hardware", specsShort: "", specsFull: "", primarySku: "", primaryBarcode: "745125495781", gtin: "",
     upc: "745125495781", ean: "", vendorCodes: [], aliases: ["745125495781"], imageUrl: "", productUrl: "", location: "",
-    notes: "", status: "active", source: "ai_gemini", confidence: 0.9, verified: true, createdAt: "t", updatedAt: "t",
+    notes: "", status: "active", source: "ai_openai", confidence: 0.9, verified: true, createdAt: "t", updatedAt: "t",
     createdBy: "ai", updatedBy: "ai",
   }));
   const finalCounts = [{ id: "pc-0", businessId: "demo-business", sessionId: "s", productId: "poison-0", quantity: 235,

@@ -11,13 +11,13 @@ const FNSKU = "X004DY7YUT";
 
 // Verified non-public decode: app confirmed the exact code in a TRUSTED source (amazon url_only -> verified).
 const VERIFIED_NONPUBLIC = {
-  providerNames: ["gemini"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{ productName: "NatureBell Magnesium Glycinate 500mg", brand: "NatureBell", category: "Supplements", specsShort: "", specsFull: "", primarySku: "", primaryBarcode: FNSKU, gtin: "", upc: "", ean: "", aliases: [], imageUrl: "", productUrl: "", sourceUrls: ["https://www.amazon.com/dp/" + FNSKU], confidence: 0.9, verifiedFacts: [], guesses: [] }],
   decision: { status: "verified", confidence: 0.9, reason: "Verified AI Decode: trusted source confirmed the exact code.", evidenceStrength: "url_only", exactCodeEvidenceVerifiedByApp: true, corroborationPath: "non_public_trusted_source", crossCheck: { decision: "single_provider" } },
 };
 // Weak non-public decode: a usable product but NO app-verified exact code (the Velvet Torch shape).
 const WEAK_NONPUBLIC = {
-  providerNames: ["gemini"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{ productName: "Velvet Torch Dress", brand: "", category: "", sourceUrls: [], verifiedFacts: [], guesses: ["g"], aliases: [], confidence: 0.6 }],
   decision: { status: "suggested", confidence: 0.6, reason: "Suggested", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider" } },
 };

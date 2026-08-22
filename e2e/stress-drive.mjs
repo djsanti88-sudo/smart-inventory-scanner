@@ -10,14 +10,10 @@ const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const NO_AI_STATUS = {
   liveEnabled: false,
   autoDecodeOnScan: false,
-  geminiEnabled: false,
-  openaiEnabled: false,
-  geminiConfigured: false,
   openaiConfigured: false,
-  premiumFallback: false,
   mode: "off",
   dailyLimit: 500,
-  missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"],
+  missingKeys: ["OPENAI_API_KEY"],
   e2e: true,
 };
 

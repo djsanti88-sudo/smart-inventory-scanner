@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { LadderStorage } from "@/server/upc/storage";
+import type { DecodeStorage } from "@/server/decode/storage";
 
 // M1 deep-review fix 1 (re-leak): the "disputed" remerge path in appendMasterCatalogEntry must never
 // write disputedBy/auditLog onto the PUBLIC catalogEntries parent doc (mirrors the split
@@ -379,19 +379,11 @@ describe("appendMasterCatalogEntry (Admin-SDK upsert, mocked)", () => {
 
 // ---- Task 2 (outcome visibility): KV counter + first-error-per-process console.error ----
 
-/** A minimal in-memory LadderStorage double so these tests never touch the file adapter or Turso. */
-function makeMockStorage(): LadderStorage & { kv: Map<string, string> } {
+/** A minimal in-memory DecodeStorage double so these tests never touch the file adapter or Turso. */
+function makeMockStorage(): DecodeStorage & { kv: Map<string, string> } {
   const kv = new Map<string, string>();
   return {
     kv,
-    async readUsage() {
-      return { month: "2026-07", used: 0 };
-    },
-    async writeUsage() {},
-    async incrementUsage() {
-      return 0;
-    },
-    async appendArchive() {},
     async appendOutcome() {},
     async get(key: string) {
       return kv.has(key) ? kv.get(key)! : null;

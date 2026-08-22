@@ -9,7 +9,7 @@ import { MockDb } from "@/services/mockDb";
 // What the server now returns for a corroborated single-provider tire (strong prefix family + specs +
 // app-verified exact code): a "verified" decision even though only one provider contributed.
 const COOPER_CORROBORATED = {
-  providerNames: ["gemini"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{
     productName: "Cooper Discoverer A/T3 LT245/75R16 120R", brand: "Cooper", category: "Tire",
     specsShort: "LT245/75R16 120R", specsFull: "", primarySku: "", primaryBarcode: "029142712886", gtin: "",
@@ -26,7 +26,7 @@ const COOPER_CORROBORATED = {
 // (owner-ratified 2026-07-14) only clears the block for an APP-VERIFIED exact code, which the poison never
 // has - so this fixture mirrors the real weak shape (false) and the poison guard stays intact.
 const MANSTEL_POISON_VERIFIED = {
-  providerNames: ["gemini"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{
     productName: "Manstel 200 Pcs Aluminum Rivet Screw Kit", brand: "Manstel", category: "Hardware",
     specsShort: "", specsFull: "", primarySku: "", primaryBarcode: "745125495781", gtin: "",

@@ -13,26 +13,26 @@ const CODE = "111222333446";
 // independently verified (exact code in fetched/strong evidence). It must auto-save + count, never
 // stay "Verified AI Decode + Unknown".
 const VERIFIED_SINGLE_TIER3 = {
-  providerNames: ["gemini"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{ productName: "Phatoil Lavender Essential Oil 100ml", brand: "Phatoil", category: "Home", specsShort: "", specsFull: "", primarySku: "", primaryBarcode: CODE, gtin: "", upc: CODE, ean: "", aliases: [], imageUrl: "", productUrl: "", sourceUrls: ["https://www.upcitemdb.com/upc/" + CODE], confidence: 0.9, verifiedFacts: [], guesses: [] }],
   decision: { status: "verified", confidence: 0.9, reason: "Verified AI Decode: single provider, but the app independently confirmed the exact code in strong evidence.", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" } },
 };
 
 // Strong, evidence-backed decode: exact code app-verified, Tier-2 source (amazon), providers agree.
 const STRONG = {
-  providerNames: ["gemini", "openai"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{ productName: "BIC Classic Pocket Lighter", brand: "BIC", category: "Lighters", upc: CODE, sourceUrls: ["https://www.amazon.com/dp/B000"], verifiedFacts: [], guesses: [], aliases: [], confidence: 0.95 }],
   decision: { status: "verified", confidence: 0.95, reason: "Verified", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "agree" } },
 };
 // Weak: AI-only, no sources, no exact-barcode evidence - but a usable product name (trust the AI).
 const WEAK = {
-  providerNames: ["gemini", "openai"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{ productName: "Maybe Snack", brand: "", category: "", sourceUrls: [], verifiedFacts: [], guesses: ["g"], aliases: [], confidence: 0.5 }],
   decision: { status: "suggested", confidence: 0.5, reason: "Suggested", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider" } },
 };
 // No usable product at all -> the only "weak" that still goes to review.
 const NOPRODUCT = {
-  providerNames: ["gemini", "openai"],
+  providerNames: ["gpt-5.4-mini"],
   results: [{ productName: "", brand: "", category: "", sourceUrls: [], verifiedFacts: [], guesses: [], aliases: [], confidence: 0 }],
   decision: { status: "needs_review", confidence: 0, reason: "No product", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider" } },
 };
