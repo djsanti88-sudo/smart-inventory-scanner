@@ -7,18 +7,38 @@
 
 ## Current phase
 
-**Local decoder simplification complete on `fix/simple-gpt54-decode-audit`.** The branch is
-uncommitted, unpushed, and undeployed. Production remains at the previously recorded `master`
-release until the owner separately approves the Git and deployment gates.
+**Navigation/isolation train + no-candidate abolition SHIPPED.** `master` = `828b74ce` (PR #43 +
+PR #44), merged 2026-08-21, both auto-deployed to production, smoke green.
 
-The local branch now has one decode path:
+What PR #43 shipped (`fix/navigation-sync-account-isolation`):
 
-1. Tire knowledge corpus.
-2. Retail knowledge corpus.
-3. Platform learned products.
-4. Master catalog.
-5. Positive persisted and memory caches.
-6. One paid GPT-5.4 mini request when every free source misses.
+- Business context stays mounted across History/Reconcile/Settings/Scan navigation (double-bootstrap
+  reload glitch gone); pending local data survives stale cloud snapshots; per-UID and per-business
+  persistence isolation with a same-browser A-B-A Firebase emulator proof; product sync ordering,
+  payload-versioned idempotency, and durable review decisions hardened; unresolved History rows count.
+- Review follow-ups landed on the same train: a server-side `decisionUpdatedAt` clock in the
+  `SAVE_UNKNOWN_SCAN` transaction (a retried stale decision can never overwrite a newer one), a
+  narrowed `countsFromTimeline` filter (conflict/quantity-less events stay out of archived-session
+  tables), and the two-account e2e seed made run-relative (it was a wall-clock time bomb).
+
+What PR #44 shipped (`chore/abolish-no-result-receipts`, owner ruling 2026-08-20 in DECISIONS.md):
+
+- ALL negative-result decode memory is abolished: no `no_result_receipt` rows (kind narrowed to
+  `result`, legacy rows read back as a miss), no L1 miss TTL (successes-only cache; in-flight map
+  still coalesces concurrent scans), no Go-UPC 30-day miss cache (LadderStorage seam pruned).
+- Production data cleaned with owner approval: 91 receipt rows deleted from Turso `decode_cache`
+  (458 result rows untouched, via `scripts/purge-decode-cache-receipts.mjs`), `goupc_miss_cache`
+  table (409 rows) dropped.
+- A failed decode stores NOTHING; every rescan re-runs the full ladder; the ladder's own cost gates
+  still bound spend and every real egress is metered. Never rebuild negative memory (GUARDRAILS.md).
+
+Earlier this cycle: PR #40/#41 consolidation (one decode mode, Gemini deleted, cap never discards a
+free identity, `source_tier` on Turso, CI runs proof:all) and PR #42 root-docs refresh - history in
+`docs/archive/PROGRESS_HISTORY_2026-07_2026-08.md`.
+
+**PR #45 decoder simplification is under review on `fix/simple-gpt54-decode-audit`.** It retains one
+decode path: tire corpus, retail corpus, platform learned products, master catalog, positive caches,
+then one paid GPT-5.4 mini request when every free source misses.
 
 All other executable provider rungs, clients, provider-specific scripts, environment switches,
 and current operational docs were removed. GPT suggestions remain unverified until app evidence or
