@@ -6,8 +6,8 @@
 // and demo/placeholder rows contributed by testers (4006381333931 -> "Test Shopidoo",
 // 5901234123457 -> "Sauce chiltepin"/"La lumbre", 0012345670121/0012345674020/0012345674037 -> brand
 // "Healthyholics", plus rows literally named "Test"/"Fakeer"/"Fakewine"/"BrandTest"). The READ-TIME
-// guard (src/decoding/decode.ts isExampleOrTestRow, wired into src/server/decode/pipeline.ts and
-// src/server/retail-knowledge/retailKnowledgeIndex.ts) already stops these from ever being surfaced as
+// guard (src/decoding/decode.ts isExampleOrTestRow, wired into src/decoding/server/pipeline/pipeline.ts and
+// src/decoding/server/knowledge/retail/retailKnowledgeIndex.ts) already stops these from ever being surfaced as
 // a confident match, in production, TODAY, without needing this script. This script is a SEPARATE,
 // optional maintenance operation to also clean the underlying Turso store, e.g. before a fresh
 // analytics query over the `retail` table, or to shrink row count. It is NOT wired into CI, the build,

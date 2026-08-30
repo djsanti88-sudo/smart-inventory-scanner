@@ -3,7 +3,7 @@ import "server-only";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, type CatalogEntry as DbCatalogEntry } from "@/sync-database/types";
 import { resolveCatalogDocId } from "@/server/catalog/catalogDocId";
-import { deletePersistedDecode } from "@/server/decodeCacheStore";
+import { deletePersistedDecode } from "@/decoding/server/cache/decodeCacheStore";
 
 // Catalog revocation round (owner-approved design, section 2). A shop reports "this scanned
 // identity was wrong" via markWrong (see scanStore.ts) -> this transactional function ->
@@ -167,7 +167,7 @@ export async function disputeCatalogEntry(
     });
 
     // L2 decode-cache purge (design §4 "independent replay layers below the master rung"): the
-    // persisted decode cache (src/server/decodeCacheStore.ts) is keyed by the SAME
+    // persisted decode cache (src/decoding/server/cache/decodeCacheStore.ts) is keyed by the SAME
     // cacheKey the pipeline uses (canonicalGtin(code) ?? code - always the GTIN-canonical form for
     // a GTIN-shaped code, which is exactly what `canonical` already is here), so a stale pre-dispute
     // "result" entry there could keep replaying the wrong identity even after this catalogEntries

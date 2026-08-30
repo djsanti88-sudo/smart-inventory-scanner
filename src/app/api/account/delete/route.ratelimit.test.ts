@@ -13,7 +13,7 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   }),
 }));
 vi.mock("@/authentication/service/authMode", () => ({ isLiveAuth: () => true }));
-vi.mock("@/server/log", () => ({ logServerEvent: vi.fn() }));
+vi.mock("@/decoding/server/log", () => ({ logServerEvent: vi.fn() }));
 
 const checkAccountDeleteRateLimit = vi.fn();
 vi.mock("@/users-businesses/account/accountDeleteRateLimit", () => ({

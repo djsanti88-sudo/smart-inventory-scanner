@@ -5,7 +5,7 @@ import { test, expect, type Page, type Route } from "./fixtures";
 // through the real UI, for both desktop and phone viewports. Uses the reordered/renamed TSV fixture
 // (src/services/import/__fixtures__/reordered-renamed.tsv), which carries a real RUNTIME-corpus part
 // number (Falken Wildpeak A/T3W, manufacturer_part_number 28030703, size LT275/70R18, barcode
-// 848983006493 - queried directly from src/server/knowledge.generated.db, the DB the app actually
+// 848983006493 - queried directly from src/decoding/server/knowledge/knowledge.generated.db, the DB the app actually
 // loads; the older tire_corpus_seed.csv is stale pre-generation source data and is NOT what
 // /api/reconcile/match reads) so the LOCAL /api/reconcile/match route (real committed corpus, no live
 // network) reports one genuine exact match. Only /api/ai-lookup is route-mocked, matching every other

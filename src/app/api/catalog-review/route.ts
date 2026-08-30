@@ -5,8 +5,8 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS } from "@/sync-database/types";
 import { accessLevelServer } from "@/users-businesses/roles/roleAccess";
 import { checkRateLimit, intEnv } from "@/decoding/limits/aiSpendGuard";
-import { decodeStorage } from "@/server/decode/storage";
-import { logServerEvent } from "@/server/log";
+import { decodeStorage } from "@/decoding/server/pipeline/storage";
+import { logServerEvent } from "@/decoding/server/log";
 
 export const runtime = "nodejs";
 

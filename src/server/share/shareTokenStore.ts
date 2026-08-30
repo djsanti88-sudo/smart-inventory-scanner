@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { BossReportData } from "@/reports/variance/bossReport";
-import { createTursoClient, tursoCredentialsFromEnv, type TursoClient } from "@/server/db/tursoClient";
+import { createTursoClient, tursoCredentialsFromEnv, type TursoClient } from "@/decoding/server/tursoClient";
 
 // A share token always points to the immutable, Boss Report safe snapshot captured when it was
 // minted. The resolver never needs tenant database access.

@@ -1,7 +1,7 @@
 import "server-only";
 
 // Firestore-backed rate limiter for the account-deletion route (D2). Deliberately decoupled from
-// the decoder's Turso/libsql storage (`src/server/decode/storage.ts`): account deletion is a
+// the decoder's Turso/libsql storage (`src/decoding/server/pipeline/storage.ts`): account deletion is a
 // GDPR/CCPA erasure obligation, and the decode cache DB being down or missing its env vars must
 // never 503 an unrelated, irreversible-action route. This limiter shares the SAME failure domain
 // as the deletion operation itself - the Firestore Admin SDK, which the route already requires to

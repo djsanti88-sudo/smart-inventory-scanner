@@ -15,10 +15,10 @@ name: CI
 # narrow, explicit, env-var-driven exclusions for data this runner cannot supply (see below) rather than
 # re-implementing a second list that can drift from the first.
 #
-# CORPUS DB NOTE: src/server/knowledge.generated.db (the SQLite corpus DB, built by
+# CORPUS DB NOTE: src/decoding/server/knowledge/knowledge.generated.db (the SQLite corpus DB, built by
 # `npm run build:knowledge-db` from tireKnowledge.generated.json + the Git-LFS retail JSON) is NOT
 # built in this workflow. The codebase is deliberately designed so JSON is the CI/Vercel source of
-# truth: src/server/knowledgeDb.ts's getKnowledgeDb() returns null gracefully when no DB file is
+# truth: src/decoding/server/knowledge/knowledgeDb.ts's getKnowledgeDb() returns null gracefully when no DB file is
 # present, and every corpus-touching test either mocks getKnowledgeDb() to null and asserts the JSON
 # fallback path (tireKnowledgeIndex.jsonfallback.test.ts, decode-corpus.test.ts, retailKnowledgeIndex.test.ts),
 # or reads the committed JSON directly (corpusDrift.test.ts / retailCorpusDrift.test.ts, the latter
@@ -85,7 +85,7 @@ jobs:
     # why each of these two suites is excluded and why that is safe (self-contained CI knobs added to
     # scripts/proof-all.mjs; local `npm run proof:all` with no env vars set still runs all of them).
     env:
-      VITEST_EXTRA_EXCLUDE: "src/server/tire-knowledge/dtHarvestIntegration.test.ts,src/import/UniversalImportPanel.fixtures.test.tsx"
+      VITEST_EXTRA_EXCLUDE: "src/decoding/server/knowledge/tire/dtHarvestIntegration.test.ts,src/import/UniversalImportPanel.fixtures.test.tsx"
       # proof-all.mjs exits non-zero on a narrowed run unless this is set (2026-08-16 clean-room
       # review, HIGH: a narrowed run used to exit 0 and be reported as "all local legs green" with
       # no distinguishable failure signal). Setting it here makes CI's narrowing -- already fully

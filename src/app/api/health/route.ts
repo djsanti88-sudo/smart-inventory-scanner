@@ -2,8 +2,8 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 import { checkRateLimit, intEnv } from "@/decoding/limits/aiSpendGuard";
-import { logServerEvent } from "@/server/log";
-import { tireJsonIndexStatus } from "@/server/tire-knowledge/tireKnowledgeIndex";
+import { logServerEvent } from "@/decoding/server/log";
+import { tireJsonIndexStatus } from "@/decoding/server/knowledge/tire/tireKnowledgeIndex";
 
 // Public, unauthenticated uptime-monitor endpoint (spec: docs/superpowers/specs/2026-07-29-m1-
 // engineering-specs.md section 4). Booleans-only JSON, no secrets, no keys, no URLs, no internal
@@ -85,7 +85,7 @@ async function checkFirestore(): Promise<boolean> {
 async function checkTurso(): Promise<boolean> {
   const timeoutMs = intEnv(process.env.HEALTH_TURSO_TIMEOUT_MS, 3000);
   try {
-    const { decodeStorage } = await import("@/server/decode/storage");
+    const { decodeStorage } = await import("@/decoding/server/pipeline/storage");
     const storage = await withTimeout(decodeStorage(), timeoutMs);
     await withTimeout(storage.get("__health_check__"), timeoutMs);
     return true;

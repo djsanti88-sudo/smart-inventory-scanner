@@ -131,7 +131,7 @@ export function loadCorpusFixtures(reconciliationPath, manifest) {
   const fixtures = deriveCorpusFixtures(csvRows(bytes.toString("utf8")), manifest, { hmacKey });
   // Reconciliation identity remains authoritative. Verify the keyed runtime projection against it;
   // never replace source expectations with index-derived identities.
-  const indexDir = join(process.cwd(), "src", "server", "tire-knowledge", "exact-index");
+  const indexDir = join(process.cwd(), "src", "decoding", "server", "knowledge", "tire", "exact-index");
   const unresolvedLookupKeys = new Set(fixtures.lookupKeys.keys());
   for (let shard = 0; shard < 64 && unresolvedLookupKeys.size; shard += 1) {
     const name = shard.toString(16).padStart(2, "0");
@@ -199,7 +199,7 @@ export function selectUiCorpusSample(fixtures, { shortest = 20, boundary = 12 } 
 export function runtimeCanonicalIdFor(entry) {
   const artifactKey = bossArtifactLookupKey(entry.lookupKey);
   const shard = (createHash("sha256").update(artifactKey).digest()[0] % 64).toString(16).padStart(2, "0");
-  const rows = JSON.parse(readFileSync(join(process.cwd(), "src", "server", "tire-knowledge", "exact-index", `${shard}.json`), "utf8"));
+  const rows = JSON.parse(readFileSync(join(process.cwd(), "src", "decoding", "server", "knowledge", "tire", "exact-index", `${shard}.json`), "utf8"));
   const row = rows[artifactKey];
   const expected = opaqueTrustedExactCanonicalId(entry.canonicalProductId);
   if (!row || row.bossTrusted !== true || row.boss_canonical_product_id !== expected) throw new Error("Selected UI spelling lacks its source-derived trusted exact runtime identity.");

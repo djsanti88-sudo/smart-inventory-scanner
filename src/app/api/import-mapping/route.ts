@@ -11,7 +11,7 @@ import {
   getImportMappingMemory,
   putImportMappingMemory,
 } from "@/import/importMappingMemory";
-import { logServerEvent } from "@/server/log";
+import { logServerEvent } from "@/decoding/server/log";
 
 export const runtime = "nodejs";
 const MAX_MAPPING_BODY_BYTES = 32 * 1024;

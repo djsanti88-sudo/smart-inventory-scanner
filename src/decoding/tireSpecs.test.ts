@@ -32,7 +32,7 @@ describe("tireSpecs (Phase 7)", () => {
 
 // B7 (2026-07-15): a 15-name battery over REALISTIC product name / specs strings pulled from real
 // brands + model lines in the corpus (benchmarks/golden/phase1-corpus-golden.json brands: goodyear,
-// michelin, cooper; src/server/tire-knowledge/tireKnowledge.generated.json model names for those
+// michelin, cooper; src/decoding/server/knowledge/tire/tireKnowledge.generated.json model names for those
 // brands: wrangler_duratrac, cross_climate_plus, discoverer_a_t3). No commercial-size row exists in
 // the current corpus (0 of 78202 rows) so the commercial example size (11R22.5) is constructed per the
 // plan's "realistic size tokens" allowance - it is a standard, real-world commercial tire size, just

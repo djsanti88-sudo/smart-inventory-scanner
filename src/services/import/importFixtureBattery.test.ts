@@ -4,7 +4,7 @@
 // end against four real files: a Shop-Ware-style CSV, a reordered/renamed TSV, a nonsense-header CSV
 // forcing the manual mapping path, and a real OOXML xlsx workbook (decoded from base64). Every
 // fixture carries at least one row whose part number is a REAL row from the RUNTIME corpus DB
-// (src/server/knowledge.generated.db, queried directly - NOT the stale tire_corpus_seed.csv, which
+// (src/decoding/server/knowledge/knowledge.generated.db, queried directly - NOT the stale tire_corpus_seed.csv, which
 // is pre-generation source data the runtime index does not load): Cooper Discoverer A/T3,
 // manufacturer_part_number 90000002732, size LT265/70R17, barcode 029142713043; Falken Wildpeak
 // A/T3W, manufacturer_part_number 28030703, size LT275/70R18, barcode 848983006493 (verified live

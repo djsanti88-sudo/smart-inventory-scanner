@@ -7,4 +7,4 @@
 *.pdf binary
 *.db binary
 *.gz binary
-src/server/retail-knowledge/retailKnowledge.generated.json filter=lfs diff=lfs merge=lfs -text
+src/decoding/server/knowledge/retail/retailKnowledge.generated.json filter=lfs diff=lfs merge=lfs -text

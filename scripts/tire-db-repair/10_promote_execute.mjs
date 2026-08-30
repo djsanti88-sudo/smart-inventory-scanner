@@ -17,7 +17,7 @@
 // any OTHER table that declares a FOREIGN KEY pointing at the renamed table (confirmed locally;
 // neither PRAGMA foreign_keys=OFF nor PRAGMA legacy_alter_table=ON prevents it). This repo's entire
 // schema-creation code was grepped exhaustively (scripts/build-knowledge-db.mjs,
-// src/server/decodeCacheStore.ts, src/server/upc/storage.ts, src/server/learnedProducts.ts, every
+// src/decoding/server/cache/decodeCacheStore.ts, src/server/upc/storage.ts, src/decoding/server/cache/learnedProducts.ts, every
 // turso-staging/*.sql file) and declares ZERO foreign keys anywhere, so this promotion's
 // tires/tire_part_numbers renames have nothing to hijack. See 09_rollback.sql for the full note;
 // re-verify before ever adding a table with an FK referencing tires or tire_part_numbers.
@@ -1204,7 +1204,7 @@ async function cmdVerify({ dryRun, manifestArg, expectedManifestSha256 }) {
 // Secondary indexes the promoted `tires` / `tire_part_numbers` / alias table need, mirroring the
 // local better-sqlite3 builder (build-knowledge-db.mjs:167-169 creates idx_tire_barcode,
 // idx_tire_part_number, idx_tire_uid) so every runtime lookup column used by
-// src/server/tire-knowledge/tireKnowledgeIndex.ts's Turso paths is covered - not just the PK.
+// src/decoding/server/knowledge/tire/tireKnowledgeIndex.ts's Turso paths is covered - not just the PK.
 //
 // Panel finding C1: the bare rename-swap ships tables with ONLY their PRIMARY KEY covered
 // (barcode on tires, normalized_part_number on tire_part_numbers). Every UID-keyed lookup

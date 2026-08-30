@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { disputeCatalogEntry } from "./catalogDispute";
 
 const mocks = vi.hoisted(() => ({ deletePersistedDecode: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("@/server/decodeCacheStore", () => ({ deletePersistedDecode: mocks.deletePersistedDecode }));
+vi.mock("@/decoding/server/cache/decodeCacheStore", () => ({ deletePersistedDecode: mocks.deletePersistedDecode }));
 
 // Catalog revocation round (design §2.1/§2.2/§3.1): disputeCatalogEntry is the transactional
 // function backing POST /api/catalog-dispute. Firestore is mocked (never live), same

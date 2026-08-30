@@ -3,11 +3,11 @@
 // The DB provides microsecond barcode lookups with ~5MB of runtime memory (vs ~1GB for JSON).
 //
 // Usage:  node scripts/build-knowledge-db.mjs
-// Output: src/server/knowledge.generated.db
+// Output: src/decoding/server/knowledge/knowledge.generated.db
 //
 // Source files (committed to git):
-//   src/server/tire-knowledge/tireKnowledge.generated.json   (53MB, 76K tires)
-//   src/server/retail-knowledge/retailKnowledge.generated.json (247MB, 4M+ retail products, Git LFS)
+//   src/decoding/server/knowledge/tire/tireKnowledge.generated.json   (53MB, 76K tires)
+//   src/decoding/server/knowledge/retail/retailKnowledge.generated.json (247MB, 4M+ retail products, Git LFS)
 //
 // If the retail JSON is a Git LFS pointer (Vercel without LFS enabled), the retail table is
 // skipped gracefully — tire lookups still work. Enable Git LFS on Vercel for retail coverage.
@@ -20,16 +20,16 @@ import { createHash } from "node:crypto";
 import Database from "better-sqlite3";
 
 const ROOT = process.cwd();
-const TIRE_JSON = join(ROOT, "src", "server", "tire-knowledge", "tireKnowledge.generated.json");
-const RETAIL_JSON = join(ROOT, "src", "server", "retail-knowledge", "retailKnowledge.generated.json");
-const DB_PATH = join(ROOT, "src", "server", "knowledge.generated.db");
+const TIRE_JSON = join(ROOT, "src", "decoding", "server", "knowledge", "tire", "tireKnowledge.generated.json");
+const RETAIL_JSON = join(ROOT, "src", "decoding", "server", "knowledge", "retail", "retailKnowledge.generated.json");
+const DB_PATH = join(ROOT, "src", "decoding", "server", "knowledge", "knowledge.generated.db");
 const GZ_PATH = DB_PATH + ".gz";
 // Generation manifest (DT2-1, 2026-08-13): a small, committed sibling recording sha256
-// fingerprints of the finalized .db and .db.gz so a consumer (src/server/knowledgeDb.ts) can
+// fingerprints of the finalized .db and .db.gz so a consumer (src/decoding/server/knowledge/knowledgeDb.ts) can
 // detect the two paired outputs describing DIFFERENT corpus generations -- e.g. a crash between
 // the two renameSync calls below leaving one swapped and the other stale -- instead of silently
 // serving whichever one it happens to pick.
-const MANIFEST_PATH = join(ROOT, "src", "server", "knowledge.generated.manifest.json");
+const MANIFEST_PATH = join(ROOT, "src", "decoding", "server", "knowledge", "knowledge.generated.manifest.json");
 // Build into throwaway paths and swap them into place only after the output-sanity guard
 // (DT-1, below) passes -- the prior committed DB must never be unlinked before the
 // replacement is known sane.
@@ -335,7 +335,7 @@ writeFileSync(TMP_MANIFEST_PATH, JSON.stringify(manifest, null, 2) + "\n");
 // with nothing else running between them -- the manifest is renamed LAST so a crash during any
 // of the three still leaves a self-consistent pair: either nothing changed yet (manifest still
 // describes the OLD db+gz, both untouched), or the manifest lags whichever of db/gz DID get
-// swapped, which the consumer's fingerprint check (src/server/knowledgeDb.ts) will detect and
+// swapped, which the consumer's fingerprint check (src/decoding/server/knowledge/knowledgeDb.ts) will detect and
 // refuse to silently serve.
 renameSync(TMP_DB_PATH, DB_PATH);
 renameSync(TMP_GZ_PATH, GZ_PATH);

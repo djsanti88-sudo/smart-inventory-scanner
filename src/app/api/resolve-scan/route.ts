@@ -6,7 +6,7 @@ import { accessLevelServer } from "@/users-businesses/roles/roleAccess";
 import { resolveScanForRole } from "@/services/security/resolveScanServer";
 import { toStoreProduct, toStoreAlias } from "@/sync-database/cloud/storeMappers";
 import type { Product, Alias } from "@/types";
-import { logServerEvent } from "@/server/log";
+import { logServerEvent } from "@/decoding/server/log";
 
 // Sec-5: PROTECTED server-side customer scan resolution.
 //

@@ -2,7 +2,7 @@
 // Task A6: runtime lookup semantics proof suite (node --test), run against the real repaired DB.
 //
 // Every test replicates the EXPLICIT two-step runtime path used by
-// src/server/tire-knowledge/tireKnowledgeIndex.ts:
+// src/decoding/server/knowledge/tire/tireKnowledgeIndex.ts:
 //   part-number key -> tire_part_numbers.canonical_product_uid (or the alias table),
 //   then tires WHERE canonical_product_uid = ? as a SEPARATE query.
 // This mirrors lookupPartNumberTurso / lookupPartNumberAliasSqlite exactly (two independent

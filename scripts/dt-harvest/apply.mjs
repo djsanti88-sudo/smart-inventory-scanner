@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // scripts/dt-harvest/apply.mjs (Task 6, Step 1) — Merge harvested Discount Tire rows into the
-// REAL tire corpus (src/server/tire-knowledge/tireKnowledge.generated.json), rebuild the SQLite
+// REAL tire corpus (src/decoding/server/knowledge/tire/tireKnowledge.generated.json), rebuild the SQLite
 // knowledge DB, and spot-check a sample of newly-added barcodes round-trip correctly.
 //
 // Real corpus schema (verified by reading tireKnowledge.generated.json directly, NOT assumed):
@@ -45,7 +45,7 @@ import { readTursoCredsFromEnvFile, upsertNewTiresToTurso } from "./lib/tursoUps
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = process.cwd();
 
-const CORPUS_JSON_PATH = join(ROOT, "src", "server", "tire-knowledge", "tireKnowledge.generated.json");
+const CORPUS_JSON_PATH = join(ROOT, "src", "decoding", "server", "knowledge", "tire", "tireKnowledge.generated.json");
 const BRAND_PREFIX_MAP_PATH = join(ROOT, "src", "products", "catalog", "brandPrefixMap.json");
 const STATE_DIR = join(__dirname, "state");
 const DEFAULT_GLOB_PREFIX = "harvested"; // matches state/harvested.jsonl and state/harvested*.jsonl
@@ -270,7 +270,7 @@ function pickRandom(arr, n) {
 }
 
 /** Spot-check newly-added barcodes round-trip through the rebuilt SQLite DB the same way
- * production reads it (src/server/knowledgeDb.ts). Returns { passed, failed } counts and logs
+ * production reads it (src/decoding/server/knowledge/knowledgeDb.ts). Returns { passed, failed } counts and logs
  * PASS/FAIL per code. Throws (non-zero exit is the caller's job) only if the DB cannot be opened. */
 async function spotCheckBarcodes(barcodes, addedByBarcode) {
   if (!barcodes.length) {
@@ -283,7 +283,7 @@ async function spotCheckBarcodes(barcodes, addedByBarcode) {
 
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const Database = (await import("better-sqlite3")).default;
-  const dbPath = join(ROOT, "src", "server", "knowledge.generated.db");
+  const dbPath = join(ROOT, "src", "decoding", "server", "knowledge", "knowledge.generated.db");
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
 
   let passed = 0;

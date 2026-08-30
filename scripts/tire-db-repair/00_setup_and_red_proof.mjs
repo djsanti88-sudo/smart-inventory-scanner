@@ -176,7 +176,7 @@ async function main() {
   reportLines.push("");
   reportLines.push("## Runtime semantics replicated");
   reportLines.push("");
-  reportLines.push("Read from `src/server/tire-knowledge/tireKnowledgeIndex.ts` and `src/products/catalog/tirePartNumber.ts`:");
+  reportLines.push("Read from `src/decoding/server/knowledge/tire/tireKnowledgeIndex.ts` and `src/products/catalog/tirePartNumber.ts`:");
   reportLines.push("");
   reportLines.push("- `normPartKey(pn)`: strip spaces/hyphens, trim, uppercase (tireKnowledgeIndex.ts:41-43). Values already stored in `tire_part_numbers.normalized_part_number` are pre-normalized to this key, so the sample queries below use the stored key directly (no further transform needed).");
   reportLines.push("- `basePartNumberKey` / `tirePartNumberCore` (tirePartNumber.ts): the affix-core variant matches `^[A-Z]{0,5}(\\d{5,})[A-Z]{0,3}$` and is only used as a fallback key when it differs from the base key; not needed here since we query the exact stored normalized key.");

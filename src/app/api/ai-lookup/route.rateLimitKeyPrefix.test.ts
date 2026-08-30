@@ -28,8 +28,8 @@ vi.mock("@/server/catalog/masterLookup", () => ({
 
 // Redirect decodeStorage() at a per-process tmp dir (same reasoning as route.test.ts: route.ts
 // calls decodeStorage() with no dir arg, defaulting to the real repo root).
-vi.mock("@/server/decode/storage", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/server/decode/storage")>();
+vi.mock("@/decoding/server/pipeline/storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/decoding/server/pipeline/storage")>();
   const tmpLadderDir = path.join(os.tmpdir(), `ladder-storage-route-prefix-test-${process.pid}`);
   return {
     ...actual,

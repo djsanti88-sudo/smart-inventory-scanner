@@ -7,7 +7,7 @@ vi.mock("@/decoding/limits/aiSpendGuard", () => ({
   checkRateLimit: (...args: unknown[]) => rateLimit(...args),
   intEnv: (value: string | undefined, fallback: number) => Number(value) || fallback,
 }));
-vi.mock("@/server/decode/storage", () => ({ decodeStorage: vi.fn().mockResolvedValue({}) }));
+vi.mock("@/decoding/server/pipeline/storage", () => ({ decodeStorage: vi.fn().mockResolvedValue({}) }));
 import { GET } from "@/app/api/prefix-floor/route";
 
 // F5 bundle-surgery (wave 2, 2026-07-20): this endpoint is the enrichment door the client uses to get

@@ -87,7 +87,7 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   }),
 }));
 
-vi.mock("@/server/decode/storage", () => ({
+vi.mock("@/decoding/server/pipeline/storage", () => ({
   decodeStorage: async () => ({} as never),
 }));
 

@@ -3,20 +3,20 @@ import { sanitizeForAiLookup } from "@/shared/privacy/sanitizer";
 import { detectCodeType } from "@/products/match/codeTypeDetector";
 import { killSwitchOn, checkRateLimit, readDailyUsed, intEnv, getGptDecodeStatus } from "@/decoding/limits/aiSpendGuard";
 import { GPT_DECODE_WORST_CASE_USD, type GptDecodeResult } from "@/decoding/gptDecodeClient";
-import { decodeStorage } from "@/server/decode/storage";
+import { decodeStorage } from "@/decoding/server/pipeline/storage";
 // The route owns HTTP/auth/rate-limit concerns. The server pipeline owns deterministic resolution,
 // cache replay, the lazy paid authorization, and the single GPT-5.4 mini provider call.
-import { runDecodePipeline, e2eMode } from "@/server/decode/pipeline";
+import { runDecodePipeline, e2eMode } from "@/decoding/server/pipeline/pipeline";
 import { clampDecodeBudgetMs } from "@/decoding/decodeBudget";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/sync-database/types";
 import { isLiveAuth } from "@/authentication/service/authMode";
 import { clampConfidenceThreshold } from "@/decoding/limits/decodePolicy";
 import { buildMasterCatalogEntry, appendMasterCatalogEntry } from "@/server/catalog/masterAppend";
-import { logServerEvent } from "@/server/log";
+import { logServerEvent } from "@/decoding/server/log";
 import { cleanScanCode } from "@/scanning/clean/scanCleaner";
-import { resolveTrustedExactBarcodeDecision } from "@/server/tire-knowledge/TireKnowledgeProvider";
-import { getTireExactIndexFingerprint, hasBossHmacKeyConfigured } from "@/server/tire-knowledge/tireExactIndex";
+import { resolveTrustedExactBarcodeDecision } from "@/decoding/server/knowledge/tire/TireKnowledgeProvider";
+import { getTireExactIndexFingerprint, hasBossHmacKeyConfigured } from "@/decoding/server/knowledge/tire/tireExactIndex";
 import { trustedExactRateLimiter } from "@/decoding/limits/trustedExactRateLimit";
 import { isPlatformOwnerServer } from "@/users-businesses/roles/roleAccess";
 import { isDecodeChargeMode, type AiLookupRequestMode } from "./decodeMode";

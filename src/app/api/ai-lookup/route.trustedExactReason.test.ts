@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Mirror the route harness: mock every external seam before importing the route so the POST
 // handler is exercised in isolation.
 const runDecodePipeline = vi.fn();
-vi.mock("@/server/decode/pipeline", () => ({
+vi.mock("@/decoding/server/pipeline/pipeline", () => ({
   runDecodePipeline: (...args: unknown[]) => runDecodePipeline(...args),
   e2eMode: () => false,
 }));
@@ -18,11 +18,11 @@ vi.mock("@/users-businesses/roles/roleAccess", () => ({
   isPlatformOwnerServer: () => false,
 }));
 
-vi.mock("@/server/tire-knowledge/tireExactIndex", () => ({
+vi.mock("@/decoding/server/knowledge/tire/tireExactIndex", () => ({
   getTireExactIndexFingerprint: async () => ({ schemaVersion: 1, contentDigest: "digest" }),
 }));
 
-vi.mock("@/server/decode/storage", () => ({
+vi.mock("@/decoding/server/pipeline/storage", () => ({
   decodeStorage: async () => ({}),
 }));
 
@@ -31,7 +31,7 @@ vi.mock("@/server/catalog/masterAppend", () => ({
   appendMasterCatalogEntry: vi.fn(),
 }));
 
-vi.mock("@/server/log", () => ({
+vi.mock("@/decoding/server/log", () => ({
   logServerEvent: vi.fn(),
 }));
 

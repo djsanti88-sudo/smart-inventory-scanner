@@ -6,7 +6,7 @@
 // BACKGROUND: the persistent decode cache (Turso `decode_cache`, plus the repo-root .decode-cache.json
 // file fallback) can hold a POISONED "result" entry - a textbook GS1 example barcode (4006381333931 ->
 // "Test Shopidoo") or a scanner-misread GTIN cached earlier as a confident identity. QA round-2 SEAM 1
-// already RE-VALIDATES a cached hit at read time (src/server/decode/pipeline.ts) so these never replay
+// already RE-VALIDATES a cached hit at read time (src/decoding/server/pipeline/pipeline.ts) so these never replay
 // as an identity in production, TODAY, without needing this script. This script is a SEPARATE, optional
 // maintenance operation to also clean the underlying stores, e.g. to shrink row count or before a fresh
 // analytics query. It is NOT wired into CI, the build, or the runtime decode path in any way.

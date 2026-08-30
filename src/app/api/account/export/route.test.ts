@@ -8,8 +8,8 @@ import { NextRequest } from "next/server";
 // path. Redirect decodeStorage() at a per-process tmp dir (same pattern as
 // src/app/api/ai-lookup/route.test.ts:21-34) so the durable rate-limit counter never pollutes the
 // real repo working tree (.ladder-kv.json) across test runs.
-vi.mock("@/server/decode/storage", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/server/decode/storage")>();
+vi.mock("@/decoding/server/pipeline/storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/decoding/server/pipeline/storage")>();
   const os = await import("node:os");
   const path = await import("node:path");
   const tmpLadderDir = path.join(os.tmpdir(), `ladder-storage-export-route-test-${process.pid}`);
@@ -308,7 +308,7 @@ describe("POST /api/account/export rate limiting (live path)", () => {
   });
 
   it("fails closed with 503 when limiter storage is unavailable after authorization", async () => {
-    const storageMod = await import("@/server/decode/storage");
+    const storageMod = await import("@/decoding/server/pipeline/storage");
     vi.spyOn(storageMod, "decodeStorage").mockRejectedValueOnce(new Error("storage unavailable"));
 
     const response = await POST(

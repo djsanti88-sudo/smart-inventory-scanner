@@ -10,10 +10,10 @@ playwright-report/
 # Big local-only corpus artifacts (2026-07-09): retail + tire corpora now live in Turso and are read
 # at runtime via the Turso client, not from these files. Excluding them fixes the "File size limit
 # exceeded (100 MB)" failed deploy (860MB upload, incl. a 343MB SQLite .db). Local dev still builds
-# and reads these files directly (fs, not a static import) — see src/server/knowledgeDb.ts and
-# src/server/tire-knowledge/tireKnowledgeIndex.ts. Keep the small .meta.json (diagnostics only).
-src/server/knowledge.generated.db
-src/server/knowledge.generated.db.gz
-src/server/retail-knowledge/retailKnowledge.generated.json
-src/server/tire-knowledge/tireKnowledge.generated.json
-src/server/tire-knowledge/tireKnowledge.generated.json.bak-*
+# and reads these files directly (fs, not a static import) — see src/decoding/server/knowledge/knowledgeDb.ts and
+# src/decoding/server/knowledge/tire/tireKnowledgeIndex.ts. Keep the small .meta.json (diagnostics only).
+src/decoding/server/knowledge/knowledge.generated.db
+src/decoding/server/knowledge/knowledge.generated.db.gz
+src/decoding/server/knowledge/retail/retailKnowledge.generated.json
+src/decoding/server/knowledge/tire/tireKnowledge.generated.json
+src/decoding/server/knowledge/tire/tireKnowledge.generated.json.bak-*

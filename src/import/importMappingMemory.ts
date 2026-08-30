@@ -3,7 +3,7 @@ import "server-only";
 
 import type { ColumnMapping, ImportField } from "@/import/importSchema";
 import { IMPORT_FIELD_ORDER } from "@/import/importSchema";
-import { decodeStorage, type DecodeStorage } from "@/server/decode/storage";
+import { decodeStorage, type DecodeStorage } from "@/decoding/server/pipeline/storage";
 
 export type MappingKv = Pick<DecodeStorage, "get" | "set">;
 

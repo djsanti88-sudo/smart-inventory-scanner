@@ -4,7 +4,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const runDecodePipeline = vi.fn();
-vi.mock("@/server/decode/pipeline", () => ({
+vi.mock("@/decoding/server/pipeline/pipeline", () => ({
   runDecodePipeline: (...args: unknown[]) => runDecodePipeline(...args),
   e2eMode: () => true,
 }));
@@ -14,7 +14,7 @@ vi.mock("@/server/catalog/masterAppend", () => ({
   appendMasterCatalogEntry: async () => "skipped_human" as const,
 }));
 
-vi.mock("@/server/log", () => ({
+vi.mock("@/decoding/server/log", () => ({
   logServerEvent: vi.fn(),
 }));
 

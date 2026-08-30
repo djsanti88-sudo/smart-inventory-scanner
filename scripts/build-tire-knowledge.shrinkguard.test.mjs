@@ -17,14 +17,14 @@ import { join } from "node:path";
 
 const GENERATOR = join(process.cwd(), "scripts", "build-tire-knowledge.mjs");
 const RULES = join(process.cwd(), "scripts", "corpusRules.mjs");
-const REAL_SEED = join(process.cwd(), "src", "server", "tire-knowledge", "seed", "tire_corpus_seed.csv");
+const REAL_SEED = join(process.cwd(), "src", "decoding", "server", "knowledge", "tire", "seed", "tire_corpus_seed.csv");
 
 let root;
 
 /** Build a throwaway repo root holding a LARGE existing index and only the tiny seed as input. */
 function makeRoot({ priorBarcodes }) {
   const dir = mkdtempSync(join(tmpdir(), "tk-shrinkguard-"));
-  const outDir = join(dir, "src", "server", "tire-knowledge");
+  const outDir = join(dir, "src", "decoding", "server", "knowledge", "tire");
   mkdirSync(join(outDir, "seed"), { recursive: true });
   // NOTE: the generator is invoked from its REAL path (so csv-parse and corpusRules
   // resolve against the repo's node_modules) but with cwd set to this throwaway root.
@@ -61,7 +61,7 @@ function runGenerator(cwd, args = []) {
 }
 
 function barcodeCount(dir) {
-  const raw = readFileSync(join(dir, "src", "server", "tire-knowledge", "tireKnowledge.generated.json"), "utf8");
+  const raw = readFileSync(join(dir, "src", "decoding", "server", "knowledge", "tire", "tireKnowledge.generated.json"), "utf8");
   return Object.keys(JSON.parse(raw).barcodeIndex).length;
 }
 
@@ -101,8 +101,8 @@ describe("build-tire-knowledge output-sanity guard (F1)", () => {
 
   it("still generates normally when no prior index exists (bootstrap case)", () => {
     root = makeRoot({ priorBarcodes: 5000 });
-    rmSync(join(root, "src", "server", "tire-knowledge", "tireKnowledge.generated.json"));
-    rmSync(join(root, "src", "server", "tire-knowledge", "tireKnowledge.generated.meta.json"));
+    rmSync(join(root, "src", "decoding", "server", "knowledge", "tire", "tireKnowledge.generated.json"));
+    rmSync(join(root, "src", "decoding", "server", "knowledge", "tire", "tireKnowledge.generated.meta.json"));
 
     const result = runGenerator(root);
 

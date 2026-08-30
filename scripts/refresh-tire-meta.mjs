@@ -43,16 +43,12 @@ import { pathToFileURL } from "node:url";
 
 const DEFAULT_PAYLOAD_PATH = join(
   process.cwd(),
-  "src",
-  "server",
-  "tire-knowledge",
+  "src", "decoding", "server", "knowledge", "tire",
   "tireKnowledge.generated.json",
 );
 const DEFAULT_META_PATH = join(
   process.cwd(),
-  "src",
-  "server",
-  "tire-knowledge",
+  "src", "decoding", "server", "knowledge", "tire",
   "tireKnowledge.generated.meta.json",
 );
 

@@ -8,18 +8,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // does NOT bypass the kill switch; (4) god:true is threaded into the pipeline.
 
 const runDecodePipeline = vi.fn();
-vi.mock("@/server/decode/pipeline", () => ({
+vi.mock("@/decoding/server/pipeline/pipeline", () => ({
   runDecodePipeline: (...args: unknown[]) => runDecodePipeline(...args),
   e2eMode: () => false,
 }));
 
 // Trusted-exact path falls through to the pipeline (a clean miss) so the cap/rate-limit gates run.
-vi.mock("@/server/tire-knowledge/TireKnowledgeProvider", () => ({
+vi.mock("@/decoding/server/knowledge/tire/TireKnowledgeProvider", () => ({
   resolveTrustedExactBarcodeDecision: vi.fn().mockResolvedValue({ kind: "miss" }),
 }));
 
 const logServerEvent = vi.fn();
-vi.mock("@/server/log", () => ({ logServerEvent: (...args: unknown[]) => logServerEvent(...args) }));
+vi.mock("@/decoding/server/log", () => ({ logServerEvent: (...args: unknown[]) => logServerEvent(...args) }));
 
 const trustedExactCheck = vi.fn();
 vi.mock("@/decoding/limits/trustedExactRateLimit", () => ({
@@ -34,7 +34,7 @@ vi.mock("@/lib/firebaseAdmin", () => ({
 }));
 
 const decodeStorage = vi.fn();
-vi.mock("@/server/decode/storage", () => ({ decodeStorage: (...args: unknown[]) => decodeStorage(...args) }));
+vi.mock("@/decoding/server/pipeline/storage", () => ({ decodeStorage: (...args: unknown[]) => decodeStorage(...args) }));
 
 const legacyRateLimit = vi.fn();
 const killSwitch = vi.fn();

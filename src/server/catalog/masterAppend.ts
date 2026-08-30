@@ -4,7 +4,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { canonicalGtin } from "@/products/barcodes/gtin";
 import { COLLECTIONS, type CatalogEntry as DbCatalogEntry } from "@/sync-database/types";
-import { decodeStorage, type DecodeStorage } from "@/server/decode/storage";
+import { decodeStorage, type DecodeStorage } from "@/decoding/server/pipeline/storage";
 
 // Master-truth write path: a strong app-verified decode on a
 // PUBLIC barcode shape appends (idempotently) to the top-level Firestore `catalogEntries` master

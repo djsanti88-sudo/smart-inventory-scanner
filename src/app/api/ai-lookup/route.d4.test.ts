@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // MANDATORY pipeline mock: the route must reach its auth/policy gates deterministically with zero
 // pipeline/provider work, and e2eMode must report false or the live-mode gates are skipped entirely.
 const runDecodePipeline = vi.fn();
-vi.mock("@/server/decode/pipeline", () => ({
+vi.mock("@/decoding/server/pipeline/pipeline", () => ({
   runDecodePipeline: (...a: unknown[]) => runDecodePipeline(...a),
   e2eMode: () => false,
 }));
@@ -28,7 +28,7 @@ vi.mock("@/lib/firebaseAdmin", () => ({
 // this test's authed decodes consult resolveTrustedExactBarcodeDecision before the ladder. Mock it to a
 // clean MISS so the flow falls through to the pipeline exactly as before (these tests exercise the
 // pipeline/policy gates, not the trusted-exact corpus).
-vi.mock("@/server/tire-knowledge/TireKnowledgeProvider", () => ({
+vi.mock("@/decoding/server/knowledge/tire/TireKnowledgeProvider", () => ({
   resolveTrustedExactBarcodeDecision: vi.fn().mockResolvedValue({ kind: "miss" }),
 }));
 

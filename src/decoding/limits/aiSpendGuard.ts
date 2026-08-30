@@ -259,7 +259,7 @@ export async function chargeDailySlotForAccountConditional(
 // ---------------------------------------------------------------------------
 // GPT decode dollar guard on the same durable counter seam as the daily cap.
 // chargeDailySlot/readDailyUsed (get/set/increment - see DailyCapStorage above and DecodeStorage in
-// src/server/decode/storage.ts). This is a DOLLAR cap, not a call counter, so it cannot use `increment`
+// src/decoding/server/pipeline/storage.ts). This is a DOLLAR cap, not a call counter, so it cannot use `increment`
 // directly (that only atomically adds 1): dollar amounts are stored as INTEGER CENTS (a tenth-of-a-
 // cent would need fractional increments the storage seam does not support) and persisted via an
 // atomic get-then-set loop with a bounded retry, matching the file adapter's single-process

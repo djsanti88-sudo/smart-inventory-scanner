@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // pipeline or a live Firestore instance.
 
 const runDecodePipeline = vi.fn();
-vi.mock("@/server/decode/pipeline", () => ({
+vi.mock("@/decoding/server/pipeline/pipeline", () => ({
   runDecodePipeline: (...a: unknown[]) => runDecodePipeline(...a),
   e2eMode: () => process.env.IS_E2E === "1",
 }));
@@ -18,7 +18,7 @@ vi.mock("@/server/catalog/masterAppend", () => ({
 }));
 
 const logServerEvent = vi.fn();
-vi.mock("@/server/log", () => ({
+vi.mock("@/decoding/server/log", () => ({
   logServerEvent: (...args: unknown[]) => logServerEvent(...args),
 }));
 

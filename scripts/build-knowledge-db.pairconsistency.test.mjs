@@ -2,7 +2,7 @@
 // build-knowledge-db.mjs swaps its two paired outputs (knowledge.generated.db and
 // knowledge.generated.db.gz) into place with two INDEPENDENT renameSync calls. A crash between them
 // (OOM during gzip, killed CI job, power loss) leaves the .db and .db.gz representing DIFFERENT
-// corpus generations, with nothing detecting the mismatch -- src/server/knowledgeDb.ts prefers the
+// corpus generations, with nothing detecting the mismatch -- src/decoding/server/knowledge/knowledgeDb.ts prefers the
 // uncompressed .db locally while Vercel production ships only the .gz, so local dev and production
 // would silently serve different data indefinitely.
 //
@@ -10,7 +10,7 @@
 // (knowledge.generated.manifest.json) recording a sha256 fingerprint of the finalized DB content
 // (db_sha256) and of the gzip bytes (gz_sha256), and renames it into place as the LAST of three
 // back-to-back renames (db, then gz, then manifest -- nothing else runs between any of them). A
-// consumer (src/server/knowledgeDb.ts, proven in its own test file) can then verify whichever file
+// consumer (src/decoding/server/knowledge/knowledgeDb.ts, proven in its own test file) can then verify whichever file
 // it actually opens against the manifest's recorded db_sha256 and fail loudly on a mismatch instead
 // of silently trusting whichever generation happens to be on disk.
 //
@@ -50,11 +50,11 @@ function tinyRetailJson() {
 
 function makeRoot() {
   const dir = mkdtempSync(join(tmpdir(), "kdb-pairconsistency-"));
-  mkdirSync(join(dir, "src", "server", "tire-knowledge"), { recursive: true });
-  mkdirSync(join(dir, "src", "server", "retail-knowledge"), { recursive: true });
-  mkdirSync(join(dir, "src", "server"), { recursive: true });
-  writeFileSync(join(dir, "src", "server", "tire-knowledge", "tireKnowledge.generated.json"), tinyTireJson());
-  writeFileSync(join(dir, "src", "server", "retail-knowledge", "retailKnowledge.generated.json"), tinyRetailJson());
+  mkdirSync(join(dir, "src", "decoding", "server", "knowledge", "tire"), { recursive: true });
+  mkdirSync(join(dir, "src", "decoding", "server", "knowledge", "retail"), { recursive: true });
+  mkdirSync(join(dir, "src", "decoding", "server", "knowledge"), { recursive: true });
+  writeFileSync(join(dir, "src", "decoding", "server", "knowledge", "tire", "tireKnowledge.generated.json"), tinyTireJson());
+  writeFileSync(join(dir, "src", "decoding", "server", "knowledge", "retail", "retailKnowledge.generated.json"), tinyRetailJson());
   return dir;
 }
 
@@ -80,9 +80,9 @@ describe("build-knowledge-db paired-output generation manifest (DT2-1)", () => {
     const result = runGenerator(root);
     expect(result.code).toBe(0);
 
-    const dbPath = join(root, "src", "server", "knowledge.generated.db");
+    const dbPath = join(root, "src", "decoding", "server", "knowledge", "knowledge.generated.db");
     const gzPath = dbPath + ".gz";
-    const manifestPath = join(root, "src", "server", "knowledge.generated.manifest.json");
+    const manifestPath = join(root, "src", "decoding", "server", "knowledge", "knowledge.generated.manifest.json");
 
     expect(existsSync(manifestPath)).toBe(true);
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -98,14 +98,14 @@ describe("build-knowledge-db paired-output generation manifest (DT2-1)", () => {
     root = makeRoot();
     expect(runGenerator(root).code).toBe(0);
 
-    const dbPath = join(root, "src", "server", "knowledge.generated.db");
+    const dbPath = join(root, "src", "decoding", "server", "knowledge", "knowledge.generated.db");
     const gzPath = dbPath + ".gz";
-    const manifestPath = join(root, "src", "server", "knowledge.generated.manifest.json");
+    const manifestPath = join(root, "src", "decoding", "server", "knowledge", "knowledge.generated.manifest.json");
 
     // Force a second, deliberately DIFFERENT generation (bigger tire index) and rebuild with --force
     // (a legitimate shrink/replace is not the scenario under test here, just a distinct generation).
     writeFileSync(
-      join(root, "src", "server", "tire-knowledge", "tireKnowledge.generated.json"),
+      join(root, "src", "decoding", "server", "knowledge", "tire", "tireKnowledge.generated.json"),
       JSON.stringify({
         schema_version: "1.0.0",
         generated_at: "2026-07-02T00:00:00.000Z",

@@ -26,7 +26,7 @@ vi.mock("@/server/catalog/catalogDispute", () => ({
   disputeCatalogEntry: mocks.disputeCatalogEntry,
 }));
 
-vi.mock("@/server/decode/storage", () => ({
+vi.mock("@/decoding/server/pipeline/storage", () => ({
   decodeStorage: async () => ({} as never),
 }));
 

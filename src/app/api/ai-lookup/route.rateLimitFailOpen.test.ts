@@ -31,8 +31,8 @@ vi.mock("@/server/catalog/masterAppend", () => ({
 // limiter and exercise the rest of the handler normally. This isolates the rate-limit fail-open: if the
 // fix is absent, the FIRST throw becomes a raw 500 and the request never gets past the limiter.
 let failNextStorageInit = false;
-vi.mock("@/server/decode/storage", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/server/decode/storage")>();
+vi.mock("@/decoding/server/pipeline/storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/decoding/server/pipeline/storage")>();
   const os = await import("node:os");
   const path = await import("node:path");
   const tmpLadderDir = path.join(os.tmpdir(), `ladder-storage-route-failopen-test-${process.pid}`);
@@ -51,7 +51,7 @@ vi.mock("@/server/decode/storage", async (importOriginal) => {
 import { POST, GET } from "@/app/api/ai-lookup/route";
 import { __resetForTest } from "@/decoding/limits/aiSpendGuard";
 import { clearDecodeCache } from "@/decoding/decodeCache";
-import { __resetForTest as __resetDecodeCacheStoreForTest } from "@/server/decodeCacheStore";
+import { __resetForTest as __resetDecodeCacheStoreForTest } from "@/decoding/server/cache/decodeCacheStore";
 
 function makeRequest(body: object, ip = "7.7.7.7") {
   return new Request("http://localhost/api/ai-lookup", {

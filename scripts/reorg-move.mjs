@@ -53,7 +53,7 @@ const rewrites = manifest.moves
 const SCAN_DIRS = ["src", "e2e", "scripts", "testing", "ct", ".github"];
 const SCAN_ROOT_FILES = [
   "vitest.config.ts", "vitest.setup.ts", "next.config.ts", "package.json", "tsconfig.json",
-  "eslint.config.mjs", ".vercelignore", ".gitignore", "firebase.json", "codemap.json",
+  "eslint.config.mjs", ".vercelignore", ".gitignore", ".gitattributes", "firebase.json", "codemap.json",
   ...readdirSync(ROOT).filter((f) => /^playwright.*\.(ts|json)$/.test(f)),
 ];
 const TEXT = /\.(ts|tsx|js|jsx|mjs|cjs|json|md|yml|yaml)$/;
@@ -113,6 +113,21 @@ for (const file of files) {
   try { src = readFileSync(file, "utf8"); } catch { continue; }
   const original = src;
 
+  // (c) SEGMENT-BUILT paths: join(process.cwd(), ...legacy path segments...).
+  // There is no contiguous slash-delimited path string here, so (a) and (b) are both blind
+  // to it - and so is tsc, because it is a runtime string. This class has already caused two real
+  // breakages in this reorganization. Driven by an explicit `segmentDirs` map in the manifest so the
+  // mapping is reviewed, never inferred. Longest source path first, so nested dirs win over parents.
+  for (const s of [...(manifest.segmentDirs || [])].sort((a, b) => b.from.length - a.from.length)) {
+    const seq = (p) => p.split("/").map((x) => '"' + x + '"');
+    const fromRe = new RegExp(seq(s.from).map(escapeDots).join('\\s*,\\s*'), "g");
+    src = src.replace(fromRe, (match, offset) => {
+      const line = original.slice(0, offset).split("\n").length;
+      changes.push({ file: rel, line, before: match, after: seq(s.to).join(", "), kind: "path-segments" });
+      return seq(s.to).join(", ");
+    });
+  }
+
   for (const r of rewrites) {
     // (a) alias specifier. Lookahead on a non-identifier char so "@/lib/auth" does not
     //     match inside "@/lib/authOther", while "@/lib/auth/x" and "@/lib/auth" both do.
@@ -133,6 +148,7 @@ for (const file of files) {
 // --- 3. report ----------------------------------------------------------------------------
 const aliasChanges = changes.filter((c) => c.kind === "alias");
 const pathChanges = changes.filter((c) => c.kind === "path-literal");
+const segChanges = changes.filter((c) => c.kind === "path-segments");
 const nonTs = pathChanges.filter((c) => !/\.(ts|tsx)$/.test(c.file));
 
 console.log("\n=== WAVE: " + manifest.wave + "  (" + (APPLY ? "APPLIED" : "DRY RUN") + ") ===");
@@ -146,6 +162,9 @@ console.log("\n--- " + aliasChanges.length + " alias rewrites across " + aliasFi
 
 console.log("\n--- " + pathChanges.length + " raw path-literal rewrites ---");
 pathChanges.forEach((c) => console.log("  " + c.file + ":" + c.line + "  " + c.before + " -> " + c.after));
+
+console.log("\n--- " + segChanges.length + " SEGMENT-BUILT path rewrites (invisible to tsc AND to a text search) ---");
+segChanges.forEach((c) => console.log("  " + c.file + ":" + c.line + "  " + c.before + "  ->  " + c.after));
 
 console.log("\n*** " + nonTs.length + " NON-TYPESCRIPT path literals changed - ORCHESTRATOR MUST REVIEW EACH ***");
 nonTs.forEach((c) => console.log("  REVIEW  " + c.file + ":" + c.line + "  " + c.before + " -> " + c.after));

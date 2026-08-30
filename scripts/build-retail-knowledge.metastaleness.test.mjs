@@ -36,7 +36,7 @@ function makeIndexEntries(n, offset) {
 function makeRoot({ staleMeta, rebuildBarcodes = REBUILD_BARCODES }) {
   const dir = mkdtempSync(join(tmpdir(), "rk-metastaleness-"));
   const dataDir = join(dir, "data", "retail-knowledge");
-  const outDir = join(dir, "src", "server", "retail-knowledge");
+  const outDir = join(dir, "src", "decoding", "server", "knowledge", "retail");
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(outDir, { recursive: true });
 
@@ -89,7 +89,7 @@ function runGenerator(cwd, args = []) {
 }
 
 function barcodeCount(dir) {
-  const raw = readFileSync(join(dir, "src", "server", "retail-knowledge", "retailKnowledge.generated.json"), "utf8");
+  const raw = readFileSync(join(dir, "src", "decoding", "server", "knowledge", "retail", "retailKnowledge.generated.json"), "utf8");
   return Object.keys(JSON.parse(raw).index).length;
 }
 

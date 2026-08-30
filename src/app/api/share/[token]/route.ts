@@ -3,7 +3,7 @@ import {
   normalizeBossReportSnapshot,
   resolveShareToken,
 } from "@/server/share/shareTokenStore";
-import { logServerEvent } from "@/server/log";
+import { logServerEvent } from "@/decoding/server/log";
 
 export const runtime = "nodejs";
 

@@ -6,7 +6,7 @@ import { COLLECTIONS, memberDocId } from "@/sync-database/types";
 import { isLiveAuth } from "@/authentication/service/authMode";
 import { intEnv } from "@/decoding/limits/aiSpendGuard";
 import { checkAccountDeleteRateLimit } from "@/users-businesses/account/accountDeleteRateLimit";
-import { logServerEvent } from "@/server/log";
+import { logServerEvent } from "@/decoding/server/log";
 
 export const runtime = "nodejs";
 

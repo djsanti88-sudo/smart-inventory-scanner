@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { DecodeStorage } from "@/server/decode/storage";
+import type { DecodeStorage } from "@/decoding/server/pipeline/storage";
 
 // M1 deep-review fix 1 (re-leak): the "disputed" remerge path in appendMasterCatalogEntry must never
 // write disputedBy/auditLog onto the PUBLIC catalogEntries parent doc (mirrors the split

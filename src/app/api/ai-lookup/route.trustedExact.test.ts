@@ -1,25 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const runDecodePipeline = vi.fn();
-vi.mock("@/server/decode/pipeline", () => ({
+vi.mock("@/decoding/server/pipeline/pipeline", () => ({
   runDecodePipeline: (...args: unknown[]) => runDecodePipeline(...args),
   e2eMode: () => false,
 }));
 
 const resolveTrustedExactBarcodeDecision = vi.fn();
-vi.mock("@/server/tire-knowledge/TireKnowledgeProvider", () => ({
+vi.mock("@/decoding/server/knowledge/tire/TireKnowledgeProvider", () => ({
   resolveTrustedExactBarcodeDecision: (...args: unknown[]) => resolveTrustedExactBarcodeDecision(...args),
 }));
 
 const getTireExactIndexFingerprint = vi.fn();
 const hasBossHmacKeyConfigured = vi.fn(() => true);
-vi.mock("@/server/tire-knowledge/tireExactIndex", () => ({
+vi.mock("@/decoding/server/knowledge/tire/tireExactIndex", () => ({
   getTireExactIndexFingerprint: (...args: unknown[]) => getTireExactIndexFingerprint(...args),
   hasBossHmacKeyConfigured: () => hasBossHmacKeyConfigured(),
 }));
 
 const logServerEvent = vi.fn();
-vi.mock("@/server/log", () => ({
+vi.mock("@/decoding/server/log", () => ({
   logServerEvent: (...args: unknown[]) => logServerEvent(...args),
 }));
 
@@ -36,7 +36,7 @@ vi.mock("@/lib/firebaseAdmin", () => ({
 }));
 
 const decodeStorage = vi.fn();
-vi.mock("@/server/decode/storage", () => ({ decodeStorage: (...args: unknown[]) => decodeStorage(...args) }));
+vi.mock("@/decoding/server/pipeline/storage", () => ({ decodeStorage: (...args: unknown[]) => decodeStorage(...args) }));
 
 const legacyRateLimit = vi.fn();
 const killSwitch = vi.fn();
