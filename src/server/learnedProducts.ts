@@ -14,12 +14,12 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { EvidenceStrength } from "@/types";
-import { canonicalGtin } from "@/services/upc/gtin";
+import { canonicalGtin } from "@/products/barcodes/gtin";
 import { isTrustedProductHost } from "@/services/ai/trustedProductHosts";
-import { normalizeBrand } from "@/services/catalog/brandPrefixGeneral";
+import { normalizeBrand } from "@/products/catalog/brandPrefixGeneral";
 import { lookupPrefixFull as lookupPrefix } from "@/server/catalog/prefixIndexServer";
 import { createTursoClient, tursoCredentialsFromEnv, type TursoClient } from "@/server/db/tursoClient";
-import { isBrandInPrefixFamily } from "@/services/tire/tirePrefixLookup";
+import { isBrandInPrefixFamily } from "@/products/tires/tirePrefixLookup";
 import { hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
 
 // ---------------------------------------------------------------------------

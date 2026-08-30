@@ -22,8 +22,8 @@
  * The master switch settings.autoAddDecodedProducts (default true) is applied by the CALLER, not here.
  */
 
-import { isFloorGuessOnlyLabel } from "@/services/catalog/prefixFloorEnrich";
-import { parseTireIdentity } from "@/services/catalog/tireListingNormalizer";
+import { isFloorGuessOnlyLabel } from "@/products/catalog/prefixFloorEnrich";
+import { parseTireIdentity } from "@/products/catalog/tireListingNormalizer";
 
 /** Public barcode shapes: the only code types a bare provider self-report may ever auto-count on. */
 const PUBLIC_BARCODE_SHAPES: readonly string[] = ["upc_a", "ean_13", "gtin_14"];

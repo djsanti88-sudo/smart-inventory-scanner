@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { matchExpectedRow, type CorpusCandidate, type MatcherDeps } from "./identityMatcher";
 import type { ExpectedInventoryRow } from "../types";
-import { IDENTITY_JACCARD_THRESHOLD } from "@/services/catalog/identityMerge";
+import { IDENTITY_JACCARD_THRESHOLD } from "@/products/catalog/identityMerge";
 
 // Task 5 (AM-R4/AM-R5, spec 2026-07-15-shopware-reconcile-pn-fill-design.md, matcher section):
 // resolution order per row:

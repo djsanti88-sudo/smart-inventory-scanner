@@ -55,7 +55,7 @@ function sha256File(path) {
   });
 }
 
-// Mirrors src/services/catalog/tirePartNumber.ts exactly (this script has zero project imports by
+// Mirrors src/products/catalog/tirePartNumber.ts exactly (this script has zero project imports by
 // design - it only touches a disposable SQLite copy, same convention as 02_boss_reconciliation.mjs).
 function basePartNumberKey(pn) {
   return (pn ?? "").toString().replace(/[ -]/g, "").trim().toUpperCase().replace(/\s/g, "");

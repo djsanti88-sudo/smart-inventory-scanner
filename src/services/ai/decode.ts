@@ -2,7 +2,7 @@ import type { AiLookupResult, CodeType, DecodeDecision, EvidenceResult } from "@
 import { crossCheck } from "@/services/ai/crossCheckEngine";
 import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerifier";
 import { isTireContext, hasCountableTireIdentity } from "@/services/ai/tireSpecs";
-import { isBrandInPrefixFamily } from "@/services/tire/tirePrefixLookup";
+import { isBrandInPrefixFamily } from "@/products/tires/tirePrefixLookup";
 import { isTrustedProductHost } from "@/services/ai/trustedProductHosts";
 
 // decideDecode: the gate that turns provider results + APP-verified evidence into a final decode

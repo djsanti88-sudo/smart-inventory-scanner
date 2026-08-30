@@ -1,12 +1,12 @@
 // scripts/dt-harvest/lib/brandFamilies.mjs
-// Node-runnable reimplementation of src/services/catalog/brandFamilies.ts's sameBrandFamily + the
+// Node-runnable reimplementation of src/products/catalog/brandFamilies.ts's sameBrandFamily + the
 // curated FAMILIES table, so the .mjs harvest pipeline (which plain `node` cannot import TS into)
 // can consult the same corporate-family firewall the runtime uses. Reimplemented rather than
 // imported for the same reason lib/backfill.mjs reimplements normPartKey: this .mjs cannot import
 // the server-only TS module.
 //
 // CRITICAL: the FAMILIES list below MUST stay byte-for-byte equivalent (after normalization) to the
-// FAMILIES in src/services/catalog/brandFamilies.ts. A drift-guard vitest test
+// FAMILIES in src/products/catalog/brandFamilies.ts. A drift-guard vitest test
 // (brandFamilies.drift.test.ts) imports BOTH this .mjs and the .ts source and asserts identical
 // family membership, so the two can never silently diverge. Wrong/duplicated family data would
 // cause a FALSE product-identity merge, which is worse than leaving codes unrecovered - do not edit
@@ -53,7 +53,7 @@ FAMILIES.forEach((family, i) => {
  * True when `a` and `b` are the SAME corporate family per the curated table (after normalization).
  * Identical brands trivially match. Unknown brands (not in any family) never match unless they
  * normalize identically - absence of family data must NOT invent a relationship. Byte-for-byte the
- * same logic as src/services/catalog/brandFamilies.ts's sameBrandFamily (enforced by the drift test).
+ * same logic as src/products/catalog/brandFamilies.ts's sameBrandFamily (enforced by the drift test).
  * @param {string} a
  * @param {string} b
  * @returns {boolean}

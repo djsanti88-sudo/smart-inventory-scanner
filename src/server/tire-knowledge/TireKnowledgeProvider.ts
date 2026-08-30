@@ -5,7 +5,7 @@ import { emptyResult } from "@/services/ai/provider";
 import { lookupByExactBarcode, lookupByExactPartNumber, type TireKnowledgeRow } from "@/server/tire-knowledge/tireKnowledgeIndex";
 import { lookupTrustedExactBarcode } from "@/server/tire-knowledge/tireExactIndex";
 import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
-import { basePartNumberKey } from "@/services/catalog/tirePartNumber";
+import { basePartNumberKey } from "@/products/catalog/tirePartNumber";
 
 // SERVER-ONLY deterministic tire-knowledge provider. It turns an EXACT trusted-corpus hit into a decode
 // result WITHOUT any AI call or page fetch. It runs in the /api/ai-lookup route BEFORE the AI providers and

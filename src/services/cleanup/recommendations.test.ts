@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildCleanupRecommendations } from "@/services/cleanup/recommendations";
-import { sanitizeCatalogEntry } from "@/services/catalog/sanitizeCatalog";
+import { sanitizeCatalogEntry } from "@/products/catalog/sanitizeCatalog";
 import type { Alias, InventoryCount, Product, Source } from "@/types";
 
 function product(id: string, name: string, opts: Partial<Product> = {}): Product {

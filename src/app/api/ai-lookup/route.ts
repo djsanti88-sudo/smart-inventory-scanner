@@ -1,6 +1,6 @@
 import type { AiLookupResult } from "@/types";
 import { sanitizeForAiLookup } from "@/services/sanitizer";
-import { detectCodeType } from "@/services/codeTypeDetector";
+import { detectCodeType } from "@/products/match/codeTypeDetector";
 import { killSwitchOn, checkRateLimit, readDailyUsed, intEnv, getGptDecodeStatus } from "@/services/security/aiSpendGuard";
 import { GPT_DECODE_WORST_CASE_USD, type GptDecodeResult } from "@/services/ai/gptDecodeClient";
 import { decodeStorage } from "@/server/decode/storage";

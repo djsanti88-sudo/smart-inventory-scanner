@@ -7,8 +7,8 @@ import type {
   UnknownCodeReview,
 } from "@/types";
 import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
-import { matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
-import { customerDisplayName } from "@/services/displayName";
+import { matchTireSize, plainTireSizeDigits } from "@/products/tires/tireSizeNormalizer";
+import { customerDisplayName } from "@/products/match/displayName";
 
 // Deterministic CSV export. Pure functions (no React, no next/*). Works entirely from local
 // session state, so export succeeds even when sync is pending. Never exports secrets/API keys.

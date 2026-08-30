@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { sanitizeProduct } from "@/services/security/serializers";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
-import { matchProductByIdentifiers } from "@/services/aliasMatcher";
+import { matchProductByIdentifiers } from "@/products/match/aliasMatcher";
 import type { CleanedCode, Product } from "@/types";
 
 // Owner rule (2026-07-22, encoded in src/components/FinalCountTable.tsx:129-131): the barcode a shop
@@ -69,7 +69,7 @@ describe("identifier fields survive customer ('business') persistence (2026-07-2
   // Regression for the trust-gate-breaking bug: CUSTOMER_SAFE_PRODUCT_FIELDS omitted `verified` and
   // `businessId`, so after a customer persist/reload round-trip a verified product's own identifier
   // (primaryBarcode/gtin/upc/ean) survived (per the fix above) but the resolver trust gate in
-  // matchProductByIdentifiers (src/services/aliasMatcher.ts:111, `p.businessId === businessId &&
+  // matchProductByIdentifiers (src/products/match/aliasMatcher.ts:111, `p.businessId === businessId &&
   // p.verified === true`) could never match it again - the shop's own already-verified products stopped
   // resolving as "known" after every reload. This proves both fields round-trip AND the trust gate still
   // matches post-reload.

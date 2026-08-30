@@ -6,9 +6,9 @@ import {
   nameTokens,
   plusGenerationDiff,
   prefixAwareJaccard,
-} from "@/services/catalog/identityMerge";
-import { sameBrandFamily } from "@/services/catalog/brandFamilies";
-import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
+} from "@/products/catalog/identityMerge";
+import { sameBrandFamily } from "@/products/catalog/brandFamilies";
+import { prefixBrandConflict } from "@/products/catalog/brandPrefixGeneral";
 import { normalizedEditSimilarity } from "@/reconcile/match/normalizedEditDistance";
 import type { CorpusCandidate } from "@/reconcile/match/identityMatcher";
 import type { ExpectedInventoryRow } from "@/reconcile/types";

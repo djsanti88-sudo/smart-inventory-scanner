@@ -37,7 +37,7 @@ vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
 
 import { emptyResult } from "@/services/ai/provider";
 import { clearDecodeCache, __clearInFlightForTest } from "@/services/ai/decodeCache";
-import { detectCodeType } from "@/services/codeTypeDetector";
+import { detectCodeType } from "@/products/match/codeTypeDetector";
 import { decodeWithGpt, GPT_DECODE_WORST_CASE_USD, type GptDecodeResult } from "@/services/ai/gptDecodeClient";
 import {
   chargeDailySlotConditional,

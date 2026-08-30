@@ -15,7 +15,7 @@ import { SessionLockControl } from "@/sessions/lock/SessionLockControl";
 import { SessionsList } from "@/sessions/SessionsList";
 import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
 import { planScanBatch } from "./planScan";
-import { resolveRawScan } from "@/services/resolver";
+import { resolveRawScan } from "@/products/match/resolver";
 import { computeMoatStats } from "@/services/moatStats";
 
 export default function ScanPage() {

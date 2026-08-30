@@ -8,7 +8,7 @@
 import type { AiLookupResult, CodeType } from "@/types";
 import { isTireContext, type IdentityText } from "@/services/ai/tireSpecs";
 import { decodeBarcodeStructure, type BrandPrefixHint } from "@/services/ai/barcodeAnatomy";
-import { isBrandInPrefixFamily } from "@/services/tire/tirePrefixLookup";
+import { isBrandInPrefixFamily } from "@/products/tires/tirePrefixLookup";
 
 export type ScanContext = "any" | "tire";
 export type ConflictKind = "category_context_conflict" | "brand_prefix_conflict";

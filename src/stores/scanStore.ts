@@ -20,20 +20,20 @@ import type {
 } from "@/types";
 import { cleanScanCode } from "@/services/scanCleaner";
 import { normalizeCode } from "@/services/codeNormalizer";
-import { evaluateMismatch, type MismatchVerdict } from "@/services/productMismatchGuard";
-import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector";
-import { resolveScan } from "@/services/resolver";
-import { isLikelyMisreadGtin } from "@/services/upc/misread";
-import { gradeBarcode } from "@/services/upc/barcodeTrust";
-import { canonicalGtin } from "@/services/upc/gtin";
+import { evaluateMismatch, type MismatchVerdict } from "@/products/match/productMismatchGuard";
+import { detectCodeType, codeTypeToAliasType } from "@/products/match/codeTypeDetector";
+import { resolveScan } from "@/products/match/resolver";
+import { isLikelyMisreadGtin } from "@/products/barcodes/misread";
+import { gradeBarcode } from "@/products/barcodes/barcodeTrust";
+import { canonicalGtin } from "@/products/barcodes/gtin";
 import { clampDecodeBudgetMs } from "@/services/ai/decodeBudget";
 import { fetchWithBackoff } from "@/services/net/fetchWithBackoff";
 import { hashPin, verifyPin, isValidPinFormat } from "@/sessions/lock/pinLock";
 import { isPlatformOwnerClient } from "@/users-businesses/roles/roleAccess";
 import { isCloudBackendEnabled } from "@/services/config/backend";
 import type { DatabaseService } from "@/services/db/databaseService";
-import { resolveScanToProductTiered } from "@/services/aliasMatcher";
-import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/services/productDedup";
+import { resolveScanToProductTiered } from "@/products/match/aliasMatcher";
+import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/products/match/productDedup";
 import { incrementInventoryCount } from "@/services/inventory";
 import { buildIdempotencyKey, stableIdempotencyFingerprint } from "@/services/idempotency";
 import { versionReviewDecision } from "@/services/reviewDecisionVersion";
@@ -59,28 +59,28 @@ import { sanitizeCustomerReason, MISS_REASON_TEXT } from "@/services/ai/decodeFa
 import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
 import { getIdentityConfidenceBand } from "@/services/ai/identityConfidenceBand";
 import { buildCleanupRecommendations } from "@/services/cleanup/recommendations";
-import type { CatalogEntry, CatalogHit, ShopOverride } from "@/services/catalog/catalogTypes";
-import { decideLookup, upsertVerified, applyAiCandidate, observeScan } from "@/services/catalog/localCatalogProvider";
-import { planAutoVerify } from "@/services/catalog/catalogAutoVerify";
-import { shopReverseUpcConflict, type UpcRecord } from "@/services/catalog/candidateUpcSet";
+import type { CatalogEntry, CatalogHit, ShopOverride } from "@/products/catalog/catalogTypes";
+import { decideLookup, upsertVerified, applyAiCandidate, observeScan } from "@/products/catalog/localCatalogProvider";
+import { planAutoVerify } from "@/products/catalog/catalogAutoVerify";
+import { shopReverseUpcConflict, type UpcRecord } from "@/products/catalog/candidateUpcSet";
 import { isTireContext, hasRequiredTireSpecs, hasCountableTireIdentity } from "@/services/ai/tireSpecs";
-import { extractTireFields } from "@/services/tire/extractTireFields";
-import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/services/aliasDiscovery";
-import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
+import { extractTireFields } from "@/products/tires/extractTireFields";
+import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/products/match/aliasDiscovery";
+import { lookupTirePrefix } from "@/products/tires/tirePrefixLookup";
 import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
-import { prefixFloorName, type PrefixFloorResult } from "@/services/catalog/prefixFloor";
-import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel, brandIsOnlyFloorGuess, isFloorGuessOnlyLabel } from "@/services/catalog/prefixFloorEnrich";
+import { prefixFloorName, type PrefixFloorResult } from "@/products/catalog/prefixFloor";
+import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel, brandIsOnlyFloorGuess, isFloorGuessOnlyLabel } from "@/products/catalog/prefixFloorEnrich";
 import { detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
-import { isCatalogWritable, toMasterAwareStoreEntry } from "@/services/catalog/sanitizeCatalog";
-import { findIdentityMerge } from "@/services/catalog/identityMerge";
-import { enrichProductIdentity } from "@/services/catalog/enrichProductIdentity";
-import { toMasterCandidates } from "@/services/catalog/masterCandidates";
+import { isCatalogWritable, toMasterAwareStoreEntry } from "@/products/catalog/sanitizeCatalog";
+import { findIdentityMerge } from "@/products/catalog/identityMerge";
+import { enrichProductIdentity } from "@/products/catalog/enrichProductIdentity";
+import { toMasterCandidates } from "@/products/catalog/masterCandidates";
 import {
   canAutoCount,
   shouldAutoApplySuggestion,
   decodeCorroborated as decodeCorroboratedGate,
 } from "@/stores/scanGates";
-import type { CatalogSourceTier, CatalogVerifiedBy } from "@/services/catalog/catalogTypes";
+import type { CatalogSourceTier, CatalogVerifiedBy } from "@/products/catalog/catalogTypes";
 import { appendFeedback, type FeedbackEvent, type FeedbackEventType } from "@/services/feedback/feedback";
 import type { CountSnapshot } from "@/services/reports/varianceReport";
 import {
@@ -108,11 +108,11 @@ import {
 } from "@/stores/scanPersistNamespace";
 import { getOrCreateDeviceId } from "@/services/deviceIdentity";
 import { shouldReuseSession, buildAutoSessionName } from "@/sessions/auto/autoSession";
-import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
+import { buildDiscoveredIdentifiers } from "@/products/match/discoveredIdentifiers";
 import { planSyncBatch } from "@/services/syncBatchPlanner";
 import { mergeReloadedProductsAndAliases, mergeReloadedReviews } from "@/services/reloadMergePolicy";
-import { safeStructuredFieldsFor } from "@/services/polish/structuredFields";
-import { backfillProducts } from "@/services/polish/backfillProducts";
+import { safeStructuredFieldsFor } from "@/products/polish/structuredFields";
+import { backfillProducts } from "@/products/polish/backfillProducts";
 import type { AiStatus } from "@/types";
 import type { ImportPreviewRow, ImportReviewContext, UniversalImportApplySummary } from "@/import/importSchema";
 

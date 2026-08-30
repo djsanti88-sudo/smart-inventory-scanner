@@ -2,7 +2,7 @@ import "server-only";
 import { createHash, createHmac } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { canonicalGtin } from "@/services/upc/gtin";
+import { canonicalGtin } from "@/products/barcodes/gtin";
 import type { TireKnowledgeRow } from "@/server/tire-knowledge/tireKnowledgeIndex";
 
 type SourceScope = "global_corpus" | "authenticated_boss_corpus";

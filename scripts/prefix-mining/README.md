@@ -1,6 +1,6 @@
 # scripts/prefix-mining
 
-Offline, deterministic tooling that derives the GS1 prefix -> brand knowledge used by scan-context safety (`src/services/catalog/tirePrefixHints.ts`, `src/services/catalog/derivedPrefixMap.json`). The outputs are committed; these scripts exist to regenerate them and are not wired into `package.json`.
+Offline, deterministic tooling that derives the GS1 prefix -> brand knowledge used by scan-context safety (`src/services/catalog/tirePrefixHints.ts`, `src/products/catalog/derivedPrefixMap.json`). The outputs are committed; these scripts exist to regenerate them and are not wired into `package.json`.
 
 Inputs and outputs live in `data/tire-knowledge/prefixes/` (`tire_prefixes_FINAL.csv` is the validated, tiered table; `ADDITIONS` / `SIBLINGS` / `PROMOTED` are the mined and owner-approved extras). Shared helpers: `scripts/lib/prefix-miner.mjs`.
 

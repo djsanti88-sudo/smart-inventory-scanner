@@ -1,9 +1,9 @@
 import type { Alias, Product } from "@/types";
 import { cleanScanCode } from "@/services/scanCleaner";
-import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector";
+import { detectCodeType, codeTypeToAliasType } from "@/products/match/codeTypeDetector";
 import { parse as parseCsvSync } from "csv-parse/sync";
-import { gradeBarcode } from "@/services/upc/barcodeTrust";
-import { isGtinShaped } from "@/services/upc/gtin";
+import { gradeBarcode } from "@/products/barcodes/barcodeTrust";
+import { isGtinShaped } from "@/products/barcodes/gtin";
 
 // Deterministic CSV import (MVP). Pure functions (no React, no next/*). Treats ALL CSV content as
 // UNTRUSTED data (semantic firewall): it is parsed as data, never interpreted as instructions.

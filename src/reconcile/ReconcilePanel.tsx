@@ -10,7 +10,7 @@ import { buildReconcileReport, reconcileReportCsv, type ReconcileBucket, type Re
 import type { MatchResult } from "@/reconcile/match/identityMatcher";
 import type { AdapterResult } from "@/reconcile/types";
 import { deriveCountedByUid } from "@/reconcile/match/countedByUid";
-import { resolveRawScan } from "@/services/resolver";
+import { resolveRawScan } from "@/products/match/resolver";
 import { cleanScanCode } from "@/services/scanCleaner";
 import { downloadCsv } from "@/services/exportFormats";
 import { getSession } from "@/authentication/auth";

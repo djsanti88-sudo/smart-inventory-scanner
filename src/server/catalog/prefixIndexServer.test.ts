@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { lookupPrefixFull, lookupDerivedPrefix, candidateKnownPrefixesFull, prefixFloorNameFull } from "@/server/catalog/prefixIndexServer";
-import { detectCodeType } from "@/services/codeTypeDetector";
+import { detectCodeType } from "@/products/match/codeTypeDetector";
 
 // F5 bundle-surgery (wave 2, 2026-07-20): the FULL prefix index (SEED + DERIVED_CATALOG + LEARNED) now
 // lives server-only here. These are the DERIVED-tier assertions that used to live in the client-safe

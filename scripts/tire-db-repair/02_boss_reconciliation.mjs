@@ -94,7 +94,7 @@ function csvLine(fields) {
   return fields.map(csvEscape).join(",") + "\n";
 }
 
-// --- Barcode normalization (mirrors src/services/upc/gtin.ts, expressed standalone so this script
+// --- Barcode normalization (mirrors src/products/barcodes/gtin.ts, expressed standalone so this script
 // has zero project imports - it reads/writes a disposable SQLite copy only). ------------------------
 function isGtinShaped(code) {
   const t = (code ?? "").trim();
@@ -149,7 +149,7 @@ function barcodeCandidates(raw) {
   return [...out];
 }
 
-// --- Part-number normalization (mirrors src/services/catalog/tirePartNumber.ts). --------------------
+// --- Part-number normalization (mirrors src/products/catalog/tirePartNumber.ts). --------------------
 function basePartNumberKey(pn) {
   return (pn ?? "").toString().replace(/[ -]/g, "").trim().toUpperCase().replace(/\s/g, "");
 }

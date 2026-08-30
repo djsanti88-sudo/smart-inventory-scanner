@@ -6,8 +6,8 @@
 // and the company prefix is variable-length so we expose a CANDIDATE slice only.
 
 import type { Alias, CodeType, Product } from "@/types";
-import { deriveGs1RegionHint, GS1_HINT_DISCLAIMER } from "@/services/gs1Prefixes";
-import { detectCodeType } from "@/services/codeTypeDetector";
+import { deriveGs1RegionHint, GS1_HINT_DISCLAIMER } from "@/products/barcodes/gs1Prefixes";
+import { detectCodeType } from "@/products/match/codeTypeDetector";
 
 export interface BarcodeStructure {
   normalizedCode: string;

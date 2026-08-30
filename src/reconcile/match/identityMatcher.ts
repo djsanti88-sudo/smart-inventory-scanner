@@ -23,11 +23,11 @@
 // between matched and ambiguous, the answer is ambiguous.
 
 import type { ExpectedInventoryRow } from "../types";
-import { sameBrandFamily } from "@/services/catalog/brandFamilies";
-import { IDENTITY_JACCARD_THRESHOLD, FUZZY_BRAND_MIN, nameTokens, jaccard, plusGenerationDiff } from "@/services/catalog/identityMerge";
+import { sameBrandFamily } from "@/products/catalog/brandFamilies";
+import { IDENTITY_JACCARD_THRESHOLD, FUZZY_BRAND_MIN, nameTokens, jaccard, plusGenerationDiff } from "@/products/catalog/identityMerge";
 import { normalizedEditSimilarity } from "@/reconcile/match/normalizedEditDistance";
 import { tireSizeToken } from "@/services/ai/tireSpecs";
-import { basePartNumberKey, tirePartNumberCore } from "@/services/catalog/tirePartNumber";
+import { basePartNumberKey, tirePartNumberCore } from "@/products/catalog/tirePartNumber";
 import { matchImportFuzzy, normalizeImportSize } from "@/reconcile/match/importFuzzyMatcher";
 
 export type MatchStatus = "matched" | "ambiguous" | "unmatched" | "non_tire";

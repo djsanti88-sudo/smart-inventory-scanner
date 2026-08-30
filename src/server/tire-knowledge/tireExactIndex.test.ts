@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { canonicalGtin } from "@/services/upc/gtin";
+import { canonicalGtin } from "@/products/barcodes/gtin";
 
 const { readFileMock } = vi.hoisted(() => ({ readFileMock: vi.fn() }));
 

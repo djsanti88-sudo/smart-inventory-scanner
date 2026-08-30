@@ -2,7 +2,7 @@
 import "server-only";
 
 import { NextRequest, NextResponse } from "next/server";
-import { detectCodeType } from "@/services/codeTypeDetector";
+import { detectCodeType } from "@/products/match/codeTypeDetector";
 import { prefixFloorNameFull } from "@/server/catalog/prefixIndexServer";
 import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
 import { decodeStorage } from "@/server/decode/storage";

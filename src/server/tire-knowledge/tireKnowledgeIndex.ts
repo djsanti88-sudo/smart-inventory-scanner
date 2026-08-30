@@ -4,8 +4,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getKnowledgeDb } from "@/server/knowledgeDb";
 import { getTursoClient as getRetailTursoClient, type TursoClient } from "@/server/retail-knowledge/retailKnowledgeIndex";
-import { lookupCandidates } from "@/services/upc/gtin";
-import { tirePartNumberVariants } from "@/services/catalog/tirePartNumber";
+import { lookupCandidates } from "@/products/barcodes/gtin";
+import { tirePartNumberVariants } from "@/products/catalog/tirePartNumber";
 
 // SERVER-ONLY tire knowledge index reader. Uses SQLite for microsecond lookups with ~5MB memory.
 // The `server-only` import makes this a BUILD ERROR if imported from a client component.
@@ -294,7 +294,7 @@ export async function lookupByExactBarcode(code: string): Promise<TireKnowledgeR
  * lookup, but tries an ORDERED candidate key list per backend before moving to the next backend:
  * [normPartKey(raw), ...affix-core variants that differ from it]. Shop part numbers carry
  * distributor affixes the corpus never stores (KH2265992 vs corpus "2265992"; F-28074576 vs
- * "28074576"). tirePartNumberVariants() (src/services/catalog/tirePartNumber.ts) already knows how
+ * "28074576"). tirePartNumberVariants() (src/products/catalog/tirePartNumber.ts) already knows how
  * to strip a leading/trailing distributor affix down to the numeric core - it is reused here so the
  * scan-path lookup benefits from the exact same primitive the reconcile matcher already trusts.
  *

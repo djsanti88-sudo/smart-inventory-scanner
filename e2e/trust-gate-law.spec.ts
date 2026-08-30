@@ -3,7 +3,7 @@ import { test, expect, type Page } from "./fixtures";
 // Browser proof of the TOP-LEVEL LAW (owner order, 2026-07-15):
 // EVERY scanned code - known, unknown, misread, random, undecodable, trust-gate-rejected - MUST
 // immediately appear on the scan feed AND be counted in the session totals. Scan 10 = count 10,
-// no exceptions. The barcode trust gate (src/services/upc/barcodeTrust.ts) only blanks a JUNK
+// no exceptions. The barcode trust gate (src/products/barcodes/barcodeTrust.ts) only blanks a JUNK
 // IDENTITY FIELD on a minted product (see scanStore.trustGate.store.test.ts) - it never blocks the
 // scan from appearing or counting. This spec proves that invariant through the real browser UI,
 // the way e2e/count-always.spec.ts proves the sibling "scan N = count N with AI off" law.
@@ -51,7 +51,7 @@ test("a bad-check-digit GTIN appears and counts", async ({ page }) => {
   await loginAndReachScan(page);
 
   // Valid GTIN SHAPE (13 digits) but WRONG GS1 check digit - the barcode trust gate
-  // (src/services/upc/barcodeTrust.ts gradeBarcode) grades this "rejected" (likely misread).
+  // (src/products/barcodes/barcodeTrust.ts gradeBarcode) grades this "rejected" (likely misread).
   // The gate only blanks a junk identity FIELD on a minted product; it must never suppress the
   // scan row or the count (see src/stores/scanStore.trustGate.store.test.ts).
   const BAD_CHECKDIGIT_GTIN = "8848111201762";

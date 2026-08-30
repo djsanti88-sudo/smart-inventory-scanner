@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
-import { safeStructuredFieldsFor } from "@/services/polish/structuredFields";
+import { safeStructuredFieldsFor } from "@/products/polish/structuredFields";
 import { getIdentityConfidenceBand, identityBandWord } from "@/services/ai/identityConfidenceBand";
 import type { UnknownCodeReview } from "@/types";
 

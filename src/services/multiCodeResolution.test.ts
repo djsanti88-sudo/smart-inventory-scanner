@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Alias } from "@/types";
-import { resolveRawScan } from "@/services/resolver";
+import { resolveRawScan } from "@/products/match/resolver";
 
 // Phase 1 proof: a product's codes resolve to the SAME product regardless of separators, and the
 // no-separator variant fixes the "2881-6861 found nothing, 28816861 found it" miss. Ambiguous

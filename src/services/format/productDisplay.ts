@@ -2,8 +2,8 @@
 // the tire corpus (e.g. "wrangler_workhorse_at", brand "goodyear"). NEVER used for matching/normalized
 // fields - those stay untouched. No React / next imports (services stay pure, per project convention).
 import type { Product } from "@/types";
-import { customerDisplayName } from "@/services/displayName";
-import { matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
+import { customerDisplayName } from "@/products/match/displayName";
+import { matchTireSize, plainTireSizeDigits } from "@/products/tires/tireSizeNormalizer";
 
 // Per-token uppercase map for known tire-spec abbreviations.
 const TOKEN_MAP: Record<string, string> = {

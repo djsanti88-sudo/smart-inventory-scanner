@@ -3,7 +3,7 @@
 //
 // Blind lane: reads ONLY sample.json (never answer_key.json). Uses:
 //   1. GS1 company-prefix -> brand map from the repo's existing catalog data
-//      (src/services/catalog/brandPrefixMap.json, consumed by brandPrefixGeneral.ts /
+//      (src/products/catalog/brandPrefixMap.json, consumed by brandPrefixGeneral.ts /
 //      prefixFirewall.ts). This JSON file is already a plain { "<7-digit-prefix>": "brand" }
 //      map with exactly one brand per prefix (per the generator's own invariant documented
 //      in brandPrefixGeneral.ts: "Only buckets with >=3 entries that are 100% ONE brand are
@@ -45,7 +45,7 @@ const DB_PATH = path.join(
 );
 const PREFIX_MAP_PATH = path.join(
   REPO_ROOT,
-  "src/services/catalog/brandPrefixMap.json"
+  "src/products/catalog/brandPrefixMap.json"
 );
 const OUT_PATH = path.join(
   REPO_ROOT,

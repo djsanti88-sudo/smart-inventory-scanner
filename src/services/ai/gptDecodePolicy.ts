@@ -1,5 +1,5 @@
 import { emptyResult } from "@/services/ai/provider";
-import { isVendorLabel } from "@/services/codeTypeDetector";
+import { isVendorLabel } from "@/products/match/codeTypeDetector";
 import type { AiLookupResult, CrossCheckResult, DecodeDecision } from "@/types";
 import type { GptDecodeResult } from "./gptDecodeClient";
 

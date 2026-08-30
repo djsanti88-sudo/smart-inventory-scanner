@@ -7,7 +7,7 @@ import { DecodeStatusBadge, MatchBadge, StatusBadge, SyncBadge } from "@/user-in
 import { prettifyBrand, prettifyProductName, resolvedCanonicalSize } from "@/services/format/productDisplay";
 import { getIdentityConfidenceBand, getReviewIdentityBand, identityBandLabel } from "@/services/ai/identityConfidenceBand";
 import { canOneTapApproveIdentity } from "@/stores/scanGates";
-import { canonicalTireSize } from "@/services/catalog/tireListingNormalizer";
+import { canonicalTireSize } from "@/products/catalog/tireListingNormalizer";
 import type { Product, UnknownCodeReview } from "@/types";
 
 // Size column: the same structured-size source the count tables use (resolvedCanonicalSize), falling

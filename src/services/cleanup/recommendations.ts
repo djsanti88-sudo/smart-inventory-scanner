@@ -1,5 +1,5 @@
 import type { Alias, InventoryCount, Product } from "@/types";
-import type { CatalogEntry } from "@/services/catalog/catalogTypes";
+import type { CatalogEntry } from "@/products/catalog/catalogTypes";
 import { isUsableProductName } from "@/services/ai/decode";
 
 // Recommendation-FIRST cleanup. This engine only DESCRIBES what could be removed and why; it never

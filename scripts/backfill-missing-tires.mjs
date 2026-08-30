@@ -20,7 +20,7 @@
 //   decision.evidenceStrength  - DecodeDecision.evidenceStrength
 // Tire size + load index + speed rating are NOT separate flat fields on AiLookupResult - they are
 // parsed deterministically from the product name / specsShort / specsFull via matchTireSize()
-// (src/services/tire/tireSizeNormalizer.ts). matchTireSize().canonical is e.g. "225/60R18 103H":
+// (src/products/tires/tireSizeNormalizer.ts). matchTireSize().canonical is e.g. "225/60R18 103H":
 // the leading token (before the first space) is the tire SIZE, and the trailing token (if present)
 // is the combined LOAD INDEX + SPEED RATING (digits = load index, trailing letter = speed rating).
 // This script reimplements that same parsing inline (copied logic, not imported) because it must
@@ -74,7 +74,7 @@ const CODES = [
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// --- tire size / load index / speed rating extraction (mirrors src/services/tire/tireSizeNormalizer.ts) ---
+// --- tire size / load index / speed rating extraction (mirrors src/products/tires/tireSizeNormalizer.ts) ---
 
 const METRIC = /(P|LT|ST)?\s*(\d{3})\s*\/\s*(\d{2})\s*(ZR|R)\s*(\d{2}(?:\.\d)?)/i;
 const FLOTATION = /(\d{2})\s*X\s*(\d{1,2}\.\d{1,2})\s*(?:ZR|R|-)?\s*(\d{2}(?:\.\d)?)/i;

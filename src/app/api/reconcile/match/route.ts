@@ -17,7 +17,7 @@ import {
   type TireKnowledgeRow,
 } from "@/server/tire-knowledge/tireKnowledgeIndex";
 import { tireSizeToken } from "@/services/ai/tireSpecs";
-import { tirePartNumberVariants } from "@/services/catalog/tirePartNumber";
+import { tirePartNumberVariants } from "@/products/catalog/tirePartNumber";
 import { lookupRetailBarcodeAsync } from "@/server/retail-knowledge/retailKnowledgeIndex";
 import type { PreviewMatchResult } from "@/import/universalImportPreview";
 import { logServerEvent } from "@/server/log";

@@ -5,7 +5,7 @@
 // match info only (NO raw/clean/normalized codes, NO aliases, NO provider/evidence). platformOwner
 // ("platform") gets the full internal result. This is the ONE place customer scan responses are produced.
 
-import { resolveRawScan } from "@/services/resolver";
+import { resolveRawScan } from "@/products/match/resolver";
 import { sanitizeScanResult, type CustomerScanResult } from "@/services/security/serializers";
 import type { AccessLevel } from "@/users-businesses/roles/roleAccess";
 import type { Product, Alias, ResolverResult } from "@/types";

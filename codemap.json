@@ -10,9 +10,9 @@
         "src/stores/**",
         "src/services/inventory.ts",
         "src/services/inventory.replay.ts",
-        "src/services/resolver.ts",
+        "src/products/match/resolver.ts",
         "src/services/scanCleaner.ts",
-        "src/services/aliasMatcher.ts",
+        "src/products/match/aliasMatcher.ts",
         "src/services/idempotency.ts"
       ],
       "gates": ["npm run proof:all", "npm run test:ledger"],

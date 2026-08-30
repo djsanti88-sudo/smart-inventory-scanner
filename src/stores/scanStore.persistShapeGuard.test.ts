@@ -9,7 +9,7 @@ import type { InventoryCount, Product } from "@/types";
 // That E2E proved a REAL defect: seeding a wrong-SHAPE value into the app's IndexedDB persist record
 // (products: "not-an-array") at the CURRENT persist version (14, so zustand's `migrate` is skipped
 // entirely and the bad value flows straight into the default shallow merge) made
-// `collectAllIdentifierHits` (src/services/aliasMatcher.ts:160, `products.filter is not a function`)
+// `collectAllIdentifierHits` (src/products/match/aliasMatcher.ts:160, `products.filter is not a function`)
 // throw INSIDE processScan, so the scan was silently dropped - "0 scans", count 0.
 //
 // Two layers close this, and this file proves both, fast (no browser, no IndexedDB):

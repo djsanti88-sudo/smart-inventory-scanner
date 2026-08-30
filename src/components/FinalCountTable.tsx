@@ -3,12 +3,12 @@
 import { useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
-import { customerDisplayName } from "@/services/displayName";
+import { customerDisplayName } from "@/products/match/displayName";
 import { prettifyProductName, resolvedBrand, resolvedModel, resolvedSizeTag, resolvedSizeDisplay } from "@/services/format/productDisplay";
 import { getReviewIdentityBand, identityBandLabel } from "@/services/ai/identityConfidenceBand";
 import { DecodeStatusBadge, SyncBadge } from "@/user-interface/ui/badges";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
-import { filterProducts } from "@/services/polish/filterProducts";
+import { filterProducts } from "@/products/polish/filterProducts";
 import { requiresOwnerPin } from "@/services/security/destructiveGuard";
 import type { InventoryCount, Product, UnknownCodeReview } from "@/types";
 

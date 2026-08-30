@@ -3,7 +3,7 @@ import Database from "better-sqlite3";
 
 // RC1/RC2 (pilot PN recall): shop part numbers carry distributor affixes the corpus never stores
 // (KH2265992 vs corpus "2265992"; F-28074576 vs "28074576"; H1021561 vs "1021561"). The affix-
-// stripping primitive already exists in src/services/catalog/tirePartNumber.ts (tirePartNumberCore /
+// stripping primitive already exists in src/products/catalog/tirePartNumber.ts (tirePartNumberCore /
 // tirePartNumberVariants). This test proves lookupByExactPartNumber tries the affix-core variant
 // as a fallback candidate key, across ALL THREE backends (SQLite, Turso, JSON), and that the
 // SQLite backend compares against a NORMALIZED column (RC2 - getStmtPartNumber was raw-column only).

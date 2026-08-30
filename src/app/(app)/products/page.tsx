@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
-import { customerDisplayName } from "@/services/displayName";
+import { customerDisplayName } from "@/products/match/displayName";
 import { ImageHoverPreview } from "@/user-interface/ui/ImageHoverPreview";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
 import { UniversalImportPanelContainer } from "@/import/UniversalImportPanelContainer";

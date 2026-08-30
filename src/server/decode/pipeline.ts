@@ -39,8 +39,8 @@ import {
   recordGptDecodeSpend,
   refundDailySlot,
 } from "@/services/security/aiSpendGuard";
-import { canonicalGtin, isGtinShaped } from "@/services/upc/gtin";
-import { isLikelyMisreadGtin } from "@/services/upc/misread";
+import { canonicalGtin, isGtinShaped } from "@/products/barcodes/gtin";
+import { isLikelyMisreadGtin } from "@/products/barcodes/misread";
 
 const GPT_PROVIDER = "gpt-5.4-mini";
 const GPT_MIN_VIABLE_MS = 20_000;
@@ -78,7 +78,7 @@ export function e2eMode(): boolean {
 
 export interface DecodePipelineRequest {
   code: string;
-  codeType: ReturnType<typeof import("@/services/codeTypeDetector").detectCodeType>;
+  codeType: ReturnType<typeof import("@/products/match/codeTypeDetector").detectCodeType>;
   rawCodeSanitized: string;
   cleanCodeSanitized: string;
   threshold: number;
@@ -111,7 +111,7 @@ export type DecodePipelineResult =
       kind: "cap_blocked";
       message: string;
       reasonCode: "daily_cap" | "account_daily_cap";
-      floor?: import("@/services/catalog/prefixFloor").PrefixFloorResult;
+      floor?: import("@/products/catalog/prefixFloor").PrefixFloorResult;
     }
   | { kind: "computed"; payload: DecodePayload; cached: boolean; paidComputeCharged: boolean };
 

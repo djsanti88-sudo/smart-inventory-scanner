@@ -131,7 +131,7 @@ export interface Product {
   /** Opaque server-issued identity used only to coalesce authenticated trusted-exact scan spellings. */
   trustedExactCanonicalId?: string;
   // Build 2 (product-name polish): fields split out of `name` by the deterministic structurer
-  // (src/services/polish/structurer.ts) or, as a fallback, the LLM polish path. All optional so
+  // (src/products/polish/structurer.ts) or, as a fallback, the LLM polish path. All optional so
   // older persisted products (no structuring run yet) fall back to `brand` / `name` at display time.
   structuredBrand?: string;
   structuredModel?: string;

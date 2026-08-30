@@ -55,7 +55,7 @@ export function stripSensitive<T>(value: T): T {
  * counted (scan 2 = count 1). Proof: src/stores/rescanAfterReload.store.test.ts.
  * POST-RELOAD RE-DECODE FIX (2026-07-22, live-proof caught): `verified` is likewise a LOCAL trust-state
  * boolean (never a barcode/alias/catalog datum), and matchProductByIdentifiers
- * (src/services/aliasMatcher.ts) is the deterministic KNOWN-match trust gate - it only matches products
+ * (src/products/match/aliasMatcher.ts) is the deterministic KNOWN-match trust gate - it only matches products
  * with `verified === true`. Without `verified` here, a customer reload rehydrated every product with its
  * identifiers intact but `verified` defaulted to falsy/undefined, so EVERY already-known code failed the
  * deterministic match after reload and fell through to the live AI decode path (a real fleet run saw 27

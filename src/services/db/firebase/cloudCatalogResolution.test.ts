@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { toStoreProduct, toStoreAlias } from "./storeMappers";
-import { resolveRawScan } from "@/services/resolver";
+import { resolveRawScan } from "@/products/match/resolver";
 
 // Regression for the live "everything Needs Review" failure: when the cloud business catalog is loaded
 // (Firestore docs -> storeMappers -> resolver), known seed codes MUST resolve to Known, and an EMPTY

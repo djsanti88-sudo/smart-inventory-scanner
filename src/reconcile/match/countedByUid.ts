@@ -9,7 +9,7 @@
 // bridge simply stays absent from countedByUid, and buildReconcileReport honestly buckets it
 // expected_not_counted (AM-R8) instead of inventing a counted quantity.
 
-import { resolveRawScan } from "@/services/resolver";
+import { resolveRawScan } from "@/products/match/resolver";
 import type { MatchResult } from "@/reconcile/match/identityMatcher";
 import type { Product, Alias, InventoryCount } from "@/types";
 
