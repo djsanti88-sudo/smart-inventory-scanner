@@ -39,7 +39,7 @@
         "src/services/fetchV2/**",
         "src/services/polish/**",
         "src/services/upc/**",
-        "src/services/security/aiSpendGuard.ts",
+        "src/decoding/limits/aiSpendGuard.ts",
         "src/app/api/ai-lookup/**"
       ],
       "gates": ["npm run proof:all", "npx vitest run src/server/decode src/app/api/ai-lookup"],

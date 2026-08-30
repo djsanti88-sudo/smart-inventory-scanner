@@ -35,7 +35,7 @@ beforeEach(async () => {
   delete process.env.OPENAI_API_KEY;
   delete process.env.VERCEL_GIT_COMMIT_SHA;
   delete process.env.GIT_COMMIT_SHA;
-  const { __resetForTest } = await import("@/services/security/aiSpendGuard");
+  const { __resetForTest } = await import("@/decoding/limits/aiSpendGuard");
   __resetForTest();
 });
 

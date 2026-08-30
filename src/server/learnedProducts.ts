@@ -15,12 +15,12 @@ import path from "node:path";
 
 import type { EvidenceStrength } from "@/types";
 import { canonicalGtin } from "@/products/barcodes/gtin";
-import { isTrustedProductHost } from "@/services/ai/trustedProductHosts";
+import { isTrustedProductHost } from "@/decoding/trustedProductHosts";
 import { normalizeBrand } from "@/products/catalog/brandPrefixGeneral";
 import { lookupPrefixFull as lookupPrefix } from "@/server/catalog/prefixIndexServer";
 import { createTursoClient, tursoCredentialsFromEnv, type TursoClient } from "@/server/db/tursoClient";
 import { isBrandInPrefixFamily } from "@/products/tires/tirePrefixLookup";
-import { hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
+import { hasRequiredTireSpecs } from "@/decoding/tireSpecs";
 
 // ---------------------------------------------------------------------------
 // shouldLearnDecode - PURE write gate. No storage, no network, no side effects.

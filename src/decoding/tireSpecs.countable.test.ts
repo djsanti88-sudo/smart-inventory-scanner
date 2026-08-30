@@ -1,4 +1,4 @@
-// src/services/ai/tireSpecs.countable.test.ts
+// src/decoding/tireSpecs.countable.test.ts
 import { describe, it, expect } from "vitest";
 import { hasCountableTireIdentity, hasTireModel } from "./tireSpecs";
 

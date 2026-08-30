@@ -7,7 +7,7 @@ const { checkRateLimit, decodeStorage, logServerEvent } = vi.hoisted(() => ({
   logServerEvent: vi.fn(),
 }));
 
-vi.mock("@/services/security/aiSpendGuard", () => ({
+vi.mock("@/decoding/limits/aiSpendGuard", () => ({
   checkRateLimit,
   intEnv: (_raw: string | undefined, fallback: number) => fallback,
 }));

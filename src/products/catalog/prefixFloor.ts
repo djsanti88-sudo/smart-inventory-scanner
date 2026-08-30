@@ -7,11 +7,11 @@
 // A prefix-floor row must NEVER be marked verified - it is a naming aid only, not an identity claim.
 
 import type { CodeType } from "@/types";
-import { decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
+import { decodeBarcodeStructure } from "@/decoding/barcodeAnatomy";
 import { lookupPrefix, type PrefixEntry } from "@/products/catalog/prefixIndex";
 import { familyLabelFor } from "@/products/catalog/brandFamilies";
 import { isLikelyMisreadGtin } from "@/products/barcodes/misread";
-import { isExampleOrTestRow } from "@/services/ai/decode";
+import { isExampleOrTestRow } from "@/decoding/decode";
 
 export interface PrefixFloorResult {
   /** Display name for the provisional row, e.g. "Coca-Cola / product unconfirmed", or with a corporate

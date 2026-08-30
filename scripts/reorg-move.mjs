@@ -21,11 +21,15 @@ import { join, dirname, relative } from "node:path";
 const BACKSLASH = String.fromCharCode(92);
 
 const [, , manifestPath, mode] = process.argv;
-if (!manifestPath || !["--dry-run", "--apply"].includes(mode)) {
-  console.error("usage: node scripts/reorg-move.mjs <manifest.json> --dry-run|--apply");
+if (!manifestPath || !["--dry-run", "--apply", "--rewrite-only"].includes(mode)) {
+  console.error("usage: node scripts/reorg-move.mjs <manifest.json> --dry-run|--apply|--rewrite-only");
   process.exit(2);
 }
-const APPLY = mode === "--apply";
+// --rewrite-only: files are ALREADY at their destinations; just fix references. Needed when a wave
+// was applied but some importers were reverted or missed, since --apply refuses to re-run once the
+// sources are gone.
+const REWRITE_ONLY = mode === "--rewrite-only";
+const APPLY = mode === "--apply" || REWRITE_ONLY;
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const ROOT = process.cwd();
 
@@ -82,6 +86,7 @@ function collectFiles() {
 // --- 1. move ------------------------------------------------------------------------------
 const moved = [];
 for (const m of manifest.moves) {
+  if (REWRITE_ONLY) { moved.push("(already moved) " + m.from + "  ->  " + m.to); continue; }
   if (!existsSync(join(ROOT, m.from))) {
     console.error("MISSING SOURCE: " + m.from);
     process.exit(1);

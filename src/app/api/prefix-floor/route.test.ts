@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const rateLimit = vi.hoisted(() => vi.fn());
-vi.mock("@/services/security/aiSpendGuard", () => ({
+vi.mock("@/decoding/limits/aiSpendGuard", () => ({
   checkRateLimit: (...args: unknown[]) => rateLimit(...args),
   intEnv: (value: string | undefined, fallback: number) => Number(value) || fallback,
 }));

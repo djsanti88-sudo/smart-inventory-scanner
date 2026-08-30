@@ -114,7 +114,7 @@ describe("empty-suggested regression guard (Group C)", () => {
     // (the fast inline-suggestion branch and the deep-verify inline-suggestion branch) both already
     // gate on isUsableProductName(best?.productName) / isUsableProductName(freshAfter.suggestedProductName)
     // before assigning status "suggested" (isUsableProductName rejects an empty/too-short/placeholder
-    // name at src/services/ai/decode.ts). This test locks that gate in as a regression guard - a
+    // name at src/decoding/decode.ts). This test locks that gate in as a regression guard - a
     // provider result that resolves to no usable identity must stay honestly needs_review, never
     // "suggested" (which the UI would otherwise badge as a real, if unconfirmed, product match).
     const store = aiOnStore();

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { crossCheck } from "@/services/ai/crossCheckEngine";
-import { emptyResult } from "@/services/ai/provider";
+import { crossCheck } from "@/decoding/crossCheckEngine";
+import { emptyResult } from "@/decoding/provider";
 import type { AiLookupResult } from "@/types";
 
 function result(overrides: Partial<AiLookupResult>): AiLookupResult {

@@ -16,7 +16,7 @@
 //   none  otherwise.
 
 import { canonicalGtin } from "@/products/barcodes/gtin";
-import { tireSizeToken } from "@/services/ai/tireSpecs";
+import { tireSizeToken } from "@/decoding/tireSpecs";
 
 /** Product-identity fields identity-merge reads. Both a stored Product and a decoded suggestion satisfy it. */
 export interface IdentityCandidate {

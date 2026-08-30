@@ -33,8 +33,8 @@ const mocks = vi.hoisted(() => ({
   queriedPaths: [] as string[],
 }));
 
-vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
+vi.mock("@/decoding/limits/aiSpendGuard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/decoding/limits/aiSpendGuard")>();
   return {
     ...actual,
     checkRateLimit: (...args: unknown[]) => mocks.checkRateLimit(...args),
@@ -104,7 +104,7 @@ vi.mock("@/lib/firebaseAdmin", () => ({
 }));
 
 import { POST } from "@/app/api/account/export/route";
-import { __resetForTest } from "@/services/security/aiSpendGuard";
+import { __resetForTest } from "@/decoding/limits/aiSpendGuard";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";

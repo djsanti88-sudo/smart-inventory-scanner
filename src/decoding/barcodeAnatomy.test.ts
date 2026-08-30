@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decodeBarcodeStructure, deriveBrandPrefixHints } from "@/services/ai/barcodeAnatomy";
+import { decodeBarcodeStructure, deriveBrandPrefixHints } from "@/decoding/barcodeAnatomy";
 import type { Alias, Product } from "@/types";
 
 const BASE_PRODUCT: Product = {

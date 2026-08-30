@@ -1,5 +1,5 @@
 // src/reconcile/match/importFuzzyMatcher.ts
-import { tireSizeToken } from "@/services/ai/tireSpecs";
+import { tireSizeToken } from "@/decoding/tireSpecs";
 import {
   FUZZY_BRAND_MIN,
   IDENTITY_JACCARD_THRESHOLD,

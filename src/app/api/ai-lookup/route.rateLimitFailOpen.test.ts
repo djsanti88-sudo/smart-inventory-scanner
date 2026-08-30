@@ -49,8 +49,8 @@ vi.mock("@/server/decode/storage", async (importOriginal) => {
 });
 
 import { POST, GET } from "@/app/api/ai-lookup/route";
-import { __resetForTest } from "@/services/security/aiSpendGuard";
-import { clearDecodeCache } from "@/services/ai/decodeCache";
+import { __resetForTest } from "@/decoding/limits/aiSpendGuard";
+import { clearDecodeCache } from "@/decoding/decodeCache";
 import { __resetForTest as __resetDecodeCacheStoreForTest } from "@/server/decodeCacheStore";
 
 function makeRequest(body: object, ip = "7.7.7.7") {

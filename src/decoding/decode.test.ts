@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { decideDecode, isUsableProductName, cleanProductName, isExampleOrTestRow, MIN_SUGGESTION_CONFIDENCE } from "@/services/ai/decode";
-import { emptyResult } from "@/services/ai/provider";
+import { decideDecode, isUsableProductName, cleanProductName, isExampleOrTestRow, MIN_SUGGESTION_CONFIDENCE } from "@/decoding/decode";
+import { emptyResult } from "@/decoding/provider";
 import type { AiLookupResult, EvidenceResult } from "@/types";
 
 describe("product-name quality gate (junk firewall)", () => {

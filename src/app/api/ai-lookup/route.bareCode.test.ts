@@ -23,8 +23,8 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   getAdminDb: () => ({ doc: () => ({ get: vi.fn() }) }),
 }));
 
-vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
-  const orig = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
+vi.mock("@/decoding/limits/aiSpendGuard", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("@/decoding/limits/aiSpendGuard")>();
   return {
     ...orig,
     killSwitchOn: () => false,

@@ -1,17 +1,17 @@
 import "server-only";
 
 import type { AiLookupResult, DecodeDecision, EvidenceResult } from "@/types";
-import { emptyResult } from "@/services/ai/provider";
-import type { ProviderStatus } from "@/services/ai/decodeProviderStatus";
-import { decideDecode, isExampleOrTestRow, isUsableProductName } from "@/services/ai/decode";
-import { getDecodeCache, withDecodeCache } from "@/services/ai/decodeCache";
-import { sanitizeCustomerReason } from "@/services/ai/decodeFallback";
+import { emptyResult } from "@/decoding/provider";
+import type { ProviderStatus } from "@/decoding/decodeProviderStatus";
+import { decideDecode, isExampleOrTestRow, isUsableProductName } from "@/decoding/decode";
+import { getDecodeCache, withDecodeCache } from "@/decoding/decodeCache";
+import { sanitizeCustomerReason } from "@/decoding/decodeFallback";
 import {
   GPT_DECODE_WORST_CASE_USD,
   decodeWithGpt,
   type GptDecodeResult,
-} from "@/services/ai/gptDecodeClient";
-import { mapGptDecodeResult, shouldRunGptDecode } from "@/services/ai/gptDecodePolicy";
+} from "@/decoding/gptDecodeClient";
+import { mapGptDecodeResult, shouldRunGptDecode } from "@/decoding/gptDecodePolicy";
 import { prefixFloorNameFull as prefixFloorName } from "@/server/catalog/prefixIndexServer";
 import { lookupMasterCatalog } from "@/server/catalog/masterLookup";
 import { getDecodeKnowledgeVersion } from "@/server/decode/knowledgeVersion";
@@ -38,7 +38,7 @@ import {
   recordGptDecodeCall,
   recordGptDecodeSpend,
   refundDailySlot,
-} from "@/services/security/aiSpendGuard";
+} from "@/decoding/limits/aiSpendGuard";
 import { canonicalGtin, isGtinShaped } from "@/products/barcodes/gtin";
 import { isLikelyMisreadGtin } from "@/products/barcodes/misread";
 

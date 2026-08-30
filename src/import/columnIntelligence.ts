@@ -1,5 +1,5 @@
 // src/import/columnIntelligence.ts
-import { KNOWN_TIRE_BRANDS, tireSizeToken } from "@/services/ai/tireSpecs";
+import { KNOWN_TIRE_BRANDS, tireSizeToken } from "@/decoding/tireSpecs";
 import { sameBrandFamily } from "@/products/catalog/brandFamilies";
 import { sanitizeCell } from "@/import/csvImport";
 import type { ColumnMapping, ImportField, MappingSource } from "@/import/importSchema";

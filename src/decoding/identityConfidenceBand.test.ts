@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getIdentityConfidenceBand, getReviewIdentityBand, identityBandLabel, identityBandWord } from "@/services/ai/identityConfidenceBand";
+import { getIdentityConfidenceBand, getReviewIdentityBand, identityBandLabel, identityBandWord } from "@/decoding/identityConfidenceBand";
 import { sanitizeReview } from "@/services/security/serializers";
 import type { UnknownCodeReview } from "@/types";
 

@@ -7,7 +7,7 @@ import {
   decodeCacheSize,
   decodeCacheKey,
   __clearInFlightForTest,
-} from "@/services/ai/decodeCache";
+} from "@/decoding/decodeCache";
 
 beforeEach(() => {
   clearDecodeCache();

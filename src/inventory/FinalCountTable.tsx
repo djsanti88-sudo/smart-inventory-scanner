@@ -5,7 +5,7 @@ import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 import { customerDisplayName } from "@/products/match/displayName";
 import { prettifyProductName, resolvedBrand, resolvedModel, resolvedSizeTag, resolvedSizeDisplay } from "@/services/format/productDisplay";
-import { getReviewIdentityBand, identityBandLabel } from "@/services/ai/identityConfidenceBand";
+import { getReviewIdentityBand, identityBandLabel } from "@/decoding/identityConfidenceBand";
 import { DecodeStatusBadge, SyncBadge } from "@/user-interface/ui/badges";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/inventory/UndoDeleteBanner";
 import { filterProducts } from "@/products/polish/filterProducts";

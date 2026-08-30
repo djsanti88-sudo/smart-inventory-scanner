@@ -4,7 +4,7 @@
 // (project resolver principle: prefer blank over wrong).
 
 import { matchTireSize } from "@/products/tires/tireSizeNormalizer";
-import { KNOWN_TIRE_BRANDS } from "@/services/ai/tireSpecs";
+import { KNOWN_TIRE_BRANDS } from "@/decoding/tireSpecs";
 
 export type TireIdentityInput = {
   productName?: string;

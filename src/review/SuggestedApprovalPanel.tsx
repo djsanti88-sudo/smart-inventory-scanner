@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 import { safeStructuredFieldsFor } from "@/products/polish/structuredFields";
-import { getIdentityConfidenceBand, identityBandWord } from "@/services/ai/identityConfidenceBand";
+import { getIdentityConfidenceBand, identityBandWord } from "@/decoding/identityConfidenceBand";
 import type { UnknownCodeReview } from "@/types";
 
 // Build 3 (docs/archive/superpowers/specs/2026-07-05-batch-approve-design.md): batch-approve screen for the

@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import type { AiLookupResult, DecodeDecision, EvidenceResult } from "@/types";
-import { emptyResult } from "@/services/ai/provider";
+import { emptyResult } from "@/decoding/provider";
 import { lookupByExactBarcode, lookupByExactPartNumber, type TireKnowledgeRow } from "@/server/tire-knowledge/tireKnowledgeIndex";
 import { lookupTrustedExactBarcode } from "@/server/tire-knowledge/tireExactIndex";
 import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";

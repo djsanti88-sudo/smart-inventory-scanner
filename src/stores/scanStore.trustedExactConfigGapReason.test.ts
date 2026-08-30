@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
 import { MockDb } from "@/services/mockDb";
-import { MISS_REASON_TEXT } from "@/services/ai/decodeFallback";
+import { MISS_REASON_TEXT } from "@/decoding/decodeFallback";
 
 // TASK T3 (2026-08-06, audit-9 finding B): when the trusted-exact probe reports reasonCode
 // "trusted_exact_not_available" (server allowlist not configured / this business is not in it) and

@@ -8,7 +8,7 @@ import {
   isDailyCapReached,
   FAILURE_THRESHOLD,
   COOLDOWN_MS,
-} from "@/services/circuitBreaker";
+} from "@/decoding/limits/circuitBreaker";
 
 describe("circuit breaker state machine", () => {
   it("opens after the failure threshold", () => {

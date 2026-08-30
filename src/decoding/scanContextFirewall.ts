@@ -6,8 +6,8 @@
 // decode must NOT auto-count - it routes to Needs Review with a safe, product-facing reason.
 
 import type { AiLookupResult, CodeType } from "@/types";
-import { isTireContext, type IdentityText } from "@/services/ai/tireSpecs";
-import { decodeBarcodeStructure, type BrandPrefixHint } from "@/services/ai/barcodeAnatomy";
+import { isTireContext, type IdentityText } from "@/decoding/tireSpecs";
+import { decodeBarcodeStructure, type BrandPrefixHint } from "@/decoding/barcodeAnatomy";
 import { isBrandInPrefixFamily } from "@/products/tires/tirePrefixLookup";
 
 export type ScanContext = "any" | "tire";

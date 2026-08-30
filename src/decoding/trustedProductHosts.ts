@@ -1,7 +1,7 @@
 // trustedProductHosts.ts (Task 21, owner-ratified 2026-07-15) - a small, curated allowlist of
 // registrable domains the owner accepts as "a legit product page" for the trusted-source confidence
 // floor and the learned-products tier: major retailers plus the manufacturer domains for the
-// KNOWN_TIRE_BRANDS list (src/services/ai/tireSpecs.ts). Mirrors EvidenceVerifier's existing url_only
+// KNOWN_TIRE_BRANDS list (src/decoding/tireSpecs.ts). Mirrors EvidenceVerifier's existing url_only
 // `trustedHosts` allowlist pattern (registrable-domain / subdomain match), but scoped to THIS module's
 // own curated list rather than the caller-supplied `trustedHosts` array evidenceVerifier.ts takes.
 //
@@ -18,7 +18,7 @@ const RETAILERS: readonly string[] = [
   "amazon.com",
 ];
 
-// Manufacturer domains for every brand in KNOWN_TIRE_BRANDS (src/services/ai/tireSpecs.ts). Verified
+// Manufacturer domains for every brand in KNOWN_TIRE_BRANDS (src/decoding/tireSpecs.ts). Verified
 // live 2026-07-15 - each is the brand's own retail/consumer site, not a lookalike or reseller.
 // Note: not every KNOWN_TIRE_BRANDS entry has its own single canonical .com (e.g. "gt radial" ->
 // gtradialtires.com, "general tire" -> generaltire.com are included below); a handful of smaller/value

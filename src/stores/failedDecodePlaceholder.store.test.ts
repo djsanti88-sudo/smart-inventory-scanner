@@ -3,7 +3,7 @@ import { createTestScanStore } from "@/stores/scanStore";
 import { MockDb } from "@/services/mockDb";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
 import { detectCodeType } from "@/products/match/codeTypeDetector";
-import { decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
+import { decodeBarcodeStructure } from "@/decoding/barcodeAnatomy";
 import { prefixFloorName } from "@/products/catalog/prefixFloor";
 
 // Drift-risk regression (see refactor(resolve): failed-decode placeholder uses shared

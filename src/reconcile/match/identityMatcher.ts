@@ -26,7 +26,7 @@ import type { ExpectedInventoryRow } from "../types";
 import { sameBrandFamily } from "@/products/catalog/brandFamilies";
 import { IDENTITY_JACCARD_THRESHOLD, FUZZY_BRAND_MIN, nameTokens, jaccard, plusGenerationDiff } from "@/products/catalog/identityMerge";
 import { normalizedEditSimilarity } from "@/reconcile/match/normalizedEditDistance";
-import { tireSizeToken } from "@/services/ai/tireSpecs";
+import { tireSizeToken } from "@/decoding/tireSpecs";
 import { basePartNumberKey, tirePartNumberCore } from "@/products/catalog/tirePartNumber";
 import { matchImportFuzzy, normalizeImportSize } from "@/reconcile/match/importFuzzyMatcher";
 

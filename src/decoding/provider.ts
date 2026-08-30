@@ -1,5 +1,5 @@
 import type { AiLookupResult } from "@/types";
-import { capSnippets } from "@/services/ai/snippetCap";
+import { capSnippets } from "@/decoding/snippetCap";
 
 // AI provider abstraction. The app only ever calls a provider for UNKNOWN codes, after the
 // deterministic matcher has missed and the input has been sanitized. Providers return the strict

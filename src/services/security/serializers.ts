@@ -4,7 +4,7 @@
 
 import type { AccessLevel } from "@/users-businesses/roles/roleAccess";
 import { stripSensitive, CUSTOMER_SAFE_PRODUCT_FIELDS, CUSTOMER_SAFE_REVIEW_FIELDS, CUSTOMER_SAFE_SCANEVENT_FIELDS } from "@/services/security/sensitiveFields";
-import { getReviewIdentityBand } from "@/services/ai/identityConfidenceBand";
+import { getReviewIdentityBand } from "@/decoding/identityConfidenceBand";
 import type { UnknownCodeReview } from "@/types";
 
 export interface CustomerProduct {

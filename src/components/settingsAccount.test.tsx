@@ -34,7 +34,7 @@ vi.mock("@/users-businesses/roles/useAccessLevel", () => ({ useIsPlatformOwner: 
 vi.mock("@/components/ExportMenu", () => ({ ExportMenu: () => null }));
 vi.mock("@/inventory/cleanup/CleanupRecommendations", () => ({ CleanupRecommendations: () => null }));
 vi.mock("@/sessions/lock/OwnerPinSettings", () => ({ OwnerPinSettings: () => null }));
-vi.mock("@/components/GptDecodePanel", () => ({ GptDecodePanel: () => null }));
+vi.mock("@/decoding/panel/GptDecodePanel", () => ({ GptDecodePanel: () => null }));
 
 const getSession = vi.fn();
 const signOut = vi.fn();

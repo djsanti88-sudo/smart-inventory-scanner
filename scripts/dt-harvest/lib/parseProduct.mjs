@@ -5,8 +5,8 @@
 // firewall). A description field that contains something like "ignore previous instructions" is just a
 // string we copy a substring out of - it is never treated as a command.
 
-// Tire-size regex, copied verbatim from src/services/ai/tireSpecs.ts (METRIC_SIZE / COMMERCIAL_SIZE) so
-// this pure script does not import app/service code. Source: src/services/ai/tireSpecs.ts lines 27-32.
+// Tire-size regex, copied verbatim from src/decoding/tireSpecs.ts (METRIC_SIZE / COMMERCIAL_SIZE) so
+// this pure script does not import app/service code. Source: src/decoding/tireSpecs.ts lines 27-32.
 // Metric / P-metric / LT sizes: 275/55R20, LT265/70R17, P225/60R17, 225/60ZR17. Also accepts the dash
 // notation some barcode DBs use (245/65-17) - same size, different separator.
 const METRIC_SIZE = /\b(LT|P|ST)?\d{3}\/\d{2}\s?(Z?R|-)\s?\d{2}\b/i;

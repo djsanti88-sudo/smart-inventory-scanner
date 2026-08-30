@@ -5,7 +5,7 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { accessLevelServer } from "@/users-businesses/roles/roleAccess";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { canonicalGtin } from "@/products/barcodes/gtin";
-import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
+import { checkRateLimit, intEnv } from "@/decoding/limits/aiSpendGuard";
 import { decodeStorage } from "@/server/decode/storage";
 import { disputeCatalogEntry } from "@/server/catalog/catalogDispute";
 import { logServerEvent } from "@/server/log";

@@ -15,7 +15,7 @@
 // guess. A bare ambiguous size blob stays unparsed rather than guessed.
 
 import { matchTireSize } from "@/products/tires/tireSizeNormalizer";
-import { KNOWN_TIRE_BRANDS } from "@/services/ai/tireSpecs";
+import { KNOWN_TIRE_BRANDS } from "@/decoding/tireSpecs";
 
 // Small supplement to tireSpecs' curated KNOWN_TIRE_BRANDS, hand-verified from the real stress
 // corpus fixtures (.superpowers/stress/results-relad100/batch-1.json, results-relad/batch-1.json)

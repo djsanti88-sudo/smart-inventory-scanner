@@ -1,6 +1,6 @@
 import type { Settings } from "@/types";
 import { DEMO_BUSINESS_ID } from "@/seed/seedData";
-import { DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
+import { DECODE_BUDGET_DEFAULT_MS } from "@/decoding/decodeBudget";
 
 export const DEFAULT_SETTINGS: Settings = {
   businessId: DEMO_BUSINESS_ID,

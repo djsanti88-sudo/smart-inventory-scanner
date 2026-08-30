@@ -9,7 +9,7 @@ vi.mock("@/server/decode/pipeline", () => ({
 }));
 
 const trustedExactCheck = vi.fn();
-vi.mock("@/services/security/trustedExactRateLimit", () => ({
+vi.mock("@/decoding/limits/trustedExactRateLimit", () => ({
   trustedExactRateLimiter: { check: (...args: unknown[]) => trustedExactCheck(...args) },
   maskTrustedExactIdentifier: (value: string) => value,
 }));
@@ -35,8 +35,8 @@ vi.mock("@/server/log", () => ({
   logServerEvent: vi.fn(),
 }));
 
-vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
-  const orig = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
+vi.mock("@/decoding/limits/aiSpendGuard", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("@/decoding/limits/aiSpendGuard")>();
   return {
     ...orig,
     killSwitchOn: () => false,

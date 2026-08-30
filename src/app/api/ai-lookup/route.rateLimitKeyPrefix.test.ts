@@ -38,8 +38,8 @@ vi.mock("@/server/decode/storage", async (importOriginal) => {
 });
 
 const checkRateLimitSpy = vi.hoisted(() => vi.fn());
-vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
+vi.mock("@/decoding/limits/aiSpendGuard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/decoding/limits/aiSpendGuard")>();
   return {
     ...actual,
     checkRateLimit: (...args: Parameters<typeof actual.checkRateLimit>) => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { verifyEvidence, looksRecycledUpc } from "@/services/ai/evidenceVerifier";
+import { verifyEvidence, looksRecycledUpc } from "@/decoding/evidenceVerifier";
 import type { ProviderEvidence } from "@/types";
 
 const empty: ProviderEvidence = { sourceUrls: [], sourceSnippets: [], groundingChunks: [] };

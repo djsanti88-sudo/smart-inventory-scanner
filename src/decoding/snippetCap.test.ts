@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { capSnippet, capSnippets, MAX_AI_SNIPPET_CHARS } from "@/services/ai/snippetCap";
-import { normalizeResult } from "@/services/ai/provider";
-import { verifyEvidence } from "@/services/ai/evidenceVerifier";
+import { capSnippet, capSnippets, MAX_AI_SNIPPET_CHARS } from "@/decoding/snippetCap";
+import { normalizeResult } from "@/decoding/provider";
+import { verifyEvidence } from "@/decoding/evidenceVerifier";
 
 describe("snippetCap (W4) - per-snippet cap", () => {
   it("caps a single snippet at MAX_AI_SNIPPET_CHARS (1500)", () => {

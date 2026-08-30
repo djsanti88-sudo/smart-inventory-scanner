@@ -6,7 +6,7 @@ import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 import { StatusBadge, SyncBadge } from "@/user-interface/ui/badges";
 import { buildDiscoveredIdentifiers } from "@/products/match/discoveredIdentifiers";
 import { prettifyProductName } from "@/services/format/productDisplay";
-import { getIdentityConfidenceBand, identityBandWord } from "@/services/ai/identityConfidenceBand";
+import { getIdentityConfidenceBand, identityBandWord } from "@/decoding/identityConfidenceBand";
 import type { UnknownCodeReview } from "@/types";
 
 // Shows the decode pipeline outcome. Two visible states only: "Verified" (app-confirmed) and

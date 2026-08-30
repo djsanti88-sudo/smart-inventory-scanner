@@ -1,4 +1,4 @@
-// Persistent decode cache (L2). The in-memory decodeCache (src/services/ai/decodeCache.ts) is L1 and
+// Persistent decode cache (L2). The in-memory decodeCache (src/decoding/decodeCache.ts) is L1 and
 // stays exactly as-is: fast, but per-process and gone on every serverless cold start. On Vercel every
 // new instance re-runs free resolution and paid decode for a code someone already scanned minutes ago on a
 // different instance. This module is the durable layer consulted on an L1 miss (see route.ts):

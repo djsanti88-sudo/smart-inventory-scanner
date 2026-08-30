@@ -1,7 +1,7 @@
-import { verifyEvidence } from "@/services/ai/evidenceVerifier";
-import { decideDecode, isUsableProductName } from "@/services/ai/decode";
-import { isTireContext, hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
-import { detectScanContextConflict } from "@/services/ai/scanContextFirewall";
+import { verifyEvidence } from "@/decoding/evidenceVerifier";
+import { decideDecode, isUsableProductName } from "@/decoding/decode";
+import { isTireContext, hasRequiredTireSpecs } from "@/decoding/tireSpecs";
+import { detectScanContextConflict } from "@/decoding/scanContextFirewall";
 import { brandNorm } from "@/products/tires/tirePrefixLookup";
 import { detectCodeType } from "@/products/match/codeTypeDetector";
 import { canAutoCount, shouldAutoApplySuggestion, isPublicBarcodeShape, type AutoCountDecision } from "@/stores/scanGates";

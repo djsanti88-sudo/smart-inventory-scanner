@@ -24,7 +24,7 @@ vi.mock("@/server/log", () => ({
 }));
 
 const trustedExactCheck = vi.fn();
-vi.mock("@/services/security/trustedExactRateLimit", () => ({
+vi.mock("@/decoding/limits/trustedExactRateLimit", () => ({
   trustedExactRateLimiter: { check: (...args: unknown[]) => trustedExactCheck(...args) },
 }));
 
@@ -40,8 +40,8 @@ vi.mock("@/server/decode/storage", () => ({ decodeStorage: (...args: unknown[]) 
 
 const legacyRateLimit = vi.fn();
 const killSwitch = vi.fn();
-vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
+vi.mock("@/decoding/limits/aiSpendGuard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/decoding/limits/aiSpendGuard")>();
   return {
     ...actual,
     killSwitchOn: () => killSwitch(),

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isTireContext, hasRequiredTireSpecs, hasTireSize, inferTireBrandFromName } from "@/services/ai/tireSpecs";
+import { isTireContext, hasRequiredTireSpecs, hasTireSize, inferTireBrandFromName } from "@/decoding/tireSpecs";
 import type { AiLookupResult } from "@/types";
 
 const r = (over: Partial<AiLookupResult>): AiLookupResult => ({

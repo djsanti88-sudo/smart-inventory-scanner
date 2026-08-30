@@ -38,7 +38,7 @@ const sampleFlagIdx = argv.indexOf("--sample");
 const SAMPLE_SIZE = sampleFlagIdx !== -1 ? Number(argv[sampleFlagIdx + 1] || 10) : 10;
 
 // EXACT-VALUE barcode blocklist (never a fuzzy prefix - could delete a real GTIN). Mirrors
-// EXAMPLE_BARCODE_BLOCKLIST in src/services/ai/decode.ts and scripts/purge-retail-turso-examples.mjs.
+// EXAMPLE_BARCODE_BLOCKLIST in src/decoding/decode.ts and scripts/purge-retail-turso-examples.mjs.
 const EXAMPLE_BARCODES = [
   "012345678905",
   "4006381333931",
@@ -55,10 +55,10 @@ const EXAMPLE_BARCODES = [
 const TEST_NAME_LIKE_PATTERNS = [
   "test", "fakeer", "fakewine", "fake wine", "dummy", "sample product", "placeholder", "brandtest", "shopidoo", "healthyholics",
 ];
-// Mirrors TEST_NAME_PATTERN in src/services/ai/decode.ts exactly (whole-word, case-insensitive).
+// Mirrors TEST_NAME_PATTERN in src/decoding/decode.ts exactly (whole-word, case-insensitive).
 const TEST_NAME_PATTERN = /\b(test|fakeer|fake ?wine|dummy|sample product|placeholder|brandtest|shopidoo)\b/i;
 
-// Zero-pad variants mirroring src/services/ai/decode.ts exampleBarcodeVariants, so the same normalized
+// Zero-pad variants mirroring src/decoding/decode.ts exampleBarcodeVariants, so the same normalized
 // shapes the read-time guard checks are checked here against the blocklist.
 function exampleBarcodeVariants(code) {
   const digits = (code || "").replace(/\D/g, "");

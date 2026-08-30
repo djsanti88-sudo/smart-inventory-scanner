@@ -1,4 +1,4 @@
-// src/services/ai/decode.countable.test.ts
+// src/decoding/decode.countable.test.ts
 import { describe, it, expect } from "vitest";
 import { decideDecode, type DecodeParams } from "./decode";
 import type { AiLookupResult, EvidenceResult } from "@/types";

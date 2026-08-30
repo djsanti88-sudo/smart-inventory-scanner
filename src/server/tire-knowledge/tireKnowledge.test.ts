@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { lookupByExactBarcode, lookupByExactPartNumber, getTireKnowledgeMeta, __resetTireKnowledgeCacheForTests } from "@/server/tire-knowledge/tireKnowledgeIndex";
 import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
-import { isTireContext, hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
+import { isTireContext, hasRequiredTireSpecs } from "@/decoding/tireSpecs";
 
 // Server-only tire knowledge: EXACT trusted-barcode hits resolve a verified tire WITHOUT AI; misses + the
 // poison + near-matches return null (fall through to the existing AI path). Runs against the REAL committed

@@ -26,7 +26,7 @@ import { resolveScan } from "@/products/match/resolver";
 import { isLikelyMisreadGtin } from "@/products/barcodes/misread";
 import { gradeBarcode } from "@/products/barcodes/barcodeTrust";
 import { canonicalGtin } from "@/products/barcodes/gtin";
-import { clampDecodeBudgetMs } from "@/services/ai/decodeBudget";
+import { clampDecodeBudgetMs } from "@/decoding/decodeBudget";
 import { fetchWithBackoff } from "@/services/net/fetchWithBackoff";
 import { hashPin, verifyPin, isValidPinFormat } from "@/sessions/lock/pinLock";
 import { isPlatformOwnerClient } from "@/users-businesses/roles/roleAccess";
@@ -53,24 +53,24 @@ import {
   isDailyCapReached,
   type AiGateReason,
   type BreakerState,
-} from "@/services/circuitBreaker";
+} from "@/decoding/limits/circuitBreaker";
 import { sanitizeForAiLookup } from "@/services/sanitizer";
-import { sanitizeCustomerReason, MISS_REASON_TEXT } from "@/services/ai/decodeFallback";
-import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
-import { getIdentityConfidenceBand } from "@/services/ai/identityConfidenceBand";
+import { sanitizeCustomerReason, MISS_REASON_TEXT } from "@/decoding/decodeFallback";
+import { isUsableProductName, cleanProductName } from "@/decoding/decode";
+import { getIdentityConfidenceBand } from "@/decoding/identityConfidenceBand";
 import { buildCleanupRecommendations } from "@/inventory/cleanup/recommendations";
 import type { CatalogEntry, CatalogHit, ShopOverride } from "@/products/catalog/catalogTypes";
 import { decideLookup, upsertVerified, applyAiCandidate, observeScan } from "@/products/catalog/localCatalogProvider";
 import { planAutoVerify } from "@/products/catalog/catalogAutoVerify";
 import { shopReverseUpcConflict, type UpcRecord } from "@/products/catalog/candidateUpcSet";
-import { isTireContext, hasRequiredTireSpecs, hasCountableTireIdentity } from "@/services/ai/tireSpecs";
+import { isTireContext, hasRequiredTireSpecs, hasCountableTireIdentity } from "@/decoding/tireSpecs";
 import { extractTireFields } from "@/products/tires/extractTireFields";
 import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/products/match/aliasDiscovery";
 import { lookupTirePrefix } from "@/products/tires/tirePrefixLookup";
-import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
+import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/decoding/barcodeAnatomy";
 import { prefixFloorName, type PrefixFloorResult } from "@/products/catalog/prefixFloor";
 import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel, brandIsOnlyFloorGuess, isFloorGuessOnlyLabel } from "@/products/catalog/prefixFloorEnrich";
-import { detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
+import { detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, conflictReason } from "@/decoding/scanContextFirewall";
 import { isCatalogWritable, toMasterAwareStoreEntry } from "@/products/catalog/sanitizeCatalog";
 import { findIdentityMerge } from "@/products/catalog/identityMerge";
 import { enrichProductIdentity } from "@/products/catalog/enrichProductIdentity";

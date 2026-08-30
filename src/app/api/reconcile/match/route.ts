@@ -3,7 +3,7 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { isLiveAuth } from "@/authentication/service/authMode";
 import { isAuthBypassEnabled } from "@/authentication/service/authBypass";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
-import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
+import { checkRateLimit, intEnv } from "@/decoding/limits/aiSpendGuard";
 import { decodeStorage } from "@/server/decode/storage";
 import {
   matchExpectedRow,
@@ -16,7 +16,7 @@ import {
   candidatesBySizeToken,
   type TireKnowledgeRow,
 } from "@/server/tire-knowledge/tireKnowledgeIndex";
-import { tireSizeToken } from "@/services/ai/tireSpecs";
+import { tireSizeToken } from "@/decoding/tireSpecs";
 import { tirePartNumberVariants } from "@/products/catalog/tirePartNumber";
 import { lookupRetailBarcodeAsync } from "@/server/retail-knowledge/retailKnowledgeIndex";
 import type { PreviewMatchResult } from "@/import/universalImportPreview";

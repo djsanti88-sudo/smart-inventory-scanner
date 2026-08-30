@@ -1,4 +1,4 @@
-import type { ProviderStatus } from "@/services/ai/decodeProviderStatus";
+import type { ProviderStatus } from "@/decoding/decodeProviderStatus";
 
 export interface BenchmarkInputRow {
   code: string;

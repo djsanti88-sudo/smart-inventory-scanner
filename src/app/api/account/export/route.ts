@@ -5,7 +5,7 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { isLiveAuth } from "@/authentication/service/authMode";
 import { isAuthBypassEnabled } from "@/authentication/service/authBypass";
-import { intEnv, checkRateLimit } from "@/services/security/aiSpendGuard";
+import { intEnv, checkRateLimit } from "@/decoding/limits/aiSpendGuard";
 import { decodeStorage } from "@/server/decode/storage";
 import { logServerEvent } from "@/server/log";
 

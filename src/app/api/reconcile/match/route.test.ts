@@ -21,7 +21,7 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   }),
 }));
 
-vi.mock("@/services/security/aiSpendGuard", () => ({
+vi.mock("@/decoding/limits/aiSpendGuard", () => ({
   checkRateLimit: (...args: unknown[]) => authMocks.checkRateLimit(...args),
   intEnv: (value: string | undefined, fallback: number) => Number(value) || fallback,
 }));

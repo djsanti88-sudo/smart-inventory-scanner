@@ -6,7 +6,7 @@ import { IMPORT_FIELD_ORDER, type ColumnMapping, type ImportField, type ImportPr
 import { inferColumnMapping, validateManualMapping, type FieldTier } from "@/import/columnIntelligence";
 import { readUniversalFile } from "@/import/universalFileReader";
 import { buildImportPreview, describeSkippedSheets, mapUniversalRows, type PreviewMatchResult } from "@/import/universalImportPreview";
-import { getIdentityConfidenceBand, identityBandWord } from "@/services/ai/identityConfidenceBand";
+import { getIdentityConfidenceBand, identityBandWord } from "@/decoding/identityConfidenceBand";
 
 const PREVIEW_LIMIT = 20;
 

@@ -22,7 +22,7 @@ const logServerEvent = vi.fn();
 vi.mock("@/server/log", () => ({ logServerEvent: (...args: unknown[]) => logServerEvent(...args) }));
 
 const trustedExactCheck = vi.fn();
-vi.mock("@/services/security/trustedExactRateLimit", () => ({
+vi.mock("@/decoding/limits/trustedExactRateLimit", () => ({
   trustedExactRateLimiter: { check: (...args: unknown[]) => trustedExactCheck(...args) },
 }));
 
@@ -40,8 +40,8 @@ const legacyRateLimit = vi.fn();
 const killSwitch = vi.fn();
 const readDailyUsedForAccount = vi.fn();
 const chargeDailySlotForAccount = vi.fn();
-vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
+vi.mock("@/decoding/limits/aiSpendGuard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/decoding/limits/aiSpendGuard")>();
   return {
     ...actual,
     killSwitchOn: () => killSwitch(),

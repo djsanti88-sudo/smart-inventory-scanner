@@ -73,7 +73,7 @@ function priorBarcodeCount() {
 // bug: 4006381333931 -> "Test Shopidoo", 5901234123457 -> "Sauce chiltepin"/"La lumbre",
 // 0012345670121/0012345674020/0012345674037 -> brand "Healthyholics", plus rows literally named
 // "Test"/"Fakeer"/"Fakewine"/"BrandTest". Skip these at BUILD time too (the read-time guard in
-// src/services/ai/decode.ts's isExampleOrTestRow / src/server/decode/pipeline.ts / retailKnowledgeIndex.ts
+// src/decoding/decode.ts's isExampleOrTestRow / src/server/decode/pipeline.ts / retailKnowledgeIndex.ts
 // is the fix that ships immediately without a regen; this is belt-and-suspenders for the NEXT regen).
 // EXACT-VALUE barcode blocklist only (never a fuzzy prefix - could suppress a real GTIN); whole-word
 // name/brand markers only (never a substring - "Latest"/"Testarossa"/"contest" must survive).

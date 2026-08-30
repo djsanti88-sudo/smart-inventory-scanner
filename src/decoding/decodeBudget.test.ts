@@ -4,7 +4,7 @@ import {
   DECODE_BUDGET_MIN_MS,
   DECODE_BUDGET_MAX_MS,
   DECODE_BUDGET_DEFAULT_MS,
-} from "@/services/ai/decodeBudget";
+} from "@/decoding/decodeBudget";
 
 describe("clampDecodeBudgetMs (server-side safety clamp)", () => {
   it("passes a valid in-range budget through", () => {

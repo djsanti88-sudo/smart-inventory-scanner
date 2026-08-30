@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyProductDomain, detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, detectBrandPrefixAdvisory } from "@/services/ai/scanContextFirewall";
+import { classifyProductDomain, detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, detectBrandPrefixAdvisory } from "@/decoding/scanContextFirewall";
 import type { AiLookupResult } from "@/types";
 
 const r = (over: Partial<AiLookupResult>): AiLookupResult => ({

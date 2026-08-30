@@ -1,6 +1,6 @@
 import type { AiLookupResult, CodeType, DecodeDecision } from "@/types";
 import type { CatalogEntry } from "./catalogTypes";
-import { isUsableProductName } from "@/services/ai/decode";
+import { isUsableProductName } from "@/decoding/decode";
 import { bestTier, type SourceTier } from "./sourceTrust";
 import { findEntry } from "./localCatalogProvider";
 import {

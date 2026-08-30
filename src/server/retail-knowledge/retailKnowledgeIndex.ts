@@ -8,7 +8,7 @@
 
 import { getKnowledgeDb } from "@/server/knowledgeDb";
 import { createTursoClient, tursoCredentialsFromEnv, type TursoClient } from "@/server/db/tursoClient";
-import { isExampleOrTestRow } from "@/services/ai/decode";
+import { isExampleOrTestRow } from "@/decoding/decode";
 
 /** Generate zero-padded barcode variants (UPC-12, EAN-13, GTIN-14) for lookup normalization. */
 function barcodeVariants(code: string): string[] {

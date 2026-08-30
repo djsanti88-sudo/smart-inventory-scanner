@@ -1,5 +1,5 @@
 import type { CatalogCandidate, CatalogEntry, CatalogEntryMeta, CatalogSourceTier } from "./catalogTypes";
-import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
+import { isUsableProductName, cleanProductName } from "@/decoding/decode";
 import { sanitizeForAiLookup } from "@/services/sanitizer";
 import type { ProvenanceTier } from "@/types";
 

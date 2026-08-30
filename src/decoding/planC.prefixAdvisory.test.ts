@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { decideDecode } from "@/services/ai/decode";
-import { detectScanContextConflict, detectBrandPrefixAdvisory } from "@/services/ai/scanContextFirewall";
-import { emptyResult } from "@/services/ai/provider";
+import { decideDecode } from "@/decoding/decode";
+import { detectScanContextConflict, detectBrandPrefixAdvisory } from "@/decoding/scanContextFirewall";
+import { emptyResult } from "@/decoding/provider";
 import type { AiLookupResult, EvidenceResult } from "@/types";
 
 // PLAN C - TASK 2: the brand-prefix conflict is demoted from a HARD BLOCK to ADVISORY guidance.

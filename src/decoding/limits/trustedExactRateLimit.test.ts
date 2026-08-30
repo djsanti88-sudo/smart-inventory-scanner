@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { TrustedExactRateLimiter } from "@/services/security/trustedExactRateLimit";
+import { TrustedExactRateLimiter } from "@/decoding/limits/trustedExactRateLimit";
 
 describe("TrustedExactRateLimiter", () => {
   it("scopes scanner-safe buckets by both verified uid and business", () => {

@@ -23,7 +23,7 @@
 import { resolveScanToProductTiered, type MasterCandidate } from "@/products/match/aliasMatcher";
 import { sameBrandFamily } from "@/products/catalog/brandFamilies";
 import { nameTokens, jaccard, IDENTITY_JACCARD_THRESHOLD } from "@/products/catalog/identityMerge";
-import { tireSizeToken } from "@/services/ai/tireSpecs";
+import { tireSizeToken } from "@/decoding/tireSpecs";
 import type { Product, Alias, CleanedCode, ProvenanceTier } from "@/types";
 
 /** The subset of the store CatalogEntry shape this transform needs (GC4 boundary: masterId /

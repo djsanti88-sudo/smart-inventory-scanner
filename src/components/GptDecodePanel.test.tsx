@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import { GptDecodePanel } from "@/components/GptDecodePanel";
+import { GptDecodePanel } from "@/decoding/panel/GptDecodePanel";
 
 // Task 6: compact GPT decode spend/call status for the Settings "Live AI status" section.
 // Presentational only - reads the already-fetched aiStatus.gptDecode field, no fetch here.

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getSession } from "@/authentication/auth";
 import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
-import { getIdentityConfidenceBand, identityBandWord } from "@/services/ai/identityConfidenceBand";
+import { getIdentityConfidenceBand, identityBandWord } from "@/decoding/identityConfidenceBand";
 
 // Task 3 (owner step 3): platform-owner-only review queue for pending catalogEntries (the shared,
 // cross-tenant master catalog). Approve marks an entry human_verified; Reject marks it rejected. Both

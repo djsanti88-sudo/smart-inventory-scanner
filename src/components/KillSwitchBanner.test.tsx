@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import { KillSwitchBanner } from "@/components/KillSwitchBanner";
+import { KillSwitchBanner } from "@/decoding/panel/KillSwitchBanner";
 
 // Spec 2 (M1, kill-switch visibility): a shop owner must be able to tell "the SERVER has AI locked
 // down (AI_LOOKUP_KILL_SWITCH)" apart from "I paused this myself (emergencyStop)". This banner renders

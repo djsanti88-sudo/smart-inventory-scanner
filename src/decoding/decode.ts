@@ -1,9 +1,9 @@
 import type { AiLookupResult, CodeType, DecodeDecision, EvidenceResult } from "@/types";
-import { crossCheck } from "@/services/ai/crossCheckEngine";
-import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerifier";
-import { isTireContext, hasCountableTireIdentity } from "@/services/ai/tireSpecs";
+import { crossCheck } from "@/decoding/crossCheckEngine";
+import { isStrongEvidence, strongestEvidence } from "@/decoding/evidenceVerifier";
+import { isTireContext, hasCountableTireIdentity } from "@/decoding/tireSpecs";
 import { isBrandInPrefixFamily } from "@/products/tires/tirePrefixLookup";
-import { isTrustedProductHost } from "@/services/ai/trustedProductHosts";
+import { isTrustedProductHost } from "@/decoding/trustedProductHosts";
 
 // decideDecode: the gate that turns provider results + APP-verified evidence into a final decode
 // status. MASTER BASELINE v1 (owner-locked, supersedes the older two-provider rule): a "verified"

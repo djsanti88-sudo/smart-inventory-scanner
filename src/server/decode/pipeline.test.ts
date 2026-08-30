@@ -16,12 +16,12 @@ vi.mock("@/server/decodeCacheStore", () => ({
   persistDecode: vi.fn(),
 }));
 vi.mock("@/server/decode/storage", () => ({ decodeStorage: vi.fn() }));
-vi.mock("@/services/ai/gptDecodeClient", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/ai/gptDecodeClient")>();
+vi.mock("@/decoding/gptDecodeClient", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/decoding/gptDecodeClient")>();
   return { ...actual, decodeWithGpt: vi.fn() };
 });
-vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
+vi.mock("@/decoding/limits/aiSpendGuard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/decoding/limits/aiSpendGuard")>();
   return {
     ...actual,
     chargeDailySlot: vi.fn(),
@@ -35,10 +35,10 @@ vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
   };
 });
 
-import { emptyResult } from "@/services/ai/provider";
-import { clearDecodeCache, __clearInFlightForTest } from "@/services/ai/decodeCache";
+import { emptyResult } from "@/decoding/provider";
+import { clearDecodeCache, __clearInFlightForTest } from "@/decoding/decodeCache";
 import { detectCodeType } from "@/products/match/codeTypeDetector";
-import { decodeWithGpt, GPT_DECODE_WORST_CASE_USD, type GptDecodeResult } from "@/services/ai/gptDecodeClient";
+import { decodeWithGpt, GPT_DECODE_WORST_CASE_USD, type GptDecodeResult } from "@/decoding/gptDecodeClient";
 import {
   chargeDailySlotConditional,
   chargeDailySlotForAccountConditional,
@@ -46,7 +46,7 @@ import {
   recordGptDecodeCall,
   recordGptDecodeSpend,
   refundDailySlot,
-} from "@/services/security/aiSpendGuard";
+} from "@/decoding/limits/aiSpendGuard";
 import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { lookupRetailBarcodeAsync } from "@/server/retail-knowledge/retailKnowledgeIndex";
 import { getLearnedProduct } from "@/server/learnedProducts";

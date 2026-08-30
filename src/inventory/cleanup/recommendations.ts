@@ -1,6 +1,6 @@
 import type { Alias, InventoryCount, Product } from "@/types";
 import type { CatalogEntry } from "@/products/catalog/catalogTypes";
-import { isUsableProductName } from "@/services/ai/decode";
+import { isUsableProductName } from "@/decoding/decode";
 
 // Recommendation-FIRST cleanup. This engine only DESCRIBES what could be removed and why; it never
 // removes anything. The store applies the owner's selected items (with backup + Undo). Pure module.

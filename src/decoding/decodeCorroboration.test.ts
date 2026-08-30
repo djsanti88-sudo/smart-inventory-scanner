@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { decideDecode } from "@/services/ai/decode";
-import { emptyResult } from "@/services/ai/provider";
-import { verifyEvidence } from "@/services/ai/evidenceVerifier";
+import { decideDecode } from "@/decoding/decode";
+import { emptyResult } from "@/decoding/provider";
+import { verifyEvidence } from "@/decoding/evidenceVerifier";
 import type { AiLookupResult, EvidenceResult } from "@/types";
 
 // MASTER BASELINE v1 - ANY-SOURCE decode policy. decideDecode returns "verified" (auto-count) for a

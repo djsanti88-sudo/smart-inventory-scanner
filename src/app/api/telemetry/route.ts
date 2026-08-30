@@ -1,7 +1,7 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
-import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
+import { checkRateLimit, intEnv } from "@/decoding/limits/aiSpendGuard";
 import { logServerEvent } from "@/server/log";
 
 export const runtime = "nodejs";
