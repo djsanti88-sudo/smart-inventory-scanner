@@ -6,7 +6,7 @@ import {
 import type {
   ProvisionRequest,
   ProvisionResponse,
-} from "@/services/auth/provisioningTypes";
+} from "@/authentication/service/provisioningTypes";
 
 export const runtime = "nodejs";
 

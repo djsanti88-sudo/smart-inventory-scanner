@@ -10,7 +10,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 const signInWithPasswordMock = vi.fn();
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/authentication/auth", () => ({
   ensureWorkspace: vi.fn(),
   signInWithPassword: (...args: unknown[]) => signInWithPasswordMock(...args),
   signUp: vi.fn(),

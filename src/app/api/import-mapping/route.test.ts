@@ -13,7 +13,7 @@ vi.mock("@/server/importMappingMemory", () => ({
 // isLiveAuth is mutable per-test so the live-mode Authorization-header tests below can flip it on
 // without affecting the existing mock-mode tests (which rely on the default `false`).
 let liveAuth = false;
-vi.mock("@/services/auth/authMode", () => ({ isLiveAuth: () => liveAuth }));
+vi.mock("@/authentication/service/authMode", () => ({ isLiveAuth: () => liveAuth }));
 const verifyIdToken = vi.fn();
 vi.mock("@/lib/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: (...args: unknown[]) => verifyIdToken(...args) }),

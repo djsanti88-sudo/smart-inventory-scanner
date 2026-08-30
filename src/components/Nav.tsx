@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useScanStore } from "@/stores/scanStore";
-import { runSignOutFlow } from "@/services/auth/signOutFlow";
-import { isLiveAuth } from "@/services/auth/authMode";
+import { runSignOutFlow } from "@/authentication/service/signOutFlow";
+import { isLiveAuth } from "@/authentication/service/authMode";
 
 // App navigation. Shows an open-review count badge so unknown codes are obvious but not disruptive.
 export function Nav() {

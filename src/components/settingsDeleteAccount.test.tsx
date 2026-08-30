@@ -33,7 +33,7 @@ vi.mock("@/components/GptDecodePanel", () => ({ GptDecodePanel: () => null }));
 
 const getIdToken = vi.fn().mockResolvedValue("id-token-123");
 const getSession = vi.fn();
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/authentication/auth", () => ({
   getSession: (...args: unknown[]) => getSession(...args),
   onAuthChange: () => () => {},
   signOut: vi.fn(),

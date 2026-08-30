@@ -20,7 +20,7 @@ vi.mock("@/services/security/useAccessLevel", () => ({
   useAccessLevel: () => mocks.accessLevel,
 }));
 
-vi.mock("@/services/auth/authMode", () => ({
+vi.mock("@/authentication/service/authMode", () => ({
   isLiveAuth: () => mocks.liveAuth,
 }));
 

@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { getSession } from "@/lib/auth";
-import { isLiveAuth } from "@/services/auth/authMode";
+import { getSession } from "@/authentication/auth";
+import { isLiveAuth } from "@/authentication/service/authMode";
 import { buildBossReport } from "@/services/reports/bossReport";
 import { useScanStore } from "@/stores/scanStore";
 import { BusinessContextGate } from "@/components/BusinessContextGate";

@@ -7,9 +7,9 @@ const signOut = vi.fn();
 vi.mock("@/stores/scanStore", () => ({
   useScanStore: { getState: () => ({ prepareSignOut, resetForSignOut }) },
 }));
-vi.mock("@/lib/auth", () => ({ signOut: (...a: unknown[]) => signOut(...a) }));
+vi.mock("@/authentication/auth", () => ({ signOut: (...a: unknown[]) => signOut(...a) }));
 
-import { runSignOutFlow, wipeAndSignOut, unsyncedSignOutMessage } from "@/services/auth/signOutFlow";
+import { runSignOutFlow, wipeAndSignOut, unsyncedSignOutMessage } from "@/authentication/service/signOutFlow";
 
 beforeEach(() => {
   prepareSignOut.mockReset().mockResolvedValue(0);

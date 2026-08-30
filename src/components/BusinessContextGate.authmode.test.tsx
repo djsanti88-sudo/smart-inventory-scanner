@@ -3,13 +3,13 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 
 const isLiveAuth = vi.fn();
-vi.mock("@/services/auth/authMode", () => ({ isLiveAuth: () => isLiveAuth() }));
+vi.mock("@/authentication/service/authMode", () => ({ isLiveAuth: () => isLiveAuth() }));
 vi.mock("@/lib/selectedBusiness", () => ({
   SELECTED_BUSINESS_CHANGED_EVENT: "sis:selected-business-changed",
   getSelectedBusinessId: () => null,
   isFirebaseBackend: () => true,
 }));
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/authentication/auth", () => ({
   getSession: vi.fn().mockResolvedValue(null),
   listMemberships: vi.fn().mockResolvedValue([]),
 }));

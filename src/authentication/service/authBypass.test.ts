@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
-import { isAuthBypassEnabled } from "@/services/auth/authBypass";
+import { isAuthBypassEnabled } from "@/authentication/service/authBypass";
 
 // Guardrail 4 proof: the E2E/test auth bypass can NEVER activate in production, and only activates under
 // the intended test/e2e conditions.

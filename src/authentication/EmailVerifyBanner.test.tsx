@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 
 const resendVerificationEmail = vi.fn(async (..._args: unknown[]) => ({ error: null as string | null }));
-vi.mock("@/lib/auth", () => ({ resendVerificationEmail: (...a: unknown[]) => resendVerificationEmail(...a) }));
+vi.mock("@/authentication/auth", () => ({ resendVerificationEmail: (...a: unknown[]) => resendVerificationEmail(...a) }));
 
 import { EmailVerifyBanner } from "./EmailVerifyBanner";
 

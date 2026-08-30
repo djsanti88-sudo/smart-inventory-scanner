@@ -41,8 +41,8 @@ import { MockDb, getMockDb, type IncrementPayload, type SyncResult } from "@/ser
 import { FirebaseSyncTarget } from "@/services/db/firebase/firebaseSyncTarget";
 import { loadBusinessData } from "@/services/db/firebase/businessDataLoader";
 import { auditRepository, catalogRepository } from "@/services/db/firebase/repositories";
-import { getDb } from "@/lib/firebaseClient";
-import { getSession } from "@/lib/auth";
+import { getDb } from "@/authentication/firebaseClient";
+import { getSession } from "@/authentication/auth";
 import { postTelemetry } from "@/lib/telemetry";
 import {
   evaluateAiGate,

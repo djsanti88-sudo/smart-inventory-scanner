@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { getSession, onAuthChange, isAuthBypassEnabled } from "@/lib/auth";
-import { isOpenAccess } from "@/services/auth/authMode";
+import { getSession, onAuthChange, isAuthBypassEnabled } from "@/authentication/auth";
+import { isOpenAccess } from "@/authentication/service/authMode";
 
 // Client-side gate for protected pages. In mock (open-access) mode children render immediately.
 // In live mode it checks a real Firebase auth session (async) and redirects to /login when there is none.

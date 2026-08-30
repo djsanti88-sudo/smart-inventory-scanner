@@ -18,11 +18,11 @@ vi.mock("firebase/auth", () => ({
   sendPasswordResetEmail: vi.fn(),
   GoogleAuthProvider: vi.fn(),
 }));
-vi.mock("@/lib/firebaseClient", () => ({
+vi.mock("@/authentication/firebaseClient", () => ({
   getFirebaseAuth: () => mocks.auth,
   getDb: vi.fn(),
 }));
-vi.mock("@/services/auth/authBypass", () => ({ isAuthBypassEnabled: () => false }));
+vi.mock("@/authentication/service/authBypass", () => ({ isAuthBypassEnabled: () => false }));
 
 import { signInWithPassword, signUp } from "./auth";
 

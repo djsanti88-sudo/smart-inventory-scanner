@@ -7,13 +7,13 @@ const mocks = vi.hoisted(() => ({
   rehydrateForUid: vi.fn(),
 }));
 
-vi.mock("@/services/auth/authMode", () => ({ isLiveAuth: () => true }));
+vi.mock("@/authentication/service/authMode", () => ({ isLiveAuth: () => true }));
 vi.mock("@/lib/selectedBusiness", () => ({
   SELECTED_BUSINESS_CHANGED_EVENT: "sis:selected-business-changed",
   getSelectedBusinessId: () => "orphan",
   isFirebaseBackend: () => true,
 }));
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/authentication/auth", () => ({
   getSession: vi.fn().mockResolvedValue({ uid: "user-1" }),
   listMemberships: (...args: unknown[]) => mocks.listMemberships(...args),
 }));

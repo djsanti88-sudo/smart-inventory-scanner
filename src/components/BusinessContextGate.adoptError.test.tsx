@@ -15,13 +15,13 @@ const mocks = vi.hoisted(() => ({
   adoptLegacyLocalData: vi.fn(),
 }));
 
-vi.mock("@/services/auth/authMode", () => ({ isLiveAuth: () => true }));
+vi.mock("@/authentication/service/authMode", () => ({ isLiveAuth: () => true }));
 vi.mock("@/lib/selectedBusiness", () => ({
   SELECTED_BUSINESS_CHANGED_EVENT: "sis:selected-business-changed",
   getSelectedBusinessId: () => "biz-1",
   isFirebaseBackend: () => true,
 }));
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/authentication/auth", () => ({
   getSession: (...args: unknown[]) => mocks.getSession(...args),
   listMemberships: (...args: unknown[]) => mocks.listMemberships(...args),
 }));

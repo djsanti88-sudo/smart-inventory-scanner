@@ -28,14 +28,14 @@ const mocks = vi.hoisted(() => {
 let selectedBusinessId: string | null = null;
 let routePushHandler: ((href: string) => void) | null = null;
 
-vi.mock("@/services/auth/authMode", () => ({ isLiveAuth: () => true }));
+vi.mock("@/authentication/service/authMode", () => ({ isLiveAuth: () => true }));
 vi.mock("@/lib/selectedBusiness", () => ({
   SELECTED_BUSINESS_CHANGED_EVENT: "sis:selected-business-changed",
   getSelectedBusinessId: () => mocks.getSelectedBusinessId(),
   setSelectedBusinessId: (...args: unknown[]) => mocks.setSelectedBusinessId(...args),
   isFirebaseBackend: () => true,
 }));
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/authentication/auth", () => ({
   getSession: (...args: unknown[]) => mocks.getSession(...args),
   listMemberships: (...args: unknown[]) => mocks.listMemberships(...args),
   createBusiness: vi.fn(),

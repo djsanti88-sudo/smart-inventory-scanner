@@ -8,8 +8,8 @@ import {
 import { buildBossReport } from "@/services/reports/bossReport";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
-import { isLiveAuth } from "@/services/auth/authMode";
-import { isAuthBypassEnabled } from "@/services/auth/authBypass";
+import { isLiveAuth } from "@/authentication/service/authMode";
+import { isAuthBypassEnabled } from "@/authentication/service/authBypass";
 import { logServerEvent } from "@/server/log";
 
 export const runtime = "nodejs";

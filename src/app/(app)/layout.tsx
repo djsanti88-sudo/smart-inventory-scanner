@@ -1,8 +1,8 @@
 import { StoreHydrator } from "@/components/StoreHydrator";
-import { AuthGuard } from "@/components/AuthGuard";
+import { AuthGuard } from "@/authentication/AuthGuard";
 import { Nav } from "@/components/Nav";
 import { ProdFirebaseBanner } from "@/components/ProdFirebaseBanner";
-import { EmailVerifyBannerGate } from "@/components/EmailVerifyBannerGate";
+import { EmailVerifyBannerGate } from "@/authentication/EmailVerifyBannerGate";
 import { BusinessContextProvider } from "@/components/BusinessContextGate";
 
 // Shell for all protected app pages. Hydrates the local store, gates on the demo login, and

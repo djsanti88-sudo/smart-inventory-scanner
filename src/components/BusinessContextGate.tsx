@@ -3,13 +3,13 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import Link from "next/link";
 import { useScanStore } from "@/stores/scanStore";
-import { getSession, listMemberships } from "@/lib/auth";
+import { getSession, listMemberships } from "@/authentication/auth";
 import {
   getSelectedBusinessId,
   isFirebaseBackend,
   SELECTED_BUSINESS_CHANGED_EVENT,
 } from "@/lib/selectedBusiness";
-import { isLiveAuth } from "@/services/auth/authMode";
+import { isLiveAuth } from "@/authentication/service/authMode";
 import { hasMeaningfulLegacyBlobAsync, hasPersistedBlobAsync, persistKeyForUid } from "@/stores/scanPersistNamespace";
 
 // Bounded wait for the bootstrap chain's own async steps (getSession's onAuthStateChanged wait,

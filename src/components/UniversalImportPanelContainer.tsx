@@ -1,8 +1,8 @@
 "use client";
 
-import { getSession } from "@/lib/auth";
+import { getSession } from "@/authentication/auth";
 import { UniversalImportPanel } from "@/components/UniversalImportPanel";
-import { isLiveAuth } from "@/services/auth/authMode";
+import { isLiveAuth } from "@/authentication/service/authMode";
 import type { ColumnMapping, MappedImportRow } from "@/services/importSchema";
 import type { PreviewMatchResult } from "@/services/universalImportPreview";
 import { useScanStore } from "@/stores/scanStore";

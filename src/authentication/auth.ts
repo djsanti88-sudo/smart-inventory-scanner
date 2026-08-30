@@ -12,16 +12,16 @@ import {
   sendEmailVerification,
 } from "firebase/auth";
 import { doc, getDoc, getDocs, query, collection, where } from "firebase/firestore";
-import { getFirebaseAuth, getDb } from "@/lib/firebaseClient";
+import { getFirebaseAuth, getDb } from "@/authentication/firebaseClient";
 import { getSelectedBusinessId } from "@/lib/selectedBusiness";
-import { isAuthBypassEnabled } from "@/services/auth/authBypass";
-import { firebaseAuthErrorMessage, isPopupCancellation } from "@/services/auth/firebaseError";
+import { isAuthBypassEnabled } from "@/authentication/service/authBypass";
+import { firebaseAuthErrorMessage, isPopupCancellation } from "@/authentication/service/firebaseError";
 import type {
   AuthFlowResult,
   ProvisionRequest,
   ProvisionResponse,
-} from "@/services/auth/provisioningTypes";
-import type { AuthUser, Membership, CreatableMemberRole } from "@/services/auth/authService";
+} from "@/authentication/service/provisioningTypes";
+import type { AuthUser, Membership, CreatableMemberRole } from "@/authentication/service/authService";
 import { COLLECTIONS, type BusinessMember } from "@/services/db/types";
 import { retryingRead } from "@/services/db/firebase/boundedRead";
 
@@ -31,8 +31,8 @@ import { retryingRead } from "@/services/db/firebase/boundedRead";
 
 export { isAuthBypassEnabled };
 // Re-exported from the port so existing call sites keep their import path while the definitions
-// live once, provider-neutrally, in @/services/auth/authService.
-export type { AppRole, Membership, CreatableMemberRole, AuthUser } from "@/services/auth/authService";
+// live once, provider-neutrally, in @/authentication/service/authService.
+export type { AppRole, Membership, CreatableMemberRole, AuthUser } from "@/authentication/service/authService";
 
 const E2E_USER = { uid: "e2e-user", email: "e2e@test.local" } as unknown as AuthUser;
 const BUSINESS_REQUEST_PREFIX = "sis-business-create-request-v2:";

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { AuthUser } from "@/services/auth/authService";
+import type { AuthUser } from "@/authentication/service/authService";
 import { useScanStore } from "@/stores/scanStore";
 import { useReconcileStore } from "@/stores/reconcileStore";
 import { DECODE_BUDGET_MIN_MS, DECODE_BUDGET_MAX_MS, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
@@ -12,8 +12,8 @@ import { OwnerPinSettings } from "@/components/OwnerPinSettings";
 import { GptDecodePanel } from "@/components/GptDecodePanel";
 import { KillSwitchBanner } from "@/components/KillSwitchBanner";
 import { requiresOwnerPin } from "@/services/security/destructiveGuard";
-import { getSession, onAuthChange } from "@/lib/auth";
-import { runSignOutFlow, wipeAndSignOut } from "@/services/auth/signOutFlow";
+import { getSession, onAuthChange } from "@/authentication/auth";
+import { runSignOutFlow, wipeAndSignOut } from "@/authentication/service/signOutFlow";
 import { BusinessContextGate } from "@/components/BusinessContextGate";
 
 export default function SettingsPage() {

@@ -11,13 +11,13 @@ vi.mock("next/navigation", () => ({
 
 const getSessionMock = vi.fn(async () => null as { uid: string } | null);
 const onAuthChangeMock = vi.fn((_cb: (s: unknown) => void) => () => {});
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/authentication/auth", () => ({
   getSession: () => getSessionMock(),
   onAuthChange: (cb: (s: unknown) => void) => onAuthChangeMock(cb),
   isAuthBypassEnabled: () => false,
 }));
 const isOpenAccess = vi.fn();
-vi.mock("@/services/auth/authMode", () => ({ isOpenAccess: () => isOpenAccess() }));
+vi.mock("@/authentication/service/authMode", () => ({ isOpenAccess: () => isOpenAccess() }));
 
 import { AuthGuard } from "./AuthGuard";
 

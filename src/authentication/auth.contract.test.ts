@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { AuthService, WorkspaceService, AuthUser } from "@/services/auth/authService";
+import type { AuthService, WorkspaceService, AuthUser } from "@/authentication/service/authService";
 
 // The seam that makes authentication replaceable.
 //
@@ -13,7 +13,7 @@ import type { AuthService, WorkspaceService, AuthUser } from "@/services/auth/au
 // file is a compile-time contract with a runtime smoke test attached, not a behavior test. The
 // behavior of each function is covered by auth.password/google/memberships/provisioning/
 // resendVerificationEmail.test.ts.
-import type * as AuthModule from "@/lib/auth";
+import type * as AuthModule from "@/authentication/auth";
 
 /** Compiles only when Actual structurally satisfies Port. */
 type Satisfies<Actual extends Port, Port> = Actual;

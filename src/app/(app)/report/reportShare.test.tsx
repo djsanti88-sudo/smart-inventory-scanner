@@ -12,11 +12,11 @@ vi.mock("@/stores/scanStore", () => ({
     selector(mocks.storeState),
 }));
 
-vi.mock("@/services/auth/authMode", () => ({
+vi.mock("@/authentication/service/authMode", () => ({
   isLiveAuth: () => mocks.isLiveAuth(),
 }));
 
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/authentication/auth", () => ({
   getSession: () => mocks.getSession(),
 }));
 

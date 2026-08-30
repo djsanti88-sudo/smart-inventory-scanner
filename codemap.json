@@ -60,7 +60,7 @@
       "id": "ui",
       "title": "UI and app shell",
       "owns": "Client components, App Router pages, auth surface.",
-      "globs": ["src/components/**", "src/app/(app)/**", "src/app/login/**", "src/lib/auth.ts"],
+      "globs": ["src/components/**", "src/app/(app)/**", "src/app/login/**", "src/authentication/auth.ts"],
       "gates": ["npm run proof:all", "npm run test:e2e", "npm run qa:bots"],
       "invariants": [
         "The scan input is focused by default; Enter submits; focus returns after every scan.",

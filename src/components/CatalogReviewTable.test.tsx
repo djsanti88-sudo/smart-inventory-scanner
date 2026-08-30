@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 
 // Task 3: component tests for the platform-owner-only catalog review table. Mocks
-// useIsPlatformOwner (mirrors src/components/settingsAccount.test.tsx), @/lib/auth's getSession
+// useIsPlatformOwner (mirrors src/components/settingsAccount.test.tsx), @/authentication/auth's getSession
 // (for the ID token), and global fetch.
 
 let isPlatform = true;
@@ -12,7 +12,7 @@ vi.mock("@/services/security/useAccessLevel", () => ({
 
 const fakeUser = { getIdToken: vi.fn().mockResolvedValue("fake-id-token") };
 const getSession = vi.fn();
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/authentication/auth", () => ({
   getSession: (...args: unknown[]) => getSession(...args),
 }));
 

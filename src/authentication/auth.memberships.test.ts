@@ -27,11 +27,11 @@ vi.mock("firebase/firestore", () => ({
   collection: vi.fn((_db: unknown, name: string) => ({ name })),
   where: vi.fn(),
 }));
-vi.mock("@/lib/firebaseClient", () => ({
+vi.mock("@/authentication/firebaseClient", () => ({
   getFirebaseAuth: () => mocks.auth,
   getDb: () => ({ __db: true }),
 }));
-vi.mock("@/services/auth/authBypass", () => ({ isAuthBypassEnabled: () => false }));
+vi.mock("@/authentication/service/authBypass", () => ({ isAuthBypassEnabled: () => false }));
 
 import { listMemberships } from "./auth";
 

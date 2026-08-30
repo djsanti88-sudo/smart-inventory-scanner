@@ -15,7 +15,7 @@
 // tokens, metadata, tenantId, multi-factor, reauthentication). A port should describe what callers
 // need, not mirror the vendor.
 
-import type { AuthFlowResult } from "@/services/auth/provisioningTypes";
+import type { AuthFlowResult } from "@/authentication/service/provisioningTypes";
 import type { BusinessMember } from "@/services/db/types";
 
 /**

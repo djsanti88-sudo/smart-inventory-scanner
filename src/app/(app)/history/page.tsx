@@ -7,7 +7,7 @@ import { getMockDb } from "@/services/mockDb";
 import { exportSessionCounts } from "@/services/csvExport";
 import { downloadCsv } from "@/services/exportFormats";
 import { useAccessLevel } from "@/services/security/useAccessLevel";
-import { isLiveAuth } from "@/services/auth/authMode";
+import { isLiveAuth } from "@/authentication/service/authMode";
 import { isCloudBackendEnabled } from "@/services/config/backend";
 import { aggregateSessionCounts, aggregateHistoryRows, type SessionCountRow, type SessionAggregate } from "@/services/sessions/history";
 import type { SessionHistoryEntry } from "@/services/sessions/sessionHistory";

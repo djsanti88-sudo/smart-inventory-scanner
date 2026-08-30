@@ -5,7 +5,7 @@
 // independent of Firestore. Without it, "what does this app need from a database?" could only be
 // answered by reading the Firestore code and mentally subtracting the vendor.
 //
-// These are TYPES ONLY - same approach as @/services/auth/authService, for the same reason: a runtime
+// These are TYPES ONLY - same approach as @/authentication/service/authService, for the same reason: a runtime
 // registry with exactly one implementation is indirection nobody can follow. Conformance is proved by
 // ./repositories.contract.test.ts, which fails `tsc --noEmit` if an implementation drifts.
 //

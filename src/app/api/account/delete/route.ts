@@ -3,7 +3,7 @@ import "server-only";
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
-import { isLiveAuth } from "@/services/auth/authMode";
+import { isLiveAuth } from "@/authentication/service/authMode";
 import { intEnv } from "@/services/security/aiSpendGuard";
 import { checkAccountDeleteRateLimit } from "@/services/security/accountDeleteRateLimit";
 import { logServerEvent } from "@/server/log";

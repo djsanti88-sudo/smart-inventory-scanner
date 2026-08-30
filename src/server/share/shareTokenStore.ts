@@ -157,7 +157,7 @@ function fallbackFile(): string {
   return process.env.SHARE_TOKEN_FILE?.trim() || path.resolve(".share-tokens.json");
 }
 
-// Same production-detection convention as src/services/auth/authBypass.ts: NODE_ENV === "production"
+// Same production-detection convention as src/authentication/service/authBypass.ts: NODE_ENV === "production"
 // is the sole signal, so this can never misfire in dev/test/CI. In production, Vercel's filesystem is
 // ephemeral: the local-file fallback write is silently lost, which would hand out a share link that
 // later 404s. Fail loud instead so the caller gets a 503 and never receives a broken token.

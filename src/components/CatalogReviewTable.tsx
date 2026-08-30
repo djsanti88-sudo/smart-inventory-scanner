@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { getSession } from "@/lib/auth";
+import { getSession } from "@/authentication/auth";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { getIdentityConfidenceBand, identityBandWord } from "@/services/ai/identityConfidenceBand";
 

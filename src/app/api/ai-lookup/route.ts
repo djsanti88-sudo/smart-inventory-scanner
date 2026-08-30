@@ -10,7 +10,7 @@ import { runDecodePipeline, e2eMode } from "@/server/decode/pipeline";
 import { clampDecodeBudgetMs } from "@/services/ai/decodeBudget";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
-import { isLiveAuth } from "@/services/auth/authMode";
+import { isLiveAuth } from "@/authentication/service/authMode";
 import { clampConfidenceThreshold } from "@/services/security/decodePolicy";
 import { buildMasterCatalogEntry, appendMasterCatalogEntry } from "@/server/catalog/masterAppend";
 import { logServerEvent } from "@/server/log";

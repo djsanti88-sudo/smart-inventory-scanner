@@ -12,8 +12,8 @@ import {
   exportSessionScanLogCustomer,
 } from "@/services/csvExport";
 import { useAccessLevel } from "@/services/security/useAccessLevel";
-import { getDb } from "@/lib/firebaseClient";
-import { getSession } from "@/lib/auth";
+import { getDb } from "@/authentication/firebaseClient";
+import { getSession } from "@/authentication/auth";
 import { useScanStore } from "@/stores/scanStore";
 import { BusinessContextGate } from "@/components/BusinessContextGate";
 import { ArchivedSessionScans } from "@/components/ArchivedSessionScans";

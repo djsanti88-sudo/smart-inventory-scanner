@@ -20,7 +20,7 @@ vi.mock("@/services/exportFormats", () => ({
 }));
 
 const getSession = vi.fn();
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/authentication/auth", () => ({
   getSession: (...args: unknown[]) => getSession(...args),
 }));
 

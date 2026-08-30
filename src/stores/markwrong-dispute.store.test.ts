@@ -10,8 +10,8 @@ import { MockDb } from "@/services/mockDb";
 // resolves null here otherwise, which would make every dispute call a silent, untested no-op).
 
 const mockUser = { getIdToken: vi.fn().mockResolvedValue("fake-id-token") };
-vi.mock("@/lib/auth", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/auth")>();
+vi.mock("@/authentication/auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/authentication/auth")>();
   return { ...actual, getSession: vi.fn().mockResolvedValue(mockUser) };
 });
 
@@ -134,7 +134,7 @@ describe("markWrong fires a fire-and-forget /api/catalog-dispute report", () => 
   });
 
   it("no session available: markWrong still completes locally and never calls the dispute endpoint", async () => {
-    const { getSession } = await import("@/lib/auth");
+    const { getSession } = await import("@/authentication/auth");
     vi.mocked(getSession).mockResolvedValueOnce(null);
 
     const calls: string[] = [];

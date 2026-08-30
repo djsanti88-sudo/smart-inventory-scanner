@@ -1,5 +1,5 @@
 import { useScanStore } from "@/stores/scanStore";
-import { signOut } from "@/lib/auth";
+import { signOut } from "@/authentication/auth";
 
 // ONE shared sign-out flow so Nav.tsx and the Settings "Sign out" button can never drift. This is the
 // data-loss-protection surface: without resetForSignOut the NEXT user on this browser inherits the prior

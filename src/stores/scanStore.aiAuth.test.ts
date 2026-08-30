@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { getSession } = vi.hoisted(() => ({ getSession: vi.fn() }));
 
-vi.mock("@/lib/auth", () => ({ getSession }));
+vi.mock("@/authentication/auth", () => ({ getSession }));
 
 import { createTestScanStore } from "@/stores/scanStore";
 

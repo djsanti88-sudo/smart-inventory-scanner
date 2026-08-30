@@ -13,8 +13,8 @@ import { deriveCountedByUid } from "@/services/reconcile/countedByUid";
 import { resolveRawScan } from "@/services/resolver";
 import { cleanScanCode } from "@/services/scanCleaner";
 import { downloadCsv } from "@/services/exportFormats";
-import { getSession } from "@/lib/auth";
-import { isLiveAuth } from "@/services/auth/authMode";
+import { getSession } from "@/authentication/auth";
+import { isLiveAuth } from "@/authentication/service/authMode";
 import { readUniversalFile } from "@/services/universalFileReader";
 import { inferColumnMapping, validateManualMapping } from "@/services/columnIntelligence";
 

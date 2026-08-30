@@ -16,7 +16,7 @@ vi.mock("@/stores/scanStore", () => ({
 }));
 // listMemberships resolves the business name onto each Membership (server-validated join), so the
 // list renders the saved NAME directly - no separate name-fetch helper.
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/authentication/auth", () => ({
   createBusiness: vi.fn(),
   createBusinessMember: vi.fn(),
   ensureWorkspace: vi.fn(),

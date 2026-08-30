@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
-import type { AuthUser } from "@/services/auth/authService";
-import { resendVerificationEmail } from "@/lib/auth";
+import type { AuthUser } from "@/authentication/service/authService";
+import { resendVerificationEmail } from "@/authentication/auth";
 
 const DISMISS_KEY = "sis-verify-banner-dismissed";
 

@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   push: vi.fn(),
 }));
 
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/authentication/auth", () => ({
   createBusiness: (...args: unknown[]) => mocks.createBusiness(...args),
   createBusinessMember: (...args: unknown[]) => mocks.createBusinessMember(...args),
   ensureWorkspace: (...args: unknown[]) => mocks.ensureWorkspace(...args),

@@ -12,7 +12,7 @@ vi.mock("@/lib/firebaseAdmin", () => ({
     recursiveDelete: vi.fn(async () => undefined),
   }),
 }));
-vi.mock("@/services/auth/authMode", () => ({ isLiveAuth: () => true }));
+vi.mock("@/authentication/service/authMode", () => ({ isLiveAuth: () => true }));
 vi.mock("@/server/log", () => ({ logServerEvent: vi.fn() }));
 
 const checkAccountDeleteRateLimit = vi.fn();

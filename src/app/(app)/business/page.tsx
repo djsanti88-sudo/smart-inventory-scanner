@@ -9,7 +9,7 @@ import {
   listMemberships,
   signOut,
   type Membership,
-} from "@/lib/auth";
+} from "@/authentication/auth";
 import { SELECTED_BUSINESS_CHANGED_EVENT, setSelectedBusinessId } from "@/lib/selectedBusiness";
 import { useRouter } from "next/navigation";
 import { useScanStore } from "@/stores/scanStore";

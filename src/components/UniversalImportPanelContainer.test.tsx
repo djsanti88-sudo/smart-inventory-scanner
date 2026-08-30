@@ -15,7 +15,7 @@ import type { ColumnMapping } from "@/services/importSchema";
 import type { Product, Alias } from "@/types";
 
 const getSession = vi.fn();
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/authentication/auth", () => ({
   getSession: (...args: unknown[]) => getSession(...args),
 }));
 

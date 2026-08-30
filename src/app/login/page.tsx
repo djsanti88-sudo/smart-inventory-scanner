@@ -9,9 +9,9 @@ import {
   signInWithGoogle,
   sendResetEmail,
   isAuthBypassEnabled,
-} from "@/lib/auth";
+} from "@/authentication/auth";
 import { setSelectedBusinessId } from "@/lib/selectedBusiness";
-import type { AuthFlowResult } from "@/services/auth/provisioningTypes";
+import type { AuthFlowResult } from "@/authentication/service/provisioningTypes";
 
 const DEFAULT_DESTINATION = "/scan";
 

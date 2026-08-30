@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { AuthUser } from "@/services/auth/authService";
-import { onAuthChange } from "@/lib/auth";
+import type { AuthUser } from "@/authentication/service/authService";
+import { onAuthChange } from "@/authentication/auth";
 import { EmailVerifyBanner } from "./EmailVerifyBanner";
 
 /** Client-side auth subscription for the server (app) layout. In mock mode there is no user,

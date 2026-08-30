@@ -17,7 +17,7 @@ const FORBIDDEN = [
   "firebase/functions",
   "firebase/messaging",
   "firebase/analytics",
-  "@/lib/firebaseClient",
+  "@/authentication/firebaseClient",
 ];
 
 // Resolve an import specifier to a repo file path, or null if it is external (node_modules) / unresolved.
