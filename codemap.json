@@ -79,7 +79,7 @@
         "src/services/catalog/**",
         "src/services/reconcile/**",
         "src/import/csvImport.ts",
-        "src/services/csvExport.ts",
+        "src/reports/export/csvExport.ts",
         "src/import/columnIntelligence.ts",
         "src/services/sessions/**",
         "src/server/business/**",

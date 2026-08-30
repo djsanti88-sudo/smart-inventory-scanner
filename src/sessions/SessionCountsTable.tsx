@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 import { customerDisplayName } from "@/products/match/displayName";
-import { prettifyProductName, resolvedBrand, resolvedModel, resolvedSizeTag, resolvedSizeDisplay } from "@/services/format/productDisplay";
+import { prettifyProductName, resolvedBrand, resolvedModel, resolvedSizeTag, resolvedSizeDisplay } from "@/shared/text/productDisplay";
 import { DecodeStatusBadge } from "@/user-interface/ui/badges";
 import type { Product } from "@/types";
 

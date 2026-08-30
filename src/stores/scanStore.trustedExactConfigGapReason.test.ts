@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 import { MISS_REASON_TEXT } from "@/decoding/decodeFallback";
 
 // TASK T3 (2026-08-06, audit-9 finding B): when the trusted-exact probe reports reasonCode

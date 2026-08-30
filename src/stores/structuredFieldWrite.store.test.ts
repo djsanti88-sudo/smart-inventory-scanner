@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // B1 regression (owner-reported, 268-row review, 2026-07-20): on MOST tire rows, Brand/Model/
 // Category/Specs/Size columns showed "-" even when the row's Product name clearly contained

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 const NON_GTIN_CODE = "3220015959";
 const originalFetch = globalThis.fetch;

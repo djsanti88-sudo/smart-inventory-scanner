@@ -4,7 +4,7 @@ import {
   __resetGeneralDecodePacerForTest,
   __drainGeneralDecodePacerForTest,
 } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Task 5: scan-store application of the GPT-5.4 mini trust tiers + a bounded decode queue.
 // All fetch calls are mocked - no live tokens are spent.

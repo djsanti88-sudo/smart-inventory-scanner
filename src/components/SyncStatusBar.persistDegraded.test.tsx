@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SyncStatusBar } from "@/components/SyncStatusBar";
+import { SyncStatusBar } from "@/sync-database/SyncStatusBar";
 import { useScanStore } from "@/stores/scanStore";
 
 // Task 2 (persist-failure surface, 2026-08-09): the persistDegraded flag (set by the wired

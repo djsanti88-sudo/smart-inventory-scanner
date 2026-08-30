@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { postTelemetry } = vi.hoisted(() => ({ postTelemetry: vi.fn() }));
-vi.mock("@/lib/telemetry", () => ({ postTelemetry }));
+vi.mock("@/shared/telemetry/telemetry", () => ({ postTelemetry }));
 
 import { createTestScanStore, __resetGeneralDecodePacerForTest } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // S6 follow-up (2026-08-09): the general decode queue's bulk pacer is a MODULE-level token bucket
 // shared by every store instance (production truth: the server rate limit is per browser/account, not

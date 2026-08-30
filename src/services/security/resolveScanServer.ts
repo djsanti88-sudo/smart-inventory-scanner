@@ -6,7 +6,7 @@
 // ("platform") gets the full internal result. This is the ONE place customer scan responses are produced.
 
 import { resolveRawScan } from "@/products/match/resolver";
-import { sanitizeScanResult, type CustomerScanResult } from "@/services/security/serializers";
+import { sanitizeScanResult, type CustomerScanResult } from "@/shared/privacy/serializers";
 import type { AccessLevel } from "@/users-businesses/roles/roleAccess";
 import type { Product, Alias, ResolverResult } from "@/types";
 

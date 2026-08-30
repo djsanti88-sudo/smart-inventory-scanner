@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ServiceAccount } from "firebase-admin/app";
 import { cleanScanCode, buildNormalizedCandidates } from "@/scanning/clean/scanCleaner";
-import { COLLECTIONS } from "@/services/db/types";
+import { COLLECTIONS } from "@/sync-database/types";
 
 const EXPECTED_PROJECT = "smart-inventory-scanner-app";
 const argVal = (f: string): string | undefined => { const i = process.argv.indexOf(f); return i >= 0 ? process.argv[i + 1] : undefined; };

@@ -1,6 +1,6 @@
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { useOnlineStatusSync } from "@/components/useOnlineStatusSync";
+import { useOnlineStatusSync } from "@/sync-database/useOnlineStatusSync";
 import { useScanStore } from "@/stores/scanStore";
 
 // Defect 2 (loop2-ui report UI2-1 follow-up): nothing listened for the browser's real "online"/"offline"

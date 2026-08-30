@@ -16,7 +16,7 @@
 // need, not mirror the vendor.
 
 import type { AuthFlowResult } from "@/authentication/service/provisioningTypes";
-import type { BusinessMember } from "@/services/db/types";
+import type { BusinessMember } from "@/sync-database/types";
 
 /**
  * The signed-in user, reduced to what this application actually reads.

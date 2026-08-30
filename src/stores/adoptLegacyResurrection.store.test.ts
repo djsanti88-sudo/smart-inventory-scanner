@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useScanStore } from "@/stores/scanStore";
-import { getMockDb } from "@/services/mockDb";
+import { getMockDb } from "@/sync-database/mock/mockDb";
 
 // F-4 (resurrection leak, 2026-08-09): adoptLegacyLocalData copies the legacy "sis-scan-v1" blob
 // into the signed-in user's per-uid key, then deletes "sis-scan-v1" - but that delete goes through

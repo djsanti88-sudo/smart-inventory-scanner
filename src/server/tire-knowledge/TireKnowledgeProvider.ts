@@ -4,7 +4,7 @@ import type { AiLookupResult, DecodeDecision, EvidenceResult } from "@/types";
 import { emptyResult } from "@/decoding/provider";
 import { lookupByExactBarcode, lookupByExactPartNumber, type TireKnowledgeRow } from "@/server/tire-knowledge/tireKnowledgeIndex";
 import { lookupTrustedExactBarcode } from "@/server/tire-knowledge/tireExactIndex";
-import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
+import { prettifyBrand, prettifyProductName } from "@/shared/text/productDisplay";
 import { basePartNumberKey } from "@/products/catalog/tirePartNumber";
 
 // SERVER-ONLY deterministic tire-knowledge provider. It turns an EXACT trusted-corpus hit into a decode

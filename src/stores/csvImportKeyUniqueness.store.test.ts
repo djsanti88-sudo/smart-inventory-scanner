@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Task 1b audit note (2026-07-22 follow-up to Task 1's SAVE_PRODUCT idempotency-key fix): a reviewer
 // flagged importProductsCsv's SAVE_PRODUCT key (scanStore.ts, bare

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ExportMenu } from "@/components/ExportMenu";
-import { SyncStatusBar } from "@/components/SyncStatusBar";
+import { ExportMenu } from "@/reports/export/ExportMenu";
+import { SyncStatusBar } from "@/sync-database/SyncStatusBar";
 import { useScanStore } from "@/stores/scanStore";
 import type { PendingSyncItem } from "@/types";
 

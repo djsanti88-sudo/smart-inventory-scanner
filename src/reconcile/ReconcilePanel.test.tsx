@@ -15,7 +15,7 @@ import type { Product } from "@/types";
 // visible adapter assumptions, CSV export, and the AM-R6/AM-R10f "Confirm barcode links" flow
 // (confirming routes through the EXISTING scanStore human-approval path; NOTHING auto-approves).
 
-vi.mock("@/services/exportFormats", () => ({
+vi.mock("@/reports/export/exportFormats", () => ({
   downloadCsv: vi.fn(),
 }));
 
@@ -24,7 +24,7 @@ vi.mock("@/authentication/auth", () => ({
   getSession: (...args: unknown[]) => getSession(...args),
 }));
 
-import { downloadCsv } from "@/services/exportFormats";
+import { downloadCsv } from "@/reports/export/exportFormats";
 
 // A real, check-digit-valid UPC-A that is NOT in any seed data.
 const LINK_BARCODE = "036000291452";

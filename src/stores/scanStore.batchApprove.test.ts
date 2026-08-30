@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 import { normalizeCode } from "@/scanning/clean/codeNormalizer";
 
 // Build 3: batch-approve for the Suggested pile (docs/archive/superpowers/specs/2026-07-05-batch-approve-design.md).

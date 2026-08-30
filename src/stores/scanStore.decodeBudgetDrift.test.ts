@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore, DEFAULT_SETTINGS } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // T17/AM-9 (2026-07-15, settings drift fix): the server has always clamped decode budget to
 // [5000, 8000] (owner cost rule 2026-06-28), but the store's persisted default was 13000 - the

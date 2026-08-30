@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore, scanStoreMigrate } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 import {
   buildPersistedScanState,
   persistAccessLevel,

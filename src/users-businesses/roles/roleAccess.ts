@@ -3,7 +3,7 @@
 // is read from env: server-side PLATFORM_OWNER_EMAILS / PLATFORM_OWNER_UIDS (authoritative), and a
 // client-visible NEXT_PUBLIC_PLATFORM_OWNER_EMAILS used ONLY to gate UI (server/serializers enforce truth).
 
-import { isCloudBackendEnabled } from "@/services/config/backend";
+import { isCloudBackendEnabled } from "@/sync-database/backend";
 
 export type BusinessRole = "owner" | "admin" | "counter" | "viewer";
 export type AccessLevel = "platform" | "business";

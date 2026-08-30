@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
 import { FieldValue, type Firestore } from "firebase-admin/firestore";
-import { COLLECTIONS, memberDocId } from "@/services/db/types";
+import { COLLECTIONS, memberDocId } from "@/sync-database/types";
 import type { ProvisionRequest } from "@/authentication/service/provisioningTypes";
 
 export interface ProvisionIdentity {

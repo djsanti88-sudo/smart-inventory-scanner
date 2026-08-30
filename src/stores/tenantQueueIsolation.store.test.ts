@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { SyncResult } from "@/services/mockDb";
-import type { SyncTarget } from "@/services/db/syncTarget";
+import type { SyncResult } from "@/sync-database/mock/mockDb";
+import type { SyncTarget } from "@/sync-database/syncTarget";
 import { createTestScanStore } from "@/stores/scanStore";
 import type { PendingSyncItem } from "@/types";
 

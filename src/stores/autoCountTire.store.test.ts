@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Live-scan auto-count for deterministically-corroborated tires + the poison backstop. The decode RESPONSE
 // is mocked (no live AI); these tests prove the STORE's auto-count gate + firewall behave correctly given

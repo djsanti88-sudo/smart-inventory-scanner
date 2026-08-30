@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { NeedsReviewTable } from "@/review/NeedsReviewTable";
 import { SuggestedApprovalPanel } from "@/review/SuggestedApprovalPanel";
-import { SyncStatusBar } from "@/components/SyncStatusBar";
+import { SyncStatusBar } from "@/sync-database/SyncStatusBar";
 import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
 
 // Build 3: the review screen gains a "Suggested" tab for batch-approving the Suggested pile

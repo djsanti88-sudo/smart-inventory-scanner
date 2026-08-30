@@ -10,7 +10,7 @@ import {
   mintShareToken,
   resolveShareToken,
 } from "@/server/share/shareTokenStore";
-import type { BossReportData } from "@/services/reports/bossReport";
+import type { BossReportData } from "@/reports/variance/bossReport";
 
 function reportSnapshot(overrides: Partial<BossReportData> = {}): BossReportData {
   return {

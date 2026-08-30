@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Owner rule ("if it is resolved, it does not go to review"): a review whose identity is actually
 // settled must never be left status "open"/"suggested" in the Needs Review queue. Both auto-count

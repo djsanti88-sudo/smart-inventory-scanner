@@ -3,7 +3,7 @@ import "server-only";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { BossReportData } from "@/services/reports/bossReport";
+import type { BossReportData } from "@/reports/variance/bossReport";
 import { createTursoClient, tursoCredentialsFromEnv, type TursoClient } from "@/server/db/tursoClient";
 
 // A share token always points to the immutable, Boss Report safe snapshot captured when it was

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useScanStore } from "@/stores/scanStore";
-import { getMockDb } from "@/services/mockDb";
+import { getMockDb } from "@/sync-database/mock/mockDb";
 
 // QA finding #16 (critical): the /scan page bricked once accumulated scans pushed localStorage
 // near its ~5MB quota - scanStore persisted with a plain createJSONStorage(() => localStorage)

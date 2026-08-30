@@ -3,7 +3,7 @@ import "server-only";
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { accessLevelServer } from "@/users-businesses/roles/roleAccess";
-import { COLLECTIONS, memberDocId } from "@/services/db/types";
+import { COLLECTIONS, memberDocId } from "@/sync-database/types";
 import { canonicalGtin } from "@/products/barcodes/gtin";
 import { checkRateLimit, intEnv } from "@/decoding/limits/aiSpendGuard";
 import { decodeStorage } from "@/server/decode/storage";

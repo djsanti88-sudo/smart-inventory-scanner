@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 import { setDerivedPrefixes } from "@/products/catalog/prefixIndex";
 
 // Root-cause diagnostic 2026-08-04 (.superpowers/sdd/2026-08-04-diagnostic-fixes-and-pr-salvage/

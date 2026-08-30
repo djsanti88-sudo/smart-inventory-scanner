@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Build 2 / Task 4: the deterministic structurer (src/products/polish/structurer.ts) runs on the
 // hot path whenever resolveUnknown mints/upgrades a product via create_new - synchronous, no LLM,
@@ -93,7 +93,7 @@ describe("scanStore - structurer containment (Task 4 review fix)", () => {
     });
 
     const { createTestScanStore: createStoreWithMock } = await import("@/stores/scanStore");
-    const { MockDb: MockDbWithMock } = await import("@/services/mockDb");
+    const { MockDb: MockDbWithMock } = await import("@/sync-database/mock/mockDb");
 
     const store = createStoreWithMock({ db: new MockDbWithMock() });
     store.getState().processScan("205551600099");

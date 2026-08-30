@@ -16,7 +16,7 @@
 // It goes to `expected_not_counted` instead, with an honest "not counted in this session" reason.
 // Variance rows exist ONLY for matched products that DO have a counted quantity this session.
 
-import { buildCsv } from "@/services/csvExport";
+import { buildCsv } from "@/reports/export/csvExport";
 import type { MatchResult } from "@/reconcile/match/identityMatcher";
 import type { AdapterResult, ExpectedInventoryRow } from "@/reconcile/types";
 

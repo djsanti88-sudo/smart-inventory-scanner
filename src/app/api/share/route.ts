@@ -5,9 +5,9 @@ import {
   mintShareToken,
   normalizeBossReportSnapshot,
 } from "@/server/share/shareTokenStore";
-import { buildBossReport } from "@/services/reports/bossReport";
+import { buildBossReport } from "@/reports/variance/bossReport";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-import { COLLECTIONS, memberDocId } from "@/services/db/types";
+import { COLLECTIONS, memberDocId } from "@/sync-database/types";
 import { isLiveAuth } from "@/authentication/service/authMode";
 import { isAuthBypassEnabled } from "@/authentication/service/authBypass";
 import { logServerEvent } from "@/server/log";

@@ -3,7 +3,7 @@ import "server-only";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { canonicalGtin } from "@/products/barcodes/gtin";
-import { COLLECTIONS, type CatalogEntry as DbCatalogEntry } from "@/services/db/types";
+import { COLLECTIONS, type CatalogEntry as DbCatalogEntry } from "@/sync-database/types";
 import { decodeStorage, type DecodeStorage } from "@/server/decode/storage";
 
 // Master-truth write path: a strong app-verified decode on a

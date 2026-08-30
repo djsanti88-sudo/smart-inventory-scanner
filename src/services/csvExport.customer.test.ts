@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { exportFinalCounts, exportFinalCountsCustomer, exportQuantityAdjustmentsCustomer, exportUnknownsCustomer } from "./csvExport";
-import { isSensitiveKey } from "./security/sensitiveFields";
+import { exportFinalCounts, exportFinalCountsCustomer, exportQuantityAdjustmentsCustomer, exportUnknownsCustomer } from "@/reports/export/csvExport";
+import { isSensitiveKey } from "@/shared/privacy/sensitiveFields";
 import type { InventoryCount, Product, UnknownCodeReview } from "@/types";
 
 const product = { id: "p1", businessId: "b", name: "Falken Sincera", brand: "Falken", category: "Tire", specsShort: "215/70R15", specsFull: "", primarySku: "28816861", primaryBarcode: "848983012906", gtin: "848983012906", upc: "", ean: "", vendorCodes: ["x"], aliases: ["28816861", "2881-6861"], imageUrl: "", productUrl: "", location: "Bay A", notes: "", status: "active", source: "manual", confidence: 1, verified: true, createdAt: "", updatedAt: "", createdBy: "", updatedBy: "" } as Product;

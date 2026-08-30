@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { getSession } from "@/authentication/auth";
 import { isLiveAuth } from "@/authentication/service/authMode";
-import { buildBossReport } from "@/services/reports/bossReport";
+import { buildBossReport } from "@/reports/variance/bossReport";
 import { useScanStore } from "@/stores/scanStore";
 import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
 

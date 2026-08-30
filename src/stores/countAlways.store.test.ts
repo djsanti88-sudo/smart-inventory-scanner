@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 function totalCount(store: ReturnType<typeof createTestScanStore>) {
   return store.getState().finalCounts.reduce((n, c) => n + c.quantity, 0);

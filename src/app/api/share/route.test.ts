@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
-import type { BossReportData } from "@/services/reports/bossReport";
+import type { BossReportData } from "@/reports/variance/bossReport";
 
 const mocks = vi.hoisted(() => ({
   mintShareToken: vi.fn(),

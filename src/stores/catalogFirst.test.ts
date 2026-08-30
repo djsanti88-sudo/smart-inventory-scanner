@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 import { sanitizeCatalogEntry } from "@/products/catalog/sanitizeCatalog";
 import type { CatalogEntry, ShopOverride } from "@/products/catalog/catalogTypes";
 import { DEMO_BUSINESS_ID } from "@/seed/seedData";

@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
 import { DEMO_BUSINESS_ID } from "@/seed/seedData";
-import type { SyncTarget } from "@/services/db/syncTarget";
-import type { SyncResult, IncrementPayload } from "@/services/mockDb";
+import type { SyncTarget } from "@/sync-database/syncTarget";
+import type { SyncResult, IncrementPayload } from "@/sync-database/mock/mockDb";
 import type { InventoryCount, InventorySession, PendingSyncItem } from "@/types";
 
 // VERIFIED DEFECT (live Firebase emulator spot-check, 2026-08-09, e2e/proof/adopt-emulator-spotcheck/):

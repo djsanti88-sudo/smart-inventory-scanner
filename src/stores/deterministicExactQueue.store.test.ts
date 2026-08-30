@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 function openReviews(store: ReturnType<typeof createTestScanStore>, codes: string[]) {
   store.getState().setOnline(false);

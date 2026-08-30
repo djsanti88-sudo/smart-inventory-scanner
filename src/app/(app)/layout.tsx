@@ -1,4 +1,4 @@
-import { StoreHydrator } from "@/components/StoreHydrator";
+import { StoreHydrator } from "@/sync-database/StoreHydrator";
 import { AuthGuard } from "@/authentication/AuthGuard";
 import { Nav } from "@/user-interface/shell/Nav";
 import { ProdFirebaseBanner } from "@/user-interface/shell/ProdFirebaseBanner";

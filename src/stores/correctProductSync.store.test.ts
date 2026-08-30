@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Task 1 (2026-07-22 sync-truth plan): a second correctProduct edit to the SAME product in the SAME
 // session previously minted an idempotency key identical to the first edit's

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { postTelemetry } from "@/lib/telemetry";
+import { postTelemetry } from "@/shared/telemetry/telemetry";
 
 export default function GlobalError({
   error,

@@ -12,7 +12,7 @@ import type { AdapterResult } from "@/reconcile/types";
 import { deriveCountedByUid } from "@/reconcile/match/countedByUid";
 import { resolveRawScan } from "@/products/match/resolver";
 import { cleanScanCode } from "@/scanning/clean/scanCleaner";
-import { downloadCsv } from "@/services/exportFormats";
+import { downloadCsv } from "@/reports/export/exportFormats";
 import { getSession } from "@/authentication/auth";
 import { isLiveAuth } from "@/authentication/service/authMode";
 import { readUniversalFile } from "@/import/universalFileReader";

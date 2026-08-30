@@ -1,6 +1,6 @@
 import type { CatalogCandidate, CatalogEntry, CatalogEntryMeta, CatalogSourceTier } from "./catalogTypes";
 import { isUsableProductName, cleanProductName } from "@/decoding/decode";
-import { sanitizeForAiLookup } from "@/services/sanitizer";
+import { sanitizeForAiLookup } from "@/shared/privacy/sanitizer";
 import type { ProvenanceTier } from "@/types";
 
 const VALID_TIERS: CatalogSourceTier[] = ["authoritative", "strong_commercial", "supporting", "weak", ""];

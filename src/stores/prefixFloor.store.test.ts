@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Plan C Task 3 - PREFIX FLOOR: a counted-but-unidentified row must never be a bare
 // "Unidentified item (barcode X)" when the scanned code's GS1 company prefix maps to a known brand.

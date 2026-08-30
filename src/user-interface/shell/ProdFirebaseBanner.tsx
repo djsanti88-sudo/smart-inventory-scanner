@@ -5,7 +5,7 @@
 // write to real data. It is DEV-ONLY: on a real deployment (NODE_ENV === "production") it never renders,
 // because in production using real Firebase IS the intended behavior. The safe `npm run dev` (mock) and
 // `npm run dev:emulator` never trigger it. Env is read at render time so it is testable.
-import { isCloudBackendEnabled } from "@/services/config/backend";
+import { isCloudBackendEnabled } from "@/sync-database/backend";
 
 export function ProdFirebaseBanner() {
   const isDev = process.env.NODE_ENV !== "production"; // false on any real Vercel deployment

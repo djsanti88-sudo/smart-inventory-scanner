@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { useScanStore } from "@/stores/scanStore";
-import { getMockDb } from "@/services/mockDb";
+import { getMockDb } from "@/sync-database/mock/mockDb";
 
 // Task 1 (B4, product honesty, 2026-08-09): adoptLegacyLocalData's migrate step copies the legacy
 // blob to the per-uid key and DELETES the legacy blob, then calls rehydrateForUid/setBusinessContext.

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 import { shouldAutoApplySuggestion, canAutoCount } from "./scanGates";
 
 // Barcode trust gate (spec v3), Task 4: PIN the AM-2 counting invariants ("suggested tier never

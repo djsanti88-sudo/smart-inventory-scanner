@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Tasks 5+6: client-orchestrated background verify. A tire scan whose FAST decode lands "suggested"
 // must auto-fire ONE mode:"decode-deep" request WITH scanContext:"tire"; on a "verified" deep response

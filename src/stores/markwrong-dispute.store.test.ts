@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Catalog revocation round (design §2.3): markWrong fires a best-effort, non-blocking dispute
 // report to POST /api/catalog-dispute, mirroring how correctionRecheck is invoked as a trailing

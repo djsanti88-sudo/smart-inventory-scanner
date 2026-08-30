@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
 import type { Product } from "@/types";
 
@@ -12,7 +12,7 @@ import type { Product } from "@/types";
 // Root cause: matchProductByIdentifiers (src/products/match/aliasMatcher.ts:104-111) is the deterministic
 // trust gate for a KNOWN identifier match - it filters `products` to `p.verified === true` BEFORE
 // checking primaryBarcode/gtin/upc/ean/primarySku. CUSTOMER_SAFE_PRODUCT_FIELDS
-// (src/services/security/sensitiveFields.ts), the allowlist buildPersistedScanState's "business"
+// (src/shared/privacy/sensitiveFields.ts), the allowlist buildPersistedScanState's "business"
 // branch uses to shape every product before writing to localStorage, does NOT include `verified`.
 // So a customer-level reload rehydrates every product with its identifiers intact but `verified`
 // silently defaulted to `undefined` (falsy) - matchProductByIdentifiers's `.filter(p => p.verified

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Phase 3 defect F1 (TOP-LEVEL LAW: "every scan appears and counts"): processScan hard-returned
 // null when the current session was locked or completed. ensureAutoSession only runs on scan-page

@@ -2,7 +2,7 @@ import "server-only";
 
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { canonicalGtin } from "@/products/barcodes/gtin";
-import { COLLECTIONS, type CatalogEntry as DbCatalogEntry } from "@/services/db/types";
+import { COLLECTIONS, type CatalogEntry as DbCatalogEntry } from "@/sync-database/types";
 import { resolveCatalogDocId } from "@/server/catalog/catalogDocId";
 
 // Sync Truth Task 4 (owner-approved 2026-07-22, docs/archive/superpowers/plans/2026-07-22-sync-truth-five-steps.md):

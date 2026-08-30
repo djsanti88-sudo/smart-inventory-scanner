@@ -1,4 +1,4 @@
-import type { AuditEvent } from "@/services/db/types";
+import type { AuditEvent } from "@/sync-database/types";
 
 // Audit-event substrate. Pure + framework-free (no React / next / firebase imports) so it is unit-
 // testable in the node vitest project. The store emits AuditEventInput through an injectable sink

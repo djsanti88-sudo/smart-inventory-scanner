@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // B2 regression (owner-reported, 268-row review, 2026-07-20): 848983027580 appeared as a SEPARATE
 // counted product row from 00848983027580 (and 0877184000481 vs 877184000481) - the same physical

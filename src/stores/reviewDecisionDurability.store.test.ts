@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 import { createTestScanStore } from "@/stores/scanStore";
 import type { UnknownCodeReview } from "@/types";
 

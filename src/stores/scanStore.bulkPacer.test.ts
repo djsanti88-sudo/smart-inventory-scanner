@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createTestScanStore, __resetGeneralDecodePacerForTest } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // BULK PACER (owner-approved 2026-08-07, impl-boss-god-rate.md #4): a 500-2000 code paste must
 // self-throttle the decode POST *rate* (not just concurrency) so it stays under AI_LOOKUP_RATE_LIMIT

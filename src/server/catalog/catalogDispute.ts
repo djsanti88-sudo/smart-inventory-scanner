@@ -1,7 +1,7 @@
 import "server-only";
 
 import { getAdminDb } from "@/lib/firebaseAdmin";
-import { COLLECTIONS, type CatalogEntry as DbCatalogEntry } from "@/services/db/types";
+import { COLLECTIONS, type CatalogEntry as DbCatalogEntry } from "@/sync-database/types";
 import { resolveCatalogDocId } from "@/server/catalog/catalogDocId";
 import { deletePersistedDecode } from "@/server/decodeCacheStore";
 

@@ -27,23 +27,23 @@ import { isLikelyMisreadGtin } from "@/products/barcodes/misread";
 import { gradeBarcode } from "@/products/barcodes/barcodeTrust";
 import { canonicalGtin } from "@/products/barcodes/gtin";
 import { clampDecodeBudgetMs } from "@/decoding/decodeBudget";
-import { fetchWithBackoff } from "@/services/net/fetchWithBackoff";
+import { fetchWithBackoff } from "@/shared/net/fetchWithBackoff";
 import { hashPin, verifyPin, isValidPinFormat } from "@/sessions/lock/pinLock";
 import { isPlatformOwnerClient } from "@/users-businesses/roles/roleAccess";
-import { isCloudBackendEnabled } from "@/services/config/backend";
-import type { DatabaseService } from "@/services/db/databaseService";
+import { isCloudBackendEnabled } from "@/sync-database/backend";
+import type { DatabaseService } from "@/sync-database/databaseService";
 import { resolveScanToProductTiered } from "@/products/match/aliasMatcher";
 import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/products/match/productDedup";
 import { incrementInventoryCount } from "@/inventory/ledger";
 import { buildIdempotencyKey, stableIdempotencyFingerprint } from "@/inventory/idempotency";
 import { versionReviewDecision } from "@/review/reviewDecisionVersion";
-import { MockDb, getMockDb, type IncrementPayload, type SyncResult } from "@/services/mockDb";
-import { FirebaseSyncTarget } from "@/services/db/firebase/firebaseSyncTarget";
-import { loadBusinessData } from "@/services/db/firebase/businessDataLoader";
-import { auditRepository, catalogRepository } from "@/services/db/firebase/repositories";
+import { MockDb, getMockDb, type IncrementPayload, type SyncResult } from "@/sync-database/mock/mockDb";
+import { FirebaseSyncTarget } from "@/sync-database/cloud/firebaseSyncTarget";
+import { loadBusinessData } from "@/sync-database/cloud/businessDataLoader";
+import { auditRepository, catalogRepository } from "@/sync-database/cloud/repositories";
 import { getDb } from "@/authentication/firebaseClient";
 import { getSession } from "@/authentication/auth";
-import { postTelemetry } from "@/lib/telemetry";
+import { postTelemetry } from "@/shared/telemetry/telemetry";
 import {
   evaluateAiGate,
   initBreaker,
@@ -54,7 +54,7 @@ import {
   type AiGateReason,
   type BreakerState,
 } from "@/decoding/limits/circuitBreaker";
-import { sanitizeForAiLookup } from "@/services/sanitizer";
+import { sanitizeForAiLookup } from "@/shared/privacy/sanitizer";
 import { sanitizeCustomerReason, MISS_REASON_TEXT } from "@/decoding/decodeFallback";
 import { isUsableProductName, cleanProductName } from "@/decoding/decode";
 import { getIdentityConfidenceBand } from "@/decoding/identityConfidenceBand";
@@ -81,8 +81,8 @@ import {
   decodeCorroborated as decodeCorroboratedGate,
 } from "@/stores/scanGates";
 import type { CatalogSourceTier, CatalogVerifiedBy } from "@/products/catalog/catalogTypes";
-import { appendFeedback, type FeedbackEvent, type FeedbackEventType } from "@/services/feedback/feedback";
-import type { CountSnapshot } from "@/services/reports/varianceReport";
+import { appendFeedback, type FeedbackEvent, type FeedbackEventType } from "@/shared/feedback/feedback";
+import type { CountSnapshot } from "@/reports/variance/varianceReport";
 import {
   buildSessionHistoryEntry,
   appendSessionHistory,
@@ -106,11 +106,11 @@ import {
   hasMeaningfulLegacyBlobAsync,
   LEGACY_PERSIST_KEY,
 } from "@/stores/scanPersistNamespace";
-import { getOrCreateDeviceId } from "@/services/deviceIdentity";
+import { getOrCreateDeviceId } from "@/sync-database/queue/deviceIdentity";
 import { shouldReuseSession, buildAutoSessionName } from "@/sessions/auto/autoSession";
 import { buildDiscoveredIdentifiers } from "@/products/match/discoveredIdentifiers";
-import { planSyncBatch } from "@/services/syncBatchPlanner";
-import { mergeReloadedProductsAndAliases, mergeReloadedReviews } from "@/services/reloadMergePolicy";
+import { planSyncBatch } from "@/sync-database/queue/syncBatchPlanner";
+import { mergeReloadedProductsAndAliases, mergeReloadedReviews } from "@/sync-database/queue/reloadMergePolicy";
 import { safeStructuredFieldsFor } from "@/products/polish/structuredFields";
 import { backfillProducts } from "@/products/polish/backfillProducts";
 import type { AiStatus } from "@/types";
@@ -689,7 +689,7 @@ function provisionalPlaceholderName(code: string): string {
 // using idempotency keys so a retry can never double-count.
 
 // The storage half of these dependencies (db, cloudBackend, trustedExactProbeEnabled,
-// loadBusinessData, audit, lookupGlobalCatalog) now lives in @/services/db/databaseService as the
+// loadBusinessData, audit, lookupGlobalCatalog) now lives in @/sync-database/databaseService as the
 // DatabaseService port, so "what would a replacement backend have to provide?" is answerable without
 // reading this file. Extending it means the two cannot drift: a new storage capability added here
 // without declaring it there is a type error.

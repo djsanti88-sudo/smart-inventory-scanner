@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Task 9b (owner-ratified 2026-07-14): a decode that yields a SUGGESTION (any confidence) no longer
 // creates/keeps an OPEN Needs Review item. The scan still counts immediately (count-decouple,

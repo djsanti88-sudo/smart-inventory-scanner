@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestScanStore, trustedExactProbeCandidate } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
-import { validatePendingSyncItem } from "@/services/db/firebase/firebaseSyncSafety";
+import { MockDb } from "@/sync-database/mock/mockDb";
+import { validatePendingSyncItem } from "@/sync-database/cloud/firebaseSyncSafety";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
 import type { PendingSyncItem, ScanEvent } from "@/types";
 

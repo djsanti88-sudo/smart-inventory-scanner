@@ -1,5 +1,5 @@
 import type { AiLookupResult } from "@/types";
-import { sanitizeForAiLookup } from "@/services/sanitizer";
+import { sanitizeForAiLookup } from "@/shared/privacy/sanitizer";
 import { detectCodeType } from "@/products/match/codeTypeDetector";
 import { killSwitchOn, checkRateLimit, readDailyUsed, intEnv, getGptDecodeStatus } from "@/decoding/limits/aiSpendGuard";
 import { GPT_DECODE_WORST_CASE_USD, type GptDecodeResult } from "@/decoding/gptDecodeClient";
@@ -9,7 +9,7 @@ import { decodeStorage } from "@/server/decode/storage";
 import { runDecodePipeline, e2eMode } from "@/server/decode/pipeline";
 import { clampDecodeBudgetMs } from "@/decoding/decodeBudget";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-import { COLLECTIONS, memberDocId } from "@/services/db/types";
+import { COLLECTIONS, memberDocId } from "@/sync-database/types";
 import { isLiveAuth } from "@/authentication/service/authMode";
 import { clampConfidenceThreshold } from "@/decoding/limits/decodePolicy";
 import { buildMasterCatalogEntry, appendMasterCatalogEntry } from "@/server/catalog/masterAppend";

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Repro for the duplicate-product bug: a product is counted, then a persist/session reset drops its
 // approved alias AND its `verified` flag (exactly what the customer-safe persist does on reload -

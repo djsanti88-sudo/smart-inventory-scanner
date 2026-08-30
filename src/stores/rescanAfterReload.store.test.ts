@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
 
 // TOP-LEVEL LAW repro (review finding, 2026-07-22): re-scanning a code after a CUSTOMER-level reload

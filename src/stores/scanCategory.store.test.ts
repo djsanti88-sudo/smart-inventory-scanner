@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore, DEFAULT_SETTINGS } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Phase 9: the app defaults to Tires (firewall on out of the box), and a blocked scan drives the
 // dismissible scan-page warning banner via lastCategoryWarning.

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // AM-1(a) (owner-reported 36-70s browser blocks): the decode fetch previously had no
 // AbortController/timeout at all - a slow/hung server response could block the scan row (and the

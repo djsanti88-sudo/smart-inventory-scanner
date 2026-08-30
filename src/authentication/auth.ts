@@ -22,8 +22,8 @@ import type {
   ProvisionResponse,
 } from "@/authentication/service/provisioningTypes";
 import type { AuthUser, Membership, CreatableMemberRole } from "@/authentication/service/authService";
-import { COLLECTIONS, type BusinessMember } from "@/services/db/types";
-import { retryingRead } from "@/services/db/firebase/boundedRead";
+import { COLLECTIONS, type BusinessMember } from "@/sync-database/types";
+import { retryingRead } from "@/sync-database/cloud/boundedRead";
 
 // Firebase Auth for the launch MVP (email/password; structured so Google can be added later). The
 // Admin SDK / service account is NEVER imported here. The guarded E2E/test bypass keeps Playwright specs

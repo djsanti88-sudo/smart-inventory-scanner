@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 import type { Product } from "@/types";
 
 // Phase 1 data-correctness: resolveUnknown(create_new) must NOT mint a fresh product when the scanned

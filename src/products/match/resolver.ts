@@ -3,7 +3,7 @@ import { cleanScanCode } from "@/scanning/clean/scanCleaner";
 import { detectCodeType } from "@/products/match/codeTypeDetector";
 import { resolveScanToProductTiered } from "@/products/match/aliasMatcher";
 import { isLikelyMisreadGtin } from "@/products/barcodes/misread";
-import { levenshteinWithin } from "@/services/textDistance";
+import { levenshteinWithin } from "@/shared/text/textDistance";
 
 // QA Task 8 (owner-approved 2026-07-15): review-only near-match SKU suggestion. A typo like
 // T432118 scanned when the shop's real SKU is T432119 should not sit as a bare "unknown" - but it

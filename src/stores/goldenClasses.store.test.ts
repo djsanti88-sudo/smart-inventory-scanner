@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Identity-outcome golden classes (AI OFF, deterministic, $0). Ledger balance is asserted separately
 // in ledgerInvariants.store.test.ts; here we lock the IDENTITY each class resolves to. Wrong identity

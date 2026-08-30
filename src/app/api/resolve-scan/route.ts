@@ -1,10 +1,10 @@
 import "server-only";
 
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-import { COLLECTIONS, memberDocId } from "@/services/db/types";
+import { COLLECTIONS, memberDocId } from "@/sync-database/types";
 import { accessLevelServer } from "@/users-businesses/roles/roleAccess";
 import { resolveScanForRole } from "@/services/security/resolveScanServer";
-import { toStoreProduct, toStoreAlias } from "@/services/db/firebase/storeMappers";
+import { toStoreProduct, toStoreAlias } from "@/sync-database/cloud/storeMappers";
 import type { Product, Alias } from "@/types";
 import { logServerEvent } from "@/server/log";
 

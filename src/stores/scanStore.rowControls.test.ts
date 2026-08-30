@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Best-guess identity (owner decision 2026-08-19): a NON-verified decode that produced a usable name
 // carries that name on the counted row as a PENDING inline suggestion with confirm controls, whatever

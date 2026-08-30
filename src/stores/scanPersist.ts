@@ -3,7 +3,7 @@
 // codes / decode traces). This module is the SINGLE place that decides what reaches disk, so it is pure and
 // unit-testable in isolation (no store, no Firebase). The store's `partialize` delegates here.
 
-import { sanitizeProduct, sanitizeReview, sanitizeScanEvent } from "@/services/security/serializers";
+import { sanitizeProduct, sanitizeReview, sanitizeScanEvent } from "@/shared/privacy/serializers";
 import { effectiveClientAccessLevel, isLocalRuntime, type AccessLevel } from "@/users-businesses/roles/roleAccess";
 
 // Minimal shape of the persistable fields we read off the store state. Typed loosely on purpose so this

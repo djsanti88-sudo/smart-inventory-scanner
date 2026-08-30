@@ -16,7 +16,7 @@ import { initializeApp, cert, getApps, type ServiceAccount } from "firebase-admi
 import { getFirestore } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
 import { getSeed } from "@/seed/seedData";
-import { COLLECTIONS } from "@/services/db/types";
+import { COLLECTIONS } from "@/sync-database/types";
 
 const EXPECTED_PROJECT = "smart-inventory-scanner-app";
 

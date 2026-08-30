@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // GOD CLIENT (owner-approved 2026-08-07, impl-boss-god-rate.md #3): evaluateAutoDecode must not
 // self-block the platform owner's own scans on the cap/breaker/emergency-stop gates - the client

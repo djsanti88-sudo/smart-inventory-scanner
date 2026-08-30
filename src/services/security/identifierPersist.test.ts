@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeProduct } from "@/services/security/serializers";
+import { sanitizeProduct } from "@/shared/privacy/serializers";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
 import { matchProductByIdentifiers } from "@/products/match/aliasMatcher";
 import type { CleanedCode, Product } from "@/types";

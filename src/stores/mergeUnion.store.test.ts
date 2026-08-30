@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 import { replayLedgerCounts } from "@/inventory/replay";
 
 // D3: all three orphan-transfer sites (resolveUnknown merge, runLiveDecodeOnce fast-decode auto-link,

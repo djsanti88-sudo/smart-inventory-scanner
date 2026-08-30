@@ -4,12 +4,12 @@ import { useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 import { customerDisplayName } from "@/products/match/displayName";
-import { prettifyProductName, resolvedBrand, resolvedModel, resolvedSizeTag, resolvedSizeDisplay } from "@/services/format/productDisplay";
+import { prettifyProductName, resolvedBrand, resolvedModel, resolvedSizeTag, resolvedSizeDisplay } from "@/shared/text/productDisplay";
 import { getReviewIdentityBand, identityBandLabel } from "@/decoding/identityConfidenceBand";
 import { DecodeStatusBadge, SyncBadge } from "@/user-interface/ui/badges";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/inventory/UndoDeleteBanner";
 import { filterProducts } from "@/products/polish/filterProducts";
-import { requiresOwnerPin } from "@/services/security/destructiveGuard";
+import { requiresOwnerPin } from "@/sessions/lock/destructiveGuard";
 import type { InventoryCount, Product, UnknownCodeReview } from "@/types";
 
 // DEFECT #29/#37 residual (live-reproduced 2026-08-05/06, canelo round 2): same freeze class as

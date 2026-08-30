@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // resolveUnknown must be idempotent against a double-click / concurrent re-entry. Every async decode path
 // (liveDecode, backgroundVerifyDeep, cloudCatalogResolve, correctionRecheck) already re-checks

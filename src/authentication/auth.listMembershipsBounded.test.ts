@@ -37,7 +37,7 @@ vi.mock("@/authentication/firebaseClient", () => ({
 vi.mock("@/authentication/service/authBypass", () => ({ isAuthBypassEnabled: () => false }));
 
 import { listMemberships } from "./auth";
-import { READ_ATTEMPT_TIMEOUT_MS, READ_MAX_ATTEMPTS } from "@/services/db/firebase/boundedRead";
+import { READ_ATTEMPT_TIMEOUT_MS, READ_MAX_ATTEMPTS } from "@/sync-database/cloud/boundedRead";
 
 afterEach(() => {
   mocks.getDocs.mockReset();

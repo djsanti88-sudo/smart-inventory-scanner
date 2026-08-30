@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 describe("provenanceTier is stamped at every provisional product birth", () => {
   it("BEHAVIOR: the ensureProvisionalCount mint carries the tier (covered end to end)", () => {

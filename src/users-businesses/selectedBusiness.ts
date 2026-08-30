@@ -36,5 +36,5 @@ export function clearSelectedBusinessId(): void {
 
 /** Whether the app is running against the cloud backend (vs the local mock).
  *  Legacy name, kept because BusinessContextGate and its five suites mock this module by this
- *  export; the implementation lives once in @/services/config/backend. */
-export { isCloudBackendEnabled as isFirebaseBackend } from "@/services/config/backend";
+ *  export; the implementation lives once in @/sync-database/backend. */
+export { isCloudBackendEnabled as isFirebaseBackend } from "@/sync-database/backend";

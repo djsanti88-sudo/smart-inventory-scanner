@@ -24,11 +24,11 @@ vi.mock("@/authentication/service/authMode", () => ({
   isLiveAuth: () => mocks.liveAuth,
 }));
 
-vi.mock("@/services/mockDb", () => ({
+vi.mock("@/sync-database/mock/mockDb", () => ({
   getMockDb: () => ({ getSessionCounts: mocks.getSessionCounts }),
 }));
 
-vi.mock("@/services/exportFormats", () => ({
+vi.mock("@/reports/export/exportFormats", () => ({
   downloadCsv: (...args: unknown[]) => mocks.downloadCsv(...args),
 }));
 

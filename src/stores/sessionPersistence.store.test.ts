@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import type { SyncTarget } from "@/services/db/syncTarget";
-import type { SyncResult } from "@/services/mockDb";
+import type { SyncTarget } from "@/sync-database/syncTarget";
+import type { SyncResult } from "@/sync-database/mock/mockDb";
 import type { InventoryCount, InventorySession, PendingSyncItem } from "@/types";
 
 // Loop 3 proof (store logic, no emulator): the count session is persisted through the durable queue

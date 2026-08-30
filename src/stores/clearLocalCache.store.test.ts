@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import type { SyncTarget } from "@/services/db/syncTarget";
-import type { SyncResult } from "@/services/mockDb";
+import type { SyncTarget } from "@/sync-database/syncTarget";
+import type { SyncResult } from "@/sync-database/mock/mockDb";
 import type { PendingSyncItem } from "@/types";
 
 // Bug #2 proof: "Clear local cache" must NOT call db.reset() in CLOUD mode (FirebaseSyncTarget.reset()

@@ -35,7 +35,7 @@ async function scan(page: Page, code: string) {
   await input.press("Enter");
 }
 
-// Minimal RFC-4180 CSV parser matching src/services/exportFormats.ts's parseCsv (BOM + CRLF + quoting) -
+// Minimal RFC-4180 CSV parser matching src/reports/export/exportFormats.ts's parseCsv (BOM + CRLF + quoting) -
 // reimplemented locally since e2e specs do not resolve the app's `@/` path alias.
 const BOM = "﻿";
 function parseCsv(csv: string): { headers: string[]; rows: string[][] } {

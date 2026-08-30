@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Decode ladder Task 9 (store wiring): applying a decode result runs identity-merge first.
 //  - auto_link (same canonical GTIN across encodings) attaches the scanned code as a new alias on the

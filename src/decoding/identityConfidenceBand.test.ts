@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { getIdentityConfidenceBand, getReviewIdentityBand, identityBandLabel, identityBandWord } from "@/decoding/identityConfidenceBand";
-import { sanitizeReview } from "@/services/security/serializers";
+import { sanitizeReview } from "@/shared/privacy/serializers";
 import type { UnknownCodeReview } from "@/types";
 
 // The band is the ONLY confidence the product shows (owner decision 2026-08-19). It is derived from the
