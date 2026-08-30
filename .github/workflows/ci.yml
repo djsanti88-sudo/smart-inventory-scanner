@@ -32,7 +32,7 @@ name: CI
 # optimization; rebuild it locally via `npm run build:knowledge-db` (or `node scripts/provision-worktree.mjs`
 # to copy from a known-good checkout) if you need to exercise the DB path.
 #
-# STRESS FIXTURES NOTE: src/components/UniversalImportPanel.fixtures.test.tsx reads real CSV fixtures
+# STRESS FIXTURES NOTE: src/import/UniversalImportPanel.fixtures.test.tsx reads real CSV fixtures
 # from .superpowers/stress/fixtures/, which is entirely gitignored (see .gitignore: "Agent/session
 # scratch") and has no build-time generator in this repo - scripts/provision-worktree.mjs only copies it
 # from a known-good LOCAL checkout path (C:/Users/djsan/inventory), which does not exist in a clean CI
@@ -85,7 +85,7 @@ jobs:
     # why each of these two suites is excluded and why that is safe (self-contained CI knobs added to
     # scripts/proof-all.mjs; local `npm run proof:all` with no env vars set still runs all of them).
     env:
-      VITEST_EXTRA_EXCLUDE: "src/server/tire-knowledge/dtHarvestIntegration.test.ts,src/components/UniversalImportPanel.fixtures.test.tsx"
+      VITEST_EXTRA_EXCLUDE: "src/server/tire-knowledge/dtHarvestIntegration.test.ts,src/import/UniversalImportPanel.fixtures.test.tsx"
       # proof-all.mjs exits non-zero on a narrowed run unless this is set (2026-08-16 clean-room
       # review, HIGH: a narrowed run used to exit 0 and be reported as "all local legs green" with
       # no distinguishable failure signal). Setting it here makes CI's narrowing -- already fully

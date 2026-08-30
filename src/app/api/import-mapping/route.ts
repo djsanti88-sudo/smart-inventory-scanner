@@ -6,11 +6,11 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { isLiveAuth } from "@/authentication/service/authMode";
 import { isAuthBypassEnabled } from "@/authentication/service/authBypass";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
-import type { ColumnMapping } from "@/services/importSchema";
+import type { ColumnMapping } from "@/import/importSchema";
 import {
   getImportMappingMemory,
   putImportMappingMemory,
-} from "@/server/importMappingMemory";
+} from "@/import/importMappingMemory";
 import { logServerEvent } from "@/server/log";
 
 export const runtime = "nodejs";

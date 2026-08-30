@@ -15,10 +15,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { inferColumnMapping, validateManualMapping } from "@/services/columnIntelligence";
-import { buildSourceSignature } from "@/services/importSchema";
-import type { UploadFileLike } from "@/services/importSchema";
-import { readUniversalFile } from "@/services/universalFileReader";
+import { inferColumnMapping, validateManualMapping } from "@/import/columnIntelligence";
+import { buildSourceSignature } from "@/import/importSchema";
+import type { UploadFileLike } from "@/import/importSchema";
+import { readUniversalFile } from "@/import/universalFileReader";
 
 const FIXTURES = join(__dirname, "__fixtures__");
 

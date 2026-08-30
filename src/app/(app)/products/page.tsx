@@ -6,7 +6,7 @@ import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 import { customerDisplayName } from "@/services/displayName";
 import { ImageHoverPreview } from "@/user-interface/ui/ImageHoverPreview";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
-import { UniversalImportPanelContainer } from "@/components/UniversalImportPanelContainer";
+import { UniversalImportPanelContainer } from "@/import/UniversalImportPanelContainer";
 import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
 import type { Product } from "@/types";
 

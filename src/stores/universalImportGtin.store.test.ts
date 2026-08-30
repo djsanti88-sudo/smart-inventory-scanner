@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import type { ImportPreviewRow } from "@/services/importSchema";
+import type { ImportPreviewRow } from "@/import/importSchema";
 
 // DEFECT 1 (padded-GTIN equivalence law, shipped P5): applyUniversalImport aggregates/keys imported
 // rows on the RAW barcode string. Importing the same tire once as a 12-digit UPC and once as its

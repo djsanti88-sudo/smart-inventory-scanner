@@ -9,8 +9,8 @@ import {
   matchExpectedRow,
   type CorpusCandidate,
   type MatcherDeps,
-} from "@/services/reconcile/identityMatcher";
-import type { ExpectedInventoryRow } from "@/services/reconcile/types";
+} from "@/reconcile/match/identityMatcher";
+import type { ExpectedInventoryRow } from "@/reconcile/types";
 import {
   lookupAllByPartNumber,
   candidatesBySizeToken,
@@ -19,7 +19,7 @@ import {
 import { tireSizeToken } from "@/services/ai/tireSpecs";
 import { tirePartNumberVariants } from "@/services/catalog/tirePartNumber";
 import { lookupRetailBarcodeAsync } from "@/server/retail-knowledge/retailKnowledgeIndex";
-import type { PreviewMatchResult } from "@/services/universalImportPreview";
+import type { PreviewMatchResult } from "@/import/universalImportPreview";
 import { logServerEvent } from "@/server/log";
 
 // Preview result = a MatchResult optionally enriched with the exact retail-corpus hit for a non-tire

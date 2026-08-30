@@ -1,19 +1,19 @@
 // src/services/import/mappingMemoryRoundtrip.test.ts
 // @vitest-environment node
 // Task 11 (Phase 4 Stage A ship gate), I7 proof: a remembered manual column mapping survives a
-// put/get round trip through src/server/importMappingMemory.ts and re-applies to the same file's
+// put/get round trip through src/import/importMappingMemory.ts and re-applies to the same file's
 // headers. NOTE (brief deviation): the brief named these exports `saveMapping`/`loadMapping` - the
 // REAL committed exports are `putImportMappingMemory`/`getImportMappingMemory` (confirmed by reading
-// src/server/importMappingMemory.ts). This file follows SOURCE. The in-memory MappingKv seam mirrors
-// src/server/importMappingMemory.test.ts - no live Turso/KV is touched.
+// src/import/importMappingMemory.ts). This file follows SOURCE. The in-memory MappingKv seam mirrors
+// src/import/importMappingMemory.test.ts - no live Turso/KV is touched.
 import { describe, expect, it, vi } from "vitest";
 import {
   getImportMappingMemory,
   putImportMappingMemory,
   type MappingKv,
-} from "@/server/importMappingMemory";
-import { validateManualMapping } from "@/services/columnIntelligence";
-import { buildSourceSignature, type ColumnMapping } from "@/services/importSchema";
+} from "@/import/importMappingMemory";
+import { validateManualMapping } from "@/import/columnIntelligence";
+import { buildSourceSignature, type ColumnMapping } from "@/import/importSchema";
 
 vi.mock("server-only", () => ({}));
 

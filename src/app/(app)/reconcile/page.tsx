@@ -1,4 +1,4 @@
-import { ReconcilePanel } from "@/components/ReconcilePanel";
+import { ReconcilePanel } from "@/reconcile/ReconcilePanel";
 import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
 
 // Reconcile page (Task 7): its own page, away from the scan flow (scanner flow untouched).

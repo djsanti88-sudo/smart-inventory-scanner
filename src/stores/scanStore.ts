@@ -89,7 +89,7 @@ import {
   type SessionHistoryEntry,
 } from "@/sessions/history/sessionHistory";
 import { toAuditEvent } from "@/users-businesses/account/audit";
-import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
+import { parseCsv, buildProductImport, type ImportConflict } from "@/import/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
 import { createCoalescedFailSoftPersistStorage, createAsyncCoalescedFailSoftPersistStorage } from "@/stores/scanPersistStorage";
@@ -114,7 +114,7 @@ import { mergeReloadedProductsAndAliases, mergeReloadedReviews } from "@/service
 import { safeStructuredFieldsFor } from "@/services/polish/structuredFields";
 import { backfillProducts } from "@/services/polish/backfillProducts";
 import type { AiStatus } from "@/types";
-import type { ImportPreviewRow, ImportReviewContext, UniversalImportApplySummary } from "@/services/importSchema";
+import type { ImportPreviewRow, ImportReviewContext, UniversalImportApplySummary } from "@/import/importSchema";
 
 /** Result summary of a CSV product import (shown in the UI). */
 export interface CsvImportSummary {

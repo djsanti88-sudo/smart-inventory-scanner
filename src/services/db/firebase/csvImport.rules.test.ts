@@ -4,7 +4,7 @@ import { doc, setDoc, type Firestore } from "firebase/firestore";
 import { readFileSync } from "node:fs";
 import { FirebaseSyncTarget } from "@/services/db/firebase/firebaseSyncTarget";
 import { loadBusinessData } from "@/services/db/firebase/businessDataLoader";
-import { parseCsv, buildProductImport } from "@/services/csvImport";
+import { parseCsv, buildProductImport } from "@/import/csvImport";
 import type { PendingSyncItem, Product, Alias } from "@/types";
 
 // Loop 5 proof (emulator): a CSV import's products + approved aliases persist to Firestore through the

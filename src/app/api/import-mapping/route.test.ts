@@ -6,7 +6,7 @@ vi.mock("server-only", () => ({}));
 
 const getMemory = vi.fn();
 const putMemory = vi.fn();
-vi.mock("@/server/importMappingMemory", () => ({
+vi.mock("@/import/importMappingMemory", () => ({
   getImportMappingMemory: (...args: unknown[]) => getMemory(...args),
   putImportMappingMemory: (...args: unknown[]) => putMemory(...args),
 }));

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useReconcileStore, RECONCILE_PERSIST_KEY } from "@/stores/reconcileStore";
-import type { AdapterResult } from "@/services/reconcile/types";
-import type { MatchResult } from "@/services/reconcile/identityMatcher";
-import type { ReconcileReport } from "@/services/reconcile/reconcileReport";
+import type { AdapterResult } from "@/reconcile/types";
+import type { MatchResult } from "@/reconcile/match/identityMatcher";
+import type { ReconcileReport } from "@/reconcile/variance/reconcileReport";
 
 // Task 7 (AM-R9): ONE active expected-inventory session; re-import REPLACES (never appends);
 // persists like other session state (Zustand persist); wiped by the existing "Clear local cache"

@@ -3,12 +3,12 @@
 // matrix must complete in under 10 seconds with no network. This closes C7 from the earlier draft,
 // which only timed inferColumnMapping - here the chain is inferColumnMapping -> mapUniversalRows ->
 // buildImportPreview, exactly the sequence UniversalImportPanel.previewWith runs (see
-// src/components/UniversalImportPanel.tsx), with a synthetic no-match result per row (no corpus/
+// src/import/UniversalImportPanel.tsx), with a synthetic no-match result per row (no corpus/
 // network call) standing in for the real /api/reconcile/match response.
 import { describe, expect, it } from "vitest";
-import { inferColumnMapping } from "@/services/columnIntelligence";
-import { buildSourceSignature, type UniversalSheet } from "@/services/importSchema";
-import { buildImportPreview, mapUniversalRows, type PreviewMatchResult } from "@/services/universalImportPreview";
+import { inferColumnMapping } from "@/import/columnIntelligence";
+import { buildSourceSignature, type UniversalSheet } from "@/import/importSchema";
+import { buildImportPreview, mapUniversalRows, type PreviewMatchResult } from "@/import/universalImportPreview";
 
 const ROW_COUNT = 5000;
 
