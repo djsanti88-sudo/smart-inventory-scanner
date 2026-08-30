@@ -5,7 +5,7 @@ import { getSession } from "@/authentication/auth";
 import { isLiveAuth } from "@/authentication/service/authMode";
 import { buildBossReport } from "@/services/reports/bossReport";
 import { useScanStore } from "@/stores/scanStore";
-import { BusinessContextGate } from "@/components/BusinessContextGate";
+import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
 
 // BusinessContextGate (same convention as /scan, /review, /history, /sessions/[id], /reconcile,
 // /products, /settings): a hard page load directly on /report must wait for the real signed-in

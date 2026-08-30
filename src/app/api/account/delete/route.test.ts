@@ -57,7 +57,7 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   }),
 }));
 
-vi.mock("@/services/security/accountDeleteRateLimit", () => ({
+vi.mock("@/users-businesses/account/accountDeleteRateLimit", () => ({
   checkAccountDeleteRateLimit: vi.fn(async () => ({ allowed: true, retryAfterMs: 0, remaining: 99 })),
 }));
 vi.mock("@/server/log", () => ({ logServerEvent: vi.fn() }));

@@ -13,7 +13,7 @@ import {
 } from "firebase/auth";
 import { doc, getDoc, getDocs, query, collection, where } from "firebase/firestore";
 import { getFirebaseAuth, getDb } from "@/authentication/firebaseClient";
-import { getSelectedBusinessId } from "@/lib/selectedBusiness";
+import { getSelectedBusinessId } from "@/users-businesses/selectedBusiness";
 import { isAuthBypassEnabled } from "@/authentication/service/authBypass";
 import { firebaseAuthErrorMessage, isPopupCancellation } from "@/authentication/service/firebaseError";
 import type {

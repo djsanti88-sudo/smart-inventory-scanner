@@ -5,7 +5,7 @@ import type { AuthUser } from "@/authentication/service/authService";
 import { useScanStore } from "@/stores/scanStore";
 import { useReconcileStore } from "@/stores/reconcileStore";
 import { DECODE_BUDGET_MIN_MS, DECODE_BUDGET_MAX_MS, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
-import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
+import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 import { ExportMenu } from "@/components/ExportMenu";
 import { CleanupRecommendations } from "@/components/CleanupRecommendations";
 import { OwnerPinSettings } from "@/components/OwnerPinSettings";
@@ -14,7 +14,7 @@ import { KillSwitchBanner } from "@/components/KillSwitchBanner";
 import { requiresOwnerPin } from "@/services/security/destructiveGuard";
 import { getSession, onAuthChange } from "@/authentication/auth";
 import { runSignOutFlow, wipeAndSignOut } from "@/authentication/service/signOutFlow";
-import { BusinessContextGate } from "@/components/BusinessContextGate";
+import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
 
 export default function SettingsPage() {
   const settings = useScanStore((s) => s.settings);

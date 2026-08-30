@@ -2,7 +2,7 @@ import "server-only";
 
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-import { accessLevelServer } from "@/services/security/roleAccess";
+import { accessLevelServer } from "@/users-businesses/roles/roleAccess";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { canonicalGtin } from "@/services/upc/gtin";
 import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";

@@ -2,7 +2,7 @@
 // gets the full internal shape; everyone else ("business") gets product-facing fields only. Used by the
 // server resolve endpoint, the customer loader, export builders, and (secondarily) UI. PURE.
 
-import type { AccessLevel } from "@/services/security/roleAccess";
+import type { AccessLevel } from "@/users-businesses/roles/roleAccess";
 import { stripSensitive, CUSTOMER_SAFE_PRODUCT_FIELDS, CUSTOMER_SAFE_REVIEW_FIELDS, CUSTOMER_SAFE_SCANEVENT_FIELDS } from "@/services/security/sensitiveFields";
 import { getReviewIdentityBand } from "@/services/ai/identityConfidenceBand";
 import type { UnknownCodeReview } from "@/types";

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
-import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
+import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 import { StatusBadge, SyncBadge } from "@/components/badges";
 import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
 import { prettifyProductName } from "@/services/format/productDisplay";

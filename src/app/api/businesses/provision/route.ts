@@ -2,7 +2,7 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import {
   provisionBusiness,
   type ProvisionIdentity,
-} from "@/server/business/provisioning";
+} from "@/users-businesses/provisioning/provisioning";
 import type {
   ProvisionRequest,
   ProvisionResponse,

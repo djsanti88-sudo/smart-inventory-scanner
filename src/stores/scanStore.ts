@@ -29,7 +29,7 @@ import { canonicalGtin } from "@/services/upc/gtin";
 import { clampDecodeBudgetMs } from "@/services/ai/decodeBudget";
 import { fetchWithBackoff } from "@/services/net/fetchWithBackoff";
 import { hashPin, verifyPin, isValidPinFormat } from "@/services/security/pinLock";
-import { isPlatformOwnerClient } from "@/services/security/roleAccess";
+import { isPlatformOwnerClient } from "@/users-businesses/roles/roleAccess";
 import { isCloudBackendEnabled } from "@/services/config/backend";
 import type { DatabaseService } from "@/services/db/databaseService";
 import { resolveScanToProductTiered } from "@/services/aliasMatcher";
@@ -88,7 +88,7 @@ import {
   appendSessionHistory,
   type SessionHistoryEntry,
 } from "@/services/sessions/sessionHistory";
-import { toAuditEvent } from "@/services/audit/audit";
+import { toAuditEvent } from "@/users-businesses/account/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
@@ -97,7 +97,7 @@ import { createIdbBacking } from "@/stores/idbBacking";
 import { emptyTenantState } from "@/stores/scanReset";
 import { DEFAULT_SETTINGS } from "@/stores/scanDefaults";
 export { DEFAULT_SETTINGS } from "@/stores/scanDefaults";
-import { clearSelectedBusinessId } from "@/lib/selectedBusiness";
+import { clearSelectedBusinessId } from "@/users-businesses/selectedBusiness";
 import {
   persistKeyForUid,
   migrateLegacyBlobOnce,

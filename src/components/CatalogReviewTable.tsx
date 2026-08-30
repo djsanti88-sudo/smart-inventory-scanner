@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { getSession } from "@/authentication/auth";
-import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
+import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 import { getIdentityConfidenceBand, identityBandWord } from "@/services/ai/identityConfidenceBand";
 
 // Task 3 (owner step 3): platform-owner-only review queue for pending catalogEntries (the shared,

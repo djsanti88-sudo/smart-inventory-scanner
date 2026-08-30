@@ -10,7 +10,7 @@ import {
   sendResetEmail,
   isAuthBypassEnabled,
 } from "@/authentication/auth";
-import { setSelectedBusinessId } from "@/lib/selectedBusiness";
+import { setSelectedBusinessId } from "@/users-businesses/selectedBusiness";
 import type { AuthFlowResult } from "@/authentication/service/provisioningTypes";
 
 const DEFAULT_DESTINATION = "/scan";

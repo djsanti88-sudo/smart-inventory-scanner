@@ -3,7 +3,7 @@ import { initializeTestEnvironment, type RulesTestEnvironment } from "@firebase/
 import { doc, deleteDoc, setDoc, updateDoc, type Firestore } from "firebase/firestore";
 import { readFileSync } from "node:fs";
 import { auditRepository } from "@/services/db/firebase/repositories";
-import { toAuditEvent } from "@/services/audit/audit";
+import { toAuditEvent } from "@/users-businesses/account/audit";
 
 // Loop 6 proof (emulator): the auditLog is append-only and business-scoped. A member can append +
 // (owner/admin) read; updates/deletes are denied by rules; a stranger cannot read another business's

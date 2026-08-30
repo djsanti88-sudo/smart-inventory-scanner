@@ -8,7 +8,7 @@ import {
   getSelectedBusinessId,
   isFirebaseBackend,
   SELECTED_BUSINESS_CHANGED_EVENT,
-} from "@/lib/selectedBusiness";
+} from "@/users-businesses/selectedBusiness";
 import { isLiveAuth } from "@/authentication/service/authMode";
 import { hasMeaningfulLegacyBlobAsync, hasPersistedBlobAsync, persistKeyForUid } from "@/stores/scanPersistNamespace";
 

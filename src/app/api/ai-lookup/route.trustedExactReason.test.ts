@@ -14,7 +14,7 @@ vi.mock("@/services/security/trustedExactRateLimit", () => ({
   maskTrustedExactIdentifier: (value: string) => value,
 }));
 
-vi.mock("@/services/security/roleAccess", () => ({
+vi.mock("@/users-businesses/roles/roleAccess", () => ({
   isPlatformOwnerServer: () => false,
 }));
 

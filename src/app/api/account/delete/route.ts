@@ -5,7 +5,7 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { isLiveAuth } from "@/authentication/service/authMode";
 import { intEnv } from "@/services/security/aiSpendGuard";
-import { checkAccountDeleteRateLimit } from "@/services/security/accountDeleteRateLimit";
+import { checkAccountDeleteRateLimit } from "@/users-businesses/account/accountDeleteRateLimit";
 import { logServerEvent } from "@/server/log";
 
 export const runtime = "nodejs";

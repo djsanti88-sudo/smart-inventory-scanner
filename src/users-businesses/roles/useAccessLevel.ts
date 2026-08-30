@@ -1,7 +1,7 @@
 "use client";
 
 import { useScanStore } from "@/stores/scanStore";
-import { effectiveClientAccessLevel, type AccessLevel } from "@/services/security/roleAccess";
+import { effectiveClientAccessLevel, type AccessLevel } from "@/users-businesses/roles/roleAccess";
 
 // Client UI hint: is the signed-in user the platformOwner (full internal view) or a customer (product-
 // facing only)? Source of truth for DATA access is server-side; this only gates what the UI renders.

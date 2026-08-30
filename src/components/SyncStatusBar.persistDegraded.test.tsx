@@ -8,7 +8,7 @@ import { useScanStore } from "@/stores/scanStore";
 // visible, honest warning so a device with genuinely failing storage is not silently trusted the same
 // as a healthy one - and must NOT render when there is no degradation (the common case).
 
-vi.mock("@/services/security/useAccessLevel", () => ({
+vi.mock("@/users-businesses/roles/useAccessLevel", () => ({
   useAccessLevel: () => "business",
   useIsPlatformOwner: () => false,
 }));

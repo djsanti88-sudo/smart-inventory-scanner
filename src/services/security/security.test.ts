@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { isSensitiveKey, stripSensitive, SENSITIVE_FIELDS } from "./sensitiveFields";
-import { isPlatformOwnerIdentity, accessLevelClient } from "./roleAccess";
+import { isPlatformOwnerIdentity, accessLevelClient } from "@/users-businesses/roles/roleAccess";
 import { sanitizeProduct, sanitizeScanResult, sanitizeForBusiness } from "./serializers";
 
 const ALLOW = { emails: ["djsanti88@gmail.com"], uids: ["ndpz45mqdmaaucovnl4y5v5vhsh3"] };

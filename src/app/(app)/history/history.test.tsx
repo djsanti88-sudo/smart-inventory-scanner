@@ -16,7 +16,7 @@ vi.mock("@/stores/scanStore", () => ({
   useScanStore: (selector: (state: Record<string, unknown>) => unknown) => selector(mocks.storeState),
 }));
 
-vi.mock("@/services/security/useAccessLevel", () => ({
+vi.mock("@/users-businesses/roles/useAccessLevel", () => ({
   useAccessLevel: () => mocks.accessLevel,
 }));
 

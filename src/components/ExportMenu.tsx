@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useShallow } from "zustand/react/shallow";
-import { useAccessLevel } from "@/services/security/useAccessLevel";
+import { useAccessLevel } from "@/users-businesses/roles/useAccessLevel";
 import {
   exportAliases,
   exportFinalCounts,

@@ -5,7 +5,7 @@ import { SyncStatusBar } from "@/components/SyncStatusBar";
 import { useScanStore } from "@/stores/scanStore";
 import type { PendingSyncItem } from "@/types";
 
-vi.mock("@/services/security/useAccessLevel", () => ({
+vi.mock("@/users-businesses/roles/useAccessLevel", () => ({
   useAccessLevel: () => "platform",
   useIsPlatformOwner: () => true,
 }));

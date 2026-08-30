@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/authentication/service/authMode", () => ({ isLiveAuth: () => true }));
-vi.mock("@/lib/selectedBusiness", () => ({
+vi.mock("@/users-businesses/selectedBusiness", () => ({
   SELECTED_BUSINESS_CHANGED_EVENT: "sis:selected-business-changed",
   getSelectedBusinessId: () => "orphan",
   isFirebaseBackend: () => true,

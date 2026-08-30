@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
-import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
+import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 import { buildCleanupRecommendations, type CleanupConfidence } from "@/services/cleanup/recommendations";
 
 function downloadJson(filename: string, data: unknown) {

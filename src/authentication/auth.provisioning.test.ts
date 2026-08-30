@@ -26,7 +26,7 @@ vi.mock("@/authentication/firebaseClient", () => ({
   getDb: vi.fn(),
 }));
 vi.mock("@/authentication/service/authBypass", () => ({ isAuthBypassEnabled: () => false }));
-vi.mock("@/lib/selectedBusiness", () => ({
+vi.mock("@/users-businesses/selectedBusiness", () => ({
   getSelectedBusinessId: () => mocks.preferredBusinessId,
 }));
 

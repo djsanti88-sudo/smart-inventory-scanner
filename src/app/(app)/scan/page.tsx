@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
-import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
+import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 import { ScannerInput } from "@/components/ScannerInput";
 import { CameraScanButton } from "@/components/CameraScanButton";
 import { LiveScanFeed } from "@/components/LiveScanFeed";
@@ -13,7 +13,7 @@ import { ExportMenu } from "@/components/ExportMenu";
 import { VarianceReport } from "@/components/VarianceReport";
 import { SessionLockControl } from "@/components/SessionLockControl";
 import { SessionsList } from "@/components/SessionsList";
-import { BusinessContextGate } from "@/components/BusinessContextGate";
+import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
 import { planScanBatch } from "./planScan";
 import { resolveRawScan } from "@/services/resolver";
 import { computeMoatStats } from "@/services/moatStats";

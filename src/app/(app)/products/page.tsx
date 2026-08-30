@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
-import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
+import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 import { customerDisplayName } from "@/services/displayName";
 import { ImageHoverPreview } from "@/components/ImageHoverPreview";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
 import { UniversalImportPanelContainer } from "@/components/UniversalImportPanelContainer";
-import { BusinessContextGate } from "@/components/BusinessContextGate";
+import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
 import type { Product } from "@/types";
 
 // BusinessContextGate wraps this page's content (same convention as /scan, /review, /history,

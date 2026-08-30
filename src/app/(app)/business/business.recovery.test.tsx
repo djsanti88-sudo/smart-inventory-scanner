@@ -17,7 +17,7 @@ vi.mock("@/authentication/auth", () => ({
   listMemberships: (...args: unknown[]) => mocks.listMemberships(...args),
   signOut: vi.fn(),
 }));
-vi.mock("@/lib/selectedBusiness", () => ({
+vi.mock("@/users-businesses/selectedBusiness", () => ({
   SELECTED_BUSINESS_CHANGED_EVENT: "sis:selected-business-changed",
   setSelectedBusinessId: vi.fn(),
 }));

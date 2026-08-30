@@ -1,4 +1,4 @@
-// src/components/BusinessContextGate.adoptError.test.tsx
+// src/users-businesses/BusinessContextGate.adoptError.test.tsx
 // Defect: the "Adopt it into my account" click handler awaited adoptLegacyLocalData with no
 // try/catch. migrateLegacyBlobOnceAsync deliberately propagates IDB copy failures (quota,
 // blocked, lockdown), so a rejection left the user stuck on the adopt banner forever: no error,
@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/authentication/service/authMode", () => ({ isLiveAuth: () => true }));
-vi.mock("@/lib/selectedBusiness", () => ({
+vi.mock("@/users-businesses/selectedBusiness", () => ({
   SELECTED_BUSINESS_CHANGED_EVENT: "sis:selected-business-changed",
   getSelectedBusinessId: () => "biz-1",
   isFirebaseBackend: () => true,

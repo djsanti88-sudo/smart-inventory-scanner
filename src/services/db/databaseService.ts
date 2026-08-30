@@ -18,7 +18,7 @@
 import type { SyncTarget } from "@/services/db/syncTarget";
 import type { Product, Alias, InventorySession, InventoryCount, ScanEvent, UnknownCodeReview } from "@/types";
 import type { CatalogEntry } from "@/services/catalog/catalogTypes";
-import type { AuditEventInput } from "@/services/audit/audit";
+import type { AuditEventInput } from "@/users-businesses/account/audit";
 
 /** A business's persisted state, as the local store models it. */
 export interface LoadedBusinessData {

@@ -1,5 +1,5 @@
 import { ReconcilePanel } from "@/components/ReconcilePanel";
-import { BusinessContextGate } from "@/components/BusinessContextGate";
+import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
 
 // Reconcile page (Task 7): its own page, away from the scan flow (scanner flow untouched).
 // BusinessContextGate wraps the content (same convention as /scan, /review, /history,

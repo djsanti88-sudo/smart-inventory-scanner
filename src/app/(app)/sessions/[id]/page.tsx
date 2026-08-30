@@ -11,11 +11,11 @@ import {
   exportSessionScanLog,
   exportSessionScanLogCustomer,
 } from "@/services/csvExport";
-import { useAccessLevel } from "@/services/security/useAccessLevel";
+import { useAccessLevel } from "@/users-businesses/roles/useAccessLevel";
 import { getDb } from "@/authentication/firebaseClient";
 import { getSession } from "@/authentication/auth";
 import { useScanStore } from "@/stores/scanStore";
-import { BusinessContextGate } from "@/components/BusinessContextGate";
+import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
 import { ArchivedSessionScans } from "@/components/ArchivedSessionScans";
 import { SessionCountsTable, type SessionCountRow } from "@/components/SessionCountsTable";
 import { countsFromTimeline } from "@/services/sessions/countsFromTimeline";

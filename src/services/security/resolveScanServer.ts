@@ -7,7 +7,7 @@
 
 import { resolveRawScan } from "@/services/resolver";
 import { sanitizeScanResult, type CustomerScanResult } from "@/services/security/serializers";
-import type { AccessLevel } from "@/services/security/roleAccess";
+import type { AccessLevel } from "@/users-businesses/roles/roleAccess";
 import type { Product, Alias, ResolverResult } from "@/types";
 
 export interface ResolveScanServerInput {

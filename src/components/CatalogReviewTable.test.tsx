@@ -6,7 +6,7 @@ import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/re
 // (for the ID token), and global fetch.
 
 let isPlatform = true;
-vi.mock("@/services/security/useAccessLevel", () => ({
+vi.mock("@/users-businesses/roles/useAccessLevel", () => ({
   useIsPlatformOwner: () => isPlatform,
 }));
 

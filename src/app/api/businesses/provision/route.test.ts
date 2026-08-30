@@ -10,7 +10,7 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   getAdminDb: () => ({ __db: true }),
 }));
 
-vi.mock("@/server/business/provisioning", () => ({
+vi.mock("@/users-businesses/provisioning/provisioning", () => ({
   provisionBusiness: (...args: unknown[]) => mocks.provisionBusiness(...args),
 }));
 

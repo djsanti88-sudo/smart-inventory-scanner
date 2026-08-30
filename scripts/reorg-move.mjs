@@ -2,7 +2,7 @@
 /**
  * Manifest-driven folder reorganization codemod (Project A).
  *
- * Moves files with `git mv`, then rewrites every `@/...` alias specifier and every raw
+ * Moves files, then rewrites every `@/...` alias specifier and every raw
  * repo-relative path literal that pointed at them, across source, tests, configs and ignore
  * files. Prints a report of EVERY changed path literal, and flags non-TypeScript string edits
  * separately so the orchestrator reviews those by hand (configs, ignore files, workflows).
@@ -15,8 +15,7 @@
  *   { "wave": "authentication",
  *     "moves": [ { "from": "src/lib/auth.ts", "to": "src/authentication/service/auth.ts" } ] }
  */
-import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync } from "node:fs";
 import { join, dirname, relative } from "node:path";
 
 const BACKSLASH = String.fromCharCode(92);
@@ -89,7 +88,11 @@ for (const m of manifest.moves) {
   }
   if (APPLY) {
     mkdirSync(join(ROOT, dirname(m.to)), { recursive: true });
-    execFileSync("git", ["mv", m.from, m.to], { cwd: ROOT });
+    // Plain filesystem rename, NOT `git mv`. Sandboxed agent environments often cannot write
+    // .git/index.lock, which makes `git mv` fail on the first file and abort the whole wave.
+    // A filesystem move is equivalent here: git detects the renames at `git add` time from
+    // content similarity, which is what the orchestrator's review relies on anyway.
+    renameSync(join(ROOT, m.from), join(ROOT, m.to));
   }
   moved.push(m.from + "  ->  " + m.to);
 }

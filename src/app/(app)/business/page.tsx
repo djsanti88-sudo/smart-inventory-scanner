@@ -10,7 +10,7 @@ import {
   signOut,
   type Membership,
 } from "@/authentication/auth";
-import { SELECTED_BUSINESS_CHANGED_EVENT, setSelectedBusinessId } from "@/lib/selectedBusiness";
+import { SELECTED_BUSINESS_CHANGED_EVENT, setSelectedBusinessId } from "@/users-businesses/selectedBusiness";
 import { useRouter } from "next/navigation";
 import { useScanStore } from "@/stores/scanStore";
 

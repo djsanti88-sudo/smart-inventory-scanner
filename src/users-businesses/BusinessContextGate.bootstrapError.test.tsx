@@ -1,4 +1,4 @@
-// src/components/BusinessContextGate.bootstrapError.test.tsx
+// src/users-businesses/BusinessContextGate.bootstrapError.test.tsx
 // Bug #33b: an unhandled rejection (or unbounded wait) anywhere in the bootstrap chain
 // (getSession -> listMemberships -> rehydrateForUid) left `status` stuck at "resolving"
 // forever, with no error surfaced and no way to recover short of a full page reload.
@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/authentication/service/authMode", () => ({ isLiveAuth: () => true }));
-vi.mock("@/lib/selectedBusiness", () => ({
+vi.mock("@/users-businesses/selectedBusiness", () => ({
   SELECTED_BUSINESS_CHANGED_EVENT: "sis:selected-business-changed",
   getSelectedBusinessId: () => "biz-1",
   isFirebaseBackend: () => true,

@@ -8,7 +8,7 @@ import type { ScanEvent, UnknownCodeReview, Product } from "@/types";
 // the stale-decodeNote suite below so we can assert on the suffix; every other describe block in this
 // file relies on the real (non-platform) default and must keep passing unmocked.
 let mockIsPlatformOwner = false;
-vi.mock("@/services/security/useAccessLevel", () => ({
+vi.mock("@/users-businesses/roles/useAccessLevel", () => ({
   useIsPlatformOwner: () => mockIsPlatformOwner,
 }));
 

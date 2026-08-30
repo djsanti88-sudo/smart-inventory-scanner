@@ -4,7 +4,7 @@
 // unit-testable in isolation (no store, no Firebase). The store's `partialize` delegates here.
 
 import { sanitizeProduct, sanitizeReview, sanitizeScanEvent } from "@/services/security/serializers";
-import { effectiveClientAccessLevel, isLocalRuntime, type AccessLevel } from "@/services/security/roleAccess";
+import { effectiveClientAccessLevel, isLocalRuntime, type AccessLevel } from "@/users-businesses/roles/roleAccess";
 
 // Minimal shape of the persistable fields we read off the store state. Typed loosely on purpose so this
 // stays decoupled from the (large) ScanState type and free of import cycles.

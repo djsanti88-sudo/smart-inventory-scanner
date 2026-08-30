@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ScanEvent, ScanStatus } from "@/types";
 import { useScanStore } from "@/stores/scanStore";
-import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
+import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 
 // TOP-LEVEL LAW: every scan appears and counts, whether known, unknown, conflicted, or reviewed.
 // This map gives EVERY status its own full-weight feedback panel (same size, same running

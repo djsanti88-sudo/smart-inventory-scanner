@@ -20,7 +20,7 @@ vi.mock("@/authentication/auth", () => ({
 }));
 
 const setSelectedBusinessIdMock = vi.fn();
-vi.mock("@/lib/selectedBusiness", () => ({
+vi.mock("@/users-businesses/selectedBusiness", () => ({
   setSelectedBusinessId: (...args: unknown[]) => setSelectedBusinessIdMock(...args),
 }));
 

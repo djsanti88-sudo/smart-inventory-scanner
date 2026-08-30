@@ -18,7 +18,7 @@ import { cleanScanCode } from "@/services/scanCleaner";
 import { resolveTrustedExactBarcodeDecision } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { getTireExactIndexFingerprint, hasBossHmacKeyConfigured } from "@/server/tire-knowledge/tireExactIndex";
 import { trustedExactRateLimiter } from "@/services/security/trustedExactRateLimit";
-import { isPlatformOwnerServer } from "@/services/security/roleAccess";
+import { isPlatformOwnerServer } from "@/users-businesses/roles/roleAccess";
 import { isDecodeChargeMode, type AiLookupRequestMode } from "./decodeMode";
 
 // Server-side AI endpoint. Keys live in env and never reach the client. ONE mode:

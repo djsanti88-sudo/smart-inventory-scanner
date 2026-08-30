@@ -1,4 +1,4 @@
-// src/components/BusinessContextGate.adoptPostCopyError.test.tsx
+// src/users-businesses/BusinessContextGate.adoptPostCopyError.test.tsx
 // Task 1 (B4, product honesty): adoptLegacyLocalData's migrate step copies the anon blob to the
 // per-uid key AND DELETES the legacy blob, then rehydrateForUid/setBusinessContext run. If a throw
 // happens AFTER the copy stage, the anon blob is GONE and the per-uid key already holds the adopted
@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/authentication/service/authMode", () => ({ isLiveAuth: () => true }));
-vi.mock("@/lib/selectedBusiness", () => ({
+vi.mock("@/users-businesses/selectedBusiness", () => ({
   SELECTED_BUSINESS_CHANGED_EVENT: "sis:selected-business-changed",
   getSelectedBusinessId: () => "biz-1",
   isFirebaseBackend: () => true,

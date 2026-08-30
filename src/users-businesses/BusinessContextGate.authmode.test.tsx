@@ -1,10 +1,10 @@
-// src/components/BusinessContextGate.authmode.test.tsx
+// src/users-businesses/BusinessContextGate.authmode.test.tsx
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 
 const isLiveAuth = vi.fn();
 vi.mock("@/authentication/service/authMode", () => ({ isLiveAuth: () => isLiveAuth() }));
-vi.mock("@/lib/selectedBusiness", () => ({
+vi.mock("@/users-businesses/selectedBusiness", () => ({
   SELECTED_BUSINESS_CHANGED_EVENT: "sis:selected-business-changed",
   getSelectedBusinessId: () => null,
   isFirebaseBackend: () => true,

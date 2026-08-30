@@ -16,7 +16,7 @@ vi.mock("@/authentication/service/authMode", () => ({ isLiveAuth: () => true }))
 vi.mock("@/server/log", () => ({ logServerEvent: vi.fn() }));
 
 const checkAccountDeleteRateLimit = vi.fn();
-vi.mock("@/services/security/accountDeleteRateLimit", () => ({
+vi.mock("@/users-businesses/account/accountDeleteRateLimit", () => ({
   checkAccountDeleteRateLimit: (...args: unknown[]) => checkAccountDeleteRateLimit(...args),
 }));
 

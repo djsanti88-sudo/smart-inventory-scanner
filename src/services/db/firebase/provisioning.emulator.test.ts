@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { POST as provisionPOST } from "@/app/api/businesses/provision/route";
 import { POST as membersPOST } from "@/app/api/businesses/members/route";
-import { defaultBusinessIdFor } from "@/server/business/provisioning";
+import { defaultBusinessIdFor } from "@/users-businesses/provisioning/provisioning";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 
 const firestoreHost = process.env.FIRESTORE_EMULATOR_HOST ?? "";

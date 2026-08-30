@@ -1,7 +1,7 @@
 "use client";
 
 import { useScanStore } from "@/stores/scanStore";
-import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
+import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 
 // Shows sync health and the controls needed to prove offline-tolerant + idempotent retry behavior:
 // online/offline toggle, pending count, a Retry button, a "simulate sync failure" switch (mock

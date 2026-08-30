@@ -20,7 +20,7 @@ import { DEMO_BUSINESS_ID } from "@/seed/seedData";
 // must show the loading gate instead of their real content, and must fire no request.
 
 vi.mock("@/authentication/service/authMode", () => ({ isLiveAuth: () => true }));
-vi.mock("@/lib/selectedBusiness", () => ({
+vi.mock("@/users-businesses/selectedBusiness", () => ({
   SELECTED_BUSINESS_CHANGED_EVENT: "sis:selected-business-changed",
   getSelectedBusinessId: () => "biz-real",
   isFirebaseBackend: () => true,
