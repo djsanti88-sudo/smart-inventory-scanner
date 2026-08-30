@@ -81,7 +81,7 @@ describe("tireJsonIndexStatus", () => {
         const actual = await importOriginal<typeof import("node:fs")>();
         return { ...actual, readFileSync: readFileSyncSpy };
       });
-      vi.doMock("@/lib/firebaseAdmin", () => ({
+      vi.doMock("@/sync-database/cloud/firebaseAdmin", () => ({
         getAdminDb: () => ({ collection: () => ({ limit: () => ({ get: async () => ({ docs: [] }) }) }) }),
       }));
       vi.doMock("@/decoding/server/pipeline/storage", () => ({

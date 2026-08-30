@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   provisionBusiness: vi.fn(),
 }));
 
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: mocks.verifyIdToken }),
   getAdminDb: () => ({ __db: true }),
 }));

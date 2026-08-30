@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   queriedPaths: [] as string[],
 }));
 
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: mocks.verifyIdToken }),
   getAdminDb: () => ({
     doc: (path: string) => {

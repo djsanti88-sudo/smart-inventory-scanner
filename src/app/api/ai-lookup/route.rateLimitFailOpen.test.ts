@@ -16,7 +16,7 @@ vi.mock("server-only", () => ({}));
 // async credential fetch rejects AFTER the test finishes ("Could not load the default credentials")
 // and vitest fails the whole run on the unhandled rejection. These tests never authenticate, so the
 // admin surface is a plain stub.
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: vi.fn(async () => { throw new Error("no auth in this suite"); }) }),
   getAdminDb: () => ({ doc: () => ({ get: async () => ({ exists: false }) }) }),
 }));

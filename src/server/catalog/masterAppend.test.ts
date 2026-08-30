@@ -534,7 +534,7 @@ describe("appendMasterCatalogEntry outcome counter (Task 2, KV pattern)", () => 
 // LESSONS_LEARNED: never assume an SDK failure mode without observing it). Mocking getAdminDb to
 // throw synchronously proves the exact contract this module promises: "creds/entry absent -> never
 // throws, always resolves 'error', and it must still be counted."
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminDb: () => {
     throw new Error("admin db unavailable: no credentials configured");
   },

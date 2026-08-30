@@ -2,7 +2,7 @@
 import "server-only";
 
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { getAdminAuth, getAdminDb } from "@/sync-database/cloud/firebaseAdmin";
 import { isLiveAuth } from "@/authentication/service/authMode";
 import { isAuthBypassEnabled } from "@/authentication/service/authBypass";
 import { COLLECTIONS, memberDocId } from "@/sync-database/types";

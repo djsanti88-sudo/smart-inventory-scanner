@@ -1,7 +1,7 @@
 import "server-only";
 
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { getAdminAuth, getAdminDb } from "@/sync-database/cloud/firebaseAdmin";
 import { accessLevelServer } from "@/users-businesses/roles/roleAccess";
 import { COLLECTIONS, memberDocId } from "@/sync-database/types";
 import { canonicalGtin } from "@/products/barcodes/gtin";

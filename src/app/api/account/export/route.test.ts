@@ -47,7 +47,7 @@ function makeQuerySnap(rows: Array<{ id: string; data: Record<string, unknown> }
   };
 }
 
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: mocks.verifyIdToken }),
   getAdminDb: () => ({
     doc: (path: string) => {

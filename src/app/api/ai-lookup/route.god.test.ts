@@ -28,7 +28,7 @@ vi.mock("@/decoding/limits/trustedExactRateLimit", () => ({
 
 const verifyIdToken = vi.fn();
 const memberGet = vi.fn();
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: (...args: unknown[]) => verifyIdToken(...args) }),
   getAdminDb: () => ({ doc: () => ({ get: (...args: unknown[]) => memberGet(...args) }) }),
 }));

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getAdminDb } from "@/lib/firebaseAdmin";
+import { getAdminDb } from "@/sync-database/cloud/firebaseAdmin";
 import { canonicalGtin } from "@/products/barcodes/gtin";
 import { COLLECTIONS, type CatalogEntry as DbCatalogEntry } from "@/sync-database/types";
 import { resolveCatalogDocId } from "@/server/catalog/catalogDocId";

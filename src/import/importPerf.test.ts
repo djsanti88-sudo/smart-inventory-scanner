@@ -1,4 +1,4 @@
-// src/services/import/importPerf.test.ts
+// src/import/importPerf.test.ts
 // Task 11 (Phase 4 Stage A ship gate), AC4: the FULL Stage A shaping chain over a 5000-data-row
 // matrix must complete in under 10 seconds with no network. This closes C7 from the earlier draft,
 // which only timed inferColumnMapping - here the chain is inferColumnMapping -> mapUniversalRows ->

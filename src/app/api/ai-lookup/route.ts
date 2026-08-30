@@ -8,7 +8,7 @@ import { decodeStorage } from "@/decoding/server/pipeline/storage";
 // cache replay, the lazy paid authorization, and the single GPT-5.4 mini provider call.
 import { runDecodePipeline, e2eMode } from "@/decoding/server/pipeline/pipeline";
 import { clampDecodeBudgetMs } from "@/decoding/decodeBudget";
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { getAdminAuth, getAdminDb } from "@/sync-database/cloud/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/sync-database/types";
 import { isLiveAuth } from "@/authentication/service/authMode";
 import { clampConfidenceThreshold } from "@/decoding/limits/decodePolicy";

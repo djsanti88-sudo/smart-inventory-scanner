@@ -14,7 +14,7 @@ describe("provenanceTier is stamped at every provisional product birth", () => {
   });
 
   it("STATIC LOCK: every 'provisional: true' product literal in scanStore.ts stamps provenanceTier", () => {
-    // Same static-source-check idiom as src/services/keySafety.test.ts: lock the invariant at the
+    // Same static-source-check idiom as src/shared/privacy/keySafety.test.ts: lock the invariant at the
     // source level so a future provisional mint site cannot forget the tier.
     const src = readFileSync(join(process.cwd(), "src", "stores", "scanStore.ts"), "utf8");
     const mintLines = src.split("\n").filter((l) => l.includes("provisional: true,"));

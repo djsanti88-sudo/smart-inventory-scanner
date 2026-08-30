@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   tursoGet: vi.fn(),
 }));
 
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminDb: () => ({
     collection: () => ({
       limit: () => ({

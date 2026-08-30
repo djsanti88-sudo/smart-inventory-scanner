@@ -1,4 +1,4 @@
-// src/services/import/importFixtureBattery.test.ts
+// src/import/importFixtureBattery.test.ts
 // Task 11 (Phase 4 Stage A ship gate): fixture battery proving the Stage A shaping chain
 // (readUniversalFile -> inferColumnMapping -> validateManualMapping -> buildSourceSignature) end to
 // end against four real files: a Shop-Ware-style CSV, a reordered/renamed TSV, a nonsense-header CSV

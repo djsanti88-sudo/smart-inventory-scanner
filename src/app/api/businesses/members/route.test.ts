@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   runTransaction: vi.fn(),
 }));
 
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({
     verifyIdToken: (...args: unknown[]) => mocks.verifyIdToken(...args),
     getUserByEmail: (...args: unknown[]) => mocks.getUserByEmail(...args),

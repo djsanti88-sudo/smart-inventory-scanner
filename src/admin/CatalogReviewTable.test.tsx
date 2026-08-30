@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 
 // Task 3: component tests for the platform-owner-only catalog review table. Mocks
-// useIsPlatformOwner (mirrors src/components/settingsAccount.test.tsx), @/authentication/auth's getSession
+// useIsPlatformOwner (mirrors src/app/(app)/settings/settingsAccount.test.tsx), @/authentication/auth's getSession
 // (for the ID token), and global fetch.
 
 let isPlatform = true;

@@ -1,4 +1,4 @@
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { getAdminAuth, getAdminDb } from "@/sync-database/cloud/firebaseAdmin";
 import {
   provisionBusiness,
   type ProvisionIdentity,

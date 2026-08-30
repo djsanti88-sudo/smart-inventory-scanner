@@ -14,7 +14,7 @@ const authMocks = vi.hoisted(() => ({
   checkRateLimit: vi.fn(),
 }));
 
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: authMocks.verifyIdToken }),
   getAdminDb: () => ({
     doc: () => ({ get: authMocks.memberGet }),

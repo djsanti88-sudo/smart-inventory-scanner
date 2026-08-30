@@ -1,4 +1,4 @@
-// src/services/import/mappingMemoryRoundtrip.test.ts
+// src/import/mappingMemoryRoundtrip.test.ts
 // @vitest-environment node
 // Task 11 (Phase 4 Stage A ship gate), I7 proof: a remembered manual column mapping survives a
 // put/get round trip through src/import/importMappingMemory.ts and re-applies to the same file's

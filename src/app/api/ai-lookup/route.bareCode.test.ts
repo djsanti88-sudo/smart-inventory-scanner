@@ -18,7 +18,7 @@ vi.mock("@/decoding/server/log", () => ({
   logServerEvent: vi.fn(),
 }));
 
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: vi.fn() }),
   getAdminDb: () => ({ doc: () => ({ get: vi.fn() }) }),
 }));

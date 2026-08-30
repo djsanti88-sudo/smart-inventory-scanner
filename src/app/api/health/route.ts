@@ -60,7 +60,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 async function checkFirestore(): Promise<boolean> {
   const timeoutMs = intEnv(process.env.HEALTH_FIRESTORE_TIMEOUT_MS, 3000);
   try {
-    const { getAdminDb } = await import("@/lib/firebaseAdmin");
+    const { getAdminDb } = await import("@/sync-database/cloud/firebaseAdmin");
     const { COLLECTIONS } = await import("@/sync-database/types");
     await withTimeout(getAdminDb().collection(COLLECTIONS.catalogEntries).limit(1).get(), timeoutMs);
     return true;

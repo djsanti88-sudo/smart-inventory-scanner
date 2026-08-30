@@ -46,7 +46,7 @@ vi.mock("@/decoding/limits/aiSpendGuard", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: vi.fn() }),
   getAdminDb: () => ({ doc: vi.fn() }),
 }));

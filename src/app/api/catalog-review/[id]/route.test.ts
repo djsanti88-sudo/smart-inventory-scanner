@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   checkRateLimit: vi.fn(),
 }));
 
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: mocks.verifyIdToken }),
   getAdminDb: () => {
     function makeDoc(path: string) {

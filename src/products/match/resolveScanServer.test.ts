@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveScanForRole } from "@/services/security/resolveScanServer";
+import { resolveScanForRole } from "@/products/match/resolveScanServer";
 import type { Product, Alias } from "@/types";
 
 // Sec-5 contract: the server resolve helper returns product-facing fields ONLY to a customer

@@ -6,57 +6,58 @@
 
 ## 1. Directory map (`src/`, top 2 levels)
 
+> Reorganized 2026-08-30 (Project A): `src/` is now grouped by WORKFLOW, not by file type.
+> Every feature folder carries its own `README.md` - read that before changing the folder.
+
 ```
 src/
-├── app/                       Next.js App Router
-│   ├── (app)/                 Authenticated app shell: business, products, reconcile,
-│   │                          review, scan, settings pages (route group, shared layout)
-│   ├── api/
-│   │   ├── ai-lookup/         GET status peek / POST decode entry point
-│   │   ├── reconcile/match/   Server-side reconcile matcher (local tire corpus only, no paid calls)
-│   │   └── resolve-scan/      Server-side deterministic resolve for the customer role (Firebase)
-│   └── login/                 Login page
-├── components/                React "use client" components: ScannerInput, LiveScanFeed, tables,
-│                              StoreHydrator, AuthGuard. Co-located .test.tsx (jsdom project).
-├── eval/                      Golden-baseline eval harness (npm run test:golden)
-├── lib/                       Thin glue: auth.ts, firebaseAdmin.ts, firebaseClient.ts
-├── seed/                      seedData.ts - verified seed products/aliases
-├── server/                    SERVER-ONLY code (never imported by client files)
-│   ├── decode/                pipeline.ts orchestrator + storage.ts counters/outcomes
-│   ├── tire-knowledge/        Tire corpus index (SQLite / Turso / generated-JSON fallback)
-│   ├── retail-knowledge/      ~4M-row retail barcode index (Open Food Facts derived)
-│   ├── knowledgeDb.ts         better-sqlite3 opener (decompresses .db.gz on Vercel)
-│   ├── decodeCacheStore.ts    L2 persistent decode cache (Turso/libsql)
-│   └── learnedProducts.ts     Server-persisted "learned products" suggestion tier
-├── services/                  PURE SERVICES: no React, no next/* imports (convention enforced by
-│   │                          file-header comments + keySafety.test.ts + importBoundary.test.ts)
-│   ├── ai/                    decode/trust rules, gptDecodeClient + policy, decodeCache (L1),
-│   │                          decodeProviderStatus types
-│   ├── catalog/               brandFamilies, brandPrefixGeneral, identityMerge, prefixFirewall,
-│   │                          prefixFloor, prefixLearning, evidenceScoring, sourceTrust
-│   ├── upc/                   CLIENT-SAFE half: barcodeTrust.ts (trust gate), gtin.ts, misread.ts
-│   ├── db/                    syncTarget.ts interface + db/firebase/* Firestore repositories
-│   ├── security/              aiSpendGuard.ts (caps/kill switch), roleAccess.ts, sensitiveFields.ts
-│   ├── reconcile/             Shop-Ware CSV adapter, identityMatcher, variance report
-│   ├── inventory.ts           THE COUNT LEDGER core (applyScanEventOnce, incrementInventoryCount)
-│   ├── inventory.replay.ts    replayLedgerCounts - rebuilds counts from scanFeed for proofs
-│   ├── resolver.ts            Deterministic-only resolver
-│   ├── scanCleaner.ts         cleanScanCode / buildNormalizedCandidates
-│   ├── aliasMatcher.ts        Alias / product-identifier matching
-│   └── mockDb.ts              Local mock SyncTarget (the default backend)
-├── stores/                    Zustand stores (see section 4) + scanGates.ts (pure gate logic)
-├── test/                      server-only-stub.ts (vitest alias for the server-only package)
-└── types.ts                   Domain entities (see section 5)
+├── app/                    Next.js App Router. Route entry points cannot move; they stay
+│                           thin and call into the feature folders below.
+├── authentication/         sign in/out, email verification, AuthGuard
+├── users-businesses/       business context, members, roles, account export/delete
+├── scanning/               ScannerInput, LiveScanFeed, camera/, clean/
+├── inventory/              ledger.ts (THE COUNT LEDGER), replay, idempotency, cleanup
+├── products/               match/, catalog/, barcodes/, tires/  (deterministic identity)
+├── decoding/               limits/, panel/, and server/{pipeline,knowledge,cache}
+├── review/                 Needs Review queue, approve / correct / reassign
+├── sessions/               auto/, history/, lock/
+├── import/                 spreadsheet import + fixtures
+├── reconcile/              match/, adapters/, variance/
+├── reports/                export/ (role-masked), variance/
+├── sync-database/          cloud/ (Firestore+Admin), mock/, queue/, StoreHydrator
+├── admin/                  platform-owner UI
+├── shared/                 privacy/ (masking + key-safety guards), telemetry/, text/, net/
+├── user-interface/         shell/, ui/  (cross-app chrome only)
+├── stores/                 Zustand stores incl. scanStore.ts (pending decomposition)
+├── server/                 remaining server-only: catalog/ (master catalog), share/
+├── eval/                   golden-baseline decode eval
+└── types.ts                domain entities
 ```
+
+### Path-keyed systems (the silent-failure class)
+
+Five independent systems identify code by its PATH as a string. None are checked by the compiler,
+and every one of them fails silently - the suite reports green while covering less:
+
+| System | Where | What breaks silently |
+|---|---|---|
+| Vitest project globs | `vitest.config.ts` | tests stop being collected |
+| CI narrowing | `.github/workflows/ci.yml` `VITEST_EXTRA_EXCLUDE` | CI runs a suite that needs absent fixtures |
+| Security guard allowlists | `shared/privacy/keySafety*.test.ts` | the guard scans an empty folder and passes |
+| Runtime `process.cwd()` segments | corpus loaders in `decoding/server/knowledge/` | free corpus not found -> falls through to PAID AI |
+| Git LFS rules | `.gitattributes` | a 258MB corpus gets committed as raw text |
+
+The vitest globs are now extension-based, and the key-safety allowlist is inverted (deny-list), so
+those two can no longer shrink silently. The other three must be checked by hand on any move.
 
 ## 2. The scan flow, end to end
 
-1. **Buffer and submit** - `src/components/ScannerInput.tsx`. An uncontrolled DOM input (ref, not
+1. **Buffer and submit** - `src/scanning/ScannerInput.tsx`. An uncontrolled DOM input (ref, not
    per-keystroke React state) so rapid scanner injection never drops characters. `submit()` reads the
    DOM value, calls `onScan(raw)` (wired to `scanStore.processScan`), clears, refocuses.
-2. **Clean** - `src/services/scanCleaner.ts`. Strips invisible chars, builds an ordered list of
+2. **Clean** - `src/scanning/clean/scanCleaner.ts`. Strips invisible chars, builds an ordered list of
    normalized candidates (AIM prefix, hyphens/spaces). Raw value is always preserved.
-3. **Resolve (deterministic, never AI)** - `src/services/resolver.ts` + `aliasMatcher.ts` +
+3. **Resolve (deterministic, never AI)** - `src/products/match/resolver.ts` + `aliasMatcher.ts` +
    `codeTypeDetector.ts`. `known` ONLY from an approved alias or a verified product identifier.
 4. **Count (synchronous, before any network)** - `src/stores/scanStore.ts` `processScan` (~line 3181):
    - Known and countable: `services/inventory.ts` `incrementInventoryCount` delegates to
@@ -85,7 +86,7 @@ src/
 
 ## 3. Decode enrichment (server side)
 
-`src/server/decode/pipeline.ts` (`runDecodePipeline`) is the only orchestrator, fronted by
+`src/decoding/server/pipeline/pipeline.ts` (`runDecodePipeline`) is the only orchestrator, fronted by
 `src/app/api/ai-lookup/route.ts`. It stops at the first usable identity:
 
 | # | Stage | Where | Cost |

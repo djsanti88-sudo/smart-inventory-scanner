@@ -77,7 +77,7 @@ function makeDocRef(id: string) {
   };
 }
 
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: mocks.verifyIdToken }),
   getAdminDb: () => ({
     collection: (path: string) => {

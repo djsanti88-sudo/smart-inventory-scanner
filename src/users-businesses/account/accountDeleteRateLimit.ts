@@ -19,7 +19,7 @@ import "server-only";
 // `_rateLimits` is Admin-SDK-only: firestore.rules has no explicit rule opening this collection, so
 // the default-deny catch-all (`match /{document=**} { allow read, write: if false; }`) covers it -
 // no client (and no security rule change) can read or write these documents.
-import { getAdminDb } from "@/lib/firebaseAdmin";
+import { getAdminDb } from "@/sync-database/cloud/firebaseAdmin";
 
 const COLLECTION = "_rateLimits";
 

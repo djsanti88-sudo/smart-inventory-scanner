@@ -4,7 +4,7 @@ import { getApps, initializeApp, cert, applicationDefault, type App } from "fire
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import { getAuth, type Auth } from "firebase-admin/auth";
 import { readFileSync } from "node:fs";
-import { parseServiceAccountJson, serviceAccountJsonFromEnv } from "@/services/firebaseAdmin/serviceAccount";
+import { parseServiceAccountJson, serviceAccountJsonFromEnv } from "@/sync-database/cloud/serviceAccount";
 
 // SERVER-ONLY Firebase Admin SDK (bypasses Firestore rules). The `server-only` import makes a build fail
 // if this is pulled into a client bundle. Credentials policy (first match wins):

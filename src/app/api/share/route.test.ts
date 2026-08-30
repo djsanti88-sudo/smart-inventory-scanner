@@ -16,7 +16,7 @@ vi.mock("@/server/share/shareTokenStore", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: mocks.verifyIdToken }),
   getAdminDb: () => ({ doc: () => ({ get: mocks.memberGet }) }),
 }));

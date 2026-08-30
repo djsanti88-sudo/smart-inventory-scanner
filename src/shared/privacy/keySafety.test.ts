@@ -29,7 +29,7 @@ const FORBIDDEN = [
   "process.env.OPENAI_API_KEY",
   // Firebase Admin (service account / privileged SDK) must never be reachable from client code.
   // Patterns are precise so a prose mention in a comment is not a false positive:
-  "@/lib/firebaseAdmin", // importing the server-only Admin client
+  "@/sync-database/cloud/firebaseAdmin", // importing the server-only Admin client
   "firebase-admin", // the Admin SDK package
   "FIREBASE_SERVICE_ACCOUNT_PATH", // local service-account path env
   "GOOGLE_APPLICATION_CREDENTIALS", // ADC path env

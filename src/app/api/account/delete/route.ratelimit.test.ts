@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: vi.fn(async () => ({ uid: "owner-uid" })) }),
   getAdminDb: () => ({
     doc: vi.fn(() => ({
@@ -63,7 +63,7 @@ describe("delete route rate limiting", () => {
   });
 
   it("does not consume the bucket for non-owners (limiter never called)", async () => {
-    vi.doMock("@/lib/firebaseAdmin", () => ({
+    vi.doMock("@/sync-database/cloud/firebaseAdmin", () => ({
       getAdminAuth: () => ({ verifyIdToken: vi.fn(async () => ({ uid: "counter-uid" })) }),
       getAdminDb: () => ({
         doc: vi.fn(() => ({

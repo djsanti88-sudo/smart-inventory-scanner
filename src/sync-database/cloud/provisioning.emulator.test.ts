@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { getAdminAuth, getAdminDb } from "@/sync-database/cloud/firebaseAdmin";
 import { POST as provisionPOST } from "@/app/api/businesses/provision/route";
 import { POST as membersPOST } from "@/app/api/businesses/members/route";
 import { defaultBusinessIdFor } from "@/users-businesses/provisioning/provisioning";

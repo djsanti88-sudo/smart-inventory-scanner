@@ -3,7 +3,7 @@ import { test, expect, type Page, type Route } from "./fixtures";
 
 // Task 11 (Phase 4 Stage A ship gate) AC5 e2e proof: the Universal Import panel on /products, driven
 // through the real UI, for both desktop and phone viewports. Uses the reordered/renamed TSV fixture
-// (src/services/import/__fixtures__/reordered-renamed.tsv), which carries a real RUNTIME-corpus part
+// (src/import/__fixtures__/reordered-renamed.tsv), which carries a real RUNTIME-corpus part
 // number (Falken Wildpeak A/T3W, manufacturer_part_number 28030703, size LT275/70R18, barcode
 // 848983006493 - queried directly from src/decoding/server/knowledge/knowledge.generated.db, the DB the app actually
 // loads; the older tire_corpus_seed.csv is stale pre-generation source data and is NOT what
@@ -20,7 +20,7 @@ import { test, expect, type Page, type Route } from "./fixtures";
 // headline is deterministically "Matched 1 of 2 automatically".
 
 const PROOF = "e2e/proof";
-const FIXTURE = path.join(__dirname, "..", "src", "services", "import", "__fixtures__", "reordered-renamed.tsv");
+const FIXTURE = path.join(__dirname, "..", "src", "import", "__fixtures__", "reordered-renamed.tsv");
 
 const NO_AI_STATUS = {
   liveEnabled: false, autoDecodeOnScan: false, openaiConfigured: false,

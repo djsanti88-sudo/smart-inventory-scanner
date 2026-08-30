@@ -1,6 +1,6 @@
 import { FieldValue } from "firebase-admin/firestore";
 import type { UserRecord } from "firebase-admin/auth";
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { getAdminAuth, getAdminDb } from "@/sync-database/cloud/firebaseAdmin";
 import { COLLECTIONS, memberDocId, type Role } from "@/sync-database/types";
 
 export const runtime = "nodejs";

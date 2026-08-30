@@ -70,7 +70,7 @@ whether merged). Batch A modules shipped: `e2e/teach/{knowledge,ladder,manifest,
 |---|---|
 | `npm run test` | All Vitest projects once: `unit` (node env: services/eval/server/app/scripts) + `dom` (jsdom: components/stores/camera). |
 | `npm run test:watch` | Watch mode. |
-| `npx vitest run <path>` | ONE test file, e.g. `npx vitest run src/services/resolver.test.ts`. |
+| `npx vitest run <path>` | ONE test file, e.g. `npx vitest run src/products/match/resolver.test.ts`. |
 | `npx vitest run <path> -t "name"` | One test by name within a file. |
 | `npm run test:ledger` | Crown invariant suite: 8 pinned files proving books balance, retry-is-no-op, markWrong transfer, merge union, provenance, replay, ladder timeout. Run for ANY counting change. |
 | `npm run test:golden` | Golden Baseline Gate: owner-loved 100/100 preview baseline, corpus slice, deterministic offline (Turso forced off). |
@@ -140,7 +140,7 @@ preflight gate before proposing any deploy action, GitHub-driven or emergency.
 | Script | What it does |
 |---|---|
 | `npm run build:tire-knowledge` | Regenerates the committed tire corpus JSON from a harvester snapshot. Fails closed. |
-| `npm run build:knowledge-db` | Builds `src/server/knowledge.generated.db` (better-sqlite3) from the JSON indexes. Needs the 4GB heap flag it already carries. |
+| `npm run build:knowledge-db` | Builds `src/decoding/server/knowledge/knowledge.generated.db` (better-sqlite3) from the JSON indexes. Needs the 4GB heap flag it already carries. |
 | `node scripts/decode-cache-backup.mjs --dump` / `--restore <file>` | Backs up / restores the PAID decode cache to `backups/*.jsonl` so a Turso wipe never forces re-paying decodes. Existing rows win on restore. |
 | `npm run eval-decode:corpus` | Scores the generated server-only tire index as ground truth. No AI, no server, no network. |
 | `npm run intel:report` | Builds the HTML report from existing intel JSON artifacts (free, offline). |
@@ -170,7 +170,7 @@ Env lives in gitignored `.env.local`. A local `.env.example` (names only) exists
 machine but is UNTRACKED (`.gitignore` covers all `.env*`), so do not rely on it existing in a fresh
 clone - this section is the durable name list. Client-exposed vars are
 `NEXT_PUBLIC_*` by Next.js convention; everything else is server-only, and
-`src/services/keySafety.test.ts` mechanically enforces that client code never reads `*_API_KEY`.
+`src/shared/privacy/keySafety.test.ts` mechanically enforces that client code never reads `*_API_KEY`.
 
 - Backend mode: `NEXT_PUBLIC_FIREBASE_BACKEND`, `NEXT_PUBLIC_FIREBASE_USE_EMULATOR`,
   `NEXT_PUBLIC_FIREBASE_ALLOW_PROD`, `NEXT_PUBLIC_FIREBASE_*` (app config), `NEXT_PUBLIC_REQUIRE_LOGIN`

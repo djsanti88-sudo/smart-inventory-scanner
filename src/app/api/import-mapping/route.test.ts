@@ -15,7 +15,7 @@ vi.mock("@/import/importMappingMemory", () => ({
 let liveAuth = false;
 vi.mock("@/authentication/service/authMode", () => ({ isLiveAuth: () => liveAuth }));
 const verifyIdToken = vi.fn();
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: (...args: unknown[]) => verifyIdToken(...args) }),
   getAdminDb: () => ({ doc: vi.fn(() => ({ get: async () => ({ exists: true }) })) }),
 }));

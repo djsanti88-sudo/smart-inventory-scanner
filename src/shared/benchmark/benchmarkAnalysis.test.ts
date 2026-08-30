@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accuracyVerdict, classifyPath, gptDecodeCallsForResponse, isUsableName, latencyStats, parseCsv, summarize, toInputRows, type BenchmarkRow, type DecodeResponseLike } from "@/services/benchmark/benchmarkAnalysis";
+import { accuracyVerdict, classifyPath, gptDecodeCallsForResponse, isUsableName, latencyStats, parseCsv, summarize, toInputRows, type BenchmarkRow, type DecodeResponseLike } from "@/shared/benchmark/benchmarkAnalysis";
 
 const response = (over: Partial<DecodeResponseLike>): DecodeResponseLike => ({ results: [], providerNames: [], providerStatuses: [], decision: { status: "needs_review" }, debug: {}, ...over });
 
