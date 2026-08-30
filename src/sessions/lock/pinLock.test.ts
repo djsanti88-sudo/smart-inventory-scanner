@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isValidPinFormat, hashPin, verifyPin } from "@/services/security/pinLock";
+import { isValidPinFormat, hashPin, verifyPin } from "@/sessions/lock/pinLock";
 
 describe("pinLock", () => {
   it("accepts 4-6 digit PINs, rejects everything else", () => {

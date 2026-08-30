@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
-import { SessionCountsTable, type SessionCountRow } from "@/components/SessionCountsTable";
-import { countsFromTimeline } from "@/services/sessions/countsFromTimeline";
+import { SessionCountsTable, type SessionCountRow } from "@/sessions/SessionCountsTable";
+import { countsFromTimeline } from "@/sessions/history/countsFromTimeline";
 import type { Product, ScanEvent } from "@/types";
 
 function makeProduct(over: Partial<Product>): Product {

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
-import { isValidPinFormat } from "@/services/security/pinLock";
+import { isValidPinFormat } from "@/sessions/lock/pinLock";
 
 // Owner PIN management (Settings). Set / change / reset the single PIN that locks and unlocks sessions.
 // The PIN is stored only as a salted hash. Reset clears it AND unlocks every session (forgot-PIN escape).

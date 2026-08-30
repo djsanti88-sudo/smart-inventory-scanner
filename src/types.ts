@@ -187,7 +187,7 @@ export interface ScanEvent {
   decodeNote?: string; // platformOwner-only auto-decode detail (why AI did/didn't run); never shown to customers
   decodeStatus?: FeedDecodeStatus; // live-decode pipeline state for this scan row
   // P5 Task 5 (honest provenance badges, 2026-07-20): honest provenance signal for the feed row's
-  // badge (see src/components/badges.tsx DecodeProvenance). Populated ONLY at the primary
+  // badge (see src/user-interface/ui/badges.tsx DecodeProvenance). Populated ONLY at the primary
   // live-decode write site (runLiveDecodeOnce) where a DecodeDecision is in scope - optional
   // because the ~15 other decodeStatus write sites (relabel/mark-wrong/suggest-link/etc.) do not
   // have a DecodeDecision in scope; full threading is deferred to P6. Display only, never gates

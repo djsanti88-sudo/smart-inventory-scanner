@@ -1,6 +1,6 @@
 "use client";
 
-import type { SessionHistoryEntry } from "@/services/sessions/sessionHistory";
+import type { SessionHistoryEntry } from "@/sessions/history/sessionHistory";
 
 // Owner feature (2026-07-22): the read-only scan spreadsheet for a session that has already ended,
 // rendered from its automatically saved sessionHistory entry (services/sessions/sessionHistory.ts).

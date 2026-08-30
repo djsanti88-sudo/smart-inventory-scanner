@@ -16,11 +16,11 @@ import { getDb } from "@/authentication/firebaseClient";
 import { getSession } from "@/authentication/auth";
 import { useScanStore } from "@/stores/scanStore";
 import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
-import { ArchivedSessionScans } from "@/components/ArchivedSessionScans";
-import { SessionCountsTable, type SessionCountRow } from "@/components/SessionCountsTable";
-import { countsFromTimeline } from "@/services/sessions/countsFromTimeline";
+import { ArchivedSessionScans } from "@/sessions/history/ArchivedSessionScans";
+import { SessionCountsTable, type SessionCountRow } from "@/sessions/SessionCountsTable";
+import { countsFromTimeline } from "@/sessions/history/countsFromTimeline";
 import { isCloudBackendEnabled } from "@/services/config/backend";
-import type { SessionHistoryEntry } from "@/services/sessions/sessionHistory";
+import type { SessionHistoryEntry } from "@/sessions/history/sessionHistory";
 import type { ScanEvent } from "@/types";
 
 const TIMELINE_UNAVAILABLE = "Session timeline is not available for this data source.";

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/experimental-ct-react";
-import { SyncBadge } from "@/components/badges";
+import { SyncBadge } from "@/user-interface/ui/badges";
 
 // Example component test (the CT scaffold's proof-of-life). Mounts the pure presentational
 // SyncBadge in a real browser and asserts its rendered text per sync status. SyncBadge is a good

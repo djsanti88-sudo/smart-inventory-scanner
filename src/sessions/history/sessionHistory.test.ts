@@ -5,7 +5,7 @@ import {
   SESSION_HISTORY_CAP,
   SESSION_HISTORY_ROWS_CAP,
   type SessionHistoryEntry,
-} from "@/services/sessions/sessionHistory";
+} from "@/sessions/history/sessionHistory";
 import type { ScanEvent } from "@/types";
 
 function scanEvent(over: Partial<ScanEvent>): ScanEvent {

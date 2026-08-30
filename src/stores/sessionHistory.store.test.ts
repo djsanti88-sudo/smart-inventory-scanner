@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
-import { SESSION_HISTORY_CAP } from "@/services/sessions/sessionHistory";
+import { SESSION_HISTORY_CAP } from "@/sessions/history/sessionHistory";
 
 // Owner feature (approved 2026-07-22): session history. Every session that ends or rotates with at
 // least one scan in it is automatically archived to `sessionHistory` BEFORE scanFeed/finalCounts are

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shouldReuseSession, buildAutoSessionName, type AutoSessionCandidate } from "@/services/sessions/autoSession";
+import { shouldReuseSession, buildAutoSessionName, type AutoSessionCandidate } from "@/sessions/auto/autoSession";
 
 const DEVICE_A = "device-a";
 const DEVICE_B = "device-b";

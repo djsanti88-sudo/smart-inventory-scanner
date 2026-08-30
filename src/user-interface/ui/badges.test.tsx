@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import { DecodeStatusBadge, StatusBadge, SyncBadge } from "@/components/badges";
+import { DecodeStatusBadge, StatusBadge, SyncBadge } from "@/user-interface/ui/badges";
 
 // Plan C, Task 1 (presentational only): collapse the weak decode states into a single
 // user-facing "Suggested" label. needs_review and conflict must both read "Suggested";

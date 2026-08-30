@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 import { customerDisplayName } from "@/services/displayName";
 import { prettifyProductName, resolvedBrand, resolvedModel, resolvedSizeTag, resolvedSizeDisplay } from "@/services/format/productDisplay";
-import { DecodeStatusBadge } from "@/components/badges";
+import { DecodeStatusBadge } from "@/user-interface/ui/badges";
 import type { Product } from "@/types";
 
 // One row of the session counts spreadsheet. `product` is the store join (getProduct) when the

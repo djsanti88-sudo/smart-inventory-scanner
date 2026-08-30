@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 import { customerDisplayName } from "@/services/displayName";
-import { ImageHoverPreview } from "@/components/ImageHoverPreview";
+import { ImageHoverPreview } from "@/user-interface/ui/ImageHoverPreview";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
 import { UniversalImportPanelContainer } from "@/components/UniversalImportPanelContainer";
 import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";

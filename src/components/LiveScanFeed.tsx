@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
-import { DecodeStatusBadge, MatchBadge, StatusBadge, SyncBadge } from "@/components/badges";
+import { DecodeStatusBadge, MatchBadge, StatusBadge, SyncBadge } from "@/user-interface/ui/badges";
 import { prettifyBrand, prettifyProductName, resolvedCanonicalSize } from "@/services/format/productDisplay";
 import { getIdentityConfidenceBand, getReviewIdentityBand, identityBandLabel } from "@/services/ai/identityConfidenceBand";
 import { canOneTapApproveIdentity } from "@/stores/scanGates";

@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import { ArchivedSessionScans } from "@/components/ArchivedSessionScans";
-import type { SessionHistoryEntry } from "@/services/sessions/sessionHistory";
+import { ArchivedSessionScans } from "@/sessions/history/ArchivedSessionScans";
+import type { SessionHistoryEntry } from "@/sessions/history/sessionHistory";
 
 // Owner feature (2026-07-22): the archived per-session scan spreadsheet - the auto-saved trace a
 // past session leaves behind, shown when the live data source has no timeline for it.

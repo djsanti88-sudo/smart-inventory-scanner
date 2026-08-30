@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import { ProdFirebaseBanner } from "@/components/ProdFirebaseBanner";
+import { ProdFirebaseBanner } from "@/user-interface/shell/ProdFirebaseBanner";
 
 // The banner is a LOCAL-DEV guardrail (warns when dev is pointed at real Firebase). It must NEVER render
 // on a real deployment, where using real Firebase is the intended behavior.

@@ -1,4 +1,4 @@
-import type { SessionCountRow } from "@/components/SessionCountsTable";
+import type { SessionCountRow } from "@/sessions/SessionCountsTable";
 import type { Product, ScanEvent } from "@/types";
 
 // Derives a session's product-count rows from its scan timeline: each product/code's session

@@ -6,7 +6,7 @@ import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 import { customerDisplayName } from "@/services/displayName";
 import { prettifyProductName, resolvedBrand, resolvedModel, resolvedSizeTag, resolvedSizeDisplay } from "@/services/format/productDisplay";
 import { getReviewIdentityBand, identityBandLabel } from "@/services/ai/identityConfidenceBand";
-import { DecodeStatusBadge, SyncBadge } from "@/components/badges";
+import { DecodeStatusBadge, SyncBadge } from "@/user-interface/ui/badges";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
 import { filterProducts } from "@/services/polish/filterProducts";
 import { requiresOwnerPin } from "@/services/security/destructiveGuard";

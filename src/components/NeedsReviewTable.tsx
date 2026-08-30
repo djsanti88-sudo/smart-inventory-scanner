@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
-import { StatusBadge, SyncBadge } from "@/components/badges";
+import { StatusBadge, SyncBadge } from "@/user-interface/ui/badges";
 import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
 import { prettifyProductName } from "@/services/format/productDisplay";
 import { getIdentityConfidenceBand, identityBandWord } from "@/services/ai/identityConfidenceBand";

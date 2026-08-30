@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { aggregateSessionCounts, aggregateHistoryRows } from "@/services/sessions/history";
+import { aggregateSessionCounts, aggregateHistoryRows } from "@/sessions/history/history";
 
 describe("aggregateSessionCounts", () => {
   it("returns zeros for an empty session", () => {

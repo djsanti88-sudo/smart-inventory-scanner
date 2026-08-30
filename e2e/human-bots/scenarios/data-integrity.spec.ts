@@ -43,7 +43,7 @@ test("DataIntegrityBot: increment correctness, refresh persistence, unknown -> N
   //    that is intended, current behavior, not a bug: see countAlways.store.test.ts). Read the
   //    most-recent feed row (top; feed prepends). Its DecodeStatusBadge label reads "Suggested"
   //    (Plan C Task 1, 2026-07-01: needs_review/conflict/suggested are intentionally collapsed to one
-  //    non-alarming customer-facing label - see src/components/badges.tsx). The label change is
+  //    non-alarming customer-facing label - see src/user-interface/ui/badges.tsx). The label change is
   //    cosmetic; the property this check actually cares about - the code was never matched to an
   //    existing NAMED product (no wrong identity) - is asserted directly below instead of via wording.
   await scan(page, "999000111222");

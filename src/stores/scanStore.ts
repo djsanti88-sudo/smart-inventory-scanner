@@ -28,7 +28,7 @@ import { gradeBarcode } from "@/services/upc/barcodeTrust";
 import { canonicalGtin } from "@/services/upc/gtin";
 import { clampDecodeBudgetMs } from "@/services/ai/decodeBudget";
 import { fetchWithBackoff } from "@/services/net/fetchWithBackoff";
-import { hashPin, verifyPin, isValidPinFormat } from "@/services/security/pinLock";
+import { hashPin, verifyPin, isValidPinFormat } from "@/sessions/lock/pinLock";
 import { isPlatformOwnerClient } from "@/users-businesses/roles/roleAccess";
 import { isCloudBackendEnabled } from "@/services/config/backend";
 import type { DatabaseService } from "@/services/db/databaseService";
@@ -87,7 +87,7 @@ import {
   buildSessionHistoryEntry,
   appendSessionHistory,
   type SessionHistoryEntry,
-} from "@/services/sessions/sessionHistory";
+} from "@/sessions/history/sessionHistory";
 import { toAuditEvent } from "@/users-businesses/account/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
@@ -107,7 +107,7 @@ import {
   LEGACY_PERSIST_KEY,
 } from "@/stores/scanPersistNamespace";
 import { getOrCreateDeviceId } from "@/services/deviceIdentity";
-import { shouldReuseSession, buildAutoSessionName } from "@/services/sessions/autoSession";
+import { shouldReuseSession, buildAutoSessionName } from "@/sessions/auto/autoSession";
 import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
 import { planSyncBatch } from "@/services/syncBatchPlanner";
 import { mergeReloadedProductsAndAliases, mergeReloadedReviews } from "@/services/reloadMergePolicy";

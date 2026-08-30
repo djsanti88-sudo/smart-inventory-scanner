@@ -8,7 +8,7 @@ import { DECODE_BUDGET_MIN_MS, DECODE_BUDGET_MAX_MS, DECODE_BUDGET_DEFAULT_MS } 
 import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 import { ExportMenu } from "@/components/ExportMenu";
 import { CleanupRecommendations } from "@/components/CleanupRecommendations";
-import { OwnerPinSettings } from "@/components/OwnerPinSettings";
+import { OwnerPinSettings } from "@/sessions/lock/OwnerPinSettings";
 import { GptDecodePanel } from "@/components/GptDecodePanel";
 import { KillSwitchBanner } from "@/components/KillSwitchBanner";
 import { requiresOwnerPin } from "@/services/security/destructiveGuard";

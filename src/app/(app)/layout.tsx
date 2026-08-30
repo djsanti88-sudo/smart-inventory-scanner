@@ -1,7 +1,7 @@
 import { StoreHydrator } from "@/components/StoreHydrator";
 import { AuthGuard } from "@/authentication/AuthGuard";
-import { Nav } from "@/components/Nav";
-import { ProdFirebaseBanner } from "@/components/ProdFirebaseBanner";
+import { Nav } from "@/user-interface/shell/Nav";
+import { ProdFirebaseBanner } from "@/user-interface/shell/ProdFirebaseBanner";
 import { EmailVerifyBannerGate } from "@/authentication/EmailVerifyBannerGate";
 import { BusinessContextProvider } from "@/users-businesses/BusinessContextGate";
 
