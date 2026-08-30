@@ -1,3 +1,5 @@
+import "server-only";
+
 // Firestore-backed rate limiter for the account-deletion route (D2). Deliberately decoupled from
 // the decoder's Turso/libsql storage (`src/server/decode/storage.ts`): account deletion is a
 // GDPR/CCPA erasure obligation, and the decode cache DB being down or missing its env vars must

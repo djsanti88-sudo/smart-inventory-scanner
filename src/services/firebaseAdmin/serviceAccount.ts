@@ -1,3 +1,5 @@
+import "server-only";
+
 // Pure, dependency-free helpers for loading a Firebase Admin service account from a Vercel-style env var
 // (no secret file on disk). Deliberately free of `firebase-admin` / `server-only` imports so it is
 // unit-testable in the fast node test project. NEVER logs or includes secret contents in error messages.

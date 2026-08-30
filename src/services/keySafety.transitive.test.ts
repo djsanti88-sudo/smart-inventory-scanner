@@ -66,11 +66,24 @@ function importsOf(file: string, src: string): string[] {
 
 const isServerOnly = (src: string) => /import\s+["']server-only["']/.test(src);
 
-/** Client entry points: "use client" files, plus everything under components/ and stores/. */
+// Folders that are CLIENT BY CONSTRUCTION. Pre-reorganization this was just components/ and stores/.
+// The folder reorganization emptied components/ and spread that UI across feature folders, so the
+// old two-name regex would have quietly stopped treating them as entry points - a client helper with
+// no "use client" directive would then never be walked. Listed explicitly, and asserted below.
+const CLIENT_BY_CONSTRUCTION =
+  /[\\/](components|stores|authentication|users-businesses|user-interface|scanning|inventory|review|sessions|import|reconcile|reports|sync-database|products|admin|decoding)[\\/]/;
+
+/** Client entry points: "use client" files, plus everything in a client-by-construction folder. */
 function clientEntryPoints(): string[] {
   return walk(SRC).filter((f) => {
-    if (/[\\/](components|stores)[\\/]/.test(f)) return true;
-    if (/[\\/]server[\\/]/.test(f)) return false;
+    // Match on the path RELATIVE to src/, never the absolute path: the repo itself lives in a
+    // directory called "inventory", so an absolute-path test would match every file in the project.
+    const rel = f.slice(SRC.length);
+    // server/ wins: it is server by construction even inside a feature folder (e.g. decoding/server).
+    if (/[\\/]server[\\/]/.test(rel)) return false;
+    // src/app/api holds server route handlers, which legitimately read secrets.
+    if (/^[\\/]app[\\/]api[\\/]/.test(rel)) return false;
+    if (CLIENT_BY_CONSTRUCTION.test(rel)) return true;
     return /^\s*["']use client["']/m.test(readFileSync(f, "utf8"));
   });
 }
