@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { resolveScanToProductTiered, resolveScanToProduct } from "./aliasMatcher";
-import { cleanScanCode } from "@/services/scanCleaner";
+import { cleanScanCode } from "@/scanning/clean/scanCleaner";
 import type { Product, Alias } from "@/types";
 
 const BID = "b1";

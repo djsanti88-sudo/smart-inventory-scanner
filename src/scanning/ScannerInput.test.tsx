@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ScannerInput } from "@/components/ScannerInput";
+import { ScannerInput } from "@/scanning/ScannerInput";
 import { useScanStore } from "@/stores/scanStore";
 import type { ScanEvent } from "@/types";
 

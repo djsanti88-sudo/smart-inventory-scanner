@@ -1,5 +1,5 @@
 import type { Alias } from "@/types";
-import { cleanScanCode } from "@/services/scanCleaner";
+import { cleanScanCode } from "@/scanning/clean/scanCleaner";
 
 // aliasDiscovery.ts - pure, deterministic. Find the GROUNDED identifiers that could become aliases for a
 // product, and which of them are safe to OFFER as one-click "discovered" aliases. No AI, no network.

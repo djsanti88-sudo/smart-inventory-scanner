@@ -1,4 +1,4 @@
-import { cleanScanCode } from "@/services/scanCleaner";
+import { cleanScanCode } from "@/scanning/clean/scanCleaner";
 
 // Smart code normalization. PURE (no React, no next/*, no network). The RAW scanned value is ALWAYS
 // preserved; normalization only ADDS safe search variants. Tire part numbers / SKUs frequently print

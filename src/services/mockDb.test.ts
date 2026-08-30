@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { MockDb, type IncrementPayload } from "@/services/mockDb";
-import { buildIdempotencyKey } from "@/services/idempotency";
+import { buildIdempotencyKey } from "@/inventory/idempotency";
 import type { Alias, PendingSyncItem, ScanEvent } from "@/types";
 
 function incrementItem(scanEventId: string): PendingSyncItem {

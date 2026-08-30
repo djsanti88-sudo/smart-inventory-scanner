@@ -7,7 +7,7 @@ import { customerDisplayName } from "@/products/match/displayName";
 import { prettifyProductName, resolvedBrand, resolvedModel, resolvedSizeTag, resolvedSizeDisplay } from "@/services/format/productDisplay";
 import { getReviewIdentityBand, identityBandLabel } from "@/services/ai/identityConfidenceBand";
 import { DecodeStatusBadge, SyncBadge } from "@/user-interface/ui/badges";
-import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
+import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/inventory/UndoDeleteBanner";
 import { filterProducts } from "@/products/polish/filterProducts";
 import { requiresOwnerPin } from "@/services/security/destructiveGuard";
 import type { InventoryCount, Product, UnknownCodeReview } from "@/types";

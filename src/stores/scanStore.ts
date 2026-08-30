@@ -18,8 +18,8 @@ import type {
   SyncOperation,
   UnknownCodeReview,
 } from "@/types";
-import { cleanScanCode } from "@/services/scanCleaner";
-import { normalizeCode } from "@/services/codeNormalizer";
+import { cleanScanCode } from "@/scanning/clean/scanCleaner";
+import { normalizeCode } from "@/scanning/clean/codeNormalizer";
 import { evaluateMismatch, type MismatchVerdict } from "@/products/match/productMismatchGuard";
 import { detectCodeType, codeTypeToAliasType } from "@/products/match/codeTypeDetector";
 import { resolveScan } from "@/products/match/resolver";
@@ -34,9 +34,9 @@ import { isCloudBackendEnabled } from "@/services/config/backend";
 import type { DatabaseService } from "@/services/db/databaseService";
 import { resolveScanToProductTiered } from "@/products/match/aliasMatcher";
 import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/products/match/productDedup";
-import { incrementInventoryCount } from "@/services/inventory";
-import { buildIdempotencyKey, stableIdempotencyFingerprint } from "@/services/idempotency";
-import { versionReviewDecision } from "@/services/reviewDecisionVersion";
+import { incrementInventoryCount } from "@/inventory/ledger";
+import { buildIdempotencyKey, stableIdempotencyFingerprint } from "@/inventory/idempotency";
+import { versionReviewDecision } from "@/review/reviewDecisionVersion";
 import { MockDb, getMockDb, type IncrementPayload, type SyncResult } from "@/services/mockDb";
 import { FirebaseSyncTarget } from "@/services/db/firebase/firebaseSyncTarget";
 import { loadBusinessData } from "@/services/db/firebase/businessDataLoader";
@@ -58,7 +58,7 @@ import { sanitizeForAiLookup } from "@/services/sanitizer";
 import { sanitizeCustomerReason, MISS_REASON_TEXT } from "@/services/ai/decodeFallback";
 import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
 import { getIdentityConfidenceBand } from "@/services/ai/identityConfidenceBand";
-import { buildCleanupRecommendations } from "@/services/cleanup/recommendations";
+import { buildCleanupRecommendations } from "@/inventory/cleanup/recommendations";
 import type { CatalogEntry, CatalogHit, ShopOverride } from "@/products/catalog/catalogTypes";
 import { decideLookup, upsertVerified, applyAiCandidate, observeScan } from "@/products/catalog/localCatalogProvider";
 import { planAutoVerify } from "@/products/catalog/catalogAutoVerify";

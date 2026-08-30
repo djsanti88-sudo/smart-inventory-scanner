@@ -44,7 +44,7 @@ export default defineConfig({
           // `node --test`, not vitest - vitest's glob would otherwise collect them and fail with
           // "No test suite found".
           exclude: [
-            "src/services/camera/**",
+            "src/scanning/camera/**",
             "src/stores/**",
             "scripts/kkm-catalog/**/*.test.mjs",
             "scripts/refresh-tire-meta.test.mjs",
@@ -65,7 +65,7 @@ export default defineConfig({
           name: "dom",
           environment: "jsdom",
           // Extension-based, folder-independent (see the "unit" project note above).
-          include: ["src/**/*.test.tsx", "src/stores/**/*.test.ts", "src/services/camera/**/*.test.ts"],
+          include: ["src/**/*.test.tsx", "src/stores/**/*.test.ts", "src/scanning/camera/**/*.test.ts"],
           setupFiles: ["./vitest.setup.ts"],
         },
       },

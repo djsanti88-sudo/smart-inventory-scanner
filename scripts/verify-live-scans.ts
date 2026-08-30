@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ServiceAccount } from "firebase-admin/app";
-import { cleanScanCode, buildNormalizedCandidates } from "@/services/scanCleaner";
+import { cleanScanCode, buildNormalizedCandidates } from "@/scanning/clean/scanCleaner";
 import { COLLECTIONS } from "@/services/db/types";
 
 const EXPECTED_PROJECT = "smart-inventory-scanner-app";

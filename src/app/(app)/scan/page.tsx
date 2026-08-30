@@ -3,10 +3,10 @@
 import { useEffect, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
-import { ScannerInput } from "@/components/ScannerInput";
-import { CameraScanButton } from "@/components/CameraScanButton";
-import { LiveScanFeed } from "@/components/LiveScanFeed";
-import { FinalCountTable } from "@/components/FinalCountTable";
+import { ScannerInput } from "@/scanning/ScannerInput";
+import { CameraScanButton } from "@/scanning/camera/CameraScanButton";
+import { LiveScanFeed } from "@/scanning/LiveScanFeed";
+import { FinalCountTable } from "@/inventory/FinalCountTable";
 import { SyncStatusBar } from "@/components/SyncStatusBar";
 import { SyncStatusIndicator } from "@/components/SyncStatusIndicator";
 import { ExportMenu } from "@/components/ExportMenu";
@@ -16,7 +16,7 @@ import { SessionsList } from "@/sessions/SessionsList";
 import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
 import { planScanBatch } from "./planScan";
 import { resolveRawScan } from "@/products/match/resolver";
-import { computeMoatStats } from "@/services/moatStats";
+import { computeMoatStats } from "@/inventory/moatStats";
 
 export default function ScanPage() {
   const processScan = useScanStore((s) => s.processScan);

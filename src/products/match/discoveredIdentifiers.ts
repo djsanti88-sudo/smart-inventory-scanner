@@ -1,4 +1,4 @@
-import { normalizeCode } from "@/services/codeNormalizer";
+import { normalizeCode } from "@/scanning/clean/codeNormalizer";
 import type { UnknownCodeReview } from "@/types";
 
 /**

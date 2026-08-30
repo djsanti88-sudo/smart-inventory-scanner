@@ -5,7 +5,7 @@ import {
   resolveScanToProduct,
   needsReview,
 } from "@/products/match/aliasMatcher";
-import { cleanScanCode } from "@/services/scanCleaner";
+import { cleanScanCode } from "@/scanning/clean/scanCleaner";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import type { Product } from "@/types";
 

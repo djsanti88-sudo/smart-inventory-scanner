@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, cleanup } from "@testing-library/react";
 import { useScanStore } from "@/stores/scanStore";
-import { FinalCountTable } from "@/components/FinalCountTable";
+import { FinalCountTable } from "@/inventory/FinalCountTable";
 import type { InventoryCount, Product } from "@/types";
 
 // DEFECT #37 (live-reproduced 2026-08-05/06, canelo round 2): same O(N*M) render-time product lookup

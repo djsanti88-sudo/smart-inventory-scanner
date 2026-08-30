@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, act, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { CameraScanButton } from "@/components/CameraScanButton";
+import { CameraScanButton } from "@/scanning/camera/CameraScanButton";
 
 afterEach(cleanup);
 
@@ -12,7 +12,7 @@ const startMock = vi.fn(async () => {});
 const stopMock = vi.fn();
 let capturedOnDetect: ((raw: string) => void) | null = null;
 
-vi.mock("@/services/camera/cameraScanner", () => ({
+vi.mock("@/scanning/camera/cameraScanner", () => ({
   createCameraScanner: (_video: HTMLVideoElement, onDetect: (raw: string) => void) => {
     capturedOnDetect = onDetect;
     return { start: startMock, stop: stopMock };

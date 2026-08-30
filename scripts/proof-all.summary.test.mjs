@@ -156,9 +156,9 @@ describe("proof-all.mjs buildSummaryReport", () => {
       discovered: [
         "e2e/boss-barcode-corpus/fixtures.test.mjs",
         "scripts/refresh-tire-meta.test.mjs",
-        "src/services/inventory.test.ts",
+        "src/inventory/ledger.test.ts",
       ],
-      collectedByVitest: ["src/services/inventory.test.ts"],
+      collectedByVitest: ["src/inventory/ledger.test.ts"],
       executedByNodeTest: ["scripts/refresh-tire-meta.test.mjs"],
       declaredNotRun: [],
     });

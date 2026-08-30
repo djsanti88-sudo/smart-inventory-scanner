@@ -1,5 +1,5 @@
 import type { Alias, Product } from "@/types";
-import { buildNormalizedCandidates, cleanScanCode } from "@/services/scanCleaner";
+import { buildNormalizedCandidates, cleanScanCode } from "@/scanning/clean/scanCleaner";
 
 // Deterministic seed data for local proof. Spans multiple trades (tires, beverage, supplement,
 // tool) to prove the app is not tied to one industry. Fixed ids/timestamps keep tests stable.

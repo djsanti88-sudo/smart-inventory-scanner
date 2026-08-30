@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import { useScanStore } from "@/stores/scanStore";
-import { NeedsReviewTable } from "@/components/NeedsReviewTable";
+import { NeedsReviewTable } from "@/review/NeedsReviewTable";
 import type { UnknownCodeReview } from "@/types";
 
 function review(over: Partial<UnknownCodeReview>): UnknownCodeReview {

@@ -1,4 +1,4 @@
-import { buildIdempotencyKey, stableIdempotencyFingerprint } from "@/services/idempotency";
+import { buildIdempotencyKey, stableIdempotencyFingerprint } from "@/inventory/idempotency";
 import type { UnknownCodeReview } from "@/types";
 
 /**

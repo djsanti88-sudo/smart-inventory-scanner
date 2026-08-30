@@ -1,5 +1,5 @@
 import type { InventoryCount, ScanEvent } from "@/types";
-import { createInventoryCount, applyScanEventOnce } from "@/services/inventory";
+import { createInventoryCount, applyScanEventOnce } from "@/inventory/ledger";
 
 // Pure ledger replay. Given the raw scan-event stream for a session, reconstruct the
 // InventoryCount[] purely from event deltas, deduping by event id exactly as the live

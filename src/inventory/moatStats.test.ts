@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeMoatStats } from "@/services/moatStats";
+import { computeMoatStats } from "@/inventory/moatStats";
 
 describe("computeMoatStats", () => {
   it("counts known/resolved as identified, everything else as not", () => {

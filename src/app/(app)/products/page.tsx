@@ -5,7 +5,7 @@ import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
 import { customerDisplayName } from "@/products/match/displayName";
 import { ImageHoverPreview } from "@/user-interface/ui/ImageHoverPreview";
-import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
+import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/inventory/UndoDeleteBanner";
 import { UniversalImportPanelContainer } from "@/import/UniversalImportPanelContainer";
 import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
 import type { Product } from "@/types";

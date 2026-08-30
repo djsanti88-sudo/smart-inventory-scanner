@@ -8,12 +8,12 @@
       "owns": "Scan intake, the count ledger, resolution, optimistic state, persistence, sync queue.",
       "globs": [
         "src/stores/**",
-        "src/services/inventory.ts",
-        "src/services/inventory.replay.ts",
+        "src/inventory/ledger.ts",
+        "src/inventory/replay.ts",
         "src/products/match/resolver.ts",
-        "src/services/scanCleaner.ts",
+        "src/scanning/clean/scanCleaner.ts",
         "src/products/match/aliasMatcher.ts",
-        "src/services/idempotency.ts"
+        "src/inventory/idempotency.ts"
       ],
       "gates": ["npm run proof:all", "npm run test:ledger"],
       "invariants": [

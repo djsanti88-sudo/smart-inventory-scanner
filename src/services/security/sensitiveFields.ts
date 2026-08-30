@@ -41,7 +41,7 @@ export function stripSensitive<T>(value: T): T {
 }
 
 /** Customer-safe product-facing fields (allowlist). Used to BUILD sanitized shapes, not just strip.
- * Owner rule (2026-07-22, encoded in src/components/FinalCountTable.tsx:129-131): the barcode a shop
+ * Owner rule (2026-07-22, encoded in src/inventory/FinalCountTable.tsx:129-131): the barcode a shop
  * scanned onto THEIR OWN product row is THEIR data - already rendered to every role in the UI - so
  * primaryBarcode/gtin/upc/ean are included here. Stripping a shop's own scanned identifier from that
  * same device's own localStorage persistence protected nothing and instead destroyed the shop's own

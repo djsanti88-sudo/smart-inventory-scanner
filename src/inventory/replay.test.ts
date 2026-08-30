@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { ScanEvent } from "@/types";
-import { replayLedgerCounts } from "@/services/inventory.replay";
+import { replayLedgerCounts } from "@/inventory/replay";
 
 function ev(over: Partial<ScanEvent>): ScanEvent {
   return {

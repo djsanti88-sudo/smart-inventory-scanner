@@ -1,6 +1,6 @@
 // Pure aggregation for the Boss Report. This module takes already-loaded store data and produces a
 // display-ready shape shared by the logged-in report page and future server-side report consumers.
-import { computeMoatStats, type MoatStats } from "@/services/moatStats";
+import { computeMoatStats, type MoatStats } from "@/inventory/moatStats";
 import {
   computeVariance,
   type CountSnapshot,

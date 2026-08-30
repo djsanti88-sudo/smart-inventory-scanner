@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
 import { useScanStore } from "@/stores/scanStore";
-import { FinalCountTable, COUNTS_RENDER_WINDOW, COUNTS_RENDER_CHUNK } from "@/components/FinalCountTable";
+import { FinalCountTable, COUNTS_RENDER_WINDOW, COUNTS_RENDER_CHUNK } from "@/inventory/FinalCountTable";
 import type { InventoryCount, Product } from "@/types";
 
 // DEFECT #29/#37 residual (live-reproduced 2026-08-05/06, canelo round 2): after the Map-lookup fix,

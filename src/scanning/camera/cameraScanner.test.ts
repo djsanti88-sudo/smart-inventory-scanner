@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createCameraScanner } from "@/services/camera/cameraScanner";
+import { createCameraScanner } from "@/scanning/camera/cameraScanner";
 
 // Mock native BarcodeDetector class. `detect()` resolves with whatever the test currently has
 // queued in `detectQueue` (an array of arrays-of-detections, one entry consumed per detect() call).
@@ -144,7 +144,7 @@ describe("createCameraScanner", () => {
       BarcodeDetector: MockPolyfillDetector,
     }));
     vi.resetModules();
-    const { createCameraScanner: createCameraScannerFresh } = await import("@/services/camera/cameraScanner");
+    const { createCameraScanner: createCameraScannerFresh } = await import("@/scanning/camera/cameraScanner");
 
     const video = makeVideo();
     const onDetect = vi.fn();
@@ -171,7 +171,7 @@ describe("createCameraScanner", () => {
       throw new Error("Failed to fetch dynamically imported module");
     });
     vi.resetModules();
-    const { createCameraScanner: createCameraScannerFresh } = await import("@/services/camera/cameraScanner");
+    const { createCameraScanner: createCameraScannerFresh } = await import("@/scanning/camera/cameraScanner");
 
     const video = makeVideo();
     const onDetect = vi.fn();

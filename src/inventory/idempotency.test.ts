@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildIdempotencyKey, newId, stableIdempotencyFingerprint } from "@/services/idempotency";
+import { buildIdempotencyKey, newId, stableIdempotencyFingerprint } from "@/inventory/idempotency";
 
 describe("buildIdempotencyKey", () => {
   it("includes business, session, event, and operation", () => {

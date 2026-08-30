@@ -1,5 +1,5 @@
 import type { Alias, Product } from "@/types";
-import { cleanScanCode } from "@/services/scanCleaner";
+import { cleanScanCode } from "@/scanning/clean/scanCleaner";
 import { detectCodeType, codeTypeToAliasType } from "@/products/match/codeTypeDetector";
 import { parse as parseCsvSync } from "csv-parse/sync";
 import { gradeBarcode } from "@/products/barcodes/barcodeTrust";

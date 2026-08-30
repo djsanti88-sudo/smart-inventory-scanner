@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
-import { LiveScanFeed, FEED_RENDER_WINDOW, FEED_RENDER_CHUNK } from "@/components/LiveScanFeed";
+import { LiveScanFeed, FEED_RENDER_WINDOW, FEED_RENDER_CHUNK } from "@/scanning/LiveScanFeed";
 import { useScanStore } from "@/stores/scanStore";
 import type { ScanEvent, Product } from "@/types";
 

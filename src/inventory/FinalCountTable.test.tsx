@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { useScanStore } from "@/stores/scanStore";
-import { FinalCountTable } from "@/components/FinalCountTable";
+import { FinalCountTable } from "@/inventory/FinalCountTable";
 import type { InventoryCount, Product, UnknownCodeReview } from "@/types";
 
 const product: Product = {

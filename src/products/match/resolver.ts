@@ -1,5 +1,5 @@
 import type { Alias, CleanedCode, Product, ResolverResult } from "@/types";
-import { cleanScanCode } from "@/services/scanCleaner";
+import { cleanScanCode } from "@/scanning/clean/scanCleaner";
 import { detectCodeType } from "@/products/match/codeTypeDetector";
 import { resolveScanToProductTiered } from "@/products/match/aliasMatcher";
 import { isLikelyMisreadGtin } from "@/products/barcodes/misread";

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
 import { MockDb } from "@/services/mockDb";
-import { replayLedgerCounts } from "@/services/inventory.replay";
+import { replayLedgerCounts } from "@/inventory/replay";
 
 const total = (store: ReturnType<typeof createTestScanStore>) =>
   store.getState().finalCounts.reduce((n, c) => n + c.quantity, 0);

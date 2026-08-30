@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { useScanStore } from "@/stores/scanStore";
-import { CleanupRecommendations } from "@/components/CleanupRecommendations";
+import { CleanupRecommendations } from "@/inventory/cleanup/CleanupRecommendations";
 import type { InventoryCount } from "@/types";
 
 // M2 regression (Phase 3 follow-up): same leak class as F2 (FinalCountTable). refreshFromCloud

@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { FirebaseSyncTarget } from "@/services/db/firebase/firebaseSyncTarget";
 import { createTestScanStore } from "@/stores/scanStore";
 import { MockDb } from "@/services/mockDb";
-import { buildIdempotencyKey } from "@/services/idempotency";
+import { buildIdempotencyKey } from "@/inventory/idempotency";
 import type { PendingSyncItem } from "@/types";
 import type { IncrementPayload } from "@/services/mockDb";
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildCleanupRecommendations } from "@/services/cleanup/recommendations";
+import { buildCleanupRecommendations } from "@/inventory/cleanup/recommendations";
 import { sanitizeCatalogEntry } from "@/products/catalog/sanitizeCatalog";
 import type { Alias, InventoryCount, Product, Source } from "@/types";
 

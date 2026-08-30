@@ -29,7 +29,7 @@
     "proof:all": "node scripts/proof-all.mjs",
     "refresh:tire-meta": "node scripts/refresh-tire-meta.mjs",
     "test:refresh-tire-meta": "node --test scripts/refresh-tire-meta.test.mjs",
-    "test:ledger": "vitest run src/stores/ledgerInvariants.store.test.ts src/stores/unknownEnqueue.store.test.ts src/stores/mergeUnion.store.test.ts src/stores/markWrongTransfer.store.test.ts src/stores/provenanceTier.store.test.ts src/stores/goldenClasses.store.test.ts src/services/inventory.replay.test.ts",
+    "test:ledger": "vitest run src/stores/ledgerInvariants.store.test.ts src/stores/unknownEnqueue.store.test.ts src/stores/mergeUnion.store.test.ts src/stores/markWrongTransfer.store.test.ts src/stores/provenanceTier.store.test.ts src/stores/goldenClasses.store.test.ts src/inventory/replay.test.ts",
     "test:e2e": "playwright test",
     "test:e2e:no-bypass": "playwright test --config=playwright.no-bypass.config.ts",
     "test:a11y": "playwright test e2e/a11y.spec.ts",

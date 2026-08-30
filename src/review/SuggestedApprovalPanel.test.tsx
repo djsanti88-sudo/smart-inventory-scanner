@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import { useScanStore } from "@/stores/scanStore";
-import { SuggestedApprovalPanel } from "@/components/SuggestedApprovalPanel";
+import { SuggestedApprovalPanel } from "@/review/SuggestedApprovalPanel";
 import type { UnknownCodeReview } from "@/types";
 
 // Build 3 review Finding 3 (Low): a Suggested row with ZERO sourceUrls carries no evidence at all.

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ScanEvent } from "@/types";
-import { createCameraScanner } from "@/services/camera/cameraScanner";
+import { createCameraScanner } from "@/scanning/camera/cameraScanner";
 
 // Camera scan entry point. Opens an overlay with a live <video> preview, wires the pure
 // createCameraScanner detection service to it, and on detect calls the SAME onScan(raw) callback

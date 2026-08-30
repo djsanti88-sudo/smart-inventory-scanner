@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { NeedsReviewTable } from "@/components/NeedsReviewTable";
-import { SuggestedApprovalPanel } from "@/components/SuggestedApprovalPanel";
+import { NeedsReviewTable } from "@/review/NeedsReviewTable";
+import { SuggestedApprovalPanel } from "@/review/SuggestedApprovalPanel";
 import { SyncStatusBar } from "@/components/SyncStatusBar";
 import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
 

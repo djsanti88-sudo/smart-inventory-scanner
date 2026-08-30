@@ -36,7 +36,7 @@ vi.mock("@/stores/reconcileStore", () => ({
 }));
 vi.mock("@/users-businesses/roles/useAccessLevel", () => ({ useIsPlatformOwner: () => true }));
 vi.mock("@/components/ExportMenu", () => ({ ExportMenu: () => null }));
-vi.mock("@/components/CleanupRecommendations", () => ({ CleanupRecommendations: () => null }));
+vi.mock("@/inventory/cleanup/CleanupRecommendations", () => ({ CleanupRecommendations: () => null }));
 vi.mock("@/sessions/lock/OwnerPinSettings", () => ({ OwnerPinSettings: () => null }));
 vi.mock("@/components/GptDecodePanel", () => ({ GptDecodePanel: () => null }));
 

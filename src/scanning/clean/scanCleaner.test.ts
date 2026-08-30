@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cleanScanCode, buildNormalizedCandidates } from "@/services/scanCleaner";
+import { cleanScanCode, buildNormalizedCandidates } from "@/scanning/clean/scanCleaner";
 
 describe("cleanScanCode", () => {
   it("preserves the raw value exactly while trimming the clean value", () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { useScanStore } from "@/stores/scanStore";
-import { NeedsReviewTable } from "@/components/NeedsReviewTable";
+import { NeedsReviewTable } from "@/review/NeedsReviewTable";
 import type { Product, UnknownCodeReview } from "@/types";
 
 // QA 2026-07-15 issue 3: "Approve suggestion" silently did nothing when the decode fuzzily matched

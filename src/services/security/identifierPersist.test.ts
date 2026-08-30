@@ -4,7 +4,7 @@ import { buildPersistedScanState, type PersistableScanState } from "@/stores/sca
 import { matchProductByIdentifiers } from "@/products/match/aliasMatcher";
 import type { CleanedCode, Product } from "@/types";
 
-// Owner rule (2026-07-22, encoded in src/components/FinalCountTable.tsx:129-131): the barcode a shop
+// Owner rule (2026-07-22, encoded in src/inventory/FinalCountTable.tsx:129-131): the barcode a shop
 // scanned onto THEIR OWN product row is THEIR data - already rendered to every role in the UI - so
 // stripping it from that same device's own localStorage persistence protects nothing and instead
 // destroys the shop's own data (the Products/Counts "Barcode" column showed "-" after any reload for a

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
 import { MockDb } from "@/services/mockDb";
-import { normalizeCode } from "@/services/codeNormalizer";
+import { normalizeCode } from "@/scanning/clean/codeNormalizer";
 
 // Build 3: batch-approve for the Suggested pile (docs/archive/superpowers/specs/2026-07-05-batch-approve-design.md).
 // Approval MUST reuse resolveUnknown exactly as the single-approve flow (NeedsReviewTable "Approve
@@ -243,7 +243,7 @@ describe("scanStore - batchApprove trust rule parity (Build 3 review Finding 1)"
     const id = weakSuggestedReview(store, "WEAKGUESS2", 2);
     const review = store.getState().needsReviewQueue.find((r) => r.id === id)!;
 
-    // Exactly the NeedsReviewTable "Approve suggestion" button payload (src/components/NeedsReviewTable.tsx)
+    // Exactly the NeedsReviewTable "Approve suggestion" button payload (src/review/NeedsReviewTable.tsx)
     // - no `origin` field at all.
     store.getState().resolveUnknown(id, "create_new", {
       applyToCount: true,

@@ -3,8 +3,8 @@ import {
   applyScanEventOnce,
   createInventoryCount,
   incrementInventoryCount,
-} from "@/services/inventory";
-import { buildIdempotencyKey } from "@/services/idempotency";
+} from "@/inventory/ledger";
+import { buildIdempotencyKey } from "@/inventory/idempotency";
 import type { InventoryCount, ScanEvent } from "@/types";
 
 function makeEvent(id: string, productId: string, cleanCode: string): ScanEvent {
