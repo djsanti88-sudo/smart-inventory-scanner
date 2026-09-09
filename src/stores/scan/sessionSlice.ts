@@ -2,17 +2,15 @@ import type { InventoryCount, InventorySession, PendingSyncItem } from "@/types"
 import { buildIdempotencyKey } from "@/inventory/idempotency";
 import { hashPin, verifyPin, isValidPinFormat } from "@/sessions/lock/pinLock";
 import { getOrCreateDeviceId } from "@/sync-database/queue/deviceIdentity";
-import { shouldReuseSession, buildAutoSessionName } from "@/sessions/auto/autoSession";
+import { AUTO_SESSION_INACTIVITY_MINUTES, shouldReuseSession, buildAutoSessionName } from "@/sessions/auto/autoSession";
 import { getMockDb } from "@/sync-database/mock/mockDb";
 import { pruneFinalCountsForRotation } from "@/stores/scan/placeholders";
 import { makeQueueItem } from "@/stores/scan/queueItem";
-import { AUTO_SESSION_INACTIVITY_MINUTES } from "@/stores/scanStore";
-import type { ScanState, ScanStoreDeps } from "@/stores/scanStore";
+import type { ScanState } from "@/stores/scanStore";
 
 export function createSessionSlice(ctx: {
   set: (partial: Partial<ScanState> | ((s: ScanState) => Partial<ScanState>)) => void;
   get: () => ScanState;
-  deps: ScanStoreDeps;
   idFactory: () => string;
   now: () => string;
   emitAudit: (e: { entityType: string; entityId: string; action: string; metadata?: Record<string, unknown> }) => void;

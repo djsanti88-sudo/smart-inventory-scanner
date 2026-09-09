@@ -5,8 +5,7 @@ vi.mock("@/decoding/server/knowledge/tire/TireKnowledgeProvider", () => ({
   resolveExactPartNumber: vi.fn(),
 }));
 vi.mock("@/decoding/server/knowledge/retail/retailKnowledgeIndex", () => ({
-  lookupRetailBarcodeAsync: vi.fn(),
-  getLastRetailLookupStatus: vi.fn(() => "turso_miss"),
+  lookupRetailBarcodeWithStatusAsync: vi.fn(),
 }));
 vi.mock("@/decoding/server/cache/learnedProducts", () => ({ getLearnedProduct: vi.fn() }));
 vi.mock("@/server/catalog/masterLookup", () => ({ lookupMasterCatalog: vi.fn() }));
@@ -48,7 +47,7 @@ import {
   refundDailySlot,
 } from "@/decoding/limits/aiSpendGuard";
 import { resolveExactBarcode, resolveExactPartNumber } from "@/decoding/server/knowledge/tire/TireKnowledgeProvider";
-import { lookupRetailBarcodeAsync } from "@/decoding/server/knowledge/retail/retailKnowledgeIndex";
+import { lookupRetailBarcodeWithStatusAsync } from "@/decoding/server/knowledge/retail/retailKnowledgeIndex";
 import { getLearnedProduct } from "@/decoding/server/cache/learnedProducts";
 import { lookupMasterCatalog } from "@/server/catalog/masterLookup";
 import { prefixFloorNameFull } from "@/server/catalog/prefixIndexServer";
@@ -145,7 +144,7 @@ beforeEach(() => {
   process.env.AI_LOOKUP_GLOBAL_BACKSTOP = "100";
   vi.mocked(resolveExactBarcode).mockResolvedValue(null);
   vi.mocked(resolveExactPartNumber).mockResolvedValue(null);
-  vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue(null);
+  vi.mocked(lookupRetailBarcodeWithStatusAsync).mockResolvedValue({ result: null, status: "turso_miss" });
   vi.mocked(getLearnedProduct).mockResolvedValue(null);
   vi.mocked(lookupMasterCatalog).mockResolvedValue({ kind: "miss" });
   vi.mocked(prefixFloorNameFull).mockReset().mockReturnValue(null);
@@ -186,13 +185,16 @@ describe("runDecodePipeline", () => {
     expect(decodeWithGpt).not.toHaveBeenCalled();
   });
 
-  it("uses the retail corpus, learned products, and approved master catalog in that order", async () => {
-    vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({ productName: "Retail Product", brand: "Retail", category: "Food", barcode: CODE });
+  it("uses the retail corpus, verified master catalog, and learned products in trust order", async () => {
+    vi.mocked(lookupRetailBarcodeWithStatusAsync).mockResolvedValue({
+      result: { productName: "Retail Product", brand: "Retail", category: "Food", barcode: CODE },
+      status: "turso_hit",
+    });
     const retail = await runDecodePipeline(request());
     expect(retail.kind === "computed" && retail.payload.providerNames).toEqual(["retail-corpus"]);
 
     clearDecodeCache();
-    vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue(null);
+    vi.mocked(lookupRetailBarcodeWithStatusAsync).mockResolvedValue({ result: null, status: "turso_miss" });
     vi.mocked(getLearnedProduct).mockResolvedValue({
       code: CODE,
       name: "Learned Product",
@@ -206,9 +208,12 @@ describe("runDecodePipeline", () => {
       prefixCheck: "match",
       createdAt: "2026-08-01T00:00:00.000Z",
     });
+    vi.mocked(lookupMasterCatalog).mockResolvedValue({
+      kind: "verified",
+      entry: { name: "Approved Product", brand: "Approved", category: "Retail" } as never,
+    });
     const learned = await runDecodePipeline(request());
-    expect(learned.kind === "computed" && learned.payload.providerNames).toEqual(["learned-products"]);
-    expect(lookupMasterCatalog).not.toHaveBeenCalled();
+    expect(learned.kind === "computed" && learned.payload.providerNames).toEqual(["master-catalog"]);
 
     clearDecodeCache();
     vi.mocked(getLearnedProduct).mockResolvedValue(null);
@@ -351,6 +356,18 @@ describe("runDecodePipeline", () => {
     expect(decodeWithGpt).toHaveBeenCalledOnce();
   });
 
+  it("keeps provider egress blocked when configured metering storage is unavailable", async () => {
+    vi.mocked(decodeStorage).mockRejectedValueOnce(new Error("Turso unavailable"));
+
+    const result = await runDecodePipeline(request());
+
+    expect(result).toMatchObject({
+      kind: "computed",
+      payload: { providerStatuses: [expect.objectContaining({ errorCode: "charge_unavailable" })] },
+    });
+    expect(decodeWithGpt).not.toHaveBeenCalled();
+  });
+
   it("leaves example and likely-misread codes free and reviewable", async () => {
     const example = await runDecodePipeline(request("4006381333931"));
     expect(example.kind === "computed" && example.payload.reasonCode).toBe("no_result");
@@ -374,6 +391,19 @@ describe("runDecodePipeline", () => {
     vi.mocked(chargeDailySlotForAccountConditional).mockResolvedValueOnce({ used: 3, granted: false });
     const account = await runDecodePipeline({ ...request(), capContext: { authedBusinessId: "tenant-1", accountLimit: 3 } });
     expect(account).toMatchObject({ kind: "cap_blocked", reasonCode: "account_daily_cap" });
+    expect(refundDailySlot).toHaveBeenCalledWith(storage);
+    expect(decodeWithGpt).not.toHaveBeenCalled();
+  });
+
+  it("refunds the global grant and blocks provider egress when the account reservation rejects", async () => {
+    vi.mocked(chargeDailySlotForAccountConditional).mockRejectedValueOnce(new Error("account meter unavailable"));
+
+    const result = await runDecodePipeline({ ...request(), capContext: { authedBusinessId: "tenant-1", accountLimit: 3 } });
+
+    expect(result).toMatchObject({
+      kind: "computed",
+      payload: { providerStatuses: [expect.objectContaining({ errorCode: "charge_unavailable" })] },
+    });
     expect(refundDailySlot).toHaveBeenCalledWith(storage);
     expect(decodeWithGpt).not.toHaveBeenCalled();
   });

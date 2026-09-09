@@ -153,7 +153,7 @@ describe("decodeStorage selector", () => {
     for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
   });
 
-  it("retries Turso client construction after a transient failure", async () => {
+  it("fails closed for the request and retries Turso client construction later", async () => {
     const directory = mkdtempSync(join(tmpdir(), "scanbin-decode-selector-"));
     directories.push(directory);
     const fake = fakeTurso();
@@ -165,11 +165,23 @@ describe("decodeStorage selector", () => {
       .mockRejectedValueOnce(new Error("temporary client failure"))
       .mockResolvedValueOnce(fake.client);
 
-    const fallback = await decodeStorage(directory);
-    expect(await fallback.get("calls")).toBeNull();
+    await expect(decodeStorage(directory)).rejects.toThrow("temporary client failure");
 
     const recovered = await decodeStorage(directory);
     expect(await recovered.get("calls")).toBeNull();
     expect(tursoClientMocks.createTursoClient).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not fall back to per-instance file storage when configured Turso initialization fails", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "scanbin-decode-selector-"));
+    directories.push(directory);
+    tursoClientMocks.tursoCredentialsFromEnv.mockReturnValue({
+      url: "libsql://example.turso.io",
+      authToken: "test-token",
+    });
+    tursoClientMocks.createTursoClient.mockRejectedValueOnce(new Error("Turso unavailable"));
+
+    await expect(decodeStorage(directory)).rejects.toThrow("Turso unavailable");
+    expect(existsSync(join(directory, ".decode-kv.json"))).toBe(false);
   });
 });

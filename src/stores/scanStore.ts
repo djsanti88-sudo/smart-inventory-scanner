@@ -306,7 +306,7 @@ export interface ScanStoreDeps extends DatabaseService {
   persistName: string | null; // null disables persistence (used by tests)
 }
 
-export const AUTO_SESSION_INACTIVITY_MINUTES = 30;
+export { AUTO_SESSION_INACTIVITY_MINUTES } from "@/sessions/auto/autoSession";
 const RECENT_LOCATIONS_CAP = 8;
 
 export interface ScanState {
@@ -1070,7 +1070,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
     };
 
     const sessionSlice = createSessionSlice({
-      set, get, deps, idFactory, now, emitAudit, enqueueAndSync, cloudBackend,
+      set, get, idFactory, now, emitAudit, enqueueAndSync, cloudBackend,
       clearTrustedExactProbes, archiveCurrentSessionIfAny,
     });
 
@@ -4902,7 +4902,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // human approves it, must NOT re-run applyToCount -> a second count of the same physical item:
         // resolved/ignored stays a hard no-op. Matches the open-status guard already used by
         // liveDecode / backgroundVerifyDeep / cloudCatalogResolve / correctionRecheck.
-        if (!review || (review.status !== "open" && review.status !== "suggested")) return;
+        if (
+          !review ||
+          review.businessId !== state.businessId ||
+          (review.status !== "open" && review.status !== "suggested")
+        ) return;
 
         if (action === "ignore") {
           const decidedAt = nextReviewDecisionAt(review, now());
@@ -5438,6 +5442,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const resolvedScanEvents: ScanEvent[] = [];
         const scanFeed = get().scanFeed.map((e) => {
           if (
+            e.businessId === state.businessId &&
             e.cleanCode === review.cleanCode &&
             (e.status === "unknown" || e.status === "needs_review" || e.status === "conflict" || e.matchedProductId !== productId)
           ) {
@@ -5484,7 +5489,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           set((st) => ({
             finalCounts: transferOrphanCount(st.finalCounts, oid, targetId, now()),
             scanFeed: st.scanFeed.map((e) =>
-              e.matchedProductId === oid ? { ...e, matchedProductId: targetId ?? null } : e,
+              e.businessId === state.businessId && e.matchedProductId === oid
+                ? { ...e, matchedProductId: targetId ?? null }
+                : e,
             ),
           }));
           if (transferOps.length > 0) enqueueAndSync(transferOps);
@@ -5865,10 +5872,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       // reload-resilient provisionalProductId fallback (a customer persist strips the event's code).
       approveSuggestion: (scanEventId) => {
         const st = get();
-        const ev = st.scanFeed.find((e) => e.id === scanEventId);
+        const ev = st.scanFeed.find((e) => e.id === scanEventId && e.businessId === st.businessId);
         if (!ev || ev.suggestion?.status !== "pending") return; // idempotent double-tap guard
         const review = st.needsReviewQueue.find(
           (r) =>
+            r.businessId === st.businessId &&
             r.status === "suggested" &&
             ((ev.cleanCode && r.cleanCode === ev.cleanCode) ||
               (ev.matchedProductId && r.provisionalProductId === ev.matchedProductId)),
@@ -5884,16 +5892,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       // Nothing platform-wide is written here (no corpus, no learned tier, no shared decode cache).
       confirmRowIdentity: (scanEventId, fields) => {
         const st = get();
-        const ev = st.scanFeed.find((e) => e.id === scanEventId);
+        const ev = st.scanFeed.find((e) => e.id === scanEventId && e.businessId === st.businessId);
         const name = (fields.name ?? "").trim();
         if (!ev || !name) return;
         // Double-tap / re-confirm guards: a settled suggestion, or a code that is ALREADY taught as an
         // approved alias, is a hard no-op - a second confirm must never mint a second product or count.
         if (ev.suggestion && ev.suggestion.status !== "pending") return;
         const code = ev.cleanCode || "";
-        if (code && st.aliases.some((a) => a.cleanCode === code && a.approved)) return;
+        if (code && st.aliases.some((a) => a.businessId === st.businessId && a.cleanCode === code && a.approved)) return;
         const ownsRow = (r: UnknownCodeReview) =>
-          (code !== "" && r.cleanCode === code) || (!!ev.matchedProductId && r.provisionalProductId === ev.matchedProductId);
+          r.businessId === st.businessId &&
+          ((code !== "" && r.cleanCode === code) || (!!ev.matchedProductId && r.provisionalProductId === ev.matchedProductId));
         let review = st.needsReviewQueue.find((r) => (r.status === "open" || r.status === "suggested") && ownsRow(r));
         if (!review) {
           // AUTO-APPLIED row (>= 0.8 suggestion applied onto the provisional, review auto-closed, product
@@ -5906,7 +5915,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           if (autoApplied) {
             // Stale click: another path already verified this product, so there is nothing left to
             // confirm - never fall through to the blank-reopen fallback on a settled review.
-            if (st.products.find((p) => p.id === autoApplied.provisionalProductId)?.verified) return;
+            if (st.products.find((p) => p.businessId === st.businessId && p.id === autoApplied.provisionalProductId)?.verified) return;
             const reopenedAt = nextReviewDecisionAt(autoApplied, now());
             set((s2) => ({
               needsReviewQueue: s2.needsReviewQueue.map((r) =>
@@ -5957,6 +5966,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (settled && settled.status !== "open" && settled.status !== "suggested") {
           set((s2) => ({
             scanFeed: s2.scanFeed.map((e) =>
+              e.businessId === st.businessId &&
               e.suggestion?.status === "pending" && (e.id === scanEventId || (code !== "" && e.cleanCode === code))
                 ? { ...e, suggestion: { ...e.suggestion, status: "approved" as const } }
                 : e,
@@ -6207,7 +6217,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const state = get();
         const code = (cleanCode ?? "").trim();
         if (!code) return null;
-        const existing = state.needsReviewQueue.find((r) => r.cleanCode === code);
+        const existing = state.needsReviewQueue.find((r) => r.businessId === state.businessId && r.cleanCode === code);
         if (existing) {
           const reopenedAt = nextReviewDecisionAt(existing, now());
           const write = buildReviewDecisionWrite({
@@ -6405,22 +6415,22 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
       markWrong: async (productId, opts) => {
         const state = get();
-        const product = state.products.find((p) => p.id === productId);
-        const counts = state.finalCounts.filter((c) => c.productId === productId);
+        const product = state.products.find((p) => p.businessId === state.businessId && p.id === productId);
+        const counts = state.finalCounts.filter((c) => c.businessId === state.businessId && c.productId === productId);
         // Codes that resolved to this product this session (scan feed is the reliable source; the count's
         // aliasesSeen is a fallback). These approved aliases are the ones to deactivate.
         const seenCodes = Array.from(
           new Set([
-            ...state.scanFeed.filter((e) => e.matchedProductId === productId).map((e) => e.cleanCode),
+            ...state.scanFeed.filter((e) => e.businessId === state.businessId && e.matchedProductId === productId).map((e) => e.cleanCode),
             ...counts.flatMap((count) => count.aliasesSeen),
           ]),
         );
         const retainedFeedCodes = Array.from(
-          new Set(state.scanFeed.filter((event) => event.matchedProductId === productId).map((event) => event.cleanCode)),
+          new Set(state.scanFeed.filter((event) => event.businessId === state.businessId && event.matchedProductId === productId).map((event) => event.cleanCode)),
         );
         // 1. Deactivate the APPROVED aliases that mapped the scanned code(s) to this (wrong) product.
         const deactivate = state.aliases.filter(
-          (a) => a.productId === productId && a.approved && (seenCodes.length === 0 || seenCodes.includes(a.cleanCode)),
+          (a) => a.businessId === state.businessId && a.productId === productId && a.approved && (seenCodes.length === 0 || seenCodes.includes(a.cleanCode)),
         );
         if (deactivate.length > 0) {
           const ids = new Set(deactivate.map((a) => a.id));
@@ -6443,7 +6453,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const key = buildIdempotencyKey(state.businessId, state.sessionId, `${product.id}:markwrong:unverify`, "SAVE_PRODUCT");
           const unverified: Product = { ...product, verified: false, updatedAt: now(), updatedBy: "human" };
           set((s) => ({
-            products: s.products.map((p) => (p.id === productId ? unverified : p)),
+            products: s.products.map((p) => (p.businessId === state.businessId && p.id === productId ? unverified : p)),
             pendingSyncQueue: [
               ...s.pendingSyncQueue,
               makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "Product", entityId: productId, operation: "SAVE_PRODUCT", payload: unverified, idempotencyKey: key, scanEventId: null }),
@@ -6454,7 +6464,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // 2. Reset related feed rows to needs_review (scan history preserved; no longer "known").
         set((s) => ({
           scanFeed: s.scanFeed.map((e) =>
-            e.matchedProductId === productId && (seenCodes.length === 0 || seenCodes.includes(e.cleanCode))
+            e.businessId === state.businessId && e.matchedProductId === productId && (seenCodes.length === 0 || seenCodes.includes(e.cleanCode))
               ? { ...e, status: "needs_review" as const, resolverStatus: "needs_review" as const, matchedProductId: null }
               : e,
           ),
@@ -6471,7 +6481,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           //     code in its identifier fields - the wrong product still does (step 1b un-verifies but
           //     does not blank primaryBarcode). Its `counted` set is built from finalCounts, so removing
           //     the row here is what lets the mint below proceed.
-          set((s) => ({ finalCounts: s.finalCounts.filter((c) => c.productId !== productId) }));
+          set((s) => ({ finalCounts: s.finalCounts.filter((c) => c.businessId !== state.businessId || c.productId !== productId) }));
           // F-03 FIX: sync the removal (mirrors deleteProductsInternal's "SYNC THE REPOINT" balanced-pair
           // fix, reviewed defect 2026-07-22, scanStore.ts ~6809) - without this the backend keeps the
           // wrong product's InventoryCount doc forever, so a fresh cloud reload / second-device load
@@ -6529,7 +6539,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               },
             );
             const provRow = get().products.find(
-              (p) => p.id === mintedId && p.id !== productId && p.provisional === true && p.status !== "archived",
+              (p) => p.businessId === state.businessId && p.id === mintedId && p.id !== productId && p.provisional === true && p.status !== "archived",
             );
             if (provRow) {
               transferProvisionals.set(transferCode, provRow);
@@ -6538,7 +6548,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               //     the same-fact quantityDelta: 1 on the row. The transferred quantity is carried by
               //     REAL events - the ledger replay reproduces it exactly (North-star #2).
               const pending = get().scanFeed.filter(
-                (e) => e.cleanCode === transferCode && e.matchedProductId === null && e.status === "needs_review",
+                (e) => e.businessId === state.businessId && e.cleanCode === transferCode && e.matchedProductId === null && e.status === "needs_review",
               );
               for (const ev2 of pending) {
                 const stNow = get();
@@ -6584,7 +6594,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             const transferProductIds = new Set([...transferProvisionals.values()].map((provisional) => provisional.id));
             const transferredEvents = new Map(
               get().scanFeed
-                .filter((event) => event.matchedProductId !== null && transferProductIds.has(event.matchedProductId))
+                .filter((event) => event.businessId === state.businessId && event.matchedProductId !== null && transferProductIds.has(event.matchedProductId))
                 .map((event) => [event.id, event.quantityDelta] as const),
             );
             for (const count of counts) {

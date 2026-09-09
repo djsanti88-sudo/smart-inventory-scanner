@@ -20,6 +20,8 @@
 // is never auto-reused - only auto-sessions with a matching device stamp are eligible, so a manual
 // session is never silently repurposed by the auto-open logic.
 
+export const AUTO_SESSION_INACTIVITY_MINUTES = 30;
+
 export interface AutoSessionCandidate {
   status: "active" | "completed";
   deviceId?: string;

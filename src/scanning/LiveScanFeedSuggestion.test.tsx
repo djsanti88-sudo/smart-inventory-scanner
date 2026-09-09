@@ -344,11 +344,12 @@ describe("LiveScanFeed - row identity controls by state", () => {
     // markWrong is PRODUCT-scoped: it moves EVERY counted unit of the product, not just this row's.
     // Seed 3 units across 2 feed rows of the same product so the confirm copy has to say so.
     const rowA = {
-      id: "rowA", rawCode: "078742051451", cleanCode: "078742051451", matchedProductId: "p1", matchType: "barcode",
+      id: "rowA", businessId: "b", rawCode: "078742051451", cleanCode: "078742051451", matchedProductId: "p1", matchType: "barcode",
       status: "known", quantityAfterScan: 2, decodeStatus: "verified", reason: "", syncStatus: "synced", createdAt: Date.now(),
     } as unknown as ScanEvent;
     const rowB = { ...rowA, id: "rowB", quantityAfterScan: 3 } as ScanEvent;
     useScanStore.setState({
+      businessId: "b",
       scanFeed: [rowB, rowA],
       needsReviewQueue: [],
       products: [{ id: "p1", name: "Purified Water 500ml", brand: "Member's Mark", primarySku: "", verified: true, provisional: false, primaryBarcode: "078742051451" } as unknown as Product],

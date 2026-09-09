@@ -4,6 +4,8 @@ import { getAdminDb } from "@/sync-database/cloud/firebaseAdmin";
 import { COLLECTIONS, type CatalogEntry as DbCatalogEntry } from "@/sync-database/types";
 import { resolveCatalogDocId } from "@/server/catalog/catalogDocId";
 import { deletePersistedDecode } from "@/decoding/server/cache/decodeCacheStore";
+import { invalidateDecodeCache } from "@/decoding/decodeCache";
+import { invalidateMasterLookupMemo } from "./masterLookup";
 
 // Catalog revocation round (owner-approved design, section 2). A shop reports "this scanned
 // identity was wrong" via markWrong (see scanStore.ts) -> this transactional function ->
@@ -175,7 +177,11 @@ export async function disputeCatalogEntry(
     // function returns, but its own failure is swallowed inside deletePersistedDecode itself and
     // must never turn a successful dispute write into an error response.
     if (result.ok && result.changed) {
-      void deletePersistedDecode(canonical);
+      await Promise.all([
+        Promise.resolve(invalidateDecodeCache(canonical)),
+        Promise.resolve(invalidateMasterLookupMemo(canonical)),
+        deletePersistedDecode(canonical),
+      ]);
     }
 
     return result;

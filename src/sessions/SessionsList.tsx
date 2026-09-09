@@ -7,9 +7,10 @@ import { useScanStore } from "@/stores/scanStore";
 // session's counts. Re-renders when the current session changes (start / finish / lock / reopen).
 export function SessionsList() {
   const current = useScanStore((s) => s.currentSession); // reactive dep -> refreshes the list on any switch
+  const hydratedSessions = useScanStore((s) => s.sessions);
   const listSessions = useScanStore((s) => s.listSessions);
   const reopenSession = useScanStore((s) => s.reopenSession);
-  const sessions = listSessions();
+  const sessions = hydratedSessions.length > 0 ? hydratedSessions : listSessions();
 
   if (sessions.length <= 1) return null; // nothing to browse until there is more than the current one
 

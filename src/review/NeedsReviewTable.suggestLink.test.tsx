@@ -37,6 +37,7 @@ function makeReview(overrides: Partial<UnknownCodeReview> = {}): UnknownCodeRevi
 
 function seed(review: UnknownCodeReview) {
   useScanStore.setState({
+    businessId: "b1",
     products: [existing],
     aliases: [],
     finalCounts: [],

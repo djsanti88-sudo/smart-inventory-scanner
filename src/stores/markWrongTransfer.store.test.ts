@@ -29,6 +29,36 @@ function seedKnown(store: ReturnType<typeof createTestScanStore>, code: string) 
 }
 
 describe("D2: markWrong transfers quantity instead of destroying it", () => {
+  it("does not alter another business's alias, count, or feed row when correcting this business's product", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ aiLookupEnabled: false });
+    const code = "049000006346";
+    const productId = seedKnown(store, code);
+    const localEvent = store.getState().processScan(code)!;
+    const localCount = store.getState().finalCounts.find((count) => count.productId === productId)!;
+    const foreignBusinessId = "foreign-business";
+    const foreignEvent = { ...localEvent, id: "foreign-event", businessId: foreignBusinessId, sessionId: "foreign-session" };
+    const foreignCount = { ...localCount, id: "foreign-count", businessId: foreignBusinessId, sessionId: "foreign-session", quantity: 7, scanEventIds: [foreignEvent.id] };
+    const foreignAlias = {
+      ...store.getState().aliases.find((alias) => alias.productId === productId)!,
+      id: "foreign-alias", businessId: foreignBusinessId,
+    };
+    store.setState((state) => ({
+      aliases: [foreignAlias, ...state.aliases],
+      finalCounts: [foreignCount, ...state.finalCounts],
+      scanFeed: [foreignEvent, ...state.scanFeed],
+    }));
+
+    await store.getState().markWrong(productId, { reason: "tenant isolation" });
+
+    expect(store.getState().aliases.find((alias) => alias.id === foreignAlias.id)?.approved).toBe(true);
+    expect(store.getState().finalCounts.find((count) => count.id === foreignCount.id)).toMatchObject({ quantity: 7 });
+    expect(store.getState().scanFeed.find((event) => event.id === foreignEvent.id)).toMatchObject({
+      matchedProductId: productId,
+      status: "known",
+    });
+  });
+
   it("marking a counted product wrong keeps total physical quantity constant", async () => {
     const store = createTestScanStore({ db: new MockDb() });
     store.getState().updateSettings({ aiLookupEnabled: false });

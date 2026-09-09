@@ -4,6 +4,7 @@ import {
   getDecodeCache,
   setDecodeCache,
   clearDecodeCache,
+  invalidateDecodeCache,
   decodeCacheSize,
   decodeCacheKey,
   __clearInFlightForTest,
@@ -90,6 +91,16 @@ describe("decodeCache (never re-pay AI/Firecrawl for the same barcode)", () => {
     expect(decodeCacheSize()).toBe(2);
     clearDecodeCache();
     expect(decodeCacheSize()).toBe(0);
+  });
+
+  it("invalidates only the requested code", () => {
+    setDecodeCache("disputed", { name: "Stale identity" });
+    setDecodeCache("other", { name: "Still valid" });
+
+    invalidateDecodeCache(" disputed ");
+
+    expect(getDecodeCache("disputed")).toBeUndefined();
+    expect(getDecodeCache("other")).toEqual({ name: "Still valid" });
   });
 
   it("normalizes the key (trims surrounding whitespace) and ignores empty codes", async () => {

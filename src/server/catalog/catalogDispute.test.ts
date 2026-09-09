@@ -1,8 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { disputeCatalogEntry } from "./catalogDispute";
 
-const mocks = vi.hoisted(() => ({ deletePersistedDecode: vi.fn().mockResolvedValue(undefined) }));
+const mocks = vi.hoisted(() => ({
+  deletePersistedDecode: vi.fn().mockResolvedValue(undefined),
+  invalidateDecodeCache: vi.fn(),
+  invalidateMasterLookupMemo: vi.fn(),
+}));
 vi.mock("@/decoding/server/cache/decodeCacheStore", () => ({ deletePersistedDecode: mocks.deletePersistedDecode }));
+vi.mock("@/decoding/decodeCache", () => ({ invalidateDecodeCache: mocks.invalidateDecodeCache }));
+vi.mock("./masterLookup", () => ({ invalidateMasterLookupMemo: mocks.invalidateMasterLookupMemo }));
 
 // Catalog revocation round (design §2.1/§2.2/§3.1): disputeCatalogEntry is the transactional
 // function backing POST /api/catalog-dispute. Firestore is mocked (never live), same
@@ -72,7 +78,7 @@ function makeMockDb(tx: ReturnType<typeof makeMockTx>["tx"], exists = true, exis
 
 describe("disputeCatalogEntry", () => {
   beforeEach(() => {
-    mocks.deletePersistedDecode.mockClear();
+    vi.clearAllMocks();
   });
 
   it("returns not_found for a missing doc id", async () => {
@@ -114,6 +120,29 @@ describe("disputeCatalogEntry", () => {
     // §4) so the ladder's own cache layer never keeps replaying the pre-dispute decode.
     await new Promise((r) => setTimeout(r, 0));
     expect(mocks.deletePersistedDecode).toHaveBeenCalledWith("00012345678905");
+  });
+
+  it("waits for L1, master-memo, and L2 invalidation after a successful dispute", async () => {
+    const existing = { verificationStatus: "verified", provenanceTier: "ladder_verified_strong" };
+    const { tx } = makeMockTx(existing, true);
+    const db = makeMockDb(tx, true, existing);
+    let releaseL2: (() => void) | undefined;
+    mocks.deletePersistedDecode.mockImplementationOnce(() => new Promise<void>((resolve) => { releaseL2 = resolve; }));
+
+    let settled = false;
+    const pending = disputeCatalogEntry({ canonical: "00012345678905", businessId: "biz-a" }, { db }).then((value) => {
+      settled = true;
+      return value;
+    });
+    await vi.waitFor(() => expect(mocks.deletePersistedDecode).toHaveBeenCalledWith("00012345678905"));
+
+    expect(mocks.invalidateDecodeCache).toHaveBeenCalledWith("00012345678905");
+    expect(mocks.invalidateMasterLookupMemo).toHaveBeenCalledWith("00012345678905");
+    expect(mocks.deletePersistedDecode).toHaveBeenCalledWith("00012345678905");
+    expect(settled).toBe(false);
+
+    releaseL2?.();
+    await expect(pending).resolves.toMatchObject({ ok: true, changed: true });
   });
 
   it("second dispute from the SAME businessId is idempotent: disputeCount stays 1, changed:false, only the moderation doc's 'at' timestamp refreshes", async () => {

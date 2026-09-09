@@ -51,6 +51,20 @@ describe("buildSessionHistoryEntry", () => {
     expect(entry!.totalUnits).toBe(3);
   });
 
+  it("keeps a physical scan with quantityDelta zero in the row log and scan total", () => {
+    const entry = buildSessionHistoryEntry(
+      { id: "s1", startedAt: "2026-07-22T09:00:00.000Z" },
+      [scanEvent({ id: "e-zero", cleanCode: "ZERO", quantityDelta: 0 })],
+      () => "Unidentified item",
+      "2026-07-22T10:10:00.000Z",
+    );
+
+    expect(entry!.scanRows).toHaveLength(1);
+    expect(entry!.scanRows[0]?.quantityDelta).toBe(0);
+    expect(entry!.totalScans).toBe(1);
+    expect(entry!.totalUnits).toBe(0);
+  });
+
   it("caps rows at SESSION_HISTORY_ROWS_CAP, keeping the most recent rows", () => {
     const feed: ScanEvent[] = Array.from({ length: SESSION_HISTORY_ROWS_CAP + 10 }, (_, i) =>
       scanEvent({ id: `e${i}`, cleanCode: String(i), createdAt: `2026-07-22T10:${String(i % 60).padStart(2, "0")}:00.000Z` }),
@@ -63,11 +77,38 @@ describe("buildSessionHistoryEntry", () => {
     );
     expect(entry!.scanRows.length).toBe(SESSION_HISTORY_ROWS_CAP);
   });
+
+  it("keeps whole-session totals when the archived row display is capped", () => {
+    const feed: ScanEvent[] = Array.from({ length: SESSION_HISTORY_ROWS_CAP + 2 }, (_, index) =>
+      scanEvent({ id: `e${index}`, cleanCode: String(index), quantityDelta: 2 }),
+    );
+    const entry = buildSessionHistoryEntry(
+      { id: "s1", startedAt: "2026-07-22T09:00:00.000Z" },
+      feed,
+      () => "-",
+      "2026-07-22T10:10:00.000Z",
+    );
+
+    expect(entry!.scanRows).toHaveLength(SESSION_HISTORY_ROWS_CAP);
+    expect(entry!.totalScans).toBe(SESSION_HISTORY_ROWS_CAP + 2);
+    expect(entry!.totalUnits).toBe((SESSION_HISTORY_ROWS_CAP + 2) * 2);
+    expect(entry!.displayedScanCount).toBe(SESSION_HISTORY_ROWS_CAP);
+    expect(entry!.scanRowsCapped).toBe(true);
+  });
 });
 
 describe("appendSessionHistory", () => {
   function entry(id: string): SessionHistoryEntry {
-    return { sessionId: id, startedAt: "", endedAt: "", scanRows: [], totalScans: 1, totalUnits: 1 };
+    return {
+      sessionId: id,
+      startedAt: "",
+      endedAt: "",
+      scanRows: [],
+      displayedScanCount: 0,
+      scanRowsCapped: false,
+      totalScans: 1,
+      totalUnits: 1,
+    };
   }
 
   it("prepends the new entry (newest-first)", () => {

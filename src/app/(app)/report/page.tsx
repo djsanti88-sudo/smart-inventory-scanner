@@ -4,6 +4,7 @@ import { useState } from "react";
 import { getSession } from "@/authentication/auth";
 import { isLiveAuth } from "@/authentication/service/authMode";
 import { buildBossReport } from "@/reports/variance/bossReport";
+import { countsForActiveSession } from "@/inventory/sessionCounts";
 import { useScanStore } from "@/stores/scanStore";
 import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
 
@@ -29,7 +30,7 @@ export default function BossReportPage() {
   const buildCurrentReport = () =>
     buildBossReport({
       products,
-      finalCounts,
+      finalCounts: countsForActiveSession(finalCounts, session),
       scanFeed,
       sessionName: session?.name ?? "Current session",
       countedBy: userId ?? "Owner",

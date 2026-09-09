@@ -303,6 +303,33 @@ describe("ReconcilePanel - Confirm barcode links (AM-R6 / AM-R10f)", () => {
     expect(screen.queryByTestId("confirm-link-079567300403")).not.toBeInTheDocument();
     expect(screen.getByTestId("confirm-links").textContent).toMatch(/No product in your inventory matches part number/i);
   });
+
+  it("executes confirmation for this business despite a foreign approved alias and preserves foreign counts", () => {
+    seedWithReport();
+    useScanStore.setState((state) => ({
+      aliases: [{
+        id: "foreign-link", businessId: "biz-2", productId: "foreign-product", rawCodeExample: LINK_BARCODE,
+        cleanCode: LINK_BARCODE, normalizedCode: LINK_BARCODE, aliasType: "barcode", source: "human_review",
+        confidence: 1, approved: true, createdAt: "", updatedAt: "", createdBy: "human", lastSeenAt: "",
+        syncStatus: "synced", idempotencyKey: "foreign-link-key",
+      }, ...state.aliases],
+      finalCounts: [{
+        ...state.finalCounts[0], id: "foreign-count", businessId: "biz-2", quantity: 99,
+      }, ...state.finalCounts],
+    }));
+
+    render(<ReconcilePanel />);
+
+    expect(screen.getByTestId(`confirm-link-${LINK_BARCODE}`)).toBeInTheDocument();
+    expect(screen.queryByText("Linked")).not.toBeInTheDocument();
+    const countsBefore = useScanStore.getState().finalCounts.map((count) => ({ ...count }));
+
+    fireEvent.click(screen.getByTestId(`confirm-link-${LINK_BARCODE}`));
+
+    expect(useScanStore.getState().aliases.some((alias) => alias.businessId === "biz-1" && alias.cleanCode === LINK_BARCODE && alias.approved)).toBe(true);
+    expect(useScanStore.getState().aliases.find((alias) => alias.id === "foreign-link")?.approved).toBe(true);
+    expect(useScanStore.getState().finalCounts).toEqual(countsBefore);
+  });
 });
 
 // M3/H1: de-brand the page ("Reconcile with Shop-Ware" -> generic "Reconcile your inventory

@@ -67,6 +67,12 @@ export function __resetMasterLookupMemoForTests(): void {
   memo.clear();
 }
 
+/** Remove one canonical code's master-catalog replay after a successful dispute. */
+export function invalidateMasterLookupMemo(code: string): void {
+  const canonical = canonicalGtin(code);
+  if (canonical) memo.delete(canonical);
+}
+
 function classifyEntry(entry: DbCatalogEntry): MasterLookupOutcome {
   if (entry.verificationStatus !== "verified") return { kind: "miss" };
   // Fix (owner-approved, rung self-poisoning): human_verified (owner-approved via catalog-review) AND

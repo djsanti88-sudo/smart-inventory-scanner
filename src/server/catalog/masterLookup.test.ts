@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { lookupMasterCatalog, __resetMasterLookupMemoForTests } from "./masterLookup";
+import { invalidateMasterLookupMemo, lookupMasterCatalog, __resetMasterLookupMemoForTests } from "./masterLookup";
 
 // Sync Truth Task 4 (owner-approved 2026-07-22; see docs/HISTORY.md):
 // unit tests for the pure master-catalog rung. Firestore is mocked via the injectable `deps.db` seam
@@ -177,6 +177,17 @@ describe("lookupMasterCatalog (Sync Truth Task 4 free ladder rung)", () => {
     expect(first).toEqual({ kind: "verified", entry });
     expect(second).toEqual({ kind: "verified", entry });
     expect(docRef.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalidates only the disputed code's memoized outcome", async () => {
+    const entry = { id: "gtin_00086699997654", normalizedBarcode: GTIN, name: "Michelin Defender", verificationStatus: "verified", provenanceTier: "human_verified" };
+    const { db, docRef } = makeDb(async () => ({ exists: true, data: () => entry }));
+
+    await lookupMasterCatalog(GTIN, { db });
+    invalidateMasterLookupMemo(GTIN);
+    await lookupMasterCatalog(GTIN, { db });
+
+    expect(docRef.get).toHaveBeenCalledTimes(2);
   });
 
   it("TTL memo also caches a miss outcome (no repeated Firestore reads for a known-miss code)", async () => {

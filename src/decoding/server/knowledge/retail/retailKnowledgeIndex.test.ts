@@ -25,12 +25,11 @@ describe("retail Turso errors are distinguishable from misses", () => {
     process.env.TURSO_AUTH_TOKEN = "t";
   });
 
-  it("reports an error status when the Turso query throws", async () => {
+  it("returns an error status with the lookup instead of retaining it globally", async () => {
     const mod = await import("@/decoding/server/knowledge/retail/retailKnowledgeIndex");
     mod.__resetRetailKnowledgeCacheForTests();
-    const res = await mod.lookupRetailBarcodeAsync("049000006346");
-    expect(res).toBeNull();
-    expect(mod.getLastRetailLookupStatus()).toBe("turso_error");
+    const outcome = await mod.lookupRetailBarcodeWithStatusAsync("049000006346");
+    expect(outcome).toEqual({ result: null, status: "turso_error" });
   });
 });
 

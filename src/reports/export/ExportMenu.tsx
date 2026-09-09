@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
+import { countsForActiveSession } from "@/inventory/sessionCounts";
 import { useShallow } from "zustand/react/shallow";
 import { useAccessLevel } from "@/users-businesses/roles/useAccessLevel";
 import {
@@ -51,27 +52,34 @@ export function ExportMenu() {
   // cross-session merge into finalCounts (a tested cross-device sync path - see
   // refreshFromCloud.store.test.ts). This menu must export only the CURRENT session's counts, not
   // every session's counts merged into the store.
-  const sessionFinalCounts = currentSession
-    ? s.finalCounts.filter((c) => c.sessionId === currentSession.id)
-    : s.finalCounts;
+  const sessionFinalCounts = countsForActiveSession(s.finalCounts, currentSession);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
+  const disclosureRef = useRef<HTMLDetailsElement>(null);
+  const triggerRef = useRef<HTMLElement>(null);
   const [importMsg, setImportMsg] = useState("");
+  const [importError, setImportError] = useState("");
   const [busy, setBusy] = useState<string | null>(null); // "<testid>:<fmt>" while generating
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState("");
 
-  // Close on click-outside + Escape (menu state machine).
   useEffect(() => {
-    if (!open) return;
-    const onClick = (e: MouseEvent) => { if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const closeDisclosure = () => {
+      disclosureRef.current?.removeAttribute("open");
+      triggerRef.current?.focus();
+    };
+    const onClick = (e: MouseEvent) => {
+      if (disclosureRef.current?.open && rootRef.current && !rootRef.current.contains(e.target as Node)) closeDisclosure();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && disclosureRef.current?.open) closeDisclosure();
+    };
     document.addEventListener("mousedown", onClick);
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", onClick); document.removeEventListener("keydown", onKey); };
-  }, [open]);
+  }, []);
 
   const groups: { group: string; datasets: Dataset[] }[] = isPlatform
     ? [
@@ -108,7 +116,7 @@ export function ExportMenu() {
 
   async function run(d: Dataset, fmt: Fmt) {
     const key = `${d.testid}:${fmt}`;
-    setBusy(key); setError(null); setDone(null);
+    setBusy(key); setError(null); setDone(null); setStatus(`Creating ${fmt.toUpperCase()} file.`);
     try {
       const csv = d.csv();
       if (fmt === "csv") downloadCsv(csv, d.filenameBase);
@@ -120,23 +128,35 @@ export function ExportMenu() {
       }
       s.auditCsvExport(d.testid, d.rows, fmt);
       setDone(key);
+      setStatus(`Created ${fmt.toUpperCase()} file.`);
       setTimeout(() => setDone((cur) => (cur === key ? null : cur)), 1500);
     } catch (e) {
-      setError(`Could not create the ${fmt.toUpperCase()} file. ${e instanceof Error ? e.message : ""}`.trim());
+      const detail = e instanceof Error && e.message ? ` ${e.message.replace(/[. ]+$/, "")}.` : "";
+      setError(`Could not create the ${fmt.toUpperCase()} file.${detail} Try again.`);
+      setStatus("");
     } finally {
       setBusy((cur) => (cur === key ? null : cur));
     }
   }
 
   async function handleImport(file: File) {
-    const text = await file.text();
-    const r = s.importProductsCsv(text);
-    const conflictNote = r.conflicts.length ? `, ${r.conflicts.length} conflict(s) skipped` : "";
-    const dupNote = r.duplicates ? `, ${r.duplicates} duplicate(s)` : "";
-    // QA Task 7 (owner decision): existing-barcode rows refresh descriptive fields only - never a
-    // quantity implication in this copy.
-    const refreshedNote = r.refreshed ? `, ${r.refreshed} matched existing product(s) (fields refreshed)` : "";
-    setImportMsg(`Imported ${r.productsCreated} products and ${r.aliasesCreated} barcodes from ${r.rowsParsed} rows${dupNote}${refreshedNote}${conflictNote}.`);
+    setImportMsg("");
+    setImportError("");
+    setStatus("Importing products CSV.");
+    try {
+      const text = await file.text();
+      const r = s.importProductsCsv(text);
+      const conflictNote = r.conflicts.length ? `, ${r.conflicts.length} conflict(s) skipped` : "";
+      const dupNote = r.duplicates ? `, ${r.duplicates} duplicate(s)` : "";
+      // QA Task 7 (owner decision): existing-barcode rows refresh descriptive fields only - never a
+      // quantity implication in this copy.
+      const refreshedNote = r.refreshed ? `, ${r.refreshed} matched existing product(s) (fields refreshed)` : "";
+      setImportMsg(`Imported ${r.productsCreated} products and ${r.aliasesCreated} barcodes from ${r.rowsParsed} rows${dupNote}${refreshedNote}${conflictNote}.`);
+      setStatus("Imported products CSV.");
+    } catch {
+      setImportError("Could not import products CSV. Choose a CSV file and try again.");
+      setStatus("");
+    }
   }
 
   const FORMATS: { fmt: Fmt; label: string }[] = [
@@ -148,27 +168,22 @@ export function ExportMenu() {
 
   return (
     <div className="flex flex-wrap items-center gap-3" ref={rootRef}>
-      <div className="relative">
-        <button
-          type="button"
+      <details className="relative" ref={disclosureRef}>
+        <summary
+          ref={triggerRef}
           data-testid="export-menu-trigger"
-          aria-haspopup="menu"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-          className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-zinc-300 px-4 text-base font-medium text-zinc-800 hover:bg-zinc-50"
+          className="inline-flex min-h-[44px] list-none items-center gap-1.5 rounded-lg border border-zinc-300 px-4 text-base font-medium text-zinc-800 hover:bg-zinc-50 [&::-webkit-details-marker]:hidden"
         >
           Export <span aria-hidden className="text-zinc-500">▾</span>
-        </button>
+        </summary>
 
-        {open && (
-          <div
-            data-testid="export-menu"
-            role="menu"
-            className="absolute left-0 z-20 mt-1 w-80 rounded-lg border border-zinc-200 bg-white p-2 shadow-lg"
-          >
+        <div
+          data-testid="export-menu"
+          className="absolute left-0 z-20 mt-1 w-80 rounded-lg border border-zinc-200 bg-white p-2 shadow-lg"
+        >
             {groups.map((g) => (
-              <div key={g.group} className="mb-1 last:mb-0">
-                <p className="px-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">{g.group}</p>
+              <fieldset key={g.group} className="mb-1 min-w-0 border-0 p-0 last:mb-0">
+                <legend className="px-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">{g.group}</legend>
                 {g.datasets.map((d) => (
                   <div key={d.testid} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-zinc-50">
                     <span className="min-w-0 truncate text-base text-zinc-800" title={`${d.title} (${d.rows})`}>
@@ -197,12 +212,11 @@ export function ExportMenu() {
                     </span>
                   </div>
                 ))}
-              </div>
+              </fieldset>
             ))}
-            {error && <p className="px-2 py-1 text-sm text-red-600" data-testid="export-error">{error}</p>}
+            {error && <p role="alert" className="px-2 py-1 text-sm text-red-600" data-testid="export-error">{error}</p>}
           </div>
-        )}
-      </div>
+      </details>
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-base font-medium text-zinc-700">Import:</span>
@@ -227,7 +241,9 @@ export function ExportMenu() {
           }}
         />
         {importMsg && <span className="text-sm text-zinc-700" data-testid="import-result">{importMsg}</span>}
+        {importError && <span role="alert" className="text-sm text-red-600" data-testid="import-error">{importError}</span>}
       </div>
+      <span role="status" aria-live="polite" className="sr-only">{status}</span>
     </div>
   );
 }

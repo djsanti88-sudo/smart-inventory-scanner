@@ -43,7 +43,7 @@ test("count snapshots + variance report: save, change counts, compare, and expor
   if (await details.getAttribute("open")) {
     // already open under E2E auth bypass
   } else {
-    await details.locator("summary").click();
+    await details.locator(":scope > summary").click();
   }
 
   // 2. Save the first snapshot ("Before").

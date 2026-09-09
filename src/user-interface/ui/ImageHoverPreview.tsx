@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 // Product image preview. Pure front-end behavior (no AI). Shows a small thumbnail/link; on hover
 // a preview card; on click a larger modal. Gracefully handles "no image" and "failed to load"
@@ -9,6 +9,16 @@ export function ImageHoverPreview({ imageUrl, alt }: { imageUrl: string; alt: st
   const [hovering, setHovering] = useState(false);
   const [open, setOpen] = useState(false);
   const [broken, setBroken] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const trigger = triggerRef.current;
+    closeButtonRef.current?.focus();
+    return () => trigger?.focus();
+  }, [open]);
 
   if (!imageUrl) {
     return <span className="text-sm text-zinc-700">No image yet</span>;
@@ -21,6 +31,7 @@ export function ImageHoverPreview({ imageUrl, alt }: { imageUrl: string; alt: st
       onMouseLeave={() => setHovering(false)}
     >
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen(true)}
         onFocus={() => setHovering(true)}
@@ -58,7 +69,15 @@ export function ImageHoverPreview({ imageUrl, alt }: { imageUrl: string; alt: st
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           onClick={() => setOpen(false)}
-          onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setOpen(false);
+            }
+            if (e.key === "Tab") {
+              e.preventDefault();
+              closeButtonRef.current?.focus();
+            }
+          }}
           role="dialog"
           aria-modal="true"
           aria-label={alt}
@@ -68,6 +87,7 @@ export function ImageHoverPreview({ imageUrl, alt }: { imageUrl: string; alt: st
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-zinc-800">{alt}</h3>
               <button
+                ref={closeButtonRef}
                 type="button"
                 onClick={() => setOpen(false)}
                 className="text-sm text-zinc-700 hover:text-zinc-900"

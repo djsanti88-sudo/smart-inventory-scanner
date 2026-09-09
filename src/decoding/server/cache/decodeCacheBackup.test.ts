@@ -13,6 +13,7 @@ describe("exportDecodeCache / parseBackup (Task 20)", () => {
         kind: "result",
         payload: JSON.stringify({ status: "verified", brand: "Coca-Cola" }),
         tier: "verified",
+        sourceTier: "gpt_5_4_mini",
         createdAt: 1700000000000,
       },
     ];

@@ -15,6 +15,8 @@ function entry(over: Partial<SessionHistoryEntry> = {}): SessionHistoryEntry {
       { time: "2026-07-22T09:05:00.000Z", code: "086699205636", productName: "Michelin Defender LTX M/S", quantityDelta: 2 },
       { time: "2026-07-22T09:06:00.000Z", code: "999888777666", productName: "Unidentified item", quantityDelta: 1 },
     ],
+    displayedScanCount: 2,
+    scanRowsCapped: false,
     totalScans: 2,
     totalUnits: 3,
     ...over,
@@ -42,8 +44,29 @@ describe("ArchivedSessionScans", () => {
     expect(screen.getByText(/2 scans, 3 units/)).toBeInTheDocument();
   });
 
+  it("discloses when only the most recent archived rows are displayed", () => {
+    render(
+      <ArchivedSessionScans
+        entry={entry({ displayedScanCount: 2, scanRowsCapped: true, totalScans: 5 })}
+      />,
+    );
+
+    expect(screen.getByTestId("archived-scan-cap-notice")).toHaveTextContent(
+      "Showing the most recent 2 of 5 scans.",
+    );
+  });
+
+  it("does not show a capped-row notice when every archived row is displayed", () => {
+    render(<ArchivedSessionScans entry={entry()} />);
+    expect(screen.queryByTestId("archived-scan-cap-notice")).toBeNull();
+  });
+
   it("shows the empty message for an entry with zero rows", () => {
-    render(<ArchivedSessionScans entry={entry({ scanRows: [], totalScans: 0, totalUnits: 0 })} />);
+    render(
+      <ArchivedSessionScans
+        entry={entry({ scanRows: [], displayedScanCount: 0, totalScans: 0, totalUnits: 0 })}
+      />,
+    );
     expect(screen.getByText("No scans recorded for this session.")).toBeInTheDocument();
   });
 });

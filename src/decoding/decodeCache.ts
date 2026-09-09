@@ -43,6 +43,12 @@ export function clearDecodeCache(): void {
   store.clear();
 }
 
+/** Remove one code's positive L1 replay after its shared catalog identity is disputed. */
+export function invalidateDecodeCache(code: string): void {
+  const key = decodeCacheKey(code);
+  if (key) store.delete(key);
+}
+
 export function decodeCacheSize(): number {
   return store.size;
 }

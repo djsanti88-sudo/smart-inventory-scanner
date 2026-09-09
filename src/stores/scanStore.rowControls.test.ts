@@ -57,6 +57,56 @@ function pendingRow(store: ReturnType<typeof aggressiveStore>) {
 }
 
 describe("feed row identity controls (best-guess display)", () => {
+  it("resolveUnknown leaves a foreign same-code feed row unchanged and never queues its payload", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ aiLookupEnabled: false });
+    const localEvent = store.getState().processScan(CODE)!;
+    const review = store.getState().needsReviewQueue.find((item) => item.cleanCode === CODE)!;
+    const foreignEvent = {
+      ...localEvent,
+      id: "foreign-same-code-event",
+      businessId: "foreign-business",
+      sessionId: "foreign-session",
+      status: "needs_review" as const,
+      resolverStatus: "needs_review" as const,
+      matchedProductId: null,
+      syncStatus: "synced" as const,
+    };
+    store.setState((state) => ({ scanFeed: [foreignEvent, ...state.scanFeed] }));
+    store.getState().setSimulateSyncFailure(true);
+    const totalBefore = store.getState().finalCounts.reduce((sum, count) => sum + count.quantity, 0);
+
+    store.getState().resolveUnknown(review.id, "create_new", {
+      applyToCount: false,
+      origin: "tenant_approval",
+      newProduct: { name: "Local resolved product", brand: "Local brand" },
+    });
+
+    expect(store.getState().scanFeed.find((event) => event.id === foreignEvent.id)).toEqual(foreignEvent);
+    expect(store.getState().pendingSyncQueue.some((item) =>
+      item.entityId === foreignEvent.id ||
+      (item.payload as { id?: string; businessId?: string }).id === foreignEvent.id ||
+      (item.payload as { id?: string; businessId?: string }).businessId === foreignEvent.businessId
+    )).toBe(false);
+    expect(store.getState().finalCounts.reduce((sum, count) => sum + count.quantity, 0)).toBe(totalBefore);
+  });
+
+  it("confirmRowIdentity is a no-op for a foreign scanEventId even when its code matches a local review", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ aiLookupEnabled: false });
+    const localEvent = store.getState().processScan(CODE)!;
+    const localReview = store.getState().needsReviewQueue.find((review) => review.cleanCode === CODE)!;
+    const foreignEvent = { ...localEvent, id: "foreign-confirm-event", businessId: "foreign-business" };
+    store.setState((state) => ({ scanFeed: [foreignEvent, ...state.scanFeed] }));
+    const totalBefore = store.getState().finalCounts.reduce((sum, count) => sum + count.quantity, 0);
+
+    store.getState().confirmRowIdentity(foreignEvent.id, { name: "Must not resolve", brand: "Foreign" });
+
+    expect(store.getState().needsReviewQueue.find((review) => review.id === localReview.id)?.status).toBe("open");
+    expect(store.getState().aliases.some((alias) => alias.businessId === store.getState().businessId && alias.cleanCode === CODE)).toBe(false);
+    expect(store.getState().finalCounts.reduce((sum, count) => sum + count.quantity, 0)).toBe(totalBefore);
+  });
+
   it("a WEAK (needs_review) decode with a usable name still gets a pending inline suggestion, banded, on the counted row", async () => {
     const store = aggressiveStore();
     const { restore } = stub(WEAK_NEEDS_REVIEW);
@@ -101,6 +151,37 @@ describe("feed row identity controls (best-guess display)", () => {
       expect(store.getState().scanFeed[0].status).toBe("known");
       expect(store.getState().scanFeed[0].matchedProductId).toBe(product.id);
       expect(store.getState().finalCounts.reduce((n, c) => n + c.quantity, 0)).toBe(2);
+    } finally {
+      restore();
+    }
+  });
+
+  it("confirmRowIdentity ignores a foreign alias and review for the same feed code", async () => {
+    const store = aggressiveStore();
+    const { restore } = stub(WEAK_NEEDS_REVIEW);
+    try {
+      store.getState().processScan(CODE);
+      await vi.waitFor(() => expect(pendingRow(store)).toBeTruthy());
+      const row = pendingRow(store)!;
+      const localReview = store.getState().needsReviewQueue.find((review) => review.cleanCode === CODE)!;
+      const localAlias = store.getState().aliases.find((alias) => alias.cleanCode === CODE);
+      expect(localAlias).toBeUndefined();
+
+      const foreignBusinessId = "foreign-business";
+      store.setState((state) => ({
+        aliases: [{
+          id: "foreign-alias", businessId: foreignBusinessId, productId: "foreign-product", rawCodeExample: CODE,
+          cleanCode: CODE, normalizedCode: CODE, aliasType: "barcode", source: "human_review", confidence: 1,
+          approved: true, createdAt: "", updatedAt: "", createdBy: "human", lastSeenAt: "",
+          syncStatus: "synced", idempotencyKey: "foreign-alias-key",
+        }, ...state.aliases],
+        needsReviewQueue: [{ ...localReview, id: "foreign-review", businessId: foreignBusinessId }, ...state.needsReviewQueue],
+      }));
+
+      store.getState().confirmRowIdentity(row.id, { name: "Buffalo Wing Sauce 12oz", brand: "Anchor Bar" });
+
+      expect(store.getState().aliases.find((alias) => alias.businessId === store.getState().businessId && alias.cleanCode === CODE)?.approved).toBe(true);
+      expect(store.getState().needsReviewQueue.find((review) => review.id === "foreign-review")?.status).toBe("suggested");
     } finally {
       restore();
     }

@@ -4,7 +4,7 @@ import { isTireContext, hasRequiredTireSpecs } from "@/decoding/tireSpecs";
 import { detectScanContextConflict } from "@/decoding/scanContextFirewall";
 import { brandNorm } from "@/products/tires/tirePrefixLookup";
 import { detectCodeType } from "@/products/match/codeTypeDetector";
-import { canAutoCount, shouldAutoApplySuggestion, isPublicBarcodeShape, type AutoCountDecision } from "@/stores/scanGates";
+import { canAutoCount, shouldAutoApplySuggestion, type AutoCountDecision } from "@/stores/scanGates";
 import type { AiLookupResult, DecodeDecision } from "@/types";
 import { EVAL_DATASET, CLASS_DATASET, type EvalLabel } from "@/eval/dataset";
 import { FIXTURES, type DecodeFixture } from "@/eval/fixtures";
@@ -112,8 +112,6 @@ function autoCountGate(
     status: decision.status,
     exactCodeEvidenceVerifiedByApp: Boolean(decision.exactCodeEvidenceVerifiedByApp),
   });
-  void isPublicBarcodeShape; // re-exported for callers that need the shape check; unused directly here
-
   return {
     autoCount: countResult.allowed,
     autoApplySuggested,

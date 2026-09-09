@@ -24,6 +24,8 @@ export interface SessionHistoryEntry {
   startedAt: string;
   endedAt: string;
   scanRows: SessionHistoryRow[];
+  displayedScanCount: number;
+  scanRowsCapped: boolean;
   totalScans: number;
   totalUnits: number;
 }
@@ -52,13 +54,16 @@ export function buildSessionHistoryEntry(
     productName: getProductName(e.matchedProductId),
     quantityDelta: e.quantityDelta ?? 0,
   }));
-  const totalUnits = scanRows.reduce((sum, r) => sum + r.quantityDelta, 0);
+  const totalScans = chronological.length;
+  const totalUnits = chronological.reduce((sum, event) => sum + (event.quantityDelta ?? 0), 0);
   return {
     sessionId: session.id,
     startedAt: session.startedAt,
     endedAt,
     scanRows,
-    totalScans: scanRows.length,
+    displayedScanCount: scanRows.length,
+    scanRowsCapped: scanRows.length < totalScans,
+    totalScans,
     totalUnits,
   };
 }

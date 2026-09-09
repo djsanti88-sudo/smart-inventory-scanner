@@ -25,6 +25,13 @@ export interface DecodeStorage {
   incrementIfBelow(key: string, limit: number): Promise<{ value: number; granted: boolean }>;
 }
 
+export class DecodeStorageUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DecodeStorageUnavailableError";
+  }
+}
+
 const KV_FILE = ".decode-kv.json";
 const OUTCOMES_SUBDIR = "decode-outcomes";
 
@@ -220,7 +227,7 @@ export function tursoDecodeStorage(client: TursoClientLike): DecodeStorage {
 
 let cachedTursoStorage: DecodeStorage | null = null;
 // Missing credentials are stable for a warm instance. Client construction errors may be transient,
-// so they fall back only for the current request and are retried on the next one.
+// so they reject this request and are retried on the next one.
 let tursoUnavailable = false;
 
 async function getTursoDecodeStorage(): Promise<DecodeStorage | null> {
@@ -235,8 +242,9 @@ async function getTursoDecodeStorage(): Promise<DecodeStorage | null> {
     cachedTursoStorage = tursoDecodeStorage(await createTursoClient(credentials));
     return cachedTursoStorage;
   } catch (error) {
-    console.warn("[decode-storage] Turso unavailable, using local file storage:", (error as Error).message);
-    return null;
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[decode-storage] Configured Turso unavailable:", message);
+    throw new DecodeStorageUnavailableError(message);
   }
 }
 

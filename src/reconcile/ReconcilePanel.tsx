@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
+import { countsForActiveSession } from "@/inventory/sessionCounts";
 import { useReconcileStore } from "@/stores/reconcileStore";
 import { parseShopwareCsv, parseShopwareUnitCosts } from "@/reconcile/adapters/shopwareCsvAdapter";
 import { mapUniversalSheetToAdapterResult, extractUniversalUnitCosts } from "@/reconcile/adapters/universalAdapter";
@@ -90,9 +91,7 @@ export function ReconcilePanel() {
   // cross-session merge into finalCounts (a tested cross-device sync path - see
   // refreshFromCloud.store.test.ts). The reconcile comparison must use only the CURRENT session's
   // counts, not every session's counts merged into the store.
-  const sessionFinalCounts = currentSession
-    ? finalCounts.filter((c) => c.sessionId === currentSession.id)
-    : finalCounts;
+  const sessionFinalCounts = countsForActiveSession(finalCounts, currentSession);
 
   const [importError, setImportError] = useState("");
   const [matchError, setMatchError] = useState("");
@@ -199,11 +198,13 @@ export function ReconcilePanel() {
     const link = m.linkageSuggestion;
     if (!link) return [];
     const cleanBarcode = cleanScanCode(link.barcode).cleanCode;
-    const alreadyLinked = aliases.some((a) => a.cleanCode === cleanBarcode && a.approved);
-    const res = resolveRawScan(link.partNumber, products, aliases, businessId);
+    const tenantProducts = products.filter((p) => p.businessId === businessId);
+    const tenantAliases = aliases.filter((a) => a.businessId === businessId);
+    const alreadyLinked = tenantAliases.some((a) => a.cleanCode === cleanBarcode && a.approved);
+    const res = resolveRawScan(link.partNumber, tenantProducts, tenantAliases, businessId);
     const target =
       res.resolverStatus === "known" && res.productId
-        ? products.find((p) => p.id === res.productId) ?? null
+        ? tenantProducts.find((p) => p.id === res.productId) ?? null
         : null;
     return [{ link, cleanBarcode, alreadyLinked, target }];
   });

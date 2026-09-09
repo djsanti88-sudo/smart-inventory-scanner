@@ -18,9 +18,9 @@ import { getDecodeKnowledgeVersion } from "@/decoding/server/pipeline/knowledgeV
 import { getPersistedDecode, persistDecode, type PersistedDecode } from "@/decoding/server/cache/decodeCacheStore";
 import { getLearnedProduct, type LearnedProductRow } from "@/decoding/server/cache/learnedProducts";
 import {
-  lookupRetailBarcodeAsync,
-  getLastRetailLookupStatus,
+  lookupRetailBarcodeWithStatusAsync,
   type RetailLookupResult,
+  type RetailLookupStatus,
 } from "@/decoding/server/knowledge/retail/retailKnowledgeIndex";
 import {
   resolveExactBarcode,
@@ -221,6 +221,7 @@ function retailPayload(
   code: string,
   rawCodeSanitized: string,
   cleanCodeSanitized: string,
+  retailLookup: RetailLookupStatus,
 ): DecodePayload {
   const confidence = 0.85;
   const reason = "Matched the shared retail corpus by exact barcode. No paid lookup was needed.";
@@ -258,7 +259,7 @@ function retailPayload(
     reasonCode: "ok",
     reasonText: reason,
     timedOut: false,
-    debug: { providersAttempted: ["retail-corpus"], aiCalled: false, cached: false, retailLookup: getLastRetailLookupStatus() },
+    debug: { providersAttempted: ["retail-corpus"], aiCalled: false, cached: false, retailLookup },
     sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
   };
 }
@@ -394,7 +395,12 @@ function persistedBody(payload: DecodePayload, row: PersistedDecode): Record<str
   };
 }
 
-function noResultPayload(req: DecodePipelineRequest, providerStatuses: ProviderStatus[], reason: string): DecodePayload {
+function noResultPayload(
+  req: DecodePipelineRequest,
+  providerStatuses: ProviderStatus[],
+  reason: string,
+  retailLookup?: RetailLookupStatus,
+): DecodePayload {
   const floor = prefixFloorName(req.code, req.codeType);
   const results: AiLookupResult[] = floor
     ? [{ ...emptyResult(), productName: floor.name, brand: floor.brand, confidence: 0.3, needsHumanReview: true }]
@@ -425,7 +431,7 @@ function noResultPayload(req: DecodePipelineRequest, providerStatuses: ProviderS
       decodePath: "no-match",
       aiCalled: providerStatuses.some((provider) => provider.provider === GPT_PROVIDER && provider.status !== "skipped"),
       cached: false,
-      retailLookup: getLastRetailLookupStatus(),
+      ...(retailLookup ? { retailLookup } : {}),
     },
     sanitizedInput: { rawCodeSanitized: req.rawCodeSanitized, cleanCodeSanitized: req.cleanCodeSanitized },
   };
@@ -478,7 +484,12 @@ async function settlePaidAuthorization(
           error: error instanceof Error ? error.message : String(error),
           ts: new Date().toISOString(),
         }));
-        account = { used: 0, granted: true };
+        try {
+          await refundDailySlot(storage);
+        } catch {
+          // Conservative over-count is safer than an unmetered call.
+        }
+        throw error;
       }
       if (!account.granted) {
         try {
@@ -524,6 +535,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   const cacheKey = canonicalGtin(req.code) ?? req.code;
   let paidComputeCharged = false;
 
+  let retailLookupStatus: RetailLookupStatus | undefined;
   const deterministic = async (): Promise<DecodePayload | null> => {
     const tire = isGtinShaped(req.code)
       ? await resolveExactBarcode(req.code)
@@ -531,17 +543,18 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     if (tire) return corpusPayload(tire, req.rawCodeSanitized, req.cleanCodeSanitized);
 
     if (isGtinShaped(req.code) && !isLikelyMisreadGtin(req.code)) {
-      const retail = await lookupRetailBarcodeAsync(req.code);
-      if (retail) return retailPayload(retail, req.code, req.rawCodeSanitized, req.cleanCodeSanitized);
+      const retail = await lookupRetailBarcodeWithStatusAsync(req.code);
+      retailLookupStatus = retail.status;
+      if (retail.result) return retailPayload(retail.result, req.code, req.rawCodeSanitized, req.cleanCodeSanitized, retail.status);
     }
-
-    const learned = await getLearnedProduct(cacheKey);
-    if (learned) return learnedPayload(learned, req.rawCodeSanitized, req.cleanCodeSanitized);
 
     const master = await lookupMasterCatalog(req.code);
     if (master.kind === "verified") {
       return masterCatalogPayload(master.entry, req.code, req.rawCodeSanitized, req.cleanCodeSanitized);
     }
+
+    const learned = await getLearnedProduct(cacheKey);
+    if (learned) return learnedPayload(learned, req.rawCodeSanitized, req.cleanCodeSanitized);
     return null;
   };
 
@@ -564,24 +577,34 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
 
   const compute = async (): Promise<DecodePayload> => {
     if (isExampleOrTestRow(req.code, "")) {
-      return noResultPayload(req, [], "This example or test code is intentionally excluded from live lookup.");
+      return noResultPayload(req, [], "This example or test code is intentionally excluded from live lookup.", retailLookupStatus);
     }
     if (isLikelyMisreadGtin(req.code)) {
-      return noResultPayload(req, [], "This barcode may be misread or may use a non-standard check digit. Review it manually.");
+      return noResultPayload(req, [], "This barcode may be misread or may use a non-standard check digit. Review it manually.", retailLookupStatus);
     }
 
     const mock = e2eMode() ? normalizeMockGpt(req.mockGptDecode) : null;
     if (e2eMode() && !mock) {
-      return noResultPayload(req, [status(GPT_PROVIDER, "skipped", { errorCode: "e2e_mode" })], "Live lookup is disabled in test mode.");
+      return noResultPayload(req, [status(GPT_PROVIDER, "skipped", { errorCode: "e2e_mode" })], "Live lookup is disabled in test mode.", retailLookupStatus);
     }
 
     const deadlineAt = startedAt + Math.max(DEFAULT_DECODE_BUDGET_MS, req.budgetMs ?? 0);
     const remainingMs = deadlineAt - Date.now();
     if (!mock && remainingMs < GPT_MIN_VIABLE_MS) {
-      return noResultPayload(req, [status(GPT_PROVIDER, "skipped", { errorCode: "insufficient_time" })], "The lookup ran out of time before a paid call could safely start.");
+      return noResultPayload(req, [status(GPT_PROVIDER, "skipped", { errorCode: "insufficient_time" })], "The lookup ran out of time before a paid call could safely start.", retailLookupStatus);
     }
 
-    const storage = e2eMode() ? undefined : await decodeStorage();
+    let storage;
+    try {
+      storage = e2eMode() ? undefined : await decodeStorage();
+    } catch {
+      return noResultPayload(
+        req,
+        [status(GPT_PROVIDER, "skipped", { errorCode: "charge_unavailable" })],
+        "Live lookup is unavailable right now.",
+        retailLookupStatus,
+      );
+    }
     const gate = mock
       ? { run: true, skipReason: "" }
       : await shouldRunGptDecode({
@@ -593,7 +616,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
             : async () => checkGptDecodeBudget({ storage, worstCaseUsd: GPT_DECODE_WORST_CASE_USD }),
         });
     if (!gate.run) {
-      return noResultPayload(req, [status(GPT_PROVIDER, "skipped", { errorCode: gate.skipReason })], "Live lookup is unavailable right now.");
+      return noResultPayload(req, [status(GPT_PROVIDER, "skipped", { errorCode: gate.skipReason })], "Live lookup is unavailable right now.", retailLookupStatus);
     }
 
     if (!mock) {
@@ -606,6 +629,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
           req,
           [status(GPT_PROVIDER, "skipped", { errorCode: "charge_unavailable" })],
           "Live lookup is unavailable right now.",
+          retailLookupStatus,
         );
       }
     }
@@ -638,6 +662,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         req,
         [status(GPT_PROVIDER, providerCode, { latencyMs: Date.now() - gptStartedAt, errorCode: detail })],
         detail === "no_match" ? "No match was found in the available corpus or web evidence." : "Live lookup could not confirm this item.",
+        retailLookupStatus,
       );
     }
 

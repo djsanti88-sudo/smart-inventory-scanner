@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { useScanStore } from "@/stores/scanStore";
 import { ExportMenu } from "@/reports/export/ExportMenu";
 import type { InventoryCount, Product } from "@/types";
@@ -32,6 +32,7 @@ const count: InventoryCount = {
 
 afterEach(() => {
   cleanup();
+  vi.clearAllMocks();
   delete process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER;
 });
 
@@ -74,5 +75,69 @@ describe("ExportMenu session scoping (M2, same leak class as F2)", () => {
     const csv = vi.mocked(downloadCsv).mock.calls[0][0];
     expect(csv).toContain("Test Widget");
     expect(csv).not.toContain("Other Session Widget");
+  });
+});
+
+describe("ExportMenu accessible feedback and recovery", () => {
+  it("uses a native disclosure with named export groups and returns focus on Escape", () => {
+    render(<ExportMenu />);
+
+    const trigger = screen.getByTestId("export-menu-trigger");
+    const disclosure = trigger.closest("details");
+    expect(disclosure).not.toBeNull();
+    expect(trigger.tagName).toBe("SUMMARY");
+    expect(trigger).not.toHaveAttribute("aria-haspopup");
+
+    fireEvent.click(trigger);
+    expect(disclosure).toHaveAttribute("open");
+    expect(screen.getByTestId("export-menu")).not.toHaveAttribute("role", "menu");
+    expect(screen.getByText("Inventory").tagName).toBe("LEGEND");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(disclosure).not.toHaveAttribute("open");
+    expect(trigger).toHaveFocus();
+  });
+
+  it("announces a successful export", async () => {
+    render(<ExportMenu />);
+    fireEvent.click(screen.getByTestId("export-menu-trigger"));
+    fireEvent.click(screen.getByTestId("export-final-counts"));
+
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Created CSV file."));
+  });
+
+  it("announces export failures with a retry recovery message", async () => {
+    vi.mocked(downloadCsv).mockImplementationOnce(() => { throw new Error("Download blocked"); });
+    render(<ExportMenu />);
+    fireEvent.click(screen.getByTestId("export-menu-trigger"));
+    fireEvent.click(screen.getByTestId("export-final-counts"));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Could not create the CSV file. Download blocked. Try again."));
+  });
+
+  it("shows an announced recovery message when reading an import file fails", async () => {
+    const file = new File(["name,barcode"], "products.csv", { type: "text/csv" });
+    Object.defineProperty(file, "text", { value: vi.fn().mockRejectedValue(new Error("File unavailable")) });
+    render(<ExportMenu />);
+
+    fireEvent.change(screen.getByTestId("import-products-input"), { target: { files: [file] } });
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Could not import products CSV. Choose a CSV file and try again."));
+  });
+
+  it("shows the same recovery message when importing parsed data fails", async () => {
+    const originalImport = useScanStore.getState().importProductsCsv;
+    const file = new File(["name,barcode"], "products.csv", { type: "text/csv" });
+    Object.defineProperty(file, "text", { value: vi.fn().mockResolvedValue("name,barcode") });
+    useScanStore.setState({ importProductsCsv: vi.fn(() => { throw new Error("Invalid row"); }) });
+
+    try {
+      render(<ExportMenu />);
+      fireEvent.change(screen.getByTestId("import-products-input"), { target: { files: [file] } });
+
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Could not import products CSV. Choose a CSV file and try again."));
+    } finally {
+      useScanStore.setState({ importProductsCsv: originalImport });
+    }
   });
 });

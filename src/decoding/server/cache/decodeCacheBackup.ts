@@ -58,6 +58,7 @@ export function parseBackup(jsonl: string): PersistedDecode[] {
       kind: parsed.kind,
       payload: parsed.payload,
       tier: parsed.tier,
+      ...(parsed.sourceTier === "gpt_5_4_mini" ? { sourceTier: parsed.sourceTier } : {}),
       createdAt: parsed.createdAt,
     });
   }

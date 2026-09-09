@@ -14,11 +14,22 @@ function formatTime(iso: string): string {
 }
 
 export function ArchivedSessionScans({ entry }: { entry: SessionHistoryEntry }) {
+  const displayedScanCount = entry.displayedScanCount ?? entry.scanRows.length;
+  const scanRowsCapped = entry.scanRowsCapped ?? displayedScanCount < entry.totalScans;
+
   return (
     <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white" data-testid="session-archived-scans">
       <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-sm text-zinc-600">
         Saved scan log for this session ({entry.totalScans} scans, {entry.totalUnits} units)
       </div>
+      {scanRowsCapped && (
+        <div
+          className="border-b border-zinc-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
+          data-testid="archived-scan-cap-notice"
+        >
+          Showing the most recent {displayedScanCount} of {entry.totalScans} scans.
+        </div>
+      )}
       <table className="w-full min-w-[36rem] border-collapse text-left text-sm">
         <thead className="border-b border-zinc-200 bg-zinc-50 font-semibold text-zinc-700">
           <tr>
