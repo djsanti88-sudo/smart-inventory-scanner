@@ -13,10 +13,16 @@ describe("provenanceTier is stamped at every provisional product birth", () => {
     expect(prod.provenanceTier).toBe("provisional");
   });
 
-  it("STATIC LOCK: every 'provisional: true' product literal in scanStore.ts stamps provenanceTier", () => {
+  it("STATIC LOCK: every 'provisional: true' product literal in scanStore.ts/decodeSlice.ts stamps provenanceTier", () => {
     // Same static-source-check idiom as src/shared/privacy/keySafety.test.ts: lock the invariant at the
     // source level so a future provisional mint site cannot forget the tier.
-    const src = readFileSync(join(process.cwd(), "src", "stores", "scanStore.ts"), "utf8");
+    // PATH TRAP (see AGENTS.md "Anything that identifies code by its PATH is a trap"): wave 7 of the
+    // store decomposition moved 2 of the 3 known mint sites out of scanStore.ts into
+    // src/stores/scan/decodeSlice.ts (liveDecode / backgroundVerifyDeep), so this check now reads both
+    // files rather than assuming every mint site still lives in scanStore.ts.
+    const src =
+      readFileSync(join(process.cwd(), "src", "stores", "scanStore.ts"), "utf8") +
+      readFileSync(join(process.cwd(), "src", "stores", "scan", "decodeSlice.ts"), "utf8");
     const mintLines = src.split("\n").filter((l) => l.includes("provisional: true,"));
     expect(mintLines.length, "the three known mint sites exist").toBeGreaterThanOrEqual(3);
     for (const line of mintLines) {
