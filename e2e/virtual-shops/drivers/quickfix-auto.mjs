@@ -1,7 +1,7 @@
 // e2e/virtual-shops/drivers/quickfix-auto.mjs
 //
 // Virtual shop (b): QuickFix Auto - small repair shop, sloppy scanner
-// habits. See docs/superpowers/specs/2026-07-29-virtual-shops-design.md
+// habits. See shops.config.mjs; history is summarized in docs/HISTORY.md.
 // section (b).
 //
 // Same daily-loop skeleton as rincon-tire.mjs, but every scan runs through

@@ -5,7 +5,7 @@ import { canonicalGtin } from "@/products/barcodes/gtin";
 import { COLLECTIONS, type CatalogEntry as DbCatalogEntry } from "@/sync-database/types";
 import { resolveCatalogDocId } from "@/server/catalog/catalogDocId";
 
-// Sync Truth Task 4 (owner-approved 2026-07-22, docs/archive/superpowers/plans/2026-07-22-sync-truth-five-steps.md):
+// Sync Truth Task 4 (owner-approved 2026-07-22; see docs/HISTORY.md):
 // a free decode stage that consults the top-level Firestore `catalogEntries` master catalog (the same
 // collection masterAppend.ts writes) BEFORE any paid rung, so a code the app (or another shop) already
 // resolved and an owner already reviewed never pays again. Read via the Admin SDK (bypasses Firestore

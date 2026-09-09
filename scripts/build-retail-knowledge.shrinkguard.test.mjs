@@ -1,4 +1,4 @@
-// Regression guard for DT-1 (2026-08-13, docs/superpowers/reports/2026-08-13-loop1-data.md):
+// Regression guard for historical finding DT-1 (2026-08-13; see docs/HISTORY.md):
 // build-retail-knowledge.mjs reads data/retail-knowledge/retail_off.jsonl and unconditionally
 // renameSync's a brand-new retailKnowledge.generated.json over the committed ~4M-barcode index,
 // with zero comparison to the prior barcode count. A truncated/partial/stale JSONL (interrupted

@@ -10,7 +10,7 @@ import { logServerEvent } from "@/decoding/server/log";
 
 export const runtime = "nodejs";
 
-// D2 (Phase 6): hard account deletion. GC-E (docs/archive/superpowers/plans/2026-07-20-phase6-sell-ready.md):
+// D2 (Phase 6): hard account deletion. GC-E (retired plan; see docs/HISTORY.md):
 // purges ONLY businesses/{businessId}/* + that business's businessMembers rows; NEVER
 // catalogEntries/retailCatalogEntries or any other tenant. Deliberately stricter than the export
 // route (src/app/api/account/export/route.ts): deletion has NO authBypass/mock path at all - a

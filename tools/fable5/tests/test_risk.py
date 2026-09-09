@@ -22,7 +22,7 @@ class ClassifyTests(unittest.TestCase):
         )
 
     def test_ui_change_scores_four(self) -> None:
-        profile = classify(["src/components/ScannerInput.tsx"], DEFAULT_RULES)
+        profile = classify(["src/user-interface/ScannerInput.tsx"], DEFAULT_RULES)
         self.assertEqual(profile.score, 4)
         self.assertEqual(profile.tags, {"ui"})
 
@@ -32,7 +32,7 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(profile.tags, {"tenancy"})
 
     def test_ledger_change_scores_ten(self) -> None:
-        profile = classify(["src/services/inventory.ts"], DEFAULT_RULES)
+        profile = classify(["src/inventory/ledger.ts"], DEFAULT_RULES)
         self.assertEqual(profile.score, 10)
         self.assertEqual(profile.tags, {"ledger"})
 
@@ -42,13 +42,13 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(profile.tags, {"ledger"})
 
     def test_decode_change_scores_six(self) -> None:
-        profile = classify(["src/server/decode/pipeline.ts"], DEFAULT_RULES)
+        profile = classify(["src/decoding/pipeline.ts"], DEFAULT_RULES)
         self.assertEqual(profile.score, 6)
         self.assertEqual(profile.tags, {"decode"})
 
     def test_multi_match_keeps_max_score_and_all_tags(self) -> None:
         profile = classify(
-            ["src/services/inventory.ts", "README.md", "src/components/Nav.tsx"],
+            ["src/inventory/ledger.ts", "README.md", "src/user-interface/Nav.tsx"],
             DEFAULT_RULES,
         )
         self.assertEqual(profile.score, 10)
@@ -74,7 +74,7 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(profile.per_file, {})
 
     def test_double_star_pattern_matches_nested_paths(self) -> None:
-        profile = classify(["src/services/db/firebase/repository.ts"], DEFAULT_RULES)
+        profile = classify(["src/sync-database/cloud/repository.ts"], DEFAULT_RULES)
         self.assertEqual(profile.score, 8)
         self.assertEqual(profile.tags, {"tenancy"})
 

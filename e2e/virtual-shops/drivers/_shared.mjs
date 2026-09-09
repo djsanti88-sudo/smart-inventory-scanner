@@ -6,7 +6,7 @@
 // Modeled directly on e2e/persona-drive.mjs and e2e/stress-drive.mjs:
 //   - same NO_AI_STATUS mock-route stub (never a live AI provider)
 //   - same localhost-only allowlist-guard pattern, pinned to the virtual
-//     shops' own dedicated port (3500, per docs/superpowers/specs/
+//     shops' own dedicated port (3500, per the retired design summarized in docs/HISTORY.md;
 //     2026-07-29-virtual-shops-design.md)
 //   - same "screenshot each flow step, collect JSON metrics" driver shape
 //
@@ -208,7 +208,7 @@ export function swapAdjacentChars(code, index) {
 
 /**
  * Append-only friction log writer. One JSON line per event, matching the
- * schema documented in docs/superpowers/specs/2026-07-29-virtual-shops-design.md
+ * schema defined by shops.config.mjs; retired design history is in docs/HISTORY.md
  * ("Common friction-log schema"): timestamp, shopKey, dayIndex, phase,
  * severity, description, screenshotPath.
  */

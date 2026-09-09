@@ -23,7 +23,7 @@
 - `/api/ai-lookup` has one decode mode and one paid provider path. -> `docs/DECODER_ARCHITECTURE.md`
 
 ## Tenancy
-- Tenant-owned records (products, aliases, scans, counts, sessions, review items) are scoped by `businessId`. -> `docs/FIREBASE_SECURITY.md`
+- Tenant-owned records (products, aliases, scans, counts, sessions, review items) are scoped by `businessId`. -> `docs/FIREBASE.md`
 - The knowledge corpus, decode caches, and learned tier are platform-scoped and shared by every tenant. -> `docs/ARCHITECTURE.md`
 - A tenant approval never writes platform knowledge; the learned tier learns from app-verified evidence only. -> `shouldLearnDecode` in `src/decoding/server/pipeline/pipeline.ts`
 

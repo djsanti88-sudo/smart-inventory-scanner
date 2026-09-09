@@ -2,7 +2,7 @@
 
 Four always-on, mock-only virtual "shops" that exercise Scanbin the way real different shops would,
 day after day, and log every piece of friction they hit. Design doc:
-`docs/superpowers/specs/2026-07-29-virtual-shops-design.md` (read that first for the full per-shop
+`shops.config.mjs` is the current source of truth for the per-shop
 spec: goal, daily loop, data sources, success metrics).
 
 Not a replacement for the human-bot QA fleet (`e2e/human-bots/`) or Teach Bot (`e2e/teach/`, learns

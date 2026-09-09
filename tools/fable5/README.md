@@ -5,10 +5,9 @@ runs deterministic evidence gates, probes changed TypeScript tests, optionally d
 risk-selected Claude expert layer, and writes a verdict with evidence for the next session.
 Python 3.11 or newer is required.
 
-From the repository root, use either the Windows wrapper or the portable module form:
+From the repository root, use the portable module form:
 
 ```powershell
-.\fable5.cmd doctor
 python -m tools.fable5 doctor
 ```
 
@@ -17,8 +16,8 @@ python -m tools.fable5 doctor
 ### Inspect local capabilities
 
 ```powershell
-.\fable5.cmd doctor
-.\fable5.cmd doctor --json
+python -m tools.fable5 doctor
+python -m tools.fable5 doctor --json
 ```
 
 `doctor` inventories local executables, project commands, repository agents, Codex skills, and
@@ -27,7 +26,7 @@ installed plugins. It does not run checks or use the network.
 ### Audit a plan and its proof methods
 
 ```powershell
-.\fable5.cmd review-plan docs/superpowers/plans/2026-07-19-master-plan.md
+python -m tools.fable5 review-plan .claude/plans/<approved-plan>.md
 ```
 
 `review-plan` checks plan structure and audits acceptance criteria in the Goals or Success Criteria
@@ -38,10 +37,10 @@ proof method is blocking. Use `--output-dir <path>` to write JSON and Markdown a
 ### Review a build
 
 ```powershell
-.\fable5.cmd review-build --gate fast
-.\fable5.cmd review-build --gate pr --no-cache
-.\fable5.cmd review-build --gate release
-.\fable5.cmd review-build --gate monthly
+python -m tools.fable5 review-build --gate fast
+python -m tools.fable5 review-build --gate pr --no-cache
+python -m tools.fable5 review-build --gate release
+python -m tools.fable5 review-build --gate monthly
 ```
 
 The gates increase in depth:
@@ -59,7 +58,7 @@ independent and do not authorize deploys or pushes.
 ### Run the canary selftest
 
 ```powershell
-.\fable5.cmd selftest
+python -m tools.fable5 selftest
 ```
 
 `selftest` copies isolated fixtures into scratch directories and proves the five seeded detectors
@@ -68,8 +67,8 @@ catch their defects. It is free, offline, and does not create Git worktrees.
 ### Stress a local or approved preview
 
 ```powershell
-.\fable5.cmd stress --target http://localhost:3400 --intensity standard
-.\fable5.cmd stress --target https://approved-preview.example --allow-cloud
+python -m tools.fable5 stress --target http://localhost:3400 --intensity standard
+python -m tools.fable5 stress --target https://approved-preview.example --allow-cloud
 ```
 
 `stress` is never automatic. Local targets must use port 3400. Every non-localhost target requires
@@ -82,7 +81,7 @@ and verifies counts from persisted state. Preview runs remain owner-gated.
 ### Claude experts and billing preflight
 
 ```powershell
-.\fable5.cmd review-build --gate pr --with-experts
+python -m tools.fable5 review-build --gate pr --with-experts
 ```
 
 `--with-experts` uses risk tags to select the smallest useful specialist fleet. Scores up to 3
@@ -98,7 +97,7 @@ floor; true spend = provider console.
 ### Measured personas
 
 ```powershell
-.\fable5.cmd review-build --gate fast --personas
+python -m tools.fable5 review-build --gate fast --personas
 ```
 
 `--personas`, also enabled by the monthly gate, measures three browser flows on localhost port
@@ -109,7 +108,7 @@ same subscription preflight and fail-closed billing rules.
 ### Mutation probes
 
 ```powershell
-.\fable5.cmd review-build --gate fast --mutation
+python -m tools.fable5 review-build --gate fast --mutation
 ```
 
 Mutation probes run automatically in `pr` and `monthly`, or on any gate with `--mutation`. A
@@ -132,7 +131,7 @@ Each build review writes `reports/fable5/<run-id>/`:
 - `fix-packet.md` appears when failed or warning results need action. Its finding text is fenced,
   labeled untrusted, and secret-redacted.
 
-After the report is written, Fable 5 atomically updates `docs/reviews/LATEST.json`. The pointer
+After the report is written, Fable 5 atomically updates `reports/fable5/LATEST.json`. The pointer
 contains the verdict, run ID, `report.md` path, up to three blockers, generated time, and cost note.
 A stale run cannot overwrite a newer pointer.
 
@@ -145,7 +144,7 @@ Exit codes are stable:
 
 ## Hooks and run lock
 
-The SessionStart hook reads `docs/reviews/LATEST.json`, `.fable5/running.json`, and any pending
+The SessionStart hook reads `reports/fable5/LATEST.json`, `.fable5/running.json`, and any pending
 preview offer, then prints no more than four status lines. The Stop hook detects a newly completed
 plan checkbox, applies a 30 minute per-plan debounce and a four-runs-per-day cap, then starts a
 hidden fast review with `FABLE5_HOOK_TRIGGERED=1`.
@@ -161,7 +160,8 @@ Successful checks are cached in `.fable5/cache.sqlite3`. The key includes the co
 Fable configuration, and dirty or untracked file content. `--no-cache` forces fresh evidence;
 failed results are never cached.
 
-Edit `fable5.toml` to configure checks, command allowlists, resource lanes, safety labels, risk
-rules, and specialist routes. Subprocesses do not use a shell, receive a secret-scrubbed
+The default local configuration lives at `tools/fable5/default.toml`. Pass `--config fable5.toml`
+to use a repository-root override for checks, command allowlists, resource lanes, safety labels,
+risk rules, and specialist routes. Subprocesses do not use a shell, receive a secret-scrubbed
 environment, and are killed on timeout. Use `--dry-run` to inspect scheduling before adding a new
 check.

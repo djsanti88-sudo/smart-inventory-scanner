@@ -12,7 +12,7 @@ from pathlib import Path
 
 from . import __version__
 from .cache import EvidenceCache
-from .config import FableConfig, load_config
+from .config import DEFAULT_CONFIG_PATH, FableConfig, load_config
 from .discovery import (
     changed_files,
     discover_capabilities,
@@ -94,6 +94,8 @@ def _path_from_root(root: Path, value: str | None) -> Path | None:
 
 def _load(root: Path, value: str | None) -> tuple[FableConfig, Path]:
     path = _path_from_root(root, value) or root / "fable5.toml"
+    if value is None and not path.is_file():
+        path = DEFAULT_CONFIG_PATH
     return load_config(root, path), path
 
 

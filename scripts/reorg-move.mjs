@@ -46,7 +46,7 @@ const rewrites = manifest.moves
   // longest first, so "@/services/auth/authMode" rewrites before "@/services/auth"
   .sort((a, b) => b.from.length - a.from.length);
 
-// NOTE: `docs/` is deliberately NOT scanned. docs/archive/ and docs/superpowers/{plans,reports,specs}
+// NOTE: `docs/` is deliberately NOT scanned. Retired documentation locations
 // are DATED HISTORICAL RECORDS - a 2026-07-19 plan must keep citing the paths that existed in July,
 // or the record becomes fiction. Living docs (ARCHITECTURE.md, AGENTS.md, COMMANDS.md, README.md) are
 // updated deliberately in the final wave, by hand, not mechanically mid-move.

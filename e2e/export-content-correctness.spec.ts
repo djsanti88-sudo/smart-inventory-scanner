@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "./fixtures";
 import { mkdirSync, readFileSync } from "node:fs";
 
-// GAP 4 (docs/superpowers/reports/2026-08-13-e2e-coverage-map.md items G1/G2): the existing
+// Historical coverage gap 4/G1-G2 (see docs/HISTORY.md): the existing
 // e2e/human-bots/scenarios/export-leak.spec.ts only reads CSV HEADERS and is report-only (writes a
 // markdown report, never fails the run). This spec parses the real exported CSV ROWS and hard-asserts
 // them 1:1 against the store's own finalCounts, and hard-fails the run if a private field (unit cost)

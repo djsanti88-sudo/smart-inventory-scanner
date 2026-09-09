@@ -25,7 +25,7 @@ from .verdict import redact_secrets
 from .verify import CallBudget, VerifiedFinding, verify_findings
 
 # Belt-and-suspenders budget cap on every expert call. A stray metered API key must never be
-# able to run up an unbounded bill through this path; see docs/reviews/BILLING_TRUTH.md.
+# able to run up an unbounded bill through this path; see the Paid API Cost Truth Rule in AGENTS.md.
 _MAX_BUDGET_USD = "0.50"
 
 # Test seam: point this env var at a stub command (split on spaces) to replace the real

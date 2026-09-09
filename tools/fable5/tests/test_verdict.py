@@ -146,7 +146,7 @@ class RedactSecretsTests(unittest.TestCase):
 
     def test_no_false_positive_on_file_paths(self) -> None:
         text = (
-            "See tools/fable5/verdict.py and docs/reviews/LATEST.json for details, "
+            "See tools/fable5/verdict.py and reports/fable5/LATEST.json for details, "
             "also C:\\Users\\djsan\\inventory\\tools\\fable5\\cli.py is relevant."
         )
         self.assertEqual(redact_secrets(text), text)
@@ -171,9 +171,9 @@ class WriteLatestTests(unittest.TestCase):
                 cost_note="subscription; true spend = provider console",
             )
             self.assertTrue(ok)
-            latest_path = root / "docs" / "reviews" / "LATEST.json"
+            latest_path = root / "reports" / "fable5" / "LATEST.json"
             self.assertTrue(latest_path.exists())
-            self.assertFalse((root / "docs" / "reviews" / "LATEST.json.tmp").exists())
+            self.assertFalse((root / "reports" / "fable5" / "LATEST.json.tmp").exists())
             data = json.loads(latest_path.read_text(encoding="utf-8"))
             self.assertEqual(data["verdict"], "PASS")
             self.assertEqual(data["run_id"], "20260101T000000Z-fast")
@@ -188,7 +188,7 @@ class WriteLatestTests(unittest.TestCase):
     def test_stale_guard_refuses_older_run(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            latest_dir = root / "docs" / "reviews"
+            latest_dir = root / "reports" / "fable5"
             latest_dir.mkdir(parents=True)
             newer = datetime.now(timezone.utc).isoformat()
             existing = {
@@ -222,7 +222,7 @@ class WriteLatestTests(unittest.TestCase):
     def test_newer_run_replaces_existing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            latest_dir = root / "docs" / "reviews"
+            latest_dir = root / "reports" / "fable5"
             latest_dir.mkdir(parents=True)
             older = (
                 datetime.now(timezone.utc) - timedelta(hours=1)
@@ -267,12 +267,12 @@ class WriteLatestTests(unittest.TestCase):
                 cost_note="subscription; true spend = provider console",
             )
             self.assertTrue(ok)
-            self.assertTrue((root / "docs" / "reviews").is_dir())
+            self.assertTrue((root / "reports" / "fable5").is_dir())
 
     def test_malformed_existing_latest_does_not_block_write(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            latest_dir = root / "docs" / "reviews"
+            latest_dir = root / "reports" / "fable5"
             latest_dir.mkdir(parents=True)
             (latest_dir / "LATEST.json").write_text("not json", encoding="utf-8")
 

@@ -19,7 +19,7 @@ import type { Product, Alias, CatalogEntry, AuditEvent } from "@/sync-database/t
 // `matchedProductId: string | null`), converted by ./firebase/storeMappers. The session read side
 // hands back the STORE shape - it feeds the timeline and the count rebuild directly - so that is what
 // this port declares. Writing the other one here compiles into a lie the mappers then have to
-// contradict. (The duplication itself is pre-existing debt, recorded in docs/ARCHITECTURE_LAYERS.md.)
+// contradict. (The duplication itself is pre-existing debt, recorded in docs/ARCHITECTURE.md.)
 import type { ScanEvent } from "@/types";
 
 /**

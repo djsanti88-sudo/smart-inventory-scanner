@@ -54,6 +54,6 @@ test("ManagerBot: shop-manager workflow coverage", async ({ page }) => {
   const absentList = items.filter((x) => !x.present).map((x) => x.feature);
   writeFileSync(
     resolve(process.cwd(), `${OUT}/manager_insights.md`),
-    `# ManagerBot insights\n\n## Present today\n${presentList.map((f) => `- ${f}`).join("\n") || "- (none)"}\n\n## Present-check came back absent\n${absentList.map((f) => `- ${f}`).join("\n") || "- (none)"}\n\n## Missing but recommended (classified)\n${missing.map((m) => `- [${m.classify}] ${m.feature}`).join("\n")}\n\n> Critical-before-pilot: the customer/role data-protection foundation (so managers/employees don't see\n> the raw code DB) - tracked in docs/HOTFIX_FOLLOWUPS.md. Screenshots: ${PROOF}/\n`,
+    `# ManagerBot insights\n\n## Present today\n${presentList.map((f) => `- ${f}`).join("\n") || "- (none)"}\n\n## Present-check came back absent\n${absentList.map((f) => `- ${f}`).join("\n") || "- (none)"}\n\n## Missing but recommended (classified)\n${missing.map((m) => `- [${m.classify}] ${m.feature}`).join("\n")}\n\n> Critical-before-pilot: the customer/role data-protection foundation (so managers/employees don't see\n> the raw code DB) - tracked in docs/BACKLOG.md. Screenshots: ${PROOF}/\n`,
   );
 });

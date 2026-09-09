@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// GAP 2 (docs/superpowers/reports/2026-08-13-e2e-coverage-map.md item 2 / C3): no existing spec seeds a
+// Historical coverage gap 2/C3 (see docs/HISTORY.md): no existing spec seeds a
 // CORRUPTED/PARTIAL IndexedDB value and proves the app recovers gracefully. persist-indexeddb.spec.ts
 // covers the happy path (write + reload) and the legacy-migration path; product-purge.spec.ts proves the
 // same "poisoned cache auto-purges to clean state" idea but only for a wrong-SHAPE localStorage v4 blob,

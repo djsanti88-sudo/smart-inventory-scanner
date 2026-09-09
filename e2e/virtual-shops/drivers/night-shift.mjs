@@ -1,7 +1,7 @@
 // e2e/virtual-shops/drivers/night-shift.mjs
 //
 // Virtual shop (d) "Night Shift" - the offline/retry resilience loop.
-// Design: docs/superpowers/specs/2026-07-29-virtual-shops-design.md section (d).
+// See shops.config.mjs; retired design history is summarized in docs/HISTORY.md.
 //
 // Flow (real UI, mock backend only), repeated per day in
 // fixtures/night-shift-scan-sequence.json (checked-in, deterministic,

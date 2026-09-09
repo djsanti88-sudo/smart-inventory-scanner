@@ -179,7 +179,7 @@ Everything else, ports, env vars, paid and live warnings: `docs/COMMANDS.md`. Ch
 |---|---|
 | Detailed product invariants | `GUARDRAILS.md` |
 | Architecture + known traps | `docs/ARCHITECTURE.md` |
-| Business logic vs infrastructure seams, migration order | `docs/ARCHITECTURE_LAYERS.md` |
+| Business logic vs infrastructure seams, migration order | `docs/ARCHITECTURE.md` |
 | Commands, ports, env vars | `docs/COMMANDS.md` |
 | Decode pipeline | `docs/DECODER_ARCHITECTURE.md` |
 | Deployment / rollback | `docs/DEPLOY_TRUTH.md` |

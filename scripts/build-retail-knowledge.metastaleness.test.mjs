@@ -1,4 +1,4 @@
-// Regression guard for DT2-2 (2026-08-13, docs/superpowers/reports/2026-08-13-loop2-data.md):
+// Regression guard for historical finding DT2-2 (2026-08-13; see docs/HISTORY.md):
 // build-retail-knowledge.mjs's shrink guard (DT-1b) uses retailKnowledge.generated.meta.json as its
 // baseline for "how many barcodes existed before this run". If a PRIOR run crashed between its two
 // renameSync calls (index renamed, meta not), the meta left on disk describes an OLDER, smaller

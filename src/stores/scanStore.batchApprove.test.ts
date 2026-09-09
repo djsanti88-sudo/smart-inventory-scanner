@@ -3,7 +3,7 @@ import { createTestScanStore } from "@/stores/scanStore";
 import { MockDb } from "@/sync-database/mock/mockDb";
 import { normalizeCode } from "@/scanning/clean/codeNormalizer";
 
-// Build 3: batch-approve for the Suggested pile (docs/archive/superpowers/specs/2026-07-05-batch-approve-design.md).
+// Build 3: batch-approve for the Suggested pile (retired design; see docs/HISTORY.md).
 // Approval MUST reuse resolveUnknown exactly as the single-approve flow (NeedsReviewTable "Approve
 // suggestion" button) does - no new approval semantics, no new trust rule. batchApprove is a thin,
 // chunked (25/commit) loop over that same call with per-row failure containment.

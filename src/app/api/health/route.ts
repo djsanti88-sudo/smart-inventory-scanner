@@ -5,7 +5,7 @@ import { checkRateLimit, intEnv } from "@/decoding/limits/aiSpendGuard";
 import { logServerEvent } from "@/decoding/server/log";
 import { tireJsonIndexStatus } from "@/decoding/server/knowledge/tire/tireKnowledgeIndex";
 
-// Public, unauthenticated uptime-monitor endpoint (spec: docs/superpowers/specs/2026-07-29-m1-
+// Public, unauthenticated uptime-monitor endpoint (retired M1 spec; see docs/HISTORY.md;
 // engineering-specs.md section 4). Booleans-only JSON, no secrets, no keys, no URLs, no internal
 // error messages - only presence/reachability. Every dependency check degrades to `false` on any
 // error or timeout; this route must NEVER throw or 500 - a 200 with ok:false IS the signal an

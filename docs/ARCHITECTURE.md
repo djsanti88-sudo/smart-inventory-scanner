@@ -166,7 +166,51 @@ suggested or Needs Review and never app-verifies itself. Full semantics live in
 - Other named gates: `test:golden`, `test:corpus-drift` (live Turso, self-skipping), `test:firebase`,
   `proof:local`, `release:check`.
 
-## 8. Traps a fresh session falls into (verified 2026-07-19)
+## 8. Dependency boundaries and migration seams
+
+The workflow folders are the product map. Runtime boundaries remain explicit inside them:
+
+- Client code may not import `@/server/*` or `@/decoding/server/*`.
+- API routes authenticate and shape requests, then delegate to workflow owners.
+- Counting, replay, barcode cleaning, and idempotency remain provider-neutral.
+- Decode and AI enrich identity only. They never own whether a scan appears or counts.
+- `src/sync-database/` owns mock, Firestore, and pending-queue persistence.
+- `src/decoding/server/` owns corpus access, positive caches, caps, and paid egress.
+
+Preserve the existing seams: `SyncTarget` for backend selection, repository interfaces around
+Firestore, the authentication service boundary, `runDecodePipeline` as the only decode orchestrator,
+and `decodeWithGpt` as the single paid-provider call. Do not introduce a parallel resolver, cache,
+counter, or provider registry.
+
+Known coupling should be removed only for a concrete migration. Several API routes still call
+Firebase Admin directly, SQL is intentionally specialized by store, and `scanStore.ts` remains the
+ordering-sensitive integration owner. A safe infrastructure migration leaves the ledger, resolver,
+and idempotency rules unchanged, adds a second implementation behind an existing seam, and proves it
+before switching the wiring point.
+
+Platform constraints:
+
+- Corpus loaders need a writable temporary directory and may reuse warm Node.js instances.
+- `next.config.ts` `serverExternalPackages` entries are load-bearing.
+- Deployment, environment-parity, and telemetry tooling are operational coupling, not business logic.
+
+### Review sections
+
+`codemap.json` is the machine-readable source for review sections. Use
+`npm run check:section <id>` to print one and add `--gates` to run its gates.
+
+| Section | Owns | Primary proof |
+|---|---|---|
+| `scan-core` | capture, ledger, resolution, optimistic state, sync queue | `proof:all`, `test:ledger` |
+| `decode` | free-source order, evidence, caches, caps, paid egress | `proof:all`, route and pipeline suites |
+| `ui` | feature UI, app routes, authentication surface | `proof:all`, `test:e2e`, `qa:bots` |
+| `data` | Firestore, tenancy, catalog, import, reconcile, corpora | `proof:all`, `test:firebase`, corpus gates |
+| `tooling` | scripts, proof gates, documentation | `proof:all` |
+
+Keep `codemap.json` aligned when folders or gates change. `npm run proof:all` is the primary proof
+gate; `proof:local` does not cover the whole repository.
+
+## 9. Traps a fresh session falls into
 
 1. `services/decode/` no longer exists (deleted 2026-08-18). It was a zero-importer barrel whose
    README described the superseded concurrent flow as current. Canonical decode doc:
@@ -183,10 +227,10 @@ suggested or Needs Review and never app-verifies itself. Full semantics live in
 7. `markWrong` transfers quantity via repointed ScanEvents; it never zeroes or deletes.
 8. Two DB layers coexist on purpose: better-sqlite3 (knowledge corpus, local file / .db.gz on
     Vercel) and Turso/libsql (decode cache and usage counters). Do not unify them casually.
-9. `services/upc/*` is deliberately client-safe barcode-shape logic. Server decode code remains under
-    `src/server/decode/`; client code must never import it.
-10. The pure-services rule (no React / next/* in `src/services`) is convention + spot tests, not a
-    lint rule. Keep honoring it.
+9. Client-safe barcode-shape logic lives under `src/products/barcodes/`. Server decode code remains
+   under `src/decoding/server/`; client code must never import it.
+10. Workflow boundaries are enforced by import tests. When moving files, update every path-keyed
+    consumer and prove the guard scanned a non-empty, representative file set.
 11. `next.config.ts` `serverExternalPackages` (firebase-admin, better-sqlite3, @libsql/client) is
     load-bearing: bundling them broke native modules and silently fell through to PAID AI (2026-07-09).
 12. `cloudDrainRace.store.test.ts` is timing-flaky only under full parallel vitest load; it passes in

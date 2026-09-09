@@ -1,7 +1,7 @@
 // e2e/virtual-shops/fixtures/generate-fixtures.mjs
 //
 // Deterministic fixture generator for the Virtual Shops harness.
-// See docs/superpowers/specs/2026-07-29-virtual-shops-design.md ("Build task
+// See shops.config.mjs and docs/HISTORY.md (retired design, "Build task
 // list", tasks 3, 5, 6, 7) and e2e/virtual-shops/README.md for the full map.
 //
 // Produces static, checked-in JSON/CSV fixtures for all four shop personas.

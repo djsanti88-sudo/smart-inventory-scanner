@@ -8,6 +8,8 @@ from typing import Any
 from .models import CheckSpec
 from .risk import DEFAULT_RULES, RiskRule
 
+DEFAULT_CONFIG_PATH = Path(__file__).with_name("default.toml")
+
 
 @dataclass(frozen=True)
 class Route:
@@ -42,6 +44,8 @@ def _tuple(value: Any) -> tuple[str, ...]:
 
 def load_config(root: Path, config_path: Path | None = None) -> FableConfig:
     path = config_path or root / "fable5.toml"
+    if config_path is None and not path.is_file():
+        path = DEFAULT_CONFIG_PATH
     if not path.is_file():
         raise FileNotFoundError(f"Fable 5 configuration not found: {path}")
     with path.open("rb") as handle:

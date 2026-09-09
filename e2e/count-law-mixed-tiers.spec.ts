@@ -1,6 +1,6 @@
 import { test, expect, type Page, type Route } from "./fixtures";
 
-// TOP-LEVEL LAW at scale, mixed tiers (coverage gap #1, docs/superpowers/reports/2026-08-13-e2e-coverage-map.md
+// TOP-LEVEL LAW at scale, mixed tiers (historical coverage gap 1; see docs/HISTORY.md
 // item B). Every existing law spec proves the invariant with 1-2 tiers and <=20 codes
 // (count-always.spec.ts, trust-gate-law.spec.ts, and gpt-decode-burst.spec.ts).
 // This spec scans 60+ codes across EVERY resolution tier in one session and asserts:

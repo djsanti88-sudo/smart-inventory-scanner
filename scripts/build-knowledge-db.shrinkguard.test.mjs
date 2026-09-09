@@ -1,4 +1,4 @@
-// Regression guard for DT-1 (2026-08-13, docs/superpowers/reports/2026-08-13-loop1-data.md):
+// Regression guard for historical finding DT-1 (2026-08-13; see docs/HISTORY.md):
 // build-knowledge-db.mjs deleted the existing runtime knowledge.generated.db via unlinkSync
 // BEFORE validating the freshly built replacement had a sane row count. A truncated or stale
 // tireKnowledge.generated.json / retailKnowledge.generated.json input would silently destroy the

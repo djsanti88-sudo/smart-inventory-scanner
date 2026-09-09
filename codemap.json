@@ -1,5 +1,5 @@
 {
-  "$comment": "Machine-readable section map for Scanbin. Created 2026-08-12. Sections are REVIEW UNITS, not folders - see docs/CODEMAP.md for why the filesystem is deliberately not reorganized to match. Consumed by scripts/check-section.mjs (npm run check:section <id>). Keep in sync with docs/CODEMAP.md.",
+  "$comment": "Machine-readable review-section map for Scanbin. Consumed by scripts/check-section.mjs (npm run check:section <id>). Keep it aligned with the workflow map and review-section summary in docs/ARCHITECTURE.md.",
   "version": 1,
   "sections": [
     {

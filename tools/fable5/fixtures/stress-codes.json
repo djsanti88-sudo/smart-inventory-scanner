@@ -1,5 +1,5 @@
 {
-  "source": "Read-only query of src/server/knowledge.generated.db tires.barcode where usable_for=auto_count_candidate and current_status=active_retail, ordered by barcode, 2026-07-20",
+  "source": "Read-only query of src/decoding/server/knowledge/knowledge.generated.db tires.barcode where usable_for=auto_count_candidate and current_status=active_retail, ordered by barcode, 2026-07-20",
   "codes": [
     "000000191180",
     "0051342128136",

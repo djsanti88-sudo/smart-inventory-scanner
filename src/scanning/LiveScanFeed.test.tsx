@@ -245,7 +245,7 @@ describe("LiveScanFeed - suggested identity over provisional placeholder (Task 3
   });
 });
 
-// UI-1 FIX (2026-08-13, docs/superpowers/reports/2026-08-13-loop1-ui.md): resolveUnknown flips a
+// UI-1 fix (2026-08-13; see docs/HISTORY.md): resolveUnknown flips a
 // scanned-unknown code's feed row to status "resolved" once it is settled via Needs Review. The row
 // already counted (TOP-LEVEL LAW: ensureProvisionalCount counts synchronously at scan time), so its
 // "Qty on hand" cell must keep showing the real, ledger-correct quantity - never regress to "-", which

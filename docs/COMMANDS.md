@@ -1,6 +1,6 @@
 # Command Reference
 
-> Every npm script and notable manual script, verified against package.json 2026-07-19.
+> Canonical command reference. npm script names were checked against `package.json` on 2026-09-02.
 > Money rule: anything marked **PAID** or **LIVE** is owner-gated. Never run those without explicit
 > approval (Engineering Doctrine + Paid API Cost Truth Rule).
 
@@ -17,13 +17,13 @@
 
 ## Fable 5 review engine
 
-The Windows wrapper `.\fable5.cmd` and `python -m tools.fable5` are equivalent.
+Use the Python module directly; the former Windows wrapper has been retired.
 
 | Command | What it does | Cost and approval |
 |---|---|---|
 | `python -m tools.fable5 doctor` | Inventories local tools, agents, skills, plugins, and project commands. Add `--json` for machine output. | Free, offline. |
 | `python -m tools.fable5 review-plan <plan.md>` | Audits plan structure and verifies acceptance-criterion proof commands, paths, screenshots, and reports. | Free, offline. |
-| `python -m tools.fable5 review-build --gate fast|pr|release|monthly` | Runs the selected evidence gate and writes a PASS/BLOCK verdict. PR and monthly include mutation probes; monthly includes personas. | Fast, PR, and release are local by default. Monthly personas use Claude subscription tokens. Safety flags require their matching approval. |
+| `python -m tools.fable5 review-build --gate fast|pr|release|monthly` | Runs the selected evidence gate and writes a PASS/BLOCK verdict to `reports/fable5`. PR and monthly include mutation probes; monthly includes personas. | Fast, PR, and release are local by default. Monthly personas use Claude subscription tokens. Safety flags require their matching approval. |
 | `python -m tools.fable5 review-build --with-experts` | Adds risk-routed Claude reviewers, verified findings, the findings ledger, and a fix packet. | **SUBSCRIPTION**: requires `claude.ai` auth with no API-key source. Nonzero reported cost fails unless owner-approved `--allow-paid-fallback` is passed. |
 | `python -m tools.fable5 review-build --personas` | Measures three localhost flows on port 3400 and produces $150/month purchase verdicts from existing agents. Monthly enables it automatically. | **SUBSCRIPTION** plus local browser work. Uses the same billing preflight. |
 | `python -m tools.fable5 review-build --mutation` | Probes changed TypeScript modules in one temporary worktree with shared `node_modules`; automatic for PR and monthly. | Free, offline. No install or native rebuild. |
@@ -75,7 +75,7 @@ whether merged). Batch A modules shipped: `e2e/teach/{knowledge,ladder,manifest,
 | `npm run test:ledger` | Crown invariant suite: 8 pinned files proving books balance, retry-is-no-op, markWrong transfer, merge union, provenance, replay, ladder timeout. Run for ANY counting change. |
 | `npm run test:golden` | Golden Baseline Gate: owner-loved 100/100 preview baseline, corpus slice, deterministic offline (Turso forced off). |
 | `npm run test:corpus-drift` | Local corpus gate (plain filesystem reads, no Turso, no skip; wired into `qa:revision`). Three checks: the REAL payload barcode key count in `tireKnowledge.generated.json` stays above a 1%-under floor derived at runtime from `meta.json`; payload is never POORER than the manifest (enrichment pipelines legitimately write the payload ahead of the manifest, but payload < manifest means a stale-snapshot regen wiped enrichments - fails); 10 golden barcodes still resolve. |
-| `npm run test:firebase` | `firebase emulators:exec` + the `src/services/db/firebase` suite (tenant isolation via real firestore.rules, audit append-only). These tests self-skip under plain `npm run test`. |
+| `npm run test:firebase` | `firebase emulators:exec` + the `src/sync-database/cloud` suite (tenant isolation via real `firestore.rules`, audit append-only). These tests self-skip under plain `npm run test`. |
 
 Known flake: `cloudDrainRace.store.test.ts` is timing-flaky only under full parallel load; passes isolated.
 
@@ -90,9 +90,9 @@ First time on a machine: `npx playwright install chromium`.
 | `npm run test:e2e:firebase` | `playwright.firebase.config.ts` / 3200 | Emulator-backed E2E with REAL login UI (no bypass). Run only via this script (it wraps emulators:exec). |
 | `npm run test:e2e:firebase:two-account` | `playwright.firebase.config.ts` / 3200 | Targeted two-account tenant-isolation E2E. The spec path lives inside the quoted `emulators:exec` command; do not append a spec path after `npm run test:e2e:firebase`, because Firebase CLI receives it as an extra emulator argument. |
 | `npm run qa:bots` | `playwright.bots.config.ts` / 3300 | All human-like QA bots, mock backend, screenshot every step. Reports: `reports/human-bots/`. |
-| `npm run qa:bots:tire` / `:security` / `:ux` / `:manager` / `:data` / `:performance` | same | Individual bot scenarios (see `docs/QA_BOTS.md`, `docs/AGENT_BOT_ROLES.md`). `qa:bots:all` = explicit no-filter alias of `qa:bots`. |
+| `npm run qa:bots:tire` / `:security` / `:ux` / `:manager` / `:data` / `:performance` | same | Individual bot scenarios (see `docs/QA_BOTS.md`). `qa:bots:all` = explicit no-filter alias of `qa:bots`. |
 | `npm run qa:bots:live` | `playwright.bots.cloud.config.ts` / 3300 | **LIVE**: real cloud Firebase, real login (needs `GOD_EMAIL`/`GOD_PASSWORD`), AI still mocked. Stop other dev servers first. |
-| `npm run qa:revision` | - | The full handoff gate: tsc + eslint (src e2e) + build + mock E2E + test:firebase + qa:bots. See `docs/REVISION_GATE.md`. |
+| `npm run qa:revision` | - | The full handoff gate: tsc + eslint (src e2e) + build + mock E2E + test:firebase + qa:bots. See `docs/QA_BOTS.md`. |
 | `npm run qa:weekly-report` | - | Bot subset bundled for the weekly report. |
 
 ## Release / hygiene

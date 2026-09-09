@@ -7,7 +7,7 @@ import { localE2EWebServerEnv } from "./e2e/localWebServerEnv";
 // screenshots index). Pinned to port 3300 so it never collides with the mock (3100) or firebase (3200) runs.
 //
 // Honest scope note: auth bypass means a single test user, and role-based code-hiding is part of the
-// DEFERRED foundation (docs/HOTFIX_FOLLOWUPS.md) - so the SecurityLeakBot reports the CURRENT visibility
+// Customer-role data protection is tracked in docs/BACKLOG.md, so the SecurityLeakBot reports current visibility
 // truthfully (today every authenticated user can see codes) rather than pretending role gates exist.
 export default defineConfig({
   testDir: "./e2e/human-bots",

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
 
-// UI-1 FIX (2026-08-13, docs/superpowers/reports/2026-08-13-loop1-ui.md): resolveUnknown rewrites a
+// UI-1 fix (2026-08-13; see docs/HISTORY.md): resolveUnknown rewrites a
 // resolved code's feed row(s) to status "resolved" but used to carry over `quantityAfterScan` verbatim
 // from scan time. That value is a snapshot of the PROVISIONAL PLACEHOLDER's own running count at the
 // moment it was scanned - it is only still correct when the resolution reuses that same placeholder id

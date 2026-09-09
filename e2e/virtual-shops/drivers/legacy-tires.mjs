@@ -1,7 +1,7 @@
 // e2e/virtual-shops/drivers/legacy-tires.mjs
 //
 // Virtual shop (c) "Legacy Tires" - the "we found you $X" demo generator.
-// Design: docs/superpowers/specs/2026-07-29-virtual-shops-design.md section (c).
+// See shops.config.mjs; retired design history is summarized in docs/HISTORY.md.
 //
 // Flow (real UI, mock backend only):
 //   1. Import the pre-committed, ugly legacy-style spreadsheet

@@ -1,4 +1,4 @@
-// Regression guard for DT2-1 (2026-08-13, docs/superpowers/reports/2026-08-13-loop2-data.md):
+// Regression guard for historical finding DT2-1 (2026-08-13; see docs/HISTORY.md):
 // build-knowledge-db.mjs's two paired outputs (.db and .db.gz) can end up describing different
 // corpus generations if the process crashes between the two renameSync calls (see
 // build-knowledge-db.pairconsistency.test.mjs for the generator side of the fix). This file proves

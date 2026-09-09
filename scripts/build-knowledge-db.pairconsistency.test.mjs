@@ -1,4 +1,4 @@
-// Regression guard for DT2-1 (2026-08-13, docs/superpowers/reports/2026-08-13-loop2-data.md):
+// Regression guard for historical finding DT2-1 (2026-08-13; see docs/HISTORY.md):
 // build-knowledge-db.mjs swaps its two paired outputs (knowledge.generated.db and
 // knowledge.generated.db.gz) into place with two INDEPENDENT renameSync calls. A crash between them
 // (OOM during gzip, killed CI job, power loss) leaves the .db and .db.gz representing DIFFERENT

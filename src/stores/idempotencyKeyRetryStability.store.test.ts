@@ -5,7 +5,7 @@ import type { SyncResult } from "@/sync-database/mock/mockDb";
 import type { Alias, InventoryCount, InventorySession, PendingSyncItem, Product } from "@/types";
 
 // Regression backstop for the audit finding in
-// docs/superpowers/reports/2026-08-12-invariant-audit-counting.md (claim #3): CLAUDE.md and
+// Historical invariant audit claim 3 (2026-08-12; see docs/HISTORY.md): CLAUDE.md and
 // GUARDRAILS.md require every ScanEvent's `id` + `idempotencyKey` to be assigned ONCE at scan time
 // and reused byte-identical on every retry - never regenerated inside a retry/catch branch. Today
 // nothing in the retry code path (drainCloudOnce's erroredItems.set, retrySync) touches those

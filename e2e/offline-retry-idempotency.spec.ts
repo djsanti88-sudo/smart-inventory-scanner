@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "./fixtures";
 
-// GAP 3 (docs/superpowers/reports/2026-08-13-e2e-coverage-map.md items F1/F2): scan.spec.ts's existing
+// Historical coverage gap 3/F1-F2 (see docs/HISTORY.md): scan.spec.ts's existing
 // "offline" proof only flips a mock "simulate sync failure" checkbox, never real network state. This spec
 // uses Playwright's genuine network-offline API (page.context().setOffline) for the TOP-LEVEL LAW half of
 // the proof, then drives a real multi-click retry storm (>1 retry, both while still failing and after the
