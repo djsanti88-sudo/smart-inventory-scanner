@@ -19,13 +19,13 @@ import { DEMO_BUSINESS_ID } from "@/seed/seedData";
 // under live auth + Firebase backend with the business context not yet hydrated, the gated pages
 // must show the loading gate instead of their real content, and must fire no request.
 
-vi.mock("@/services/auth/authMode", () => ({ isLiveAuth: () => true }));
-vi.mock("@/lib/selectedBusiness", () => ({
+vi.mock("@/authentication/service/authMode", () => ({ isLiveAuth: () => true }));
+vi.mock("@/users-businesses/selectedBusiness", () => ({
   SELECTED_BUSINESS_CHANGED_EVENT: "sis:selected-business-changed",
   getSelectedBusinessId: () => "biz-real",
   isFirebaseBackend: () => true,
 }));
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/authentication/auth", () => ({
   // Never resolves during the test: BusinessContextGate must stay in its "resolving" state the
   // whole time, the same window a hard page load spends before the real business context lands.
   getSession: vi.fn(() => new Promise(() => {})),

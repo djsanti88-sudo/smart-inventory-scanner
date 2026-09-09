@@ -1,4 +1,4 @@
-// Regression guard for DT2-4 (2026-08-13, docs/superpowers/reports/2026-08-13-loop2-data.md):
+// Regression guard for historical finding DT2-4 (2026-08-13; see docs/HISTORY.md):
 // retailImportGuard.mjs's evaluateShrinkGuard() was unit-tested in isolation, but nothing proved
 // scripts/import-retail-turso.mjs actually CALLS it, or that the guard's decision runs BEFORE
 // `DROP TABLE retail` against the live ~4.13M-row production table. import-retail-turso.mjs opens a

@@ -74,7 +74,7 @@ def write_latest(
     run_started_at: str,
     cost_note: str,
 ) -> bool:
-    reviews_dir = root / "docs" / "reviews"
+    reviews_dir = root / "reports" / "fable5"
     reviews_dir.mkdir(parents=True, exist_ok=True)
     latest_path = reviews_dir / "LATEST.json"
 

@@ -2,16 +2,16 @@
 import "server-only";
 
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-import { isLiveAuth } from "@/services/auth/authMode";
-import { isAuthBypassEnabled } from "@/services/auth/authBypass";
-import { COLLECTIONS, memberDocId } from "@/services/db/types";
-import type { ColumnMapping } from "@/services/importSchema";
+import { getAdminAuth, getAdminDb } from "@/sync-database/cloud/firebaseAdmin";
+import { isLiveAuth } from "@/authentication/service/authMode";
+import { isAuthBypassEnabled } from "@/authentication/service/authBypass";
+import { COLLECTIONS, memberDocId } from "@/sync-database/types";
+import type { ColumnMapping } from "@/import/importSchema";
 import {
   getImportMappingMemory,
   putImportMappingMemory,
-} from "@/server/importMappingMemory";
-import { logServerEvent } from "@/server/log";
+} from "@/import/importMappingMemory";
+import { logServerEvent } from "@/decoding/server/log";
 
 export const runtime = "nodejs";
 const MAX_MAPPING_BODY_BYTES = 32 * 1024;

@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 const { postTelemetry } = vi.hoisted(() => ({ postTelemetry: vi.fn() }));
-vi.mock("@/lib/telemetry", () => ({ postTelemetry }));
+vi.mock("@/shared/telemetry/telemetry", () => ({ postTelemetry }));
 
 import GlobalError from "./global-error";
 

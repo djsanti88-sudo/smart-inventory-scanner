@@ -8,40 +8,40 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // does NOT bypass the kill switch; (4) god:true is threaded into the pipeline.
 
 const runDecodePipeline = vi.fn();
-vi.mock("@/server/decode/pipeline", () => ({
+vi.mock("@/decoding/server/pipeline/pipeline", () => ({
   runDecodePipeline: (...args: unknown[]) => runDecodePipeline(...args),
   e2eMode: () => false,
 }));
 
 // Trusted-exact path falls through to the pipeline (a clean miss) so the cap/rate-limit gates run.
-vi.mock("@/server/tire-knowledge/TireKnowledgeProvider", () => ({
+vi.mock("@/decoding/server/knowledge/tire/TireKnowledgeProvider", () => ({
   resolveTrustedExactBarcodeDecision: vi.fn().mockResolvedValue({ kind: "miss" }),
 }));
 
 const logServerEvent = vi.fn();
-vi.mock("@/server/log", () => ({ logServerEvent: (...args: unknown[]) => logServerEvent(...args) }));
+vi.mock("@/decoding/server/log", () => ({ logServerEvent: (...args: unknown[]) => logServerEvent(...args) }));
 
 const trustedExactCheck = vi.fn();
-vi.mock("@/services/security/trustedExactRateLimit", () => ({
+vi.mock("@/decoding/limits/trustedExactRateLimit", () => ({
   trustedExactRateLimiter: { check: (...args: unknown[]) => trustedExactCheck(...args) },
 }));
 
 const verifyIdToken = vi.fn();
 const memberGet = vi.fn();
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: (...args: unknown[]) => verifyIdToken(...args) }),
   getAdminDb: () => ({ doc: () => ({ get: (...args: unknown[]) => memberGet(...args) }) }),
 }));
 
 const decodeStorage = vi.fn();
-vi.mock("@/server/decode/storage", () => ({ decodeStorage: (...args: unknown[]) => decodeStorage(...args) }));
+vi.mock("@/decoding/server/pipeline/storage", () => ({ decodeStorage: (...args: unknown[]) => decodeStorage(...args) }));
 
 const legacyRateLimit = vi.fn();
 const killSwitch = vi.fn();
 const readDailyUsedForAccount = vi.fn();
 const chargeDailySlotForAccount = vi.fn();
-vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
+vi.mock("@/decoding/limits/aiSpendGuard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/decoding/limits/aiSpendGuard")>();
   return {
     ...actual,
     killSwitchOn: () => killSwitch(),

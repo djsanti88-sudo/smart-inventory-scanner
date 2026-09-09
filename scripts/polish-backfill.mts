@@ -3,7 +3,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { backfillProducts } from "../src/services/polish/backfillProducts.ts";
+import { backfillProducts } from "../src/products/polish/backfillProducts.ts";
 import type { Product } from "../src/types.ts";
 
 type SnapshotShape = "array" | "wrapped" | "persisted";

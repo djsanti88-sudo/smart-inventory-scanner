@@ -173,7 +173,7 @@ class AuditProofsTests(unittest.TestCase):
         self.assertTrue(any(f.code == "missing-plan-proof" for f in findings))
 
     def test_existing_path_is_not_a_finding(self) -> None:
-        criteria = [Criterion(text="Follows the template", proof_refs=["PLAN_TEMPLATE.md"], line=5)]
+        criteria = [Criterion(text="Follows the template", proof_refs=["docs/PLAN_EXECUTION.md"], line=5)]
         findings = audit_proofs(criteria, REPO_ROOT, set())
         self.assertEqual(findings, [])
 
@@ -239,4 +239,3 @@ class ReviewPlanProofAuditTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

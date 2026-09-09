@@ -18,7 +18,7 @@ const GUARD_MODULE = path.resolve(process.cwd(), "scripts/lib/paidScriptGuard.mj
 
 // Directories that are not live dev-tooling surface: archived/quarantined probe output, node_modules,
 // and build artifacts. scripts/archive-tmp-2026-07/ is the project's established disposal pattern for
-// dead one-off probes (see docs/superpowers/reports/2026-08-12-sweep-E-findings.md, E-4) and is
+// dead one-off probes (historical finding E-4; see docs/HISTORY.md) and is
 // gitignored - it is not a live surface a twelfth offender could be added to unnoticed.
 const EXCLUDED_DIR_SEGMENTS = ["node_modules", "archive-tmp-2026-07", ".git"];
 

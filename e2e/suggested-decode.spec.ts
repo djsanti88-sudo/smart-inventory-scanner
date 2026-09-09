@@ -1,6 +1,6 @@
 import { test, expect, type Page, type Route } from "./fixtures";
 
-// Task 10 (docs/archive/superpowers/plans/2026-07-09-decode-ux-fixes.md, Step 2) + the auto-applied
+// Retired decode UX plan Task 10, Step 2 (see docs/HISTORY.md) + the auto-applied
 // band/Approve contract (owner decision 2026-08-19, production-found gap): browser proof for the
 // suggested-decode UX end to end. A mocked decode with confidence 0.92 (>= 0.8) and decision.status
 // "suggested" - the same shape a retail-corpus exact hit (0.85) produces on production - must:

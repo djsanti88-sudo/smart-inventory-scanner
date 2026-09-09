@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // scripts/refresh-tire-meta.mjs
 //
-// F-16 (Task 13, docs/superpowers/plans/2026-07-29-audit-remediation.md): a
+// Historical finding F-16, Task 13 (see docs/HISTORY.md): a
 // METADATA-ONLY provenance refresh for the tire-knowledge corpus.
 //
 // DANGER -- this script NEVER rewrites the generated payload
@@ -43,16 +43,12 @@ import { pathToFileURL } from "node:url";
 
 const DEFAULT_PAYLOAD_PATH = join(
   process.cwd(),
-  "src",
-  "server",
-  "tire-knowledge",
+  "src", "decoding", "server", "knowledge", "tire",
   "tireKnowledge.generated.json",
 );
 const DEFAULT_META_PATH = join(
   process.cwd(),
-  "src",
-  "server",
-  "tire-knowledge",
+  "src", "decoding", "server", "knowledge", "tire",
   "tireKnowledge.generated.meta.json",
 );
 

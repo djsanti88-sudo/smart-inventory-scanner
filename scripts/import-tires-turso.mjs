@@ -1,5 +1,5 @@
 // One-time (idempotent, re-runnable) import of the tire corpus into Turso.
-// Source: src/server/tire-knowledge/tireKnowledge.generated.json
+// Source: src/decoding/server/knowledge/tire/tireKnowledge.generated.json
 //   barcodeIndex:      Record<normBarcodeKey(barcode), TireKnowledgeRow>
 //   partNumberIndex:   Record<normPartKey(manufacturer_part_number), canonical_product_uid>
 //
@@ -7,7 +7,7 @@
 //   tires             — one row per barcodeIndex entry, PK = barcode (already normBarcodeKey form)
 //   tire_part_numbers — one row per partNumberIndex entry, PK = normalized_part_number (normPartKey form)
 //
-// Key convention (verified against src/server/tire-knowledge/tireKnowledgeIndex.ts):
+// Key convention (verified against src/decoding/server/knowledge/tire/tireKnowledgeIndex.ts):
 //   - normBarcodeKey(code) = code.replace(/[ -]/g, '').trim().replace(/[ -]/g, '')
 //   - normPartKey(pn)      = pn.replace(/[ -]/g, '').trim().toUpperCase().replace(/\s/g, '')
 //   The JSON's barcodeIndex/partNumberIndex keys are ALREADY in these normalized forms (spot-checked
@@ -26,7 +26,7 @@ import { createClient } from "@libsql/client";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const BATCH_SIZE = 500;
-const TIRE_JSON_PATH = "src/server/tire-knowledge/tireKnowledge.generated.json";
+const TIRE_JSON_PATH = "src/decoding/server/knowledge/tire/tireKnowledge.generated.json";
 
 // minimal .env.local parse (no dep) — mirrors scripts/dt-harvest/state/turso-inspect.mjs
 const env = {};

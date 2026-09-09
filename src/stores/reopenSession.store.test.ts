@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useScanStore } from "@/stores/scanStore";
-import { getMockDb } from "@/services/mockDb";
+import { getMockDb } from "@/sync-database/mock/mockDb";
 import type { InventorySession } from "@/types";
 
 const BID = useScanStore.getState().businessId;

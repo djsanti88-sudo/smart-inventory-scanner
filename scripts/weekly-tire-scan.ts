@@ -1,6 +1,6 @@
 // Live tire decode monitor. This can spend money and therefore requires --allow-paid.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { classifyPath, gptDecodeCallsForResponse, webSearchCallsForResponse } from "../src/services/benchmark/benchmarkAnalysis.ts";
+import { classifyPath, gptDecodeCallsForResponse, webSearchCallsForResponse } from "../src/shared/benchmark/benchmarkAnalysis.ts";
 
 const value = (name, fallback) => process.argv.find((arg) => arg.startsWith(`--${name}=`))?.split("=")[1] || fallback;
 const BASE = value("base", process.env.SMOKE_BASE_URL || "http://localhost:3000");

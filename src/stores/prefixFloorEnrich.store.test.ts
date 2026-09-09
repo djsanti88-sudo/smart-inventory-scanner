@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // F5 bundle-surgery (wave 2, 2026-07-20): the 2.3MB derived prefix map left the client bundle, so a
 // DERIVED-tier-only prefix (e.g. 5603344 -> "General", Continental family) no longer resolves

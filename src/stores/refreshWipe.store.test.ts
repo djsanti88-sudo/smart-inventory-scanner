@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
 import { buildPersistedScanState } from "@/stores/scanPersist";
-import { replayLedgerCounts } from "@/services/inventory.replay";
+import { replayLedgerCounts } from "@/inventory/replay";
 import type { InventoryCount, InventorySession, PendingSyncItem, ScanEvent, UnknownCodeReview } from "@/types";
 
 // Data-loss fix (critical): on a real page REFRESH with the cloud backend, BusinessContextGate

@@ -5,12 +5,12 @@ import {
   mintShareToken,
   normalizeBossReportSnapshot,
 } from "@/server/share/shareTokenStore";
-import { buildBossReport } from "@/services/reports/bossReport";
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-import { COLLECTIONS, memberDocId } from "@/services/db/types";
-import { isLiveAuth } from "@/services/auth/authMode";
-import { isAuthBypassEnabled } from "@/services/auth/authBypass";
-import { logServerEvent } from "@/server/log";
+import { buildBossReport } from "@/reports/variance/bossReport";
+import { getAdminAuth, getAdminDb } from "@/sync-database/cloud/firebaseAdmin";
+import { COLLECTIONS, memberDocId } from "@/sync-database/types";
+import { isLiveAuth } from "@/authentication/service/authMode";
+import { isAuthBypassEnabled } from "@/authentication/service/authBypass";
+import { logServerEvent } from "@/decoding/server/log";
 
 export const runtime = "nodejs";
 

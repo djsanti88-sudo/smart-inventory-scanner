@@ -13,7 +13,7 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace }),
   useSearchParams: () => ({ get: () => null }),
 }));
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/authentication/auth", () => ({
   signInWithPassword: (...a: unknown[]) => signInWithPassword(...a),
   signUp: (...a: unknown[]) => signUp(...a),
   signInWithGoogle: (...a: unknown[]) => signInWithGoogle(...a),

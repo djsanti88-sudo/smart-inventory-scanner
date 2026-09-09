@@ -1,6 +1,6 @@
 # Test-Triage Crib: Scanbin (inventory)
 
-Verified against package.json / TESTING.md / docs/COMMANDS.md / docs/REVISION_GATE.md, 2026-07-25.
+Verified against package.json / TESTING.md / docs/COMMANDS.md / docs/QA_BOTS.md, 2026-07-25.
 Identify/review/suggest only. Never propose code.
 
 ## Suite map (exact script names)
@@ -38,7 +38,7 @@ Identify/review/suggest only. Never propose code.
 ## Which gate for which change class
 - Counting/quantity/ledger/markWrong/merge/sync/idempotency -> `test:ledger` MANDATORY, plus `test`.
 - Scanner resolution, inventory, roles/auth, exports, catalog, aliases, product data -> human-bot proof
-  REQUIRED before handoff (`docs/REVISION_GATE.md`); unit tests alone are NOT sufficient (the leak that
+  REQUIRED before handoff (`docs/QA_BOTS.md`); unit tests alone are NOT sufficient (the leak that
   motivated the gate passed unit tests). Run `qa:bots:tire` for resolution/normalization,
   `qa:bots:security` for roles/auth/exports/catalog/aliases/API/Firebase-rules/localStorage,
   `qa:bots:data` for sync/cache/import/export/counting, `qa:bots:ux` for any UI change.

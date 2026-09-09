@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   queriedPaths: [] as string[],
 }));
 
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: mocks.verifyIdToken }),
   getAdminDb: () => ({
     doc: (path: string) => {
@@ -57,10 +57,10 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   }),
 }));
 
-vi.mock("@/services/security/accountDeleteRateLimit", () => ({
+vi.mock("@/users-businesses/account/accountDeleteRateLimit", () => ({
   checkAccountDeleteRateLimit: vi.fn(async () => ({ allowed: true, retryAfterMs: 0, remaining: 99 })),
 }));
-vi.mock("@/server/log", () => ({ logServerEvent: vi.fn() }));
+vi.mock("@/decoding/server/log", () => ({ logServerEvent: vi.fn() }));
 
 import { POST } from "@/app/api/account/delete/route";
 

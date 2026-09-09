@@ -78,7 +78,7 @@ function parseCsv(text) {
   return rows;
 }
 
-// Mirrors src/services/upc/gtin.ts gtinVariants exactly (leading-zero-only equivalence).
+// Mirrors src/products/barcodes/gtin.ts gtinVariants exactly (leading-zero-only equivalence).
 function gtinVariants(code) {
   const t = (code ?? "").toString().trim();
   const stripped = t.replace(/^0+/, "") || "0";

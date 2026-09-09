@@ -219,7 +219,7 @@ def execute_stress(
         ) from error
 
     fixture_path = root / "tools" / "fable5" / "fixtures" / "stress-codes.json"
-    corpus_path = root / "src" / "server" / "knowledge.generated.db"
+    corpus_path = root / "src" / "decoding" / "server" / "knowledge" / "knowledge.generated.db"
     load_and_validate_fixture(fixture_path, corpus_path)
 
     if report_dir is None:

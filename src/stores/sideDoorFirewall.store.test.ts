@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Phase 8C - the scan-context firewall must guard the DETERMINISTIC count path, not just the AI decode
 // path. The seed includes verified products + approved aliases: prod-coke ("Coca-Cola 12 pack...", UPC

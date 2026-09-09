@@ -19,19 +19,20 @@ class RiskProfile:
 
 
 DEFAULT_RULES: tuple[RiskRule, ...] = (
-    RiskRule(patterns=("src/services/inventory*", "src/stores/scan*"), tag="ledger", weight=10),
+    RiskRule(patterns=("src/inventory/**", "src/stores/scan*"), tag="ledger", weight=10),
     RiskRule(
         patterns=(
             "firestore.rules",
-            "src/services/auth*",
-            "src/services/db/**",
+            "src/authentication/**",
+            "src/users-businesses/**",
+            "src/sync-database/**",
             "src/app/api/**",
         ),
         tag="tenancy",
         weight=8,
     ),
-    RiskRule(patterns=("src/server/decode/**", "src/services/ai/**"), tag="decode", weight=6),
-    RiskRule(patterns=("src/components/**", "src/app/**"), tag="ui", weight=4),
+    RiskRule(patterns=("src/decoding/**", "src/app/api/ai-lookup/**"), tag="decode", weight=6),
+    RiskRule(patterns=("src/user-interface/**", "src/app/**"), tag="ui", weight=4),
     RiskRule(patterns=("docs/**", "*.md"), tag="docs", weight=1),
 )
 

@@ -1,6 +1,6 @@
 {
   "shopKey": "rincon-tire",
-  "generatedFrom": "src/server/knowledge.generated.db (offline read-only SQL, better-sqlite3)",
+  "generatedFrom": "src/decoding/server/knowledge/knowledge.generated.db (offline read-only SQL, better-sqlite3)",
   "sourcePattern": "scripts/seed-tires-from-corpus.ts (row-shaping only; this generator never writes to Firestore)",
   "targetRows": 800,
   "actualRows": 800,

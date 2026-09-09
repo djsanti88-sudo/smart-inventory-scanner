@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Barcode trust gate (spec v3 AM-4.2), Task 3: resolveUnknown's two product-identity minting sites
 // (fresh mint + provisional upgrade) copy np.gtin/upc/ean VERBATIM from the caller's payload today.

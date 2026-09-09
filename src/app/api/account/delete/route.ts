@@ -1,16 +1,16 @@
 import "server-only";
 
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-import { COLLECTIONS, memberDocId } from "@/services/db/types";
-import { isLiveAuth } from "@/services/auth/authMode";
-import { intEnv } from "@/services/security/aiSpendGuard";
-import { checkAccountDeleteRateLimit } from "@/services/security/accountDeleteRateLimit";
-import { logServerEvent } from "@/server/log";
+import { getAdminAuth, getAdminDb } from "@/sync-database/cloud/firebaseAdmin";
+import { COLLECTIONS, memberDocId } from "@/sync-database/types";
+import { isLiveAuth } from "@/authentication/service/authMode";
+import { intEnv } from "@/decoding/limits/aiSpendGuard";
+import { checkAccountDeleteRateLimit } from "@/users-businesses/account/accountDeleteRateLimit";
+import { logServerEvent } from "@/decoding/server/log";
 
 export const runtime = "nodejs";
 
-// D2 (Phase 6): hard account deletion. GC-E (docs/archive/superpowers/plans/2026-07-20-phase6-sell-ready.md):
+// D2 (Phase 6): hard account deletion. GC-E (retired plan; see docs/HISTORY.md):
 // purges ONLY businesses/{businessId}/* + that business's businessMembers rows; NEVER
 // catalogEntries/retailCatalogEntries or any other tenant. Deliberately stricter than the export
 // route (src/app/api/account/export/route.ts): deletion has NO authBypass/mock path at all - a

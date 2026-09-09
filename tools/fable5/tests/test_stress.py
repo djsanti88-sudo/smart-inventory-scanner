@@ -164,7 +164,7 @@ class FixtureRailTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[3]
         codes = load_and_validate_fixture(
             root / "tools" / "fable5" / "fixtures" / "stress-codes.json",
-            root / "src" / "server" / "knowledge.generated.db",
+            root / "src" / "decoding" / "server" / "knowledge" / "knowledge.generated.db",
         )
         self.assertEqual(len(codes), 40)
 

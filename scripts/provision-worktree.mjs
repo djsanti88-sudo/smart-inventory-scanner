@@ -2,7 +2,7 @@
 // provision-worktree.mjs — Build-prevention item 4 ("Never Again" package, fail-loud provisioning).
 //
 // Root cause it fixes: a fresh `git worktree add` does not carry the generated corpus DB
-// (src/server/knowledge.generated.db, ~340MB) or the stress-test fixtures
+// (src/decoding/server/knowledge/knowledge.generated.db, ~340MB) or the stress-test fixtures
 // (.superpowers/stress/fixtures/), because both are large generated/local-only assets. Without
 // them, tests either fail with confusing "file not found" errors, or — worse — knowledgeDb.ts's
 // resolveDbPath() falls back to a copy sitting in os.tmpdir() that may be stale/unrelated, which
@@ -103,15 +103,15 @@ function main() {
   const targets = [
     {
       label: "knowledge.generated.db (corpus DB)",
-      src: join(source, "src", "server", "knowledge.generated.db"),
-      dest: join(ROOT, "src", "server", "knowledge.generated.db"),
+      src: join(source, "src", "decoding", "server", "knowledge", "knowledge.generated.db"),
+      dest: join(ROOT, "src", "decoding", "server", "knowledge", "knowledge.generated.db"),
       kind: "file",
       required: true,
     },
     {
       label: "knowledge.generated.db.gz (compressed corpus DB)",
-      src: join(source, "src", "server", "knowledge.generated.db.gz"),
-      dest: join(ROOT, "src", "server", "knowledge.generated.db.gz"),
+      src: join(source, "src", "decoding", "server", "knowledge", "knowledge.generated.db.gz"),
+      dest: join(ROOT, "src", "decoding", "server", "knowledge", "knowledge.generated.db.gz"),
       kind: "file",
       required: false,
     },
@@ -168,7 +168,7 @@ function main() {
   if (missing > 0) {
     console.error(
       `[provision-worktree] ${missing} required asset(s) could not be provisioned. Tests relying on ` +
-        `the corpus DB will fail loud (see src/server/knowledgeDb.ts resolveDbPath) rather than ` +
+        `the corpus DB will fail loud (see src/decoding/server/knowledge/knowledgeDb.ts resolveDbPath) rather than ` +
         `silently using stale data -- that is the safe/expected behavior, but you still need the ` +
         `real asset. Check --source or regenerate via: npm run build:knowledge-db`,
     );

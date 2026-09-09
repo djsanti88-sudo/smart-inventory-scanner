@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // TASK T6 (2026-08-06, audit-6 finding 5, live-observed): a scan that is already SETTLED by the
 // deterministic-only trusted-exact probe was still firing a second, ordinary /api/ai-lookup POST -

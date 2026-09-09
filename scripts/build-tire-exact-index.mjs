@@ -202,10 +202,10 @@ function validateOnDiskArtifact(outputDir, freshDir) {
 export function buildExactIndex(options = {}) {
   const root = resolve(options.root ?? ".");
   const bossHmacKey = requireBossHmacKey(options.bossHmacKey);
-  const globalPath = options.globalPath ?? process.env.BOSS_GLOBAL_CORPUS_PATH ?? join(root, "src/server/tire-knowledge/tireKnowledge.generated.json");
+  const globalPath = options.globalPath ?? process.env.BOSS_GLOBAL_CORPUS_PATH ?? join(root, "src/decoding/server/knowledge/tire/tireKnowledge.generated.json");
   const repairPath = options.repairPath ?? process.env.BOSS_REPAIR_DB_PATH ?? join(root, "backups/boss-export-2026-08-05/REPAIRED_TIRE_DATABASE_v2.db");
   const reconciliationPath = options.reconciliationPath ?? process.env.BOSS_RECONCILIATION_PATH ?? join(root, "backups/boss-export-2026-08-05/BOSS_ROW_RECONCILIATION_v2.csv");
-  const outputDir = options.outputDir ?? join(root, "src/server/tire-knowledge/exact-index");
+  const outputDir = options.outputDir ?? join(root, "src/decoding/server/knowledge/tire/exact-index");
   const dispositionPath = options.dispositionPath ?? join(root, "scripts/tire-exact-index-collision-dispositions.json");
   const expected = options.expectedHashes ?? HASHES;
   const dispositionLedger = loadDispositionLedger(dispositionPath, bossHmacKey);

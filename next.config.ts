@@ -19,8 +19,8 @@ const nextConfig: NextConfig = {
   // rows when a corpus is rebuilt. Without tracing they would silently degrade to "none" in prod.
   outputFileTracingIncludes: {
     "/api/ai-lookup": [
-      "src/server/tire-knowledge/tireKnowledge.generated.meta.json",
-      "src/server/retail-knowledge/retailKnowledge.generated.meta.json",
+      "src/decoding/server/knowledge/tire/tireKnowledge.generated.meta.json",
+      "src/decoding/server/knowledge/retail/retailKnowledge.generated.meta.json",
     ],
   },
 };

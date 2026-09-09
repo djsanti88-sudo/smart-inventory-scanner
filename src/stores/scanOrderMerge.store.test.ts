@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Regression for BUG 4 (owner live-proven, 115-code preview run): scanning a barcode THEN a part number
 // (PN) of the SAME real-world product leaves TWO unmerged product rows (12/19 pairs unmerged), while

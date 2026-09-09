@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useScanStore } from "@/stores/scanStore";
-import { getMockDb } from "@/services/mockDb";
+import { getMockDb } from "@/sync-database/mock/mockDb";
 
 // SECONDARY FINDING (root-caused 2026-08-09 from the adopt emulator spot-check): after adoption +
 // reload, an EMPTY "sis-scan-v1" (+ its "::stamp" sibling) reappeared even though a per-uid namespace

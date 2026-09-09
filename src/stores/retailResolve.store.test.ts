@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
-import { sanitizeCatalogEntry } from "@/services/catalog/sanitizeCatalog";
-import type { CatalogEntry } from "@/services/catalog/catalogTypes";
+import { MockDb } from "@/sync-database/mock/mockDb";
+import { sanitizeCatalogEntry } from "@/products/catalog/sanitizeCatalog";
+import type { CatalogEntry } from "@/products/catalog/catalogTypes";
 
 // Regression proof for 827e398 (retail/global catalog resolves as Known) under the CORRECTED rule:
 //   - A safe catalog-backed match must resolve AUTOMATICALLY (no AI, NOT the old Needs Review bottleneck).

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Regression for the owner-reported burst bug: scanning ~100 tire barcodes rapidly against the Vercel
 // preview showed MANY feed rows with Product = "Unidentified item (barcode <CODE>)" while

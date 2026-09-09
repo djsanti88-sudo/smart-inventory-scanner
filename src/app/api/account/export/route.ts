@@ -1,13 +1,13 @@
 import "server-only";
 
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-import { COLLECTIONS, memberDocId } from "@/services/db/types";
-import { isLiveAuth } from "@/services/auth/authMode";
-import { isAuthBypassEnabled } from "@/services/auth/authBypass";
-import { intEnv, checkRateLimit } from "@/services/security/aiSpendGuard";
-import { decodeStorage } from "@/server/decode/storage";
-import { logServerEvent } from "@/server/log";
+import { getAdminAuth, getAdminDb } from "@/sync-database/cloud/firebaseAdmin";
+import { COLLECTIONS, memberDocId } from "@/sync-database/types";
+import { isLiveAuth } from "@/authentication/service/authMode";
+import { isAuthBypassEnabled } from "@/authentication/service/authBypass";
+import { intEnv, checkRateLimit } from "@/decoding/limits/aiSpendGuard";
+import { decodeStorage } from "@/decoding/server/pipeline/storage";
+import { logServerEvent } from "@/decoding/server/log";
 
 export const runtime = "nodejs";
 

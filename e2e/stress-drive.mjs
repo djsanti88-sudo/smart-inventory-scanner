@@ -51,7 +51,7 @@ function parseArgs(argv) {
     allowCloud: false,
     unknownScans: 0,
     fixture: "tools/fable5/fixtures/stress-codes.json",
-    corpus: "src/server/knowledge.generated.db",
+    corpus: "src/decoding/server/knowledge/knowledge.generated.db",
     output: "reports/fable5/manual-stress/stress/report.json",
   };
   for (let index = 0; index < argv.length; index += 1) {

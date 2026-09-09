@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
-import { sanitizeCatalogEntry } from "@/services/catalog/sanitizeCatalog";
-import type { CatalogEntry } from "@/services/catalog/catalogTypes";
+import { MockDb } from "@/sync-database/mock/mockDb";
+import { sanitizeCatalogEntry } from "@/products/catalog/sanitizeCatalog";
+import type { CatalogEntry } from "@/products/catalog/catalogTypes";
 
 // RUNTIME CONTRACT (owner law, db-blank-filler skill polish, 2026-07-28): every data class the
 // db-blank-filler skill adds to the tire corpus must ship an app-level test proving real scan
@@ -12,7 +12,7 @@ import type { CatalogEntry } from "@/services/catalog/catalogTypes";
 // 2 - never a second product - and the UI-facing product identity must never display both codes
 // glued together (single primaryBarcode, single aliases entry per distinct code).
 //
-// Mechanism under test: canonicalGtin (src/services/upc/gtin.ts) strips leading zeros then re-pads
+// Mechanism under test: canonicalGtin (src/products/barcodes/gtin.ts) strips leading zeros then re-pads
 // to 14 digits, so a 12-digit UPC-A and its 0-prefixed EAN-13 twin collapse to the same canonical
 // key. That canonical key is what the catalog-first lookup keys on (sanitizeCatalogEntry normalizes
 // normalizedBarcode the same way product identity resolution does), so a second scan of the twin

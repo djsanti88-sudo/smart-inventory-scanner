@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import type { ImportPreviewRow } from "@/services/importSchema";
+import type { ImportPreviewRow } from "@/import/importSchema";
 
 // DEFECT 1 (padded-GTIN equivalence law, shipped P5): applyUniversalImport aggregates/keys imported
 // rows on the RAW barcode string. Importing the same tire once as a 12-digit UPC and once as its
 // zero-padded 13-digit EAN must collapse to ONE product carrying the summed quantity - not two.
-// canonicalGtin() already exists (src/services/upc/gtin.ts) for exactly this equivalence.
+// canonicalGtin() already exists (src/products/barcodes/gtin.ts) for exactly this equivalence.
 
 // A GTIN-shaped barcode row. Two padded encodings of the same GTIN must resolve to one product, so
 // they must share the same resolved identity signature (candidate.uid) - keying them on the raw

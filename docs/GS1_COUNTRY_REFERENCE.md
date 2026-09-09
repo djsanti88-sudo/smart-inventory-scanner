@@ -1,6 +1,6 @@
 # GS1 Country / Region Reference (v1.0.0)
 
-Implemented in `src/services/gs1Prefixes.ts`. Used ONLY as a non-authoritative hint to help the AI
+Implemented in `src/products/barcodes/gs1Prefixes.ts`. Used ONLY as a non-authoritative hint to help the AI
 lookup search. It is never product identity. This doc's scope also covers deterministic GTIN FORM
 derivation (UPC-A/EAN-13 twin forms, below) - a separate, unrelated concern from the country/region
 hint: form derivation is pure math on the code's own digits, never a guess about origin or brand.

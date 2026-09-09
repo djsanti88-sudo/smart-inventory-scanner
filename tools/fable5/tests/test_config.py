@@ -61,6 +61,13 @@ files = ["README.md", "docs/GUIDE.md"]
             config = load_config(root)
             self.assertEqual(config.risk_rules, list(DEFAULT_RULES))
 
+    def test_missing_root_config_uses_packaged_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = load_config(root)
+            self.assertEqual(config.project_name, "Smart Inventory Scanner")
+            self.assertTrue(config.checks)
+
     def test_custom_risk_rules_parsing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -100,4 +107,3 @@ gates = ["fast"]
 
 if __name__ == "__main__":
     unittest.main()
-

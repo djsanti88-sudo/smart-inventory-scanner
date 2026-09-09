@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Task 9b (owner-ratified 2026-07-14): a decode that yields a SUGGESTION (any confidence) no longer
 // creates/keeps an OPEN Needs Review item. The scan still counts immediately (count-decouple,
@@ -64,6 +64,21 @@ function openReviews(store: Store) {
 }
 
 describe("Task 9b: inline suggestion approve/decline (suggestions bypass Needs Review)", () => {
+  it("approveSuggestion selects only the active business's review for a same-code row", async () => {
+    const store = newStore();
+    await scanWithMockedDecode(store, suggestedDecode({ confidence: 0.3 }));
+    const row = store.getState().scanFeed.find((event) => event.cleanCode === CODE)!;
+    const localReview = store.getState().needsReviewQueue.find((review) => review.cleanCode === CODE)!;
+    const foreignReview = { ...localReview, id: "foreign-same-code-review", businessId: "foreign-business" };
+    store.setState((state) => ({ needsReviewQueue: [foreignReview, ...state.needsReviewQueue] }));
+
+    store.getState().approveSuggestion(row.id);
+
+    expect(store.getState().aliases.some((alias) => alias.businessId === store.getState().businessId && alias.cleanCode === CODE && alias.approved)).toBe(true);
+    expect(store.getState().needsReviewQueue.find((review) => review.id === localReview.id)?.status).toBe("resolved");
+    expect(store.getState().needsReviewQueue.find((review) => review.id === foreignReview.id)?.status).toBe("suggested");
+  });
+
   it("a low-confidence suggestion counts, tags the row, and does NOT create a review", async () => {
     const store = newStore();
     await scanWithMockedDecode(store, suggestedDecode({ confidence: 0.3, productName: "Anchor Bar Hot Sauce" }));

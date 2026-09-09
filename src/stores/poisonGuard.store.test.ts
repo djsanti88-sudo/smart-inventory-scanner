@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Phase-2 REVIEW-FLOW POISON GUARD.
 // The live poison: 078742051451 (Sam's / Member's Mark water) became a VERIFIED product + APPROVED alias

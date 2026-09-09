@@ -3,24 +3,24 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { FirebaseSyncTarget } from "@/services/db/firebase/firebaseSyncTarget";
-import type { SyncTarget } from "@/services/db/syncTarget";
-import { downloadCsv } from "@/services/exportFormats";
-import { getMockDb } from "@/services/mockDb";
+import { FirebaseSyncTarget } from "@/sync-database/cloud/firebaseSyncTarget";
+import type { SyncTarget } from "@/sync-database/syncTarget";
+import { downloadCsv } from "@/reports/export/exportFormats";
+import { getMockDb } from "@/sync-database/mock/mockDb";
 import {
   exportSessionScanLog,
   exportSessionScanLogCustomer,
-} from "@/services/csvExport";
-import { useAccessLevel } from "@/services/security/useAccessLevel";
-import { getDb } from "@/lib/firebaseClient";
-import { getSession } from "@/lib/auth";
+} from "@/reports/export/csvExport";
+import { useAccessLevel } from "@/users-businesses/roles/useAccessLevel";
+import { getDb } from "@/authentication/firebaseClient";
+import { getSession } from "@/authentication/auth";
 import { useScanStore } from "@/stores/scanStore";
-import { BusinessContextGate } from "@/components/BusinessContextGate";
-import { ArchivedSessionScans } from "@/components/ArchivedSessionScans";
-import { SessionCountsTable, type SessionCountRow } from "@/components/SessionCountsTable";
-import { countsFromTimeline } from "@/services/sessions/countsFromTimeline";
-import { isCloudBackendEnabled } from "@/services/config/backend";
-import type { SessionHistoryEntry } from "@/services/sessions/sessionHistory";
+import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
+import { ArchivedSessionScans } from "@/sessions/history/ArchivedSessionScans";
+import { SessionCountsTable, type SessionCountRow } from "@/sessions/SessionCountsTable";
+import { countsFromTimeline } from "@/sessions/history/countsFromTimeline";
+import { isCloudBackendEnabled } from "@/sync-database/backend";
+import type { SessionHistoryEntry } from "@/sessions/history/sessionHistory";
 import type { ScanEvent } from "@/types";
 
 const TIMELINE_UNAVAILABLE = "Session timeline is not available for this data source.";

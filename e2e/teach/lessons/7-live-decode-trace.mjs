@@ -19,7 +19,7 @@
 // data-testid="review-row-<cleanCode>"). That button only renders for a
 // platform-owner identity AND only for a non-import-origin review AND is
 // disabled when settings.aiLookupEnabled is false - see
-// src/components/NeedsReviewTable.tsx:404-429. Teach Bot personas are
+// src/review/NeedsReviewTable.tsx:404-429. Teach Bot personas are
 // regular fresh signups (never platform-owner), so on most deployments this
 // button will be ABSENT and decode cannot be triggered through this UI path;
 // that is expected, not a bug, and the lesson records an honest non-locked

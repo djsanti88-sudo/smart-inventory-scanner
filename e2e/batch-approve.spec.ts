@@ -1,6 +1,6 @@
 import { test, expect, type Page, type Route } from "./fixtures";
 
-// Build 3 (docs/archive/superpowers/specs/2026-07-05-batch-approve-design.md): batch-approve screen for
+// Build 3 batch-approve design (retired; see docs/HISTORY.md): batch-approve screen for
 // the Suggested pile. Seeds 6 suggested unknown codes (all mocked - IS_E2E webServer, page.route,
 // zero live calls), selects all on the /review "Suggested" tab, approves once, and proves every
 // count landed exactly once. Then proves re-approval (a retried batch / double-click) is a no-op:

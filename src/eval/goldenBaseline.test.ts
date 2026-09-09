@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import golden from "../../benchmarks/golden/phase1-corpus-golden.json";
-import { lookupByExactBarcode } from "@/server/tire-knowledge/tireKnowledgeIndex";
+import { lookupByExactBarcode } from "@/decoding/server/knowledge/tire/tireKnowledgeIndex";
 
 // GOLDEN BASELINE GATE (B1): mechanically protects the corpus-resolvable slice of the owner-loved
 // 100/100 preview baseline (commit 1782c11, preview inventory-5tk3c3vxf, 2026-07-10 - see
@@ -8,7 +8,7 @@ import { lookupByExactBarcode } from "@/server/tire-knowledge/tireKnowledgeIndex
 //
 // IMPORTANT: this gate covers 84 of those 100 codes, NOT 100. The other 16
 // (scripts/build-golden-baseline.mjs run output, and task-10-report.md) are genuinely absent from
-// src/server/tire-knowledge/tireKnowledge.generated.json's barcodeIndex under every zero-padding
+// src/decoding/server/knowledge/tire/tireKnowledge.generated.json's barcodeIndex under every zero-padding
 // variant lookupByExactBarcode tries - they settled the live 100/100 run via a paid ladder rung
 // (goupc/GPT), not the local corpus. That is a real corpus gap, not a test bug: see task-10-report.md
 // for the full list of the 16 codes and owner follow-up (backfill those rows, or re-baseline on a

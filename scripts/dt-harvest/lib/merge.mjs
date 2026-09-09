@@ -8,7 +8,7 @@
 import { isPlaceholderBarcode } from "./placeholderBarcodes.mjs";
 
 /** GS1 mod-10 check digit over the full code (last digit is the check digit).
- * Logic shape mirrors src/services/upc/gtin.ts isValidCheckDigit (reference only, not imported).
+ * Logic shape mirrors src/products/barcodes/gtin.ts isValidCheckDigit (reference only, not imported).
  */
 function isGtinShaped(code) {
   const t = (code ?? "").trim();
@@ -36,7 +36,7 @@ function normalizeBrand(b) {
  * Unknown/unmapped prefixes and empty brands never conflict.
  *
  * `sameBrandFamily` (optional): a pure `(a, b) => boolean` that returns true when two brands
- * belong to the SAME corporate family (see src/services/catalog/brandFamilies.ts). When supplied,
+ * belong to the SAME corporate family (see src/products/catalog/brandFamilies.ts). When supplied,
  * a brand that differs from the registered prefix brand does NOT conflict if the two are the same
  * family - this is what lets a corrected family later recover a previously-conflicting row. When
  * absent (default), behavior is unchanged: any different brand conflicts. Injected rather than

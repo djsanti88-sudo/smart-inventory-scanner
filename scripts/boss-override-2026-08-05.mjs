@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Task B3: Turso full-clone rename-swap override making NEW_UPDATED_BOSS_DB.xlsx sheet1 boss truth
-// live, per ADJUDICATED PLAN AMENDMENTS AM-B3-1..4 (docs/superpowers/plans/2026-08-05-boss-truth-and-
+// live, per historical adjudicated amendments AM-B3-1..4 (see docs/HISTORY.md;
 // localhost-proof.md, 2026-08-05, from the Codex sol-xhigh plan attack). These amendments OVERRIDE
 // this script's own original header comments about a lighter "chunked upsert" design - read AM-B3-1
 // through AM-B3-4 before touching this file.

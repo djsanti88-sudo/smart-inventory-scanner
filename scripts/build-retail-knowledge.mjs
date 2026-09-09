@@ -4,8 +4,8 @@
 //
 //   node scripts/build-retail-knowledge.mjs
 //
-// Output: src/server/retail-knowledge/retailKnowledge.generated.json (~compact, barcode-keyed)
-//         src/server/retail-knowledge/retailKnowledge.generated.meta.json (stats)
+// Output: src/decoding/server/knowledge/retail/retailKnowledge.generated.json (~compact, barcode-keyed)
+//         src/decoding/server/knowledge/retail/retailKnowledge.generated.meta.json (stats)
 
 import { createReadStream, writeFileSync, mkdirSync, renameSync, readFileSync, existsSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
@@ -13,7 +13,7 @@ import { join } from "node:path";
 
 const ROOT = process.cwd();
 const INPUT = join(ROOT, "data", "retail-knowledge", "retail_off.jsonl");
-const OUT_DIR = join(ROOT, "src", "server", "retail-knowledge");
+const OUT_DIR = join(ROOT, "src", "decoding", "server", "knowledge", "retail");
 const OUT_JSON = join(OUT_DIR, "retailKnowledge.generated.json");
 const OUT_META = join(OUT_DIR, "retailKnowledge.generated.meta.json");
 // Output-sanity guard (DT-1, 2026-08-13, ported from build-tire-knowledge.mjs's F1 fix,
@@ -73,7 +73,7 @@ function priorBarcodeCount() {
 // bug: 4006381333931 -> "Test Shopidoo", 5901234123457 -> "Sauce chiltepin"/"La lumbre",
 // 0012345670121/0012345674020/0012345674037 -> brand "Healthyholics", plus rows literally named
 // "Test"/"Fakeer"/"Fakewine"/"BrandTest". Skip these at BUILD time too (the read-time guard in
-// src/services/ai/decode.ts's isExampleOrTestRow / src/server/decode/pipeline.ts / retailKnowledgeIndex.ts
+// src/decoding/decode.ts's isExampleOrTestRow / src/decoding/server/pipeline/pipeline.ts / retailKnowledgeIndex.ts
 // is the fix that ships immediately without a regen; this is belt-and-suspenders for the NEXT regen).
 // EXACT-VALUE barcode blocklist only (never a fuzzy prefix - could suppress a real GTIN); whole-word
 // name/brand markers only (never a substring - "Latest"/"Testarossa"/"contest" must survive).

@@ -1,4 +1,4 @@
-// Regression guard for DT-1 (2026-08-13, docs/superpowers/reports/2026-08-13-loop1-data.md):
+// Regression guard for historical finding DT-1 (2026-08-13; see docs/HISTORY.md):
 // build-knowledge-db.mjs deleted the existing runtime knowledge.generated.db via unlinkSync
 // BEFORE validating the freshly built replacement had a sane row count. A truncated or stale
 // tireKnowledge.generated.json / retailKnowledge.generated.json input would silently destroy the
@@ -43,9 +43,9 @@ function tinyRetailJson() {
 /** Build a throwaway repo root holding a LARGE existing runtime DB and tiny JSON inputs. */
 function makeRoot({ priorRows }) {
   const dir = mkdtempSync(join(tmpdir(), "kdb-shrinkguard-"));
-  const tireOutDir = join(dir, "src", "server", "tire-knowledge");
-  const retailOutDir = join(dir, "src", "server", "retail-knowledge");
-  const dbOutDir = join(dir, "src", "server");
+  const tireOutDir = join(dir, "src", "decoding", "server", "knowledge", "tire");
+  const retailOutDir = join(dir, "src", "decoding", "server", "knowledge", "retail");
+  const dbOutDir = join(dir, "src", "decoding", "server", "knowledge");
   mkdirSync(tireOutDir, { recursive: true });
   mkdirSync(retailOutDir, { recursive: true });
   mkdirSync(dbOutDir, { recursive: true });
@@ -91,7 +91,7 @@ function runGenerator(cwd, args = []) {
 }
 
 function rowCounts(dir) {
-  const dbPath = join(dir, "src", "server", "knowledge.generated.db");
+  const dbPath = join(dir, "src", "decoding", "server", "knowledge", "knowledge.generated.db");
   const db = new Database(dbPath, { readonly: true });
   try {
     const tires = db.prepare("SELECT COUNT(*) AS c FROM tires").get().c;
@@ -108,7 +108,7 @@ afterEach(() => { if (root) rmSync(root, { recursive: true, force: true }); });
 describe("build-knowledge-db output-sanity guard (DT-1)", () => {
   it("refuses to overwrite a large existing DB with a tiny-JSON rebuild, and never unlinks it first", () => {
     root = makeRoot({ priorRows: 5000 });
-    const dbPath = join(root, "src", "server", "knowledge.generated.db");
+    const dbPath = join(root, "src", "decoding", "server", "knowledge", "knowledge.generated.db");
     const gzPath = dbPath + ".gz";
     const gzBefore = readFileSync(gzPath);
 

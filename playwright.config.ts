@@ -47,7 +47,7 @@ export default defineConfig({
     stdout: "pipe",
     // TEST SAFETY: force the AI route to mock-only so E2E can never call live Gemini/OpenAI.
     // NEXT_PUBLIC_E2E_AUTH_BYPASS enables the client auth bypass for E2E only (impossible in production -
-    // see src/services/auth/authBypass.ts). This keeps specs auth-independent of a live Supabase.
+    // see src/authentication/service/authBypass.ts). This keeps specs auth-independent of a live Supabase.
     // Pin the LOCAL/mock backend explicitly so this suite is independent of whatever .env.local holds
     // (e.g. a real-cloud god-account config). Otherwise the scan page renders the Firebase
     // business-context gate instead of the scanner input.

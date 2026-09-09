@@ -2,23 +2,24 @@
 """Build the local RAG knowledge index for the fleet (round-2 teaching).
 
 Chunks the project's law/architecture docs, embeds each chunk with the local
-nomic-embed model via LM Studio's /v1/embeddings, and writes rag-index.jsonl
+nomic-embed model through LM Studio's OpenAI-compatible API, and writes rag-index.jsonl
 (one {text, source, vector} per line). Retrieval happens in local-run.py --rag.
 
 Usage:  python rag-index.py            (build/rebuild the index)
         python rag-index.py --query "..."  (test retrieval, prints top chunks)
 
-$0, fully local. Requires: lms server running (auto-started), nomic-embed
-downloaded (verified present 2026-07-22).
+$0, fully local. Requires the LM Studio server on http://localhost:1234 and a
+downloaded embedding model whose id contains "nomic".
 """
 import argparse
 import json
+import os
 import pathlib
 import re
 import sys
 import urllib.request
 
-BASE = "http://localhost:11434"
+BASE = os.environ.get("LM_STUDIO_BASE_URL", "http://localhost:1234/v1").rstrip("/")
 EMBED_MODEL = "nomic"  # substring-matched against /api/tags
 HERE = pathlib.Path(__file__).parent
 REPO = HERE.parent
@@ -44,8 +45,8 @@ def post_json(path, payload):
 
 
 def resolve_embed_model():
-    with urllib.request.urlopen(f"{BASE}/api/tags", timeout=10) as r:
-        models = [m["name"] for m in json.load(r)["models"]]
+    with urllib.request.urlopen(f"{BASE}/models", timeout=10) as r:
+        models = [m["id"] for m in json.load(r)["data"]]
     hits = [m for m in models if EMBED_MODEL in m.lower()]
     if not hits:
         sys.exit(f"FATAL: no embedding model matching '{EMBED_MODEL}' in {models}")
@@ -70,8 +71,8 @@ def chunk(doc_path):
 
 
 def embed(model, texts):
-    out = post_json("/api/embed", {"model": model, "input": texts})
-    return out["embeddings"]
+    out = post_json("/embeddings", {"model": model, "input": texts})
+    return [row["embedding"] for row in sorted(out["data"], key=lambda row: row["index"])]
 
 
 def build():

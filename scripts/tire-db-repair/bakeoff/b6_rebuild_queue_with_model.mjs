@@ -23,7 +23,7 @@ const DB_PATH = path.join(
   REPO_ROOT,
   "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/REPAIRED_TIRE_DATABASE.db"
 );
-const PREFIX_MAP_PATH = path.join(REPO_ROOT, "src/services/catalog/brandPrefixMap.json");
+const PREFIX_MAP_PATH = path.join(REPO_ROOT, "src/products/catalog/brandPrefixMap.json");
 const B6_DIR = path.join(REPO_ROOT, "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/bakeoff/b6");
 
 const BOSS_BRANDS = ["nexen", "arisun", "blackhawk", "fortune", "falken"];

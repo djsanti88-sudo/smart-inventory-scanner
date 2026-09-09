@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Phase 1 (+ 2026-07-22 delete-transfer): deleting a saved product archives it + un-verifies it +
 // deactivates ALL its aliases + TRANSFERS its counted quantity onto an Unidentified provisional

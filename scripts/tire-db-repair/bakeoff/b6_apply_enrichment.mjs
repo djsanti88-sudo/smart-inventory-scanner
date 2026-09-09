@@ -75,7 +75,7 @@ const FILLABLE_FIELDS = ["brand", "model", "size", "manufacturer_part_number"];
 // treated as trusted when it produced an exact structural barcode-to-spec tie).
 //
 // Registrable-domain match only (host === domain, or host ends with "." + domain) - never a
-// substring - mirrors src/services/ai/trustedProductHosts.ts's matching rule, extended with the
+// substring - mirrors src/decoding/trustedProductHosts.ts's matching rule, extended with the
 // additional retailers/manufacturers this brief names.
 const TRUSTED_HOSTS = [
   // Major tire retailers (brief-named)

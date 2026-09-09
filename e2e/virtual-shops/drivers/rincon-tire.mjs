@@ -1,7 +1,7 @@
 // e2e/virtual-shops/drivers/rincon-tire.mjs
 //
 // Virtual shop (a): Rincon Tire - disciplined tire shop, realistic scale.
-// See docs/superpowers/specs/2026-07-29-virtual-shops-design.md section (a).
+// See shops.config.mjs; retired design history is summarized in docs/HISTORY.md.
 //
 // Daily loop: a morning stock count of "yesterday's deliveries" (a batch of
 // known tire barcodes), a couple of genuinely unknown codes routed to Needs

@@ -13,7 +13,7 @@
 //   - Turso: `INSERT OR IGNORE` - if the code's row already exists, the backup row is dropped.
 //   - File store: only keys ABSENT from the current store are added; existing keys are left untouched.
 //
-// Pure Node + the JSONL format module (src/server/decodeCacheBackup.ts, imported via a small on-the-fly
+// Pure Node + the JSONL format module (src/decoding/server/cache/decodeCacheBackup.ts, imported via a small on-the-fly
 // require of the compiled logic is avoided - the format is duplicated here in plain JS on purpose,
 // matching decode-outcomes-report.mjs's convention of zero-build-step scripts). Only imports
 // @libsql/client when Turso env vars are present.
@@ -22,7 +22,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 
 // ---------------------------------------------------------------------------
-// JSONL format (mirrors src/server/decodeCacheBackup.ts's exportDecodeCache/parseBackup contract -
+// JSONL format (mirrors src/decoding/server/cache/decodeCacheBackup.ts's exportDecodeCache/parseBackup contract -
 // duplicated here in plain JS so this script has no build step / TS import, per decode-outcomes-
 // report.mjs's existing convention).
 // ---------------------------------------------------------------------------
@@ -105,7 +105,7 @@ async function restoreToTurso(db, rows) {
 }
 
 // ---------------------------------------------------------------------------
-// Backend: local file store (mirrors src/server/decodeCacheStore.ts's file adapter exactly)
+// Backend: local file store (mirrors src/decoding/server/cache/decodeCacheStore.ts's file adapter exactly)
 // ---------------------------------------------------------------------------
 
 function cacheFilePath() {

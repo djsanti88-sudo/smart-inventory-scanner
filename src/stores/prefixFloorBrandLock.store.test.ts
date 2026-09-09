@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Owner-reported live bug (2026-07-21, 310-row review): rows 049000242201 / 049000245462 (real
 // TIRES, decoded names carrying descriptive tire text like "Entry level") showed Brand "Coca-Cola" -

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // QA Task 8 (owner-approved 2026-07-15): store-level wiring proof. The deterministic resolver's
 // nearMatchSuggestion (resolver.ts) must reach the Needs Review row as suggestedLinkProductId -

@@ -1,4 +1,4 @@
-// Regression guard for DT2-2 (2026-08-13, docs/superpowers/reports/2026-08-13-loop2-data.md):
+// Regression guard for historical finding DT2-2 (2026-08-13; see docs/HISTORY.md):
 // build-retail-knowledge.mjs's shrink guard (DT-1b) uses retailKnowledge.generated.meta.json as its
 // baseline for "how many barcodes existed before this run". If a PRIOR run crashed between its two
 // renameSync calls (index renamed, meta not), the meta left on disk describes an OLDER, smaller
@@ -36,7 +36,7 @@ function makeIndexEntries(n, offset) {
 function makeRoot({ staleMeta, rebuildBarcodes = REBUILD_BARCODES }) {
   const dir = mkdtempSync(join(tmpdir(), "rk-metastaleness-"));
   const dataDir = join(dir, "data", "retail-knowledge");
-  const outDir = join(dir, "src", "server", "retail-knowledge");
+  const outDir = join(dir, "src", "decoding", "server", "knowledge", "retail");
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(outDir, { recursive: true });
 
@@ -89,7 +89,7 @@ function runGenerator(cwd, args = []) {
 }
 
 function barcodeCount(dir) {
-  const raw = readFileSync(join(dir, "src", "server", "retail-knowledge", "retailKnowledge.generated.json"), "utf8");
+  const raw = readFileSync(join(dir, "src", "decoding", "server", "knowledge", "retail", "retailKnowledge.generated.json"), "utf8");
   return Object.keys(JSON.parse(raw).index).length;
 }
 

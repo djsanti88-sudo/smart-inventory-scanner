@@ -7,10 +7,10 @@ $proj = (Resolve-Path "$PSScriptRoot\..\..").Path
 python -m tools.fable5.hook_support sessionstart-hook --repo "$proj"
 
 # --- Doc-freshness orientation (additive, non-fatal): one line naming the
-# newest dated plan under docs/superpowers/plans/ and REPO_HEALTH.md's
+# approved plan named by docs/plans/ACTIVE.md and REPO_HEALTH.md's
 # "Last updated" date, with a warning if that date is more than 7 days old.
 try {
-    $plansDir = Join-Path $proj "docs\superpowers\plans"
+    $plansDir = Join-Path $proj "docs\plans"
     $newestPlan = "(no plans found)"
     if (Test-Path $plansDir) {
         $planFile = Get-ChildItem -Path $plansDir -Filter "*.md" -File | Sort-Object Name -Descending | Select-Object -First 1
@@ -34,6 +34,18 @@ try {
             }
         } else {
             $repoHealthLine = "REPO_HEALTH.md has no 'Last updated' line"
+            $lastCommitDate = git -C $proj log -1 --format=%ad --date=short -- REPO_HEALTH.md 2>$null
+            if ($lastCommitDate) {
+                $lastCommitDate = "$lastCommitDate".Trim()
+            }
+            if ($lastCommitDate) {
+                $commitDate = [datetime]::ParseExact($lastCommitDate, "yyyy-MM-dd", $null)
+                $ageDays = (Get-Date).Date.Subtract($commitDate).Days
+                $repoHealthLine = "REPO_HEALTH.md last committed $lastCommitDate"
+                if ($ageDays -gt 7) {
+                    $repoHealthLine = "$repoHealthLine (WARNING: $ageDays days old)"
+                }
+            }
         }
     }
 

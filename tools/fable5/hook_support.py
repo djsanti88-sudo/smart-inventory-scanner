@@ -22,7 +22,7 @@ _DIFF_FILE_HEADER_RE = re.compile(r"^\+\+\+ b/(.+)$")
 _PREVIEW_URL_RE = re.compile(r"https://[a-z0-9-]+\.vercel\.app")
 
 IGNORED_DIFF_PREFIXES = ("docs/reviews/", "reports/")
-PLAN_DIFF_PREFIX = "docs/superpowers/plans/"
+PLAN_DIFF_PREFIX = ".claude/plans/"
 
 
 def detect_phase_completion(diff_text: str) -> bool:
@@ -142,7 +142,7 @@ def should_fire(
 
 def _git_diff(root: Path, *args: str) -> str:
     completed = subprocess.run(
-        ["git", "diff", *args, "--", "docs/superpowers/plans/*.md"],
+        ["git", "diff", *args, "--", ".claude/plans/*.md"],
         cwd=root,
         check=False,
         capture_output=True,
@@ -219,7 +219,7 @@ def _format_running_line(running: dict) -> str | None:
 def run_sessionstart_hook(root: Path) -> int:
     lines: list[str] = []
 
-    latest_path = root / "docs" / "reviews" / "LATEST.json"
+    latest_path = root / "reports" / "fable5" / "LATEST.json"
     if latest_path.is_file():
         try:
             latest = _read_json(latest_path)

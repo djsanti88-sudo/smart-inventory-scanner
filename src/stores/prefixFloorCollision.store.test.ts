@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
 
 // Regression for task-FINALREVIEW-report.md's "Important, low likelihood" follow-up: the
@@ -38,7 +38,7 @@ describe("scanStore - resolveUnknown(create_new) after reload attributes the RIG
     const store = createTestScanStore({ db: new MockDb() });
 
     // Both valid UPC-A (correct check digit) and both share the seed prefix 0051596 -> "United Solutions"
-    // (src/services/catalog/prefixIndex.ts), so ensureProvisionalCount mints the IDENTICAL placeholder
+    // (src/products/catalog/prefixIndex.ts), so ensureProvisionalCount mints the IDENTICAL placeholder
     // name "United Solutions / product unconfirmed" for both - the exact collision precondition.
     const codeA = "051596000004";
     const codeB = "051596320812";

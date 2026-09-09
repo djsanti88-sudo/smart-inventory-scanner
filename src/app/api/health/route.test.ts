@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   tursoGet: vi.fn(),
 }));
 
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminDb: () => ({
     collection: () => ({
       limit: () => ({
@@ -21,7 +21,7 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   }),
 }));
 
-vi.mock("@/server/decode/storage", () => ({
+vi.mock("@/decoding/server/pipeline/storage", () => ({
   decodeStorage: async () => ({ get: mocks.tursoGet }),
 }));
 
@@ -35,7 +35,7 @@ beforeEach(async () => {
   delete process.env.OPENAI_API_KEY;
   delete process.env.VERCEL_GIT_COMMIT_SHA;
   delete process.env.GIT_COMMIT_SHA;
-  const { __resetForTest } = await import("@/services/security/aiSpendGuard");
+  const { __resetForTest } = await import("@/decoding/limits/aiSpendGuard");
   __resetForTest();
 });
 

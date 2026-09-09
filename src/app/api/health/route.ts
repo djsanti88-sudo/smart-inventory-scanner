@@ -1,11 +1,11 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
-import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
-import { logServerEvent } from "@/server/log";
-import { tireJsonIndexStatus } from "@/server/tire-knowledge/tireKnowledgeIndex";
+import { checkRateLimit, intEnv } from "@/decoding/limits/aiSpendGuard";
+import { logServerEvent } from "@/decoding/server/log";
+import { tireJsonIndexStatus } from "@/decoding/server/knowledge/tire/tireKnowledgeIndex";
 
-// Public, unauthenticated uptime-monitor endpoint (spec: docs/superpowers/specs/2026-07-29-m1-
+// Public, unauthenticated uptime-monitor endpoint (retired M1 spec; see docs/HISTORY.md;
 // engineering-specs.md section 4). Booleans-only JSON, no secrets, no keys, no URLs, no internal
 // error messages - only presence/reachability. Every dependency check degrades to `false` on any
 // error or timeout; this route must NEVER throw or 500 - a 200 with ok:false IS the signal an
@@ -60,8 +60,8 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 async function checkFirestore(): Promise<boolean> {
   const timeoutMs = intEnv(process.env.HEALTH_FIRESTORE_TIMEOUT_MS, 3000);
   try {
-    const { getAdminDb } = await import("@/lib/firebaseAdmin");
-    const { COLLECTIONS } = await import("@/services/db/types");
+    const { getAdminDb } = await import("@/sync-database/cloud/firebaseAdmin");
+    const { COLLECTIONS } = await import("@/sync-database/types");
     await withTimeout(getAdminDb().collection(COLLECTIONS.catalogEntries).limit(1).get(), timeoutMs);
     return true;
   } catch (err) {
@@ -85,7 +85,7 @@ async function checkFirestore(): Promise<boolean> {
 async function checkTurso(): Promise<boolean> {
   const timeoutMs = intEnv(process.env.HEALTH_TURSO_TIMEOUT_MS, 3000);
   try {
-    const { decodeStorage } = await import("@/server/decode/storage");
+    const { decodeStorage } = await import("@/decoding/server/pipeline/storage");
     const storage = await withTimeout(decodeStorage(), timeoutMs);
     await withTimeout(storage.get("__health_check__"), timeoutMs);
     return true;

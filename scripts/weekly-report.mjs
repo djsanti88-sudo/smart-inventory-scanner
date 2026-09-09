@@ -21,10 +21,10 @@ const sh = (cmd, optional = false) => {
 sh('npm run qa:bots:all', true);
 
 // 2. Fresh Fable 5 PR review. This remains optional so a missing Python executable cannot prevent the
-//    existing weekly report from running. LATEST.json points at report.md for the review just produced.
+//    existing weekly report from running. reports/fable5/LATEST.json points at report.md for the review just produced.
 sh('python -m tools.fable5 review-build --gate pr --no-cache', true);
 try {
-  const latest = JSON.parse(readFileSync('docs/reviews/LATEST.json', 'utf8'));
+  const latest = JSON.parse(readFileSync('reports/fable5/LATEST.json', 'utf8'));
   console.log(`Fable 5 review: [${latest.verdict}](${latest.report})`);
 } catch (e) {
   console.warn('(continuing) Fable 5 report pointer unavailable: ' + e.message);

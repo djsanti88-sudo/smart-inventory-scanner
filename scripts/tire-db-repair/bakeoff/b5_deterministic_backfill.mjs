@@ -62,7 +62,7 @@ const DB_PATH = dbPathArg ? path.resolve(dbPathArg) : DEFAULT_DB_PATH;
 // against a throwaway working copy never writes into the packaged deliverable directory.
 const REPORT_DIR = dbPathArg ? path.dirname(DB_PATH) : path.join(REPO_ROOT, "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28");
 const PACKAGE_DIR = path.join(REPO_ROOT, "backups/claude-tire-db-handoff-2026-07-28");
-const PREFIX_MAP_PATH = path.join(REPO_ROOT, "src/services/catalog/brandPrefixMap.json");
+const PREFIX_MAP_PATH = path.join(REPO_ROOT, "src/products/catalog/brandPrefixMap.json");
 const REPORT_PATH = path.join(REPORT_DIR, "B5_BACKFILL_REPORT.md");
 const REMAINING_BLANKS_PATH = path.join(REPORT_DIR, "bakeoff", "remaining_blanks.json");
 

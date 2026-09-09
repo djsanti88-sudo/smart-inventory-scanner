@@ -1,6 +1,6 @@
 // Live decode benchmark. This script can spend money; it requires an explicit opt-in.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { accuracyVerdict, classifyPath, gptDecodeCallsForResponse, parseCsv, summarize, toInputRows, webSearchCallsForResponse } from "../src/services/benchmark/benchmarkAnalysis.ts";
+import { accuracyVerdict, classifyPath, gptDecodeCallsForResponse, parseCsv, summarize, toInputRows, webSearchCallsForResponse } from "../src/shared/benchmark/benchmarkAnalysis.ts";
 
 const BASE = process.env.SMOKE_BASE_URL || "http://localhost:3000";
 const FILE = process.argv.find((arg) => arg.startsWith("--file="))?.split("=")[1] || "benchmarks/phase1_100_codes.csv";

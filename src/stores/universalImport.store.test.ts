@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import type { ImportPreviewRow } from "@/services/importSchema";
+import type { ImportPreviewRow } from "@/import/importSchema";
 
 function previewRow(status: "exact" | "fuzzy", code: string, quantity: number): ImportPreviewRow {
   return {

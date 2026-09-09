@@ -1,14 +1,14 @@
 import "server-only";
 
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-import { accessLevelServer } from "@/services/security/roleAccess";
-import { COLLECTIONS, memberDocId } from "@/services/db/types";
-import { canonicalGtin } from "@/services/upc/gtin";
-import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
-import { decodeStorage } from "@/server/decode/storage";
+import { getAdminAuth, getAdminDb } from "@/sync-database/cloud/firebaseAdmin";
+import { accessLevelServer } from "@/users-businesses/roles/roleAccess";
+import { COLLECTIONS, memberDocId } from "@/sync-database/types";
+import { canonicalGtin } from "@/products/barcodes/gtin";
+import { checkRateLimit, intEnv } from "@/decoding/limits/aiSpendGuard";
+import { decodeStorage } from "@/decoding/server/pipeline/storage";
 import { disputeCatalogEntry } from "@/server/catalog/catalogDispute";
-import { logServerEvent } from "@/server/log";
+import { logServerEvent } from "@/decoding/server/log";
 
 export const runtime = "nodejs";
 

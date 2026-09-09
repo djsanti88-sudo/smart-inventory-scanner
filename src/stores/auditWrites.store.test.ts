@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import type { SyncTarget } from "@/services/db/syncTarget";
-import type { SyncResult } from "@/services/mockDb";
+import type { SyncTarget } from "@/sync-database/syncTarget";
+import type { SyncResult } from "@/sync-database/mock/mockDb";
 import type { InventoryCount, InventorySession } from "@/types";
-import type { AuditEventInput } from "@/services/audit/audit";
+import type { AuditEventInput } from "@/users-businesses/account/audit";
 
 // Loop 6 proof (store logic): important actions emit a business-scoped, fire-and-forget audit event
 // through the injectable sink, with a REAL business context (no fake businessId/actor). An audit

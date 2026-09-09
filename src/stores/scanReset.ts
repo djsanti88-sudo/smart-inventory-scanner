@@ -1,6 +1,6 @@
 import { DEFAULT_SETTINGS } from "@/stores/scanDefaults";
-import type { SessionHistoryEntry } from "@/services/sessions/sessionHistory";
-import type { CountSnapshot } from "@/services/reports/varianceReport";
+import type { SessionHistoryEntry } from "@/sessions/history/sessionHistory";
+import type { CountSnapshot } from "@/reports/variance/varianceReport";
 import type {
   Alias,
   InventorySession,

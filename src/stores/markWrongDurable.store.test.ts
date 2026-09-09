@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
-import { replayLedgerCounts } from "@/services/inventory.replay";
-import { buildIdempotencyKey as buildIdempotencyKeyForTest } from "@/services/idempotency";
+import { MockDb } from "@/sync-database/mock/mockDb";
+import { replayLedgerCounts } from "@/inventory/replay";
+import { buildIdempotencyKey as buildIdempotencyKeyForTest } from "@/inventory/idempotency";
 
 // F-03 (audit remediation 2026-07-29): markWrong repoints local state (D2's total-quantity-invariant
 // behavior, proven by markWrongTransfer.store.test.ts) but historically REUSED the original scan

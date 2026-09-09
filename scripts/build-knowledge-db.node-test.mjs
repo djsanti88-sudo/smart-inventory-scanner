@@ -73,7 +73,7 @@ test("CLI paths build only the requested disposable artifacts", () => {
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.equal(existsSync(fx.outputDb), true);
     assert.equal(existsSync(fx.outputGzip), true);
-    assert.equal(existsSync(join(fx.root, "src", "server", "knowledge.generated.db")), false);
+    assert.equal(existsSync(join(fx.root, "src", "decoding", "server", "knowledge", "knowledge.generated.db")), false);
 
     const db = new Database(fx.outputDb, { readonly: true });
     try {

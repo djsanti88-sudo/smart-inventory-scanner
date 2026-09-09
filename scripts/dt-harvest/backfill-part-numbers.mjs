@@ -21,8 +21,8 @@ import { sameBrandFamily } from "./lib/brandFamilies.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = process.cwd();
 
-const DEFAULT_CORPUS_PATH = join(ROOT, "src", "server", "tire-knowledge", "tireKnowledge.generated.json");
-const BRAND_PREFIX_MAP_PATH = join(ROOT, "src", "services", "catalog", "brandPrefixMap.json");
+const DEFAULT_CORPUS_PATH = join(ROOT, "src", "decoding", "server", "knowledge", "tire", "tireKnowledge.generated.json");
+const BRAND_PREFIX_MAP_PATH = join(ROOT, "src", "products", "catalog", "brandPrefixMap.json");
 const STATE_DIR = join(__dirname, "state");
 const DEFAULT_GLOB_PREFIX = "harvested"; // matches state/harvested.jsonl and state/harvested*.jsonl
 const DEFAULT_CONFLICTS_PATH = join(STATE_DIR, "pn-conflicts.json");

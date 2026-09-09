@@ -4,7 +4,7 @@
 // BULK SCAN lets a user paste/type several codes separated by whitespace and have each become its
 // own scan row. That assumption breaks for a domain where a SINGLE code legitimately contains an
 // internal space (e.g. a tire part number printed "2881 6861", one of several separator shapes -
-// see src/services/scanCleaner.ts buildNormalizedCandidates and the Falken seed alias). Splitting
+// see src/scanning/clean/scanCleaner.ts buildNormalizedCandidates and the Falken seed alias). Splitting
 // on whitespace unconditionally turns that one valid code into two garbage halves that resolve to
 // nothing.
 //

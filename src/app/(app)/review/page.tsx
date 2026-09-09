@@ -1,13 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { NeedsReviewTable } from "@/components/NeedsReviewTable";
-import { SuggestedApprovalPanel } from "@/components/SuggestedApprovalPanel";
-import { SyncStatusBar } from "@/components/SyncStatusBar";
-import { BusinessContextGate } from "@/components/BusinessContextGate";
+import { NeedsReviewTable } from "@/review/NeedsReviewTable";
+import { SuggestedApprovalPanel } from "@/review/SuggestedApprovalPanel";
+import { SyncStatusBar } from "@/sync-database/SyncStatusBar";
+import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
 
 // Build 3: the review screen gains a "Suggested" tab for batch-approving the Suggested pile
-// (docs/archive/superpowers/specs/2026-07-05-batch-approve-design.md). "All" is the original single-row
+// (retired batch-approve design; see docs/HISTORY.md). "All" is the original single-row
 // Needs Review table, unchanged. Tab state is local UI only - no store/approval semantics here.
 export default function ReviewPage() {
   const [tab, setTab] = useState<"all" | "suggested">("all");

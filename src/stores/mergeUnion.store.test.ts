@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
-import { replayLedgerCounts } from "@/services/inventory.replay";
+import { MockDb } from "@/sync-database/mock/mockDb";
+import { replayLedgerCounts } from "@/inventory/replay";
 
 // D3: all three orphan-transfer sites (resolveUnknown merge, runLiveDecodeOnce fast-decode auto-link,
 // backgroundVerifyDeep deep-verify merge) must UNION the surviving count's scanEventIds / aliasesSeen /

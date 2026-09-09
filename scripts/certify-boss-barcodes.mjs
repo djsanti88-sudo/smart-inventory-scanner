@@ -24,7 +24,7 @@ export function main(argv = process.argv.slice(2), env = process.env) {
   const args = parseCertificationArgs(argv);
   const source = env.BOSS_RECONCILIATION_PATH;
   if (!source || !existsSync(source)) throw new Error("BOSS_RECONCILIATION_PATH must name the available private reconciliation source.");
-  const result = spawnSync(process.execPath, ["node_modules/vitest/vitest.mjs", "run", "src/server/tire-knowledge/bossCorpusDirect.test.ts"], {
+  const result = spawnSync(process.execPath, ["node_modules/vitest/vitest.mjs", "run", "src/decoding/server/knowledge/tire/bossCorpusDirect.test.ts"], {
     cwd: resolve("."),
     env: { ...env, BOSS_RECONCILIATION_PATH: source },
     stdio: "inherit",

@@ -1,6 +1,6 @@
 // scripts/dt-harvest/lib/placeholderBarcodes.mjs
 // Node-runnable mirror of the barcode trust gate's placeholder blocklist + placeholder check
-// (src/services/upc/barcodeTrust.ts), so the .mjs harvest pipeline (which plain `node` cannot
+// (src/products/barcodes/barcodeTrust.ts), so the .mjs harvest pipeline (which plain `node` cannot
 // import TS into) can reject the same enumerated placeholder/dummy barcodes the runtime rejects.
 // Reimplemented rather than imported for the same reason lib/brandFamilies.mjs reimplements
 // sameBrandFamily - this .mjs cannot import the app's TS module.
@@ -12,7 +12,7 @@
 // significant core, so this is a safe structural block, not a false-positive risk.
 //
 // CRITICAL: the exported list below MUST stay byte-for-byte identical to the TS source's blocklist.
-// A drift-guard vitest test (src/services/upc/barcodeTrust.test.ts) reads this file and asserts the
+// A drift-guard vitest test (src/products/barcodes/barcodeTrust.test.ts) reads this file and asserts the
 // two lists match - do not edit this list without editing the .ts in lockstep and re-running that
 // test.
 //
@@ -30,7 +30,7 @@ export const PLACEHOLDER_BARCODES = [
 /**
  * True when `code` is an enumerated placeholder/dummy barcode, an all-same-digit code, or a
  * zero-padded code whose zero-stripped significant core is empty or all-same-digit. Logic mirrors
- * src/services/upc/barcodeTrust.ts's isPlaceholderBarcode (enforced by the drift test).
+ * src/products/barcodes/barcodeTrust.ts's isPlaceholderBarcode (enforced by the drift test).
  * @param {string} code
  * @returns {boolean}
  */

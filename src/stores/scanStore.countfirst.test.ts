@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createTestScanStore, scanStoreMigrate } from "@/stores/scanStore";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 import type { ScanEvent, UnknownCodeReview } from "@/types";
 
 // HARD RULE 0 (count-first durability): the scan event persists and its feed row + Needs Review entry are

@@ -14,31 +14,31 @@ const authMocks = vi.hoisted(() => ({
   checkRateLimit: vi.fn(),
 }));
 
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: authMocks.verifyIdToken }),
   getAdminDb: () => ({
     doc: () => ({ get: authMocks.memberGet }),
   }),
 }));
 
-vi.mock("@/services/security/aiSpendGuard", () => ({
+vi.mock("@/decoding/limits/aiSpendGuard", () => ({
   checkRateLimit: (...args: unknown[]) => authMocks.checkRateLimit(...args),
   intEnv: (value: string | undefined, fallback: number) => Number(value) || fallback,
 }));
 
-vi.mock("@/server/decode/storage", () => ({
+vi.mock("@/decoding/server/pipeline/storage", () => ({
   decodeStorage: vi.fn().mockResolvedValue({}),
 }));
 
 const mockLookupAll = vi.fn();
 const mockBySize = vi.fn();
-vi.mock("@/server/tire-knowledge/tireKnowledgeIndex", () => ({
+vi.mock("@/decoding/server/knowledge/tire/tireKnowledgeIndex", () => ({
   lookupAllByPartNumber: (key: string) => mockLookupAll(key),
   candidatesBySizeToken: (token: string) => mockBySize(token),
 }));
 
 const mockRetailLookup = vi.fn();
-vi.mock("@/server/retail-knowledge/retailKnowledgeIndex", () => ({
+vi.mock("@/decoding/server/knowledge/retail/retailKnowledgeIndex", () => ({
   lookupRetailBarcodeAsync: (code: string) => mockRetailLookup(code),
 }));
 

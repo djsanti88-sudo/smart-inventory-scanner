@@ -1,26 +1,26 @@
 import { NextResponse } from "next/server";
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-import { isLiveAuth } from "@/services/auth/authMode";
-import { isAuthBypassEnabled } from "@/services/auth/authBypass";
-import { COLLECTIONS, memberDocId } from "@/services/db/types";
-import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
-import { decodeStorage } from "@/server/decode/storage";
+import { getAdminAuth, getAdminDb } from "@/sync-database/cloud/firebaseAdmin";
+import { isLiveAuth } from "@/authentication/service/authMode";
+import { isAuthBypassEnabled } from "@/authentication/service/authBypass";
+import { COLLECTIONS, memberDocId } from "@/sync-database/types";
+import { checkRateLimit, intEnv } from "@/decoding/limits/aiSpendGuard";
+import { decodeStorage } from "@/decoding/server/pipeline/storage";
 import {
   matchExpectedRow,
   type CorpusCandidate,
   type MatcherDeps,
-} from "@/services/reconcile/identityMatcher";
-import type { ExpectedInventoryRow } from "@/services/reconcile/types";
+} from "@/reconcile/match/identityMatcher";
+import type { ExpectedInventoryRow } from "@/reconcile/types";
 import {
   lookupAllByPartNumber,
   candidatesBySizeToken,
   type TireKnowledgeRow,
-} from "@/server/tire-knowledge/tireKnowledgeIndex";
-import { tireSizeToken } from "@/services/ai/tireSpecs";
-import { tirePartNumberVariants } from "@/services/catalog/tirePartNumber";
-import { lookupRetailBarcodeAsync } from "@/server/retail-knowledge/retailKnowledgeIndex";
-import type { PreviewMatchResult } from "@/services/universalImportPreview";
-import { logServerEvent } from "@/server/log";
+} from "@/decoding/server/knowledge/tire/tireKnowledgeIndex";
+import { tireSizeToken } from "@/decoding/tireSpecs";
+import { tirePartNumberVariants } from "@/products/catalog/tirePartNumber";
+import { lookupRetailBarcodeAsync } from "@/decoding/server/knowledge/retail/retailKnowledgeIndex";
+import type { PreviewMatchResult } from "@/import/universalImportPreview";
+import { logServerEvent } from "@/decoding/server/log";
 
 // Preview result = a MatchResult optionally enriched with the exact retail-corpus hit for a non-tire
 // row (the "identified from the 4M-product catalog" badge). Shared with universalImportPreview.ts,

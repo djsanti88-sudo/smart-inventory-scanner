@@ -5,7 +5,7 @@
 // Reads the validated, repaired local DB (backups/claude-tire-db-handoff-2026-07-28/
 // repair-2026-07-28/REPAIRED_TIRE_DATABASE.db) and, if read-only TURSO_DATABASE_URL /
 // TURSO_AUTH_TOKEN credentials are already configured (per docs/COMMANDS.md, loaded the same way
-// src/server/retail-knowledge/retailKnowledgeIndex.ts and src/server/tire-knowledge/
+// src/decoding/server/knowledge/retail/retailKnowledgeIndex.ts and src/decoding/server/knowledge/tire/
 // tireKnowledgeIndex.ts do), runs a small number of read-only SELECT queries against live Turso to
 // recompute the actual pre-promotion diff. If credentials are not available, falls back to the
 // live counts recorded in CLAUDE_HANDOFF.md and labels the report "offline-snapshot mode".
@@ -321,7 +321,7 @@ async function main() {
     const path = writeStagingFile(
       "03_staging_tire_product_part_number_aliases.sql",
       `-- Dataset 3/5: tire_product_part_number_aliases (${aliases.length} rows). This table does not exist on live\n` +
-        "-- Turso today (Turso's runtime lookup path, src/server/tire-knowledge/tireKnowledgeIndex.ts\n" +
+        "-- Turso today (Turso's runtime lookup path, src/decoding/server/knowledge/tire/tireKnowledgeIndex.ts\n" +
         "-- lookupPartNumberTurso, uses ONLY tire_part_numbers + tires; this alias table currently backs\n" +
         "-- the LOCAL better-sqlite3 lookup path only). Promoting it is additive and does not change\n" +
         "-- today's Turso runtime lookup behavior; it is future-ready for when the Turso lookup path is\n" +
@@ -398,7 +398,7 @@ async function main() {
   // -------------------------------------------------------------------------------------------
   // 2. Gate queries to run AGAINST STAGING (never against the live tables). Mirrors the same
   //    relationship and runtime-lookup semantics validated locally by 05_validate.mjs and used at
-  //    runtime by src/server/tire-knowledge/tireKnowledgeIndex.ts's Turso path.
+  //    runtime by src/decoding/server/knowledge/tire/tireKnowledgeIndex.ts's Turso path.
   // -------------------------------------------------------------------------------------------
   {
     const gateSql = `-- Gate queries: run against the STAGING tables after loading datasets 1-5.
@@ -416,7 +416,7 @@ SELECT COUNT(*) AS staging_tire_part_numbers_count FROM staging_tire_part_number
 
 -- Gate D: every staging_tire_part_numbers row must join to a staging_tires row via
 -- canonical_product_uid (mirrors the exact runtime path in
--- src/server/tire-knowledge/tireKnowledgeIndex.ts:lookupPartNumberTurso). Expect 0 orphans.
+-- src/decoding/server/knowledge/tire/tireKnowledgeIndex.ts:lookupPartNumberTurso). Expect 0 orphans.
 SELECT COUNT(*) AS orphan_part_numbers
 FROM staging_tire_part_numbers p
 LEFT JOIN staging_tires t ON t.canonical_product_uid = p.canonical_product_uid
@@ -575,7 +575,7 @@ WHERE c.canonical_product_id IS NULL;
   lines.push(
     mode === "live-read"
       ? "Read-only TURSO_DATABASE_URL / TURSO_AUTH_TOKEN credentials were available (loaded the same " +
-          "way src/server/retail-knowledge/retailKnowledgeIndex.ts and src/server/tire-knowledge/ " +
+          "way src/decoding/server/knowledge/retail/retailKnowledgeIndex.ts and src/decoding/server/knowledge/tire/ " +
           "tireKnowledgeIndex.ts load them). Live counts and key sets below were read directly from " +
           "Turso via SELECT-only queries (no INSERT/UPDATE/DELETE/CREATE/DROP was ever issued)."
       : "Read-only Turso credentials were not available (or the read attempt failed), so this report " +
@@ -670,7 +670,7 @@ WHERE c.canonical_product_id IS NULL;
       "). This is a PRE-EXISTING characteristic of the tire corpus (multiple barcodes/distributor " +
       "variants legitimately share one canonical product), not something this repair or this " +
       "promotion introduces. It matters here because the runtime part-number lookup path " +
-      "(`src/server/tire-knowledge/tireKnowledgeIndex.ts:lookupPartNumberTurso`) resolves " +
+      "(`src/decoding/server/knowledge/tire/tireKnowledgeIndex.ts:lookupPartNumberTurso`) resolves " +
       "`canonical_product_uid -> tires` with `LIMIT 1` and no deterministic tie-break, so a " +
       "part-number lookup against a duplicated UID can return any one of the matching barcodes' rows. " +
       "This is unchanged behavior versus production today; it is flagged here as an existing risk, " +

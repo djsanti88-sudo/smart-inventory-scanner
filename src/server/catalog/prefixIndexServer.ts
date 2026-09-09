@@ -2,7 +2,7 @@ import "server-only";
 
 // F5 bundle-surgery (wave 2, 2026-07-20): the FULL prefix index (SEED + DERIVED_CATALOG + LEARNED),
 // including the 2.3MB `derivedPrefixMap.json` generated from our 4M-row retail/tire corpus, lives here
-// SERVER-ONLY. The client-safe half (@/services/catalog/prefixIndex) keeps only the tiny curated SEED
+// SERVER-ONLY. The client-safe half (@/products/catalog/prefixIndex) keeps only the tiny curated SEED
 // and the in-memory LEARNED flywheel so `lookupPrefix` stays synchronous and correct for those tiers in
 // browser code (scanStore's prefix-floor naming) without ever shipping the derived map to a customer.
 //
@@ -18,9 +18,9 @@ import {
   gtin13,
   lookupPrefix as lookupSeedOrLearned,
   candidateKnownPrefixes as candidateKnownPrefixesSeedOrLearned,
-} from "@/services/catalog/prefixIndex";
-import derivedPrefixMap from "@/services/catalog/derivedPrefixMap.json";
-import { prefixFloorName, type PrefixFloorResult } from "@/services/catalog/prefixFloor";
+} from "@/products/catalog/prefixIndex";
+import derivedPrefixMap from "@/products/catalog/derivedPrefixMap.json";
+import { prefixFloorName, type PrefixFloorResult } from "@/products/catalog/prefixFloor";
 import type { CodeType } from "@/types";
 
 export type { PrefixEntry, PrefixSource, PrefixCandidate };
@@ -67,7 +67,7 @@ export function lookupDerivedPrefix(code: string | undefined): PrefixEntry | nul
  * FULL merged lookup (SEED > DERIVED > LEARNED precedence, matching the pre-split `lookupPrefix`
  * exactly) for server-only callers that need the whole index (decode pipeline firewall,
  * learned-tier prefix corroboration). Never use from client code - import the client-safe
- * `lookupPrefix` from @/services/catalog/prefixIndex instead.
+ * `lookupPrefix` from @/products/catalog/prefixIndex instead.
  */
 export function lookupPrefixFull(code: string | undefined): PrefixEntry | null {
   const digits = gtin13(code);

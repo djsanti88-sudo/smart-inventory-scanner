@@ -7,7 +7,7 @@
 // testing/app-knowledge/oracle-codes.json.
 //
 // Sources:
-//   1. src/server/tire-knowledge/tireKnowledge.generated.json (git-tracked,
+//   1. src/decoding/server/knowledge/tire/tireKnowledge.generated.json (git-tracked,
 //      plain JSON) -> barcodeIndex -> { brand, model, size, barcode_type, ... }
 //   2. benchmarks/phase1_100_codes.csv (already has expectedName/expectedBrand/
 //      expectedSource columns) -> folded in verbatim.
@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
 
-const TIRE_CORPUS = resolve(repoRoot, 'src/server/tire-knowledge/tireKnowledge.generated.json');
+const TIRE_CORPUS = resolve(repoRoot, 'src/decoding/server/knowledge/tire/tireKnowledge.generated.json');
 const PHASE1_CSV = resolve(repoRoot, 'benchmarks/phase1_100_codes.csv');
 const OUT_PATH = resolve(repoRoot, 'testing/app-knowledge/oracle-codes.json');
 

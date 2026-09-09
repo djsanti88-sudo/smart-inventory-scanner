@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // DEFECT 2 (untrusted string leak): when a scan's decode fetch fails offline, the raw browser error
 // ("Failed to fetch") must NOT leak into the user-facing Reason column on the scan feed / review row.

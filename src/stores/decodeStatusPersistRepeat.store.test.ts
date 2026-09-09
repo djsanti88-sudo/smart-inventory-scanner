@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import type { SyncTarget } from "@/services/db/syncTarget";
-import type { SyncResult } from "@/services/mockDb";
+import type { SyncTarget } from "@/sync-database/syncTarget";
+import type { SyncResult } from "@/sync-database/mock/mockDb";
 import type { PendingSyncItem, ScanEvent } from "@/types";
 
 // Codex final verdict (2026-08-04), finding 2 (Medium): scanStore.ts:3971 settles EVERY scanFeed row

@@ -1,5 +1,5 @@
 {
-  "$comment": "Machine-readable section map for Scanbin. Created 2026-08-12. Sections are REVIEW UNITS, not folders - see docs/CODEMAP.md for why the filesystem is deliberately not reorganized to match. Consumed by scripts/check-section.mjs (npm run check:section <id>). Keep in sync with docs/CODEMAP.md.",
+  "$comment": "Machine-readable review-section map for Scanbin. Consumed by scripts/check-section.mjs (npm run check:section <id>). Keep it aligned with the workflow map and review-section summary in docs/ARCHITECTURE.md.",
   "version": 1,
   "sections": [
     {
@@ -8,12 +8,12 @@
       "owns": "Scan intake, the count ledger, resolution, optimistic state, persistence, sync queue.",
       "globs": [
         "src/stores/**",
-        "src/services/inventory.ts",
-        "src/services/inventory.replay.ts",
-        "src/services/resolver.ts",
-        "src/services/scanCleaner.ts",
-        "src/services/aliasMatcher.ts",
-        "src/services/idempotency.ts"
+        "src/inventory/ledger.ts",
+        "src/inventory/replay.ts",
+        "src/products/match/resolver.ts",
+        "src/scanning/clean/scanCleaner.ts",
+        "src/products/match/aliasMatcher.ts",
+        "src/inventory/idempotency.ts"
       ],
       "gates": ["npm run proof:all", "npm run test:ledger"],
       "invariants": [
@@ -24,8 +24,8 @@
         "Barcodes and part numbers are TEXT. No numeric coercion at any layer."
       ],
       "traps": [
-        "scanStore.ts is ~8,800 lines. Grep for symbols; never read top to bottom.",
-        "Audited 2026-08-12: this file largely EARNS its size. Density here is documented history, not bloat."
+        "scanStore.ts is ~1,850 lines; the actions live in src/stores/scan/*Slice.ts. Grep for symbols.",
+        "A slice is a per-store-instance factory. Anything mutable crosses ctx as a reference or getter, never by value."
       ]
     },
     {
@@ -39,7 +39,7 @@
         "src/services/fetchV2/**",
         "src/services/polish/**",
         "src/services/upc/**",
-        "src/services/security/aiSpendGuard.ts",
+        "src/decoding/limits/aiSpendGuard.ts",
         "src/app/api/ai-lookup/**"
       ],
       "gates": ["npm run proof:all", "npx vitest run src/server/decode src/app/api/ai-lookup"],
@@ -60,7 +60,7 @@
       "id": "ui",
       "title": "UI and app shell",
       "owns": "Client components, App Router pages, auth surface.",
-      "globs": ["src/components/**", "src/app/(app)/**", "src/app/login/**", "src/lib/auth.ts"],
+      "globs": ["src/components/**", "src/app/(app)/**", "src/app/login/**", "src/authentication/auth.ts"],
       "gates": ["npm run proof:all", "npm run test:e2e", "npm run qa:bots"],
       "invariants": [
         "The scan input is focused by default; Enter submits; focus returns after every scan.",
@@ -78,9 +78,9 @@
         "src/services/db/**",
         "src/services/catalog/**",
         "src/services/reconcile/**",
-        "src/services/csvImport.ts",
-        "src/services/csvExport.ts",
-        "src/services/columnIntelligence.ts",
+        "src/import/csvImport.ts",
+        "src/reports/export/csvExport.ts",
+        "src/import/columnIntelligence.ts",
         "src/services/sessions/**",
         "src/server/business/**",
         "src/server/share/**",

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Owner-reported LIVE BUG (deployed preview, 2026-07-20): a counted row showed name "Falken Azenis
 // RT660 P 245 /40 R18 97W XL BSW (suggested)" for barcode 848983017918, but the Brand / Model /
@@ -114,7 +114,7 @@ describe("empty-suggested regression guard (Group C)", () => {
     // (the fast inline-suggestion branch and the deep-verify inline-suggestion branch) both already
     // gate on isUsableProductName(best?.productName) / isUsableProductName(freshAfter.suggestedProductName)
     // before assigning status "suggested" (isUsableProductName rejects an empty/too-short/placeholder
-    // name at src/services/ai/decode.ts). This test locks that gate in as a regression guard - a
+    // name at src/decoding/decode.ts). This test locks that gate in as a regression guard - a
     // provider result that resolves to no usable identity must stay honestly needs_review, never
     // "suggested" (which the UI would otherwise badge as a real, if unconfirmed, product match).
     const store = aiOnStore();

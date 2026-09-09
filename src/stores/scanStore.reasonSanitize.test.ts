@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // BUG #14 (medium, info-disclosure, QA hardening 2026-07-16): CLIENT-SIDE defense-in-depth. Even
 // though the server now sanitizes reasonText/decision.reason before responding (pipeline.ts), the

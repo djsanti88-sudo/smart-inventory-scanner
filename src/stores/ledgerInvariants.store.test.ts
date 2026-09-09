@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
-import { replayLedgerCounts } from "@/services/inventory.replay";
+import { MockDb } from "@/sync-database/mock/mockDb";
+import { replayLedgerCounts } from "@/inventory/replay";
 import type { ScanEvent } from "@/types";
 
 type Store = ReturnType<typeof createTestScanStore>;
@@ -343,5 +345,29 @@ describe("ledger invariants hold across an auto-session boundary", () => {
     // The finished session's OWN synced ledger is untouched by the rotation - no phantom/double count
     // leaked backward onto it, still exactly the one scan taken before Finish.
     expect(db.getServerCount(finishedSessionId, "prod-coke")?.quantity).toBe(1);
+  });
+});
+
+// ---- The gate guards itself ----------------------------------------------------------------------
+// PATH TRAP (AGENTS.md: "Anything that identifies code by its PATH is a trap"). `npm run test:ledger`
+// names its suite files by hand in package.json, and vitest SILENTLY IGNORES a path that does not
+// exist - it prints "1 passed" and exits 0 rather than erroring. So renaming or moving any ledger
+// suite would quietly drop it from the counting gate while the gate stayed green, which is the exact
+// failure this project has now been bitten by twice (the key-safety allowlist, the provenanceTier
+// static lock). This test lives INSIDE the gate's own file list, so it runs whenever the gate runs.
+describe("test:ledger covers the files it claims to", () => {
+  it("every suite named in the package.json test:ledger script exists", () => {
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"));
+    const named: string[] = (pkg.scripts["test:ledger"] as string)
+      .split(/\s+/)
+      .filter((token) => token.includes(".test."));
+    expect(named.length, "test:ledger still names its suites explicitly").toBeGreaterThanOrEqual(7);
+    for (const file of named) {
+      expect(
+        existsSync(join(process.cwd(), file)),
+        `test:ledger names ${file}, which does not exist - vitest would skip it SILENTLY and the ` +
+          `counting gate would go green while covering less. Update the script in package.json.`,
+      ).toBe(true);
+    }
   });
 });

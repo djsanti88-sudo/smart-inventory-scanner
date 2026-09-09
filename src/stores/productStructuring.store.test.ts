@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
-// Build 2 / Task 4: the deterministic structurer (src/services/polish/structurer.ts) runs on the
+// Build 2 / Task 4: the deterministic structurer (src/products/polish/structurer.ts) runs on the
 // hot path whenever resolveUnknown mints/upgrades a product via create_new - synchronous, no LLM,
 // never blocks a scan. A human correction (correctProduct) permanently stamps structuredBy "human"
 // so no later automatic re-structuring pass (hot path or the offline backfill) can overwrite it -
@@ -82,8 +82,8 @@ describe("scanStore - product structuring on create_new (Task 4)", () => {
 describe("scanStore - structurer containment (Task 4 review fix)", () => {
   it("a structurer throw on create_new never breaks scan flow - the product is still created, just unstructured", async () => {
     vi.resetModules();
-    vi.doMock("@/services/polish/structurer", async (importOriginal) => {
-      const actual = await importOriginal<typeof import("@/services/polish/structurer")>();
+    vi.doMock("@/products/polish/structurer", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("@/products/polish/structurer")>();
       return {
         ...actual,
         structureProduct: () => {
@@ -93,7 +93,7 @@ describe("scanStore - structurer containment (Task 4 review fix)", () => {
     });
 
     const { createTestScanStore: createStoreWithMock } = await import("@/stores/scanStore");
-    const { MockDb: MockDbWithMock } = await import("@/services/mockDb");
+    const { MockDb: MockDbWithMock } = await import("@/sync-database/mock/mockDb");
 
     const store = createStoreWithMock({ db: new MockDbWithMock() });
     store.getState().processScan("205551600099");
@@ -120,7 +120,7 @@ describe("scanStore - structurer containment (Task 4 review fix)", () => {
     expect(product?.structuredBrand).toBeUndefined();
     expect(product?.structuredBy).toBeUndefined();
 
-    vi.doUnmock("@/services/polish/structurer");
+    vi.doUnmock("@/products/polish/structurer");
     vi.resetModules();
   });
 });

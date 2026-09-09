@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Aggressive Auto Decode Mode: an unknown scan must AUTOMATICALLY run the live decode pipeline when
 // AI lookup is on and a provider key is configured - not sit passively in Needs Review. These tests

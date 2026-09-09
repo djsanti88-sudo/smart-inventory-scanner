@@ -2,7 +2,7 @@
 // Task A6: runtime lookup semantics proof suite (node --test), run against the real repaired DB.
 //
 // Every test replicates the EXPLICIT two-step runtime path used by
-// src/server/tire-knowledge/tireKnowledgeIndex.ts:
+// src/decoding/server/knowledge/tire/tireKnowledgeIndex.ts:
 //   part-number key -> tire_part_numbers.canonical_product_uid (or the alias table),
 //   then tires WHERE canonical_product_uid = ? as a SEPARATE query.
 // This mirrors lookupPartNumberTurso / lookupPartNumberAliasSqlite exactly (two independent
@@ -49,7 +49,7 @@ function normBarcodeKey(code) {
 function normPartKey(pn) {
   return (pn ?? "").toString().replace(/[ -]/g, "").trim().toUpperCase().replace(/\s/g, "");
 }
-// Mirrors src/services/upc/gtin.ts gtinVariants (leading-zero-only equivalence).
+// Mirrors src/products/barcodes/gtin.ts gtinVariants (leading-zero-only equivalence).
 function gtinVariants(code) {
   const t = (code ?? "").toString().trim();
   const stripped = t.replace(/^0+/, "") || "0";
@@ -71,7 +71,7 @@ function lookupCandidates(code) {
   if (!isGtinShaped(t)) return [t];
   return [...new Set([t, ...gtinVariants(t)])];
 }
-// Mirrors src/services/catalog/tirePartNumber.ts basePartNumberKey/tirePartNumberCore/tirePartNumberVariants.
+// Mirrors src/products/catalog/tirePartNumber.ts basePartNumberKey/tirePartNumberCore/tirePartNumberVariants.
 function basePartNumberKey(pn) {
   return (pn ?? "").toString().replace(/[ -]/g, "").trim().toUpperCase().replace(/\s/g, "");
 }

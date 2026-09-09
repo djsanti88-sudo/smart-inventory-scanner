@@ -1,4 +1,4 @@
-import { CatalogReviewTable } from "@/components/CatalogReviewTable";
+import { CatalogReviewTable } from "@/admin/CatalogReviewTable";
 
 // Task 3 (owner step 3): platform-owner-only page for approving/rejecting pending catalogEntries
 // (the shared master catalog). Deliberately not linked from the main Nav (owner did not ask for that);

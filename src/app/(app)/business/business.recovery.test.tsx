@@ -10,14 +10,14 @@ const mocks = vi.hoisted(() => ({
   push: vi.fn(),
 }));
 
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/authentication/auth", () => ({
   createBusiness: (...args: unknown[]) => mocks.createBusiness(...args),
   createBusinessMember: (...args: unknown[]) => mocks.createBusinessMember(...args),
   ensureWorkspace: (...args: unknown[]) => mocks.ensureWorkspace(...args),
   listMemberships: (...args: unknown[]) => mocks.listMemberships(...args),
   signOut: vi.fn(),
 }));
-vi.mock("@/lib/selectedBusiness", () => ({
+vi.mock("@/users-businesses/selectedBusiness", () => ({
   SELECTED_BUSINESS_CHANGED_EVENT: "sis:selected-business-changed",
   setSelectedBusinessId: vi.fn(),
 }));

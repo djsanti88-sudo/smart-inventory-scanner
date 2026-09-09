@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { DEVICE_ID_KEY } from "@/services/deviceIdentity";
+import { DEVICE_ID_KEY } from "@/sync-database/queue/deviceIdentity";
 import { createTestScanStore } from "@/stores/scanStore";
 import type { PendingSyncItem, ScanEvent } from "@/types";
 

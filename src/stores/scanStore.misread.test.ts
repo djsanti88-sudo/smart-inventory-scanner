@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
-import { sanitizeCatalogEntry } from "@/services/catalog/sanitizeCatalog";
-import type { CatalogEntry } from "@/services/catalog/catalogTypes";
+import { MockDb } from "@/sync-database/mock/mockDb";
+import { sanitizeCatalogEntry } from "@/products/catalog/sanitizeCatalog";
+import type { CatalogEntry } from "@/products/catalog/catalogTypes";
 
 // A3/AM-2 (owner-ratified 2026-07-15): a scan of a code whose GS1 check digit fails must NEVER
 // dispatch the decode ladder - every GTIN rung is doomed by a bad check digit, so auto-decode would

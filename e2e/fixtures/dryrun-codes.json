@@ -687,7 +687,7 @@
       "codeType": "fnsku",
       "truth": "Nested Super Greens",
       "expected": "suggest-only",
-      "source": "repo src/server/retail-knowledge/retailKnowledge.generated.json (barcode 6188611731231)",
+      "source": "repo src/decoding/server/knowledge/retail/retailKnowledge.generated.json (barcode 6188611731231)",
       "group": "fnsku"
     },
     {
@@ -695,7 +695,7 @@
       "codeType": "fnsku",
       "truth": "Minimalist Vitamin C Face Serum",
       "expected": "suggest-only",
-      "source": "repo src/server/retail-knowledge/retailKnowledge.generated.json (barcode 8906128101082)",
+      "source": "repo src/decoding/server/knowledge/retail/retailKnowledge.generated.json (barcode 8906128101082)",
       "group": "fnsku"
     },
     {
@@ -703,7 +703,7 @@
       "codeType": "fnsku",
       "truth": "Minimalist Vitamin C Face Serum (label variant string in same repo record)",
       "expected": "suggest-only",
-      "source": "repo src/server/retail-knowledge/retailKnowledge.generated.json (barcode 8906128101082)",
+      "source": "repo src/decoding/server/knowledge/retail/retailKnowledge.generated.json (barcode 8906128101082)",
       "group": "fnsku"
     },
     {

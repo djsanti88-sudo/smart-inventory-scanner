@@ -7,7 +7,7 @@
 //
 // Reads state/urls.json (shared, read-only) + state/done<suffix>.json (map url -> true).
 // For each selected url: fetchProductPage -> parseTireFromHtml -> guardRow (using
-// src/services/catalog/brandPrefixMap.json, read-only) -> append to
+// src/products/catalog/brandPrefixMap.json, read-only) -> append to
 // state/harvested<suffix>.jsonl. Updates state/done<suffix>.json and
 // state/telemetry<suffix>.json after EVERY page (crash-safe, atomic-ish write-then-rename).
 //
@@ -33,7 +33,7 @@ import { guardRow } from "./lib/merge.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STATE_DIR = path.join(__dirname, "state");
 const URLS_FILE = path.join(STATE_DIR, "urls.json");
-const PREFIX_MAP_FILE = path.join(__dirname, "..", "..", "src", "services", "catalog", "brandPrefixMap.json");
+const PREFIX_MAP_FILE = path.join(__dirname, "..", "..", "src", "products", "catalog", "brandPrefixMap.json");
 
 const MIN_DELAY_MS = 2000;
 const MAX_DELAY_MS = 4000;

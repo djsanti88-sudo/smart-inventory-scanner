@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import type { BossReportData } from "@/services/reports/bossReport";
+import type { BossReportData } from "@/reports/variance/bossReport";
 
 // This public, read-only page intentionally lives outside the authenticated (app) route group.
 export default function PublicReportPage() {

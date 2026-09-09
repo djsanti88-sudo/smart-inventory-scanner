@@ -28,7 +28,7 @@ promoted to known products.
 - `review.jsonl.gz`: complete non-serving review/quarantine ledger (17 MB; NOT committed - kept in the local analysis output and reproducible from the corpus v2 build; a git history ledger is not a product asset).
 - `projection-diff.json`: exact serving drift against the frozen baseline.
 - `knowledge-db.receipt.json`: SQLite row counts, integrity checks, and DB/gzip hash parity.
-- `src/server/retail-knowledge/retailKnowledge.generated.meta.json`: classification and
+- `src/decoding/server/knowledge/retail/retailKnowledge.generated.meta.json`: classification and
   normalization totals.
 
 The final SQLite database contains **4,046,693 retail rows** and **78,838 tire rows**. Its SHA-256 is

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore, transferOrphanCount } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 import type { InventoryCount } from "@/types";
 
 // TOP-LEVEL LAW (owner, 2026-07-15, re-affirmed 2026-07-22): scan N = count N. Deleting a product

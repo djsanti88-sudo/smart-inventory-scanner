@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // Bug: scanFeed[].decodeNote is set once, synchronously at scan time, to "Decoding with AI..."
 // (evaluateAutoDecode's allowed:true reason) and is never refreshed once the decode settles. The

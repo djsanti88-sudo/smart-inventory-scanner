@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import type { SyncTarget } from "@/services/db/syncTarget";
-import type { SyncResult } from "@/services/mockDb";
+import type { SyncTarget } from "@/sync-database/syncTarget";
+import type { SyncResult } from "@/sync-database/mock/mockDb";
 import type { InventoryCount, InventorySession, PendingSyncItem } from "@/types";
-import type { AuditEventInput } from "@/services/audit/audit";
+import type { AuditEventInput } from "@/users-businesses/account/audit";
 
 // Loop 5 proof (store): importProductsCsv adds products + approved aliases, queues them through the
 // SAME durable path as scans (SAVE_PRODUCT + RESOLVE_ALIAS), audits the import, and an imported code

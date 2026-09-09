@@ -8,7 +8,7 @@ Fixture plan used to prove the proof-audit accepts criteria with real, existing 
 | # | Done means | Proof |
 |---|---|---|
 | 1 | Unit suite passes | `npm run test` |
-| 2 | Plan template stays the canonical structure | `PLAN_TEMPLATE.md` |
+| 2 | Plan template stays the canonical structure | `docs/PLAN_EXECUTION.md` |
 
 ## Proof / Testing
 - Run `npm run test` and require exit code zero.

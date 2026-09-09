@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
 
 // Repro for the customer-review-persistence bot failure (task-BOTFIX2-report.md / task-RESOLVEMERGE):

@@ -19,8 +19,8 @@ import { missingRequiredColumns, classifyRow, normPart, normText as norm, remapH
 
 const ROOT = process.cwd();
 const HARVEST_DIR = join(ROOT, "data", "tire-knowledge");
-const SEED = join(ROOT, "src", "server", "tire-knowledge", "seed", "tire_corpus_seed.csv");
-const OUT_DIR = join(ROOT, "src", "server", "tire-knowledge");
+const SEED = join(ROOT, "src", "decoding", "server", "knowledge", "tire", "seed", "tire_corpus_seed.csv");
+const OUT_DIR = join(ROOT, "src", "decoding", "server", "knowledge", "tire");
 const OUT_JSON = join(OUT_DIR, "tireKnowledge.generated.json");
 const OUT_META = join(OUT_DIR, "tireKnowledge.generated.meta.json");
 const STATUS = join(ROOT, "coordination", "RAG_KNOWLEDGE_STATUS.json");
@@ -41,7 +41,7 @@ function sha256(buf) { return createHash("sha256").update(buf).digest("hex"); }
 
 function writeStatus(obj) {
   mkdirSync(join(ROOT, "coordination"), { recursive: true });
-  writeFileSync(STATUS, JSON.stringify({ branch: gitInfo().git_branch, generator_path: "scripts/build-tire-knowledge.mjs", generated_index_path: "src/server/tire-knowledge/tireKnowledge.generated.json", generated_meta_path: "src/server/tire-knowledge/tireKnowledge.generated.meta.json", data_folder_written: false, pushed: false, merged: false, deployed: false, ...obj }, null, 2) + "\n");
+  writeFileSync(STATUS, JSON.stringify({ branch: gitInfo().git_branch, generator_path: "scripts/build-tire-knowledge.mjs", generated_index_path: "src/decoding/server/knowledge/tire/tireKnowledge.generated.json", generated_meta_path: "src/decoding/server/knowledge/tire/tireKnowledge.generated.meta.json", data_folder_written: false, pushed: false, merged: false, deployed: false, ...obj }, null, 2) + "\n");
 }
 
 /**

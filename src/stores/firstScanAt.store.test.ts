@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
 
 // P6 C2: firstScanAt is a set-once ISO timestamp of this business's FIRST counted scan (any path),

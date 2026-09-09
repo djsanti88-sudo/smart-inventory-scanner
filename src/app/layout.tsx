@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { SpeedInsightsTelemetry } from "@/components/SpeedInsightsTelemetry";
+import { SpeedInsightsTelemetry } from "@/shared/telemetry/SpeedInsightsTelemetry";
 import "./globals.css";
 
 const geistSans = Geist({

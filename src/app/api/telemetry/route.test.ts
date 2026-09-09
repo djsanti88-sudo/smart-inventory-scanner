@@ -7,12 +7,12 @@ const { checkRateLimit, decodeStorage, logServerEvent } = vi.hoisted(() => ({
   logServerEvent: vi.fn(),
 }));
 
-vi.mock("@/services/security/aiSpendGuard", () => ({
+vi.mock("@/decoding/limits/aiSpendGuard", () => ({
   checkRateLimit,
   intEnv: (_raw: string | undefined, fallback: number) => fallback,
 }));
-vi.mock("@/server/decode/storage", () => ({ decodeStorage }));
-vi.mock("@/server/log", () => ({ logServerEvent }));
+vi.mock("@/decoding/server/pipeline/storage", () => ({ decodeStorage }));
+vi.mock("@/decoding/server/log", () => ({ logServerEvent }));
 
 import { POST } from "./route";
 

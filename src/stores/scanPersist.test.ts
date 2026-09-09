@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { buildPersistedScanState, persistAccessLevel, type PersistableScanState } from "@/stores/scanPersist";
-import { effectiveClientAccessLevel } from "@/services/security/roleAccess";
+import { effectiveClientAccessLevel } from "@/users-businesses/roles/roleAccess";
 
 // Sec-4 contract: a customer ("business") browser must NOT persist the reusable code database (aliases /
 // catalog / shop overrides / OTHER products' codes / provider+decode traces). P1 (2026-06-22): it MUST

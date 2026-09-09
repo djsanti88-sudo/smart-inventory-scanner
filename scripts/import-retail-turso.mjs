@@ -15,7 +15,7 @@ const TOKEN = process.env.TURSO_AUTH_TOKEN;
 if (!TOKEN) { console.error("Set TURSO_AUTH_TOKEN"); process.exit(1); }
 
 const BATCH_SIZE = 200; // Turso batch limit per request
-const JSON_PATH = join(process.cwd(), "src", "server", "retail-knowledge", "retailKnowledge.generated.json");
+const JSON_PATH = join(process.cwd(), "src", "decoding", "server", "knowledge", "retail", "retailKnowledge.generated.json");
 // Pre-drop sanity guard (mirrors scripts/build-tire-knowledge.mjs's MIN_RETAINED_FRACTION output-sanity
 // guard, F1 2026-08-12; logic in scripts/retailImportGuard.mjs). --force here DROPs the LIVE Turso retail
 // table (~4.13M rows in production) and reimports from the local JSON. A stale or truncated local file

@@ -1,4 +1,4 @@
-// Generate src/services/tire/tirePrefixHints.ts from the validated, tiered CSV.
+// Generate src/products/tires/tirePrefixHints.ts from the validated, tiered CSV.
 //   node scripts/genTirePrefixHints.mjs
 // Ingest ONLY hint_strong + hint_weak rows. exclude_partnumber and review_before_use rows are NOT
 // ingested as prefixes (held out). Exclusion is per-ROW: a prefix shared by an excluded brand still
@@ -8,7 +8,7 @@ import fs from "node:fs";
 const CSV = "data/tire-knowledge/prefixes/tire_prefixes_FINAL.csv";
 // Extra curated/mined files (same columns) merged on top of FINAL; strong-beats-weak dedupe handles overlaps.
 const EXTRA = ["data/tire-knowledge/prefixes/tire_prefixes_ADDITIONS.csv", "data/tire-knowledge/prefixes/tire_prefixes_SIBLINGS.csv", "data/tire-knowledge/prefixes/tire_prefixes_PROMOTED.csv"];
-const OUT = "src/services/tire/tirePrefixHints.ts";
+const OUT = "src/products/tires/tirePrefixHints.ts";
 
 function parseCSV(text) {
   const rows = [];

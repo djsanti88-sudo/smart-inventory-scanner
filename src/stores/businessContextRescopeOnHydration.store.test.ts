@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
 import { DEMO_BUSINESS_ID } from "@/seed/seedData";
-import type { SyncTarget } from "@/services/db/syncTarget";
-import type { SyncResult, IncrementPayload } from "@/services/mockDb";
+import type { SyncTarget } from "@/sync-database/syncTarget";
+import type { SyncResult, IncrementPayload } from "@/sync-database/mock/mockDb";
 import type { InventoryCount, InventorySession, PendingSyncItem, UnknownCodeReview } from "@/types";
 
 // Fix #41 (data-loss shaped, intermittent race): if a scan is processed on the SIGN-IN path before the

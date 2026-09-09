@@ -2,10 +2,10 @@
 import "server-only";
 
 import { NextRequest, NextResponse } from "next/server";
-import { detectCodeType } from "@/services/codeTypeDetector";
+import { detectCodeType } from "@/products/match/codeTypeDetector";
 import { prefixFloorNameFull } from "@/server/catalog/prefixIndexServer";
-import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
-import { decodeStorage } from "@/server/decode/storage";
+import { checkRateLimit, intEnv } from "@/decoding/limits/aiSpendGuard";
+import { decodeStorage } from "@/decoding/server/pipeline/storage";
 
 // F5 bundle-surgery (wave 2, 2026-07-20): the DERIVED-tier prefix->brand map (2.3MB, generated from
 // our 4M-row retail/tire corpus) must never reach the client bundle (see

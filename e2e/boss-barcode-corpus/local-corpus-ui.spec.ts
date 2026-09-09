@@ -12,7 +12,7 @@ const ALLOWED_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const SCANNER_INTERVAL_MS = 100; // declared local keyboard-wedge arrival rate: 10 scans/s
 const SETTLEMENT_TIMEOUT_MS = 2_000;
 
-function manifest() { return JSON.parse(readFileSync(join(process.cwd(), "src", "server", "tire-knowledge", "exact-index", "manifest.json"), "utf8")); }
+function manifest() { return JSON.parse(readFileSync(join(process.cwd(), "src", "decoding", "server", "knowledge", "tire", "exact-index", "manifest.json"), "utf8")); }
 
 async function blockExternalEgress(page: Page) {
   const blocked: Array<{ method: string; hostname: string; pathname: string }> = [];

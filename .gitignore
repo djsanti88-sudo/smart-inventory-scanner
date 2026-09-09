@@ -113,13 +113,13 @@ reports/**/playwright-report/
 # confirms zero tracked. Consequence worth knowing before reasoning about production: because the
 # .gz does not ship in the function bundle, getKnowledgeDb() returns null on Vercel and every
 # corpus lookup falls through to Turso. Both files are built locally by `npm run build:knowledge-db`.
-src/server/knowledge.generated.db
+src/decoding/server/knowledge/knowledge.generated.db
 knowledge.generated.db.gz
-src/server/knowledge.generated.db-wal
-src/server/knowledge.generated.db-shm
+src/decoding/server/knowledge/knowledge.generated.db-wal
+src/decoding/server/knowledge/knowledge.generated.db-shm
 # Generation manifest (DT2-1, 2026-08-13): sha256 fingerprints of the paired .db/.db.gz outputs,
 # regenerated on every build alongside them -- never committed, same as the DB itself.
-src/server/knowledge.generated.manifest.json
+src/decoding/server/knowledge/knowledge.generated.manifest.json
 
 # Agent/session scratch (Playwright MCP snapshots + superpowers tooling state)
 .playwright-mcp/
@@ -143,7 +143,7 @@ scripts/barcode-harvester/output/*.csv
 scripts/dt-harvest/state/
 
 # dt-harvest corpus apply backups (local only)
-src/server/tire-knowledge/tireKnowledge.generated.json.bak-*
+src/decoding/server/knowledge/tire/tireKnowledge.generated.json.bak-*
 
 # Root artifact sweep (Task 1.2, 2026-07-12): root-level proof PNGs and firestore emulator log
 # are regenerated/transient; archived copies live in docs/archive/proof-images/.
@@ -220,7 +220,7 @@ data/tire-knowledge/exports/**/MANIFEST.md
 
 # Tree triage (2026-08-12): local scratch that should never be tracked.
 # `db` / `db-wal` are zero-byte SQLite artifacts a script created in the repo root
-# on 2026-08-10 (bad path arg); the real corpus DB is src/server/knowledge.generated.db.
+# on 2026-08-10 (bad path arg); the real corpus DB is src/decoding/server/knowledge/knowledge.generated.db.
 # Leading slash is REQUIRED: a bare `db` matches ANY path component named db, which
 # silently ignored the entire src/services/db/ directory (caught 2026-08-12 when a
 # `git add src/services/db/repositories.ts` was refused). Anchor to the repo root.

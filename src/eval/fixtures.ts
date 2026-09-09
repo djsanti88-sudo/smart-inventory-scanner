@@ -1,4 +1,4 @@
-import { emptyResult } from "@/services/ai/provider";
+import { emptyResult } from "@/decoding/provider";
 import type { AiLookupResult, DecodeDecision } from "@/types";
 
 // Mock/offline evidence fixtures. These preserve poisoned and legacy evidence shapes so the trust

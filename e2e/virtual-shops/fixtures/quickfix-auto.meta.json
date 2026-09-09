@@ -1,6 +1,6 @@
 {
   "shopKey": "quickfix-auto",
-  "generatedFrom": "curated static catalog (retail-shaped, deterministic) - see README.md for why src/server/retail-knowledge/ was NOT used",
+  "generatedFrom": "curated static catalog (retail-shaped, deterministic) - see README.md for why src/decoding/server/knowledge/retail/ was NOT used",
   "targetItems": 150,
   "actualItems": 150,
   "categoryCount": 20,

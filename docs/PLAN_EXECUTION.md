@@ -15,9 +15,9 @@
 3. **"Done" is a proof, not a feeling.** The goal becomes measurable acceptance criteria with a named
    proof method. The plan is NOT done until that proof passes or the owner explicitly accepts a
    near-miss. This gate is blocking; no partial work is ever presented as complete.
-4. **The orchestrator orchestrates; subagents build.** The main session (Fable) never implements;
-   every subagent call passes an explicit model (sonnet default, haiku trivial, opus for the hardest
-   reviews). Every substantive diff gets two-layer review.
+4. **Use delegation deliberately.** Follow the active Codex delegation policy. When delegation is
+   allowed and useful, give each worker explicit ownership and independently review substantive
+   diffs. The primary agent may implement directly when policy or task shape calls for it.
 5. **Autonomous between gates.** After plan approval, execute phase after phase without per-step
    approvals. Stop only for the doctrine's true blockers (spend, deploy, real data, scope change).
 
@@ -35,7 +35,8 @@
 ## Step 2 - Draft
 
 - The orchestrator drafts the plan (use the template in the Appendix below; brainstorming skill
-  first for creative work). Plans live in `docs/superpowers/plans/YYYY-MM-DD-<name>.md`.
+  first for creative work). Temporary plans live outside the canonical docs set, normally under
+  `.claude/plans/`. Record the one approved plan in `docs/plans/ACTIVE.md`.
 - The draft must contain: goal + criteria + proof methods, phases with per-phase gates, files likely
   touched, commands to run, risk gates, cost estimate (tokens and any paid-API WORST CASE per the
   Paid API Cost Truth Rule), and rollback story.
@@ -54,8 +55,8 @@ fail, lose data, overspend, or miss the goal) and non-blocking suggestions.
 
 Loop: revise the plan, re-attack, until ALL attackers report zero blocking objections - max 3
 rounds. Whatever disagreements survive round 3 are listed VERBATIM in the plan for the owner.
-Attackers run as subagents with explicit models (sonnet default; opus for the final round of a
-high-stakes plan).
+When subagents are available and permitted, use the model and reasoning settings required by the
+current delegation policy.
 
 ## Step 4 - Owner approval (one gate)
 
@@ -64,8 +65,8 @@ and the cost worst case. One approval starts autonomous execution. Do not re-ask
 
 ## Step 5 - Execution
 
-- **Orchestrator contract:** the main session decomposes, dispatches, reviews, and reports. Subagents
-  write the code. Model tiering is explicit on every dispatch; omitting the model is a violation.
+- **Orchestrator contract:** the primary session owns decomposition, implementation or dispatch,
+  review, and reporting. Any delegation follows the current delegation policy.
 - **Two-layer review on every substantive diff:** the implementer self-verifies (tests + evidence),
   then an independent reviewer subagent reviews the diff. Findings are fixed, not argued away.
 - **Autonomous phase progression:** phases proceed without owner check-ins. Respect concurrency caps.
@@ -143,7 +144,8 @@ Use this structure for EVERY plan in this project. The goal: a plan that is **se
 a person or another AI can read it cold (without the codebase) and give useful feedback. Always put
 the Problem / Context first so it can be pasted into another AI for review.
 
-Copy the sections below into `docs/superpowers/plans/<date>-<slug>.md` for each new plan.
+Copy the sections below into `.claude/plans/<date>-<slug>.md` for each new plan, then point
+`docs/plans/ACTIVE.md` at it only after explicit approval.
 
 1. **Problem / Context** (write this so a stranger AI understands it with zero prior context) - what
    the app is (one or two sentences); what is broken or missing, in plain language; the concrete

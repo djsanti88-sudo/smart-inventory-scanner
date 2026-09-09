@@ -1,7 +1,7 @@
 // scripts/dt-harvest/lib/applyTransform.mjs
 // Pure transforms for Task 6 (apply.mjs): turn raw harvested.jsonl lines into guard-eligible
 // TireRow objects, and map a TireRow onto the REAL corpus row schema found in
-// src/server/tire-knowledge/tireKnowledge.generated.json (barcodeIndex[barcode] = {...}).
+// src/decoding/server/knowledge/tire/tireKnowledge.generated.json (barcodeIndex[barcode] = {...}).
 //
 // The real corpus schema differs from lib/merge.mjs's assumed CorpusRow columns (no top-level
 // array, no `source`/`current_status` exactly matching the merge.mjs shape in the same way) so

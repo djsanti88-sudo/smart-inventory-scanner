@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   checkRateLimit: vi.fn(),
 }));
 
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: mocks.verifyIdToken }),
   getAdminDb: () => {
     function makeDoc(path: string) {
@@ -57,11 +57,11 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   },
 }));
 
-vi.mock("@/server/decode/storage", () => ({
+vi.mock("@/decoding/server/pipeline/storage", () => ({
   decodeStorage: async () => ({} as never),
 }));
 
-vi.mock("@/services/security/aiSpendGuard", () => ({
+vi.mock("@/decoding/limits/aiSpendGuard", () => ({
   checkRateLimit: (...args: unknown[]) => mocks.checkRateLimit(...args),
   intEnv: (value: string | undefined, fallback: number) => {
     if (value === undefined) return fallback;

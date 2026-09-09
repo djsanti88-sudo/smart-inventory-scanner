@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import type { SyncTarget } from "@/services/db/syncTarget";
-import type { SyncResult } from "@/services/mockDb";
+import type { SyncTarget } from "@/sync-database/syncTarget";
+import type { SyncResult } from "@/sync-database/mock/mockDb";
 import type { PendingSyncItem, Product, Alias } from "@/types";
 
 // Loop 2 proof (store logic, no emulator needed): with the Firebase (cloud) backend, sync uses the ASYNC

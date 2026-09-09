@@ -91,8 +91,8 @@ class InvariantLoaderTests(unittest.TestCase):
                     "npx",
                     "vitest",
                     "run",
-                    "src/server/upc/importBoundary.test.ts",
-                    "src/server/tire-knowledge/importBoundary.test.ts",
+                    "src/products/catalog/prefixIndexBundleBoundary.test.ts",
+                    "src/decoding/server/knowledge/tire/importBoundary.test.ts",
                 ),
                 "no-em-dash": ("node", "scripts/validate-agents.mjs"),
                 "cap-single-charge": (

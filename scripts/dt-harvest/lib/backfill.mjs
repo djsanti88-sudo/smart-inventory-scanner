@@ -2,7 +2,7 @@
 // Pure lib: fill in blank manufacturer_part_number fields on the REAL tire corpus
 // (barcodeIndex[barcode] rows) from harvested Discount Tire rows, WITHOUT overwriting any
 // existing non-blank field. Never touches any field other than manufacturer_part_number /
-// part_number_source. Corpus row shape: src/server/tire-knowledge/tireKnowledge.generated.json
+// part_number_source. Corpus row shape: src/decoding/server/knowledge/tire/tireKnowledge.generated.json
 // (barcodeIndex: Record<barcode, RowV1>, partNumberIndex: Record<normalizedPartNumber, uid>).
 //
 // Untrusted input: harvest rows came from scraped HTML (see parseProduct.mjs's semantic-firewall
@@ -12,7 +12,7 @@
 
 import { guardRow } from "./merge.mjs";
 
-/** Reimplemented identically to src/server/tire-knowledge/tireKnowledgeIndex.ts's normPartKey
+/** Reimplemented identically to src/decoding/server/knowledge/tire/tireKnowledgeIndex.ts's normPartKey
  * (3-line normalizer) rather than importing server-only TS into this .mjs script. */
 export function normPartKey(pn) {
   return (pn ?? "").toString().replace(/[ -]/g, "").trim().toUpperCase().replace(/\s/g, "");

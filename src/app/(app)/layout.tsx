@@ -1,9 +1,9 @@
-import { StoreHydrator } from "@/components/StoreHydrator";
-import { AuthGuard } from "@/components/AuthGuard";
-import { Nav } from "@/components/Nav";
-import { ProdFirebaseBanner } from "@/components/ProdFirebaseBanner";
-import { EmailVerifyBannerGate } from "@/components/EmailVerifyBannerGate";
-import { BusinessContextProvider } from "@/components/BusinessContextGate";
+import { StoreHydrator } from "@/sync-database/StoreHydrator";
+import { AuthGuard } from "@/authentication/AuthGuard";
+import { Nav } from "@/user-interface/shell/Nav";
+import { ProdFirebaseBanner } from "@/user-interface/shell/ProdFirebaseBanner";
+import { EmailVerifyBannerGate } from "@/authentication/EmailVerifyBannerGate";
+import { BusinessContextProvider } from "@/users-businesses/BusinessContextGate";
 
 // Shell for all protected app pages. Hydrates the local store, gates on the demo login, and
 // renders the navigation. Login lives outside this group so it is not gated.

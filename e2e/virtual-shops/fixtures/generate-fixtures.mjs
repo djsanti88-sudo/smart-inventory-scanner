@@ -1,7 +1,7 @@
 // e2e/virtual-shops/fixtures/generate-fixtures.mjs
 //
 // Deterministic fixture generator for the Virtual Shops harness.
-// See docs/superpowers/specs/2026-07-29-virtual-shops-design.md ("Build task
+// See shops.config.mjs and docs/HISTORY.md (retired design, "Build task
 // list", tasks 3, 5, 6, 7) and e2e/virtual-shops/README.md for the full map.
 //
 // Produces static, checked-in JSON/CSV fixtures for all four shop personas.
@@ -13,7 +13,7 @@
 //   node e2e/virtual-shops/fixtures/generate-fixtures.mjs
 //
 // Reused machinery:
-//   - src/server/knowledge.generated.db (read-only, better-sqlite3) for the
+//   - src/decoding/server/knowledge/knowledge.generated.db (read-only, better-sqlite3) for the
 //     Rincon Tire pull, mirroring scripts/seed-tires-from-corpus.ts's "read
 //     the corpus, shape rows" pattern (that script's Firestore write path is
 //     NOT reused - this generator never touches a network or a database
@@ -45,7 +45,7 @@ import { generateInventorySheet, buildReconcilePlan } from '../../teach/sheets.m
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const FIXTURES_DIR = __dirname;
-const CORPUS_DB_PATH = path.join(REPO_ROOT, 'src/server/knowledge.generated.db');
+const CORPUS_DB_PATH = path.join(REPO_ROOT, 'src/decoding/server/knowledge/knowledge.generated.db');
 const STRESS_CODES_PATH = path.join(REPO_ROOT, 'tools/fable5/fixtures/stress-codes.json');
 
 // ---------------------------------------------------------------------------
@@ -216,7 +216,7 @@ function buildRinconTire() {
     const fixture = { known, unknown };
     const meta = {
       shopKey: 'rincon-tire',
-      generatedFrom: 'src/server/knowledge.generated.db (offline read-only SQL, better-sqlite3)',
+      generatedFrom: 'src/decoding/server/knowledge/knowledge.generated.db (offline read-only SQL, better-sqlite3)',
       sourcePattern: 'scripts/seed-tires-from-corpus.ts (row-shaping only; this generator never writes to Firestore)',
       targetRows: RINCON_TARGET_ROWS,
       actualRows: known.length,
@@ -372,7 +372,7 @@ function buildQuickFixAuto() {
   const fixture = { items };
   const meta = {
     shopKey: 'quickfix-auto',
-    generatedFrom: 'curated static catalog (retail-shaped, deterministic) - see README.md for why src/server/retail-knowledge/ was NOT used',
+    generatedFrom: 'curated static catalog (retail-shaped, deterministic) - see README.md for why src/decoding/server/knowledge/retail/ was NOT used',
     targetItems: QUICKFIX_TARGET_ITEMS,
     actualItems: items.length,
     categoryCount: QUICKFIX_CATEGORIES.length,

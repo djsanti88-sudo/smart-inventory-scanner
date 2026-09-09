@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
-import { sanitizeCatalogEntry } from "@/services/catalog/sanitizeCatalog";
-import type { CatalogEntry } from "@/services/catalog/catalogTypes";
+import { MockDb } from "@/sync-database/mock/mockDb";
+import { sanitizeCatalogEntry } from "@/products/catalog/sanitizeCatalog";
+import type { CatalogEntry } from "@/products/catalog/catalogTypes";
 
 // Phase 5b Task 4: cloudCatalogResolve's cross-tier conflict check. When the async global-catalog
 // lookup finds a MASTER entry whose identity disagrees with a tenant product this account already

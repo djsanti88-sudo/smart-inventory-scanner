@@ -27,16 +27,12 @@ import { refreshTireMeta } from "./refresh-tire-meta.mjs";
 
 const REAL_PAYLOAD_PATH = join(
   process.cwd(),
-  "src",
-  "server",
-  "tire-knowledge",
+  "src", "decoding", "server", "knowledge", "tire",
   "tireKnowledge.generated.json",
 );
 const REAL_META_PATH = join(
   process.cwd(),
-  "src",
-  "server",
-  "tire-knowledge",
+  "src", "decoding", "server", "knowledge", "tire",
   "tireKnowledge.generated.meta.json",
 );
 
@@ -60,7 +56,7 @@ const EXPECTED_BASE_SOURCE_ROW_COUNT = 76208;
 // +671 barcodes / +653 part numbers / +635 identities, zero removals), and again
 // 2026-08-19 for the 2026-08-17 regeneration restored from the pre-aws WIP stash
 // (+281 barcodes / +258 part numbers / +246 identities). Counts below re-verified
-// directly against src/server/tire-knowledge/tireKnowledge.generated.json
+// directly against src/decoding/server/knowledge/tire/tireKnowledge.generated.json
 // (Object.keys of barcodeIndex / partNumberIndex / identityIndex).
 const EXPECTED_BARCODE_COUNT = 79389;
 const EXPECTED_PART_NUMBER_COUNT = 28275;

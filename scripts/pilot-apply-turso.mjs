@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
-const CORPUS_JSON_PATH = join(ROOT, "src", "server", "tire-knowledge", "tireKnowledge.generated.json");
+const CORPUS_JSON_PATH = join(ROOT, "src", "decoding", "server", "knowledge", "tire", "tireKnowledge.generated.json");
 const ENV_LOCAL_PATH = join(ROOT, ".env.local");
 
 const APPLY = process.argv.includes("--apply");

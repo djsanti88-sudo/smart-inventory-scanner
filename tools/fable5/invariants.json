@@ -21,8 +21,8 @@
       "npx",
       "vitest",
       "run",
-      "src/server/upc/importBoundary.test.ts",
-      "src/server/tire-knowledge/importBoundary.test.ts"
+      "src/products/catalog/prefixIndexBundleBoundary.test.ts",
+      "src/decoding/server/knowledge/tire/importBoundary.test.ts"
     ],
     "timeout_seconds": 180
   },

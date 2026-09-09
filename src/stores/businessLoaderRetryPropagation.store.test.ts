@@ -22,7 +22,7 @@ vi.mock("firebase/firestore", () => ({
   orderBy: vi.fn((field: string, dir: string) => ({ field, dir })),
 }));
 
-import { loadBusinessData, LOAD_ATTEMPT_TIMEOUT_MS, LOAD_MAX_ATTEMPTS } from "@/services/db/firebase/businessDataLoader";
+import { loadBusinessData, LOAD_ATTEMPT_TIMEOUT_MS, LOAD_MAX_ATTEMPTS } from "@/sync-database/cloud/businessDataLoader";
 import type { Firestore } from "firebase/firestore";
 
 const fakeDb = {} as Firestore;

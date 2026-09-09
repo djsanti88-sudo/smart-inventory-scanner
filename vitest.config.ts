@@ -30,14 +30,22 @@ export default defineConfig({
         test: {
           name: "unit",
           environment: "node",
-          include: ["src/services/**/*.test.ts", "src/eval/**/*.test.ts", "src/server/**/*.test.ts", "src/app/**/*.test.ts", "src/lib/**/*.test.ts", "scripts/**/*.test.mjs"],
+          // STRUCTURE-INDEPENDENT (folder reorganization, Project A): projects are selected by file
+          // EXTENSION plus two named DOM exceptions, never by feature-folder path. A directory glob
+          // silently stops collecting when its folder is renamed - the suite still reports green while
+          // hundreds of tests quietly vanish. Extension-based globs cannot fail that way.
+          //   unit -> every *.test.ts under src/ (node env), except the DOM exceptions below
+          //   dom  -> every *.test.tsx, plus the store + camera suites that need a real DOM
+          include: ["src/**/*.test.ts", "scripts/**/*.test.mjs"],
           // src/services/camera touches window.BarcodeDetector and HTMLVideoElement, which need a DOM -
-          // excluded here and picked up by the "dom" project below instead.
+          // excluded here and picked up by the "dom" project below instead. Same for the Zustand store
+          // suites, which render/persist against browser storage.
           // scripts/kkm-catalog and scripts/tire-db-repair/*.test.mjs are node:test suites run via
           // `node --test`, not vitest - vitest's glob would otherwise collect them and fail with
           // "No test suite found".
           exclude: [
-            "src/services/camera/**",
+            "src/scanning/camera/**",
+            "src/stores/**",
             "scripts/kkm-catalog/**/*.test.mjs",
             "scripts/refresh-tire-meta.test.mjs",
             "scripts/boss-workbook-reconcile-dryrun.test.mjs",
@@ -56,7 +64,8 @@ export default defineConfig({
         test: {
           name: "dom",
           environment: "jsdom",
-          include: ["src/components/**/*.test.tsx", "src/app/**/*.test.tsx", "src/stores/**/*.test.ts", "src/services/camera/**/*.test.ts"],
+          // Extension-based, folder-independent (see the "unit" project note above).
+          include: ["src/**/*.test.tsx", "src/stores/**/*.test.ts", "src/scanning/camera/**/*.test.ts"],
           setupFiles: ["./vitest.setup.ts"],
         },
       },

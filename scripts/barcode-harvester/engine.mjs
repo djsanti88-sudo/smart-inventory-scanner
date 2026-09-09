@@ -12,7 +12,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..", "..");
 const SITES_DIR = join(__dirname, "sites");
 const OUTPUT_DIR = join(__dirname, "output");
-const TIRE_INDEX = join(ROOT, "src", "server", "tire-knowledge", "tireKnowledge.generated.json");
+const TIRE_INDEX = join(ROOT, "src", "decoding", "server", "knowledge", "tire", "tireKnowledge.generated.json");
 
 // --- CLI args ---
 function parseArgs() {
@@ -267,7 +267,7 @@ async function main() {
   if (stats.newBarcodes > 0) {
     console.log(`\n[harvester] Next steps:`);
     console.log(`  1. Review: head -20 ${outPath}`);
-    console.log(`  2. Copy to seed: cp ${outPath} src/server/tire-knowledge/seed/`);
+    console.log(`  2. Copy to seed: cp ${outPath} src/decoding/server/knowledge/tire/seed/`);
     console.log(`  3. Rebuild index: node scripts/build-tire-knowledge.mjs`);
     console.log(`  4. Rebuild SQLite: node scripts/build-knowledge-db.mjs`);
   }

@@ -1,11 +1,11 @@
 // Offline derivation of the GS1 prefix-confidence map for the anti-hallucination firewall.
 // Streams a product dataset (default: the tire corpus CSV) and aggregates, per 6-digit company prefix,
 // the candidate brands/manufacturers with confidence weights + category distribution. Emits the map in
-// the PrefixEntry shape consumed by src/services/catalog/prefixIndex.ts (derived_catalog source).
+// the PrefixEntry shape consumed by src/products/catalog/prefixIndex.ts (derived_catalog source).
 //
 // This is STATISTICAL evidence, NOT official GS1 truth. Run offline ($0, no AI):
 //   node scripts/build-prefix-index.mjs [--input <csv>] [--out <json>] [--min <n>] [--brandCol N] [--codeCol N] [--category tire]
-// Default --out writes the runtime map (src/services/catalog/derivedPrefixMap.json); use --out to a
+// Default --out writes the runtime map (src/products/catalog/derivedPrefixMap.json); use --out to a
 // proof path to inspect without changing runtime. For the full 4M DB, export it to CSV/JSONL first
 // (Firestore -> rows of {barcode, brand, category}) and point --input at it.
 
@@ -17,7 +17,7 @@ const opt = (name, def) => {
   return i >= 0 && args[i + 1] ? args[i + 1] : def;
 };
 const INPUT = opt("input", "data/tire-knowledge/tire_corpus_flat.csv");
-const OUT = opt("out", "src/services/catalog/derivedPrefixMap.json");
+const OUT = opt("out", "src/products/catalog/derivedPrefixMap.json");
 const MIN = Number(opt("min", "3"));
 const BRAND_COL = Number(opt("brandCol", "1")); // tire corpus: brand is column 1
 const CODE_COL = Number(opt("codeCol", "9")); // tire corpus: barcode is column 9

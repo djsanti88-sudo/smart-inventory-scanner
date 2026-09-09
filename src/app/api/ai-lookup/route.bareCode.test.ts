@@ -4,7 +4,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const runDecodePipeline = vi.fn();
-vi.mock("@/server/decode/pipeline", () => ({
+vi.mock("@/decoding/server/pipeline/pipeline", () => ({
   runDecodePipeline: (...args: unknown[]) => runDecodePipeline(...args),
   e2eMode: () => true,
 }));
@@ -14,17 +14,17 @@ vi.mock("@/server/catalog/masterAppend", () => ({
   appendMasterCatalogEntry: async () => "skipped_human" as const,
 }));
 
-vi.mock("@/server/log", () => ({
+vi.mock("@/decoding/server/log", () => ({
   logServerEvent: vi.fn(),
 }));
 
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: vi.fn() }),
   getAdminDb: () => ({ doc: () => ({ get: vi.fn() }) }),
 }));
 
-vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
-  const orig = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
+vi.mock("@/decoding/limits/aiSpendGuard", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("@/decoding/limits/aiSpendGuard")>();
   return {
     ...orig,
     killSwitchOn: () => false,

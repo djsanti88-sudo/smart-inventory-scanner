@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isBrandInPrefixFamily } from "../../src/services/tire/tirePrefixLookup.ts";
+import { isBrandInPrefixFamily } from "../../src/products/tires/tirePrefixLookup.ts";
 
 // Real barcodes for known brands MUST be in their STRONG prefix family after mining + merge.
 // Convention-agnostic: goes through the lookup's dual-alignment, so 086699 vs 0086699 both work.

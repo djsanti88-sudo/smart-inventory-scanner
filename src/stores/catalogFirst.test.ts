@@ -1,13 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
-import { sanitizeCatalogEntry } from "@/services/catalog/sanitizeCatalog";
-import type { CatalogEntry, ShopOverride } from "@/services/catalog/catalogTypes";
+import { MockDb } from "@/sync-database/mock/mockDb";
+import { sanitizeCatalogEntry } from "@/products/catalog/sanitizeCatalog";
+import type { CatalogEntry, ShopOverride } from "@/products/catalog/catalogTypes";
 import { DEMO_BUSINESS_ID } from "@/seed/seedData";
 
 const NOW = "2026-06-14T00:00:00.000Z";
 // A3/AM-2 (2026-07-15): must be a VALID-check-digit GTIN - a bad-check-digit code is now treated
-// as a likely misread and skips auto-decode entirely (src/services/upc/misread.ts), which is
+// as a likely misread and skips auto-decode entirely (src/products/barcodes/misread.ts), which is
 // unrelated to what this suite tests. Fixture value only; no assertions changed.
 const CODE = "111222333446"; // not a seed alias -> resolver returns needs_review
 

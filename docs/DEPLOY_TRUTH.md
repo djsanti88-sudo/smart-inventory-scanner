@@ -1,8 +1,27 @@
 # Deploy Truth (canonical)
 
-This is the single source of truth for how a deploy actually happens on this project today. When
-CLAUDE.md, COMMANDS.md, GO_LIVE_CHECKLIST.md, or any other doc describes deploy mechanics, it should
+This is the single source of truth for deployment targets, release gates, environment separation,
+production readiness, and operational monitoring. When another doc describes deploy mechanics, it should
 point here rather than restate it - this file is what gets updated when the mechanism changes.
+
+## Stable targets
+
+| System | Target |
+|---|---|
+| GitHub repository | `djsanti88-sudo/smart-inventory-scanner` |
+| Production branch | `master` |
+| Vercel team | `sharpenly` |
+| Vercel project | `inventory` |
+| Customer production alias | `inventory-lovat-six.vercel.app` |
+| Stable Preview alias | `inventory-preview-sharpenly.vercel.app` |
+| Firebase production project | `smart-inventory-scanner-app` |
+| Firebase Preview project | `smart-inventory-preview` |
+| Firebase emulator project | `demo-smart-inventory` |
+| Turso database | `inventory-retail` |
+
+Do not record a current deployment URL or deployment ID here; those change on every release. Query
+the deployment platform immediately before release proof. This file never contains credentials or
+environment-variable values.
 
 ## GitHub is the deploy trigger (cutover complete 2026-08-06)
 
@@ -34,9 +53,9 @@ PR #21 as the deliberate last cutover step after protection was confirmed live (
    to them:
    - **typecheck**: `npx tsc --noEmit`.
    - **unit-tests**: `npx vitest run`, with two explicit exclusions -
-     `--exclude "src/server/tire-knowledge/dtHarvestIntegration.test.ts"` (needs a locally-built
+     `--exclude "src/decoding/server/knowledge/tire/dtHarvestIntegration.test.ts"` (needs a locally-built
      knowledge DB not built in CI) and
-     `--exclude "src/components/UniversalImportPanel.fixtures.test.tsx"` (needs gitignored local-only
+     `--exclude "src/import/UniversalImportPanel.fixtures.test.tsx"` (needs gitignored local-only
      CSV fixtures with no CI-reachable generator). See the comments at the top of `ci.yml` for the full
      rationale on both exclusions.
    - **build**: `npm run build` (`next build`).
@@ -98,7 +117,7 @@ PR #21 as the deliberate last cutover step after protection was confirmed live (
 - **Firestore security rules deploys** (`npm run deploy:rules:prod`) are a completely separate
   production surface outside Vercel. Merging a PR to `master` never touches Firestore rules; rules
   changes still require the explicit `deploy:rules:prod` command run with owner sign-off per
-  `docs/GO_LIVE_CHECKLIST.md`.
+  `docs/FIREBASE.md` and `docs/RECOVERY.md`.
 - **Paid/live API keys and any live-provider calls** - CI runs against mock providers, so nothing in
   the CI pipeline itself calls a paid AI provider. Preview is different: it carries real
   `OPENAI_API_KEY` value and can make live paid decode calls, bounded by the same
@@ -158,7 +177,7 @@ Preview deployments use `smart-inventory-preview`, a Firebase project separate f
 explicit `FIREBASE_PROJECT_ID`, and Preview-scoped Admin credential so authentication, Firestore,
 sessions, and tenant-isolation can be tested without touching production users or inventory. This
 supersedes the earlier mock/no-login-by-design Preview state described in historical commit messages
-and `DECISIONS.md`'s 2026-07-22 deployment-model entry; this file (not `docs/FIREBASE_SETUP.md`) is the
+and `DECISIONS.md`'s 2026-07-22 deployment-model entry; this file is the
 authoritative current statement of Preview policy.
 
 **Owner-ratified policy: paid decode remains enabled in Preview.** `scripts/env-manifest.json`
@@ -172,17 +191,11 @@ Preview must never use emulator mode, a production-mode opt-in, raw service-acco
 owner overrides - those remain forbidden by `scripts/env-manifest.json`. Runtime browser proof must
 also confirm the public Firebase project ID before any authenticated test.
 
-### Current safety stop (2026-07-26)
-
-The previously deployed Preview bundle contained the production Firebase project. That deployment is
-not an acceptable authenticated test target. A dedicated Preview project now exists, but the Vercel
-Preview variables and runtime proof must be updated before a new authenticated Preview is deployed.
-
 ## Production environment
 
 Production carries the real Firebase config (`NEXT_PUBLIC_FIREBASE_*`, `NEXT_PUBLIC_AUTH_MODE=live`,
-`FIREBASE_SERVICE_ACCOUNT_JSON`/`_BASE64`) per `docs/GO_LIVE_CHECKLIST.md`. As of 2026-07-22,
-production and Preview include `OPENAI_API_KEY` for the single GPT-5.4 mini decode path. Retired
+`FIREBASE_SERVICE_ACCOUNT_JSON`/`_BASE64`) per `docs/FIREBASE.md`. Production and Preview include
+`OPENAI_API_KEY` for the single GPT-5.4 mini decode path. Retired
 provider keys are forbidden by `scripts/env-manifest.json`. Whenever a new env
 var is added to one environment, check the other environments for parity before assuming it is
 everywhere the code expects it.
@@ -222,6 +235,35 @@ everywhere the code expects it.
   production deploy after a merge, or the preview URL from a PR.
 - All three scripts above are wired into `scripts/deploy-preview.mjs` (see "Local CLI deploy" above)
   and also runnable standalone for manual verification at any time.
+
+## Production-readiness checklist
+
+The active release state and remaining owner-gated actions live at the top of `PROGRESS.md`. Before a
+production release or environment change, verify all applicable items with fresh evidence:
+
+- the exact candidate SHA and its relationship to current `master`;
+- a clean, intentional release diff with no secrets or generated junk;
+- `npm run proof:all` plus the ledger, Firebase, and browser gates required by the change;
+- Preview project identity and environment-variable name parity;
+- production Firebase rules/index parity when those files changed;
+- the rollback deployment and the source-level `git revert` follow-up path;
+- post-deploy route fingerprint, authenticated customer workflow, and tenant isolation;
+- provider billing-console reconciliation after any approved paid/live decode proof.
+
+Do not carry forward a checked box from an older release. Mock or Preview proof does not certify
+authenticated production, and a Vercel deployment does not deploy Firestore rules or indexes.
+
+## Observability
+
+`logServerEvent` emits structured JSON with fixed routing/event fields and bounded optional detail.
+Never log request bodies, scanned codes, customer identities, prices, credentials, tokens, or raw
+exception stacks. The public telemetry route accepts only its allowlisted client events, derives
+server-owned fields, applies body limits and rate limits, and fails softly.
+
+In Vercel Logs, filter `src:scanbin` and investigate sustained `breaker_open`, any
+`spend_write_diverged`, and any `charge_pair_incomplete`. Logs are diagnostic evidence, not paging.
+An uptime monitor or alerting provider requires a separate owner-approved integration and must not be
+described as configured until live delivery is proven.
 
 ## What this replaces
 

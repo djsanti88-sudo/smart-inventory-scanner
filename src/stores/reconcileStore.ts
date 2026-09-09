@@ -1,8 +1,8 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import type { AdapterResult } from "@/services/reconcile/types";
-import type { MatchResult } from "@/services/reconcile/identityMatcher";
-import type { ReconcileReport } from "@/services/reconcile/reconcileReport";
+import type { AdapterResult } from "@/reconcile/types";
+import type { MatchResult } from "@/reconcile/match/identityMatcher";
+import type { ReconcileReport } from "@/reconcile/variance/reconcileReport";
 
 // Reconcile session store (Task 7, AM-R9): exactly ONE active expected-inventory session.
 // - Re-importing a file REPLACES the session (never appends) and clears stale matches/report.

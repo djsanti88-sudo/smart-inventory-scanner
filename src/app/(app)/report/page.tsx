@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { getSession } from "@/lib/auth";
-import { isLiveAuth } from "@/services/auth/authMode";
-import { buildBossReport } from "@/services/reports/bossReport";
+import { getSession } from "@/authentication/auth";
+import { isLiveAuth } from "@/authentication/service/authMode";
+import { buildBossReport } from "@/reports/variance/bossReport";
+import { countsForActiveSession } from "@/inventory/sessionCounts";
 import { useScanStore } from "@/stores/scanStore";
-import { BusinessContextGate } from "@/components/BusinessContextGate";
+import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
 
 // BusinessContextGate (same convention as /scan, /review, /history, /sessions/[id], /reconcile,
 // /products, /settings): a hard page load directly on /report must wait for the real signed-in
@@ -29,7 +30,7 @@ export default function BossReportPage() {
   const buildCurrentReport = () =>
     buildBossReport({
       products,
-      finalCounts,
+      finalCounts: countsForActiveSession(finalCounts, session),
       scanFeed,
       sessionName: session?.name ?? "Current session",
       countedBy: userId ?? "Owner",

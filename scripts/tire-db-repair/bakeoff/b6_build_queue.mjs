@@ -13,7 +13,7 @@
 //
 // Priority order (owner-authorized):
 //   1. Rows whose GS1 prefix or existing known_* fields indicate one of the five boss brands
-//      (nexen, arisun, blackhawk, fortune, falken) - checked via src/services/catalog/brandPrefixMap.json
+//      (nexen, arisun, blackhawk, fortune, falken) - checked via src/products/catalog/brandPrefixMap.json
 //      and via any known_brand text match.
 //   2. Rows with a valid (non-placeholder, correct check-digit where checkable) GTIN barcode.
 //   3. Everything else (still non-placeholder).
@@ -35,7 +35,7 @@ const REMAINING_BLANKS_PATH = path.join(
   REPO_ROOT,
   "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/bakeoff/remaining_blanks.json"
 );
-const PREFIX_MAP_PATH = path.join(REPO_ROOT, "src/services/catalog/brandPrefixMap.json");
+const PREFIX_MAP_PATH = path.join(REPO_ROOT, "src/products/catalog/brandPrefixMap.json");
 const B6_DIR = path.join(REPO_ROOT, "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/bakeoff/b6");
 
 const BOSS_BRANDS = ["nexen", "arisun", "blackhawk", "fortune", "falken"];

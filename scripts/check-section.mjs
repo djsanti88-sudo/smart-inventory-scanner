@@ -9,7 +9,7 @@
 // the tests keep PASSING while checking nothing. A feature-folder reorg would silently
 // disarm the very guards that keep API keys out of the browser bundle.
 //
-// So the map lives in codemap.json + docs/CODEMAP.md instead, and this script makes it
+// The map lives in codemap.json; docs/ARCHITECTURE.md explains its review sections. This script makes it
 // runnable. Handing a subagent `npm run check:section decode` gives it the file globs,
 // the invariants it must not break, the traps that have bitten before, and the exact gate
 // commands -- which is what the folder layout was being asked to communicate.

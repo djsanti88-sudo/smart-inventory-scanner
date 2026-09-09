@@ -3,7 +3,7 @@
 // Single source of truth for the four Virtual Shops persona configs: name,
 // fixture file paths, report directory, and behavior knobs (typo/double-scan/
 // interrupt rates, session pattern). See
-// docs/superpowers/specs/2026-07-29-virtual-shops-design.md for the full
+// docs/HISTORY.md records the retired virtual-shops design; this file is the current
 // per-shop spec (goal, daily loop, data sources, success metrics).
 //
 // IMPORTANT: this file is config-only - no Playwright, no browser code, no

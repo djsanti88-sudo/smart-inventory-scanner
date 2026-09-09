@@ -7,7 +7,7 @@ import BusinessPage from "@/app/(app)/business/page";
 // saved business name. The name IS stored on the businesses doc; the list must join and show it.
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
-vi.mock("@/lib/selectedBusiness", () => ({
+vi.mock("@/users-businesses/selectedBusiness", () => ({
   SELECTED_BUSINESS_CHANGED_EVENT: "sis:selected-business-changed",
   setSelectedBusinessId: vi.fn(),
 }));
@@ -16,7 +16,7 @@ vi.mock("@/stores/scanStore", () => ({
 }));
 // listMemberships resolves the business name onto each Membership (server-validated join), so the
 // list renders the saved NAME directly - no separate name-fetch helper.
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/authentication/auth", () => ({
   createBusiness: vi.fn(),
   createBusinessMember: vi.fn(),
   ensureWorkspace: vi.fn(),

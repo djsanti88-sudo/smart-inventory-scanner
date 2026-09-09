@@ -1,12 +1,12 @@
 import "server-only";
 
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-import { COLLECTIONS, memberDocId } from "@/services/db/types";
-import { accessLevelServer } from "@/services/security/roleAccess";
-import { resolveScanForRole } from "@/services/security/resolveScanServer";
-import { toStoreProduct, toStoreAlias } from "@/services/db/firebase/storeMappers";
+import { getAdminAuth, getAdminDb } from "@/sync-database/cloud/firebaseAdmin";
+import { COLLECTIONS, memberDocId } from "@/sync-database/types";
+import { accessLevelServer } from "@/users-businesses/roles/roleAccess";
+import { resolveScanForRole } from "@/products/match/resolveScanServer";
+import { toStoreProduct, toStoreAlias } from "@/sync-database/cloud/storeMappers";
 import type { Product, Alias } from "@/types";
-import { logServerEvent } from "@/server/log";
+import { logServerEvent } from "@/decoding/server/log";
 
 // Sec-5: PROTECTED server-side customer scan resolution.
 //

@@ -22,8 +22,8 @@ function corpusEval(): void {
   let index: { barcodeIndex: Record<string, { brand: string; size: string; load_index: string; speed_rating: string; confidence: string }> };
   let meta: Record<string, unknown> = {};
   try {
-    index = JSON.parse(readFileSync("src/server/tire-knowledge/tireKnowledge.generated.json", "utf8"));
-    meta = JSON.parse(readFileSync("src/server/tire-knowledge/tireKnowledge.generated.meta.json", "utf8"));
+    index = JSON.parse(readFileSync("src/decoding/server/knowledge/tire/tireKnowledge.generated.json", "utf8"));
+    meta = JSON.parse(readFileSync("src/decoding/server/knowledge/tire/tireKnowledge.generated.meta.json", "utf8"));
   } catch {
     console.log("No generated tire-knowledge index. Run: npm run build:tire-knowledge");
     return;

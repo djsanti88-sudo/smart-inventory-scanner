@@ -1,7 +1,7 @@
 // Shared predicate for a single security/money invariant: "the daily AI cap charges ONLY paid rungs,
 // exactly once per genuine compute" (decode evidence rules; LESSONS_LEARNED L12).
 //
-// Extracted per the 2026-08-12 invariant audit (docs/superpowers/reports/2026-08-12-invariant-audit-
+// Extracted per the 2026-08-12 invariant audit (see docs/HISTORY.md;
 // security.md, finding #2): route.ts previously computed `isDecodeMode` inline from the client-supplied
 // `body.mode` string and reused that single variable at two downstream call sites - the "skip the legacy
 // lookup-mode charge" gate and the "run the decode pipeline (which owns its own charge)" dispatch. Today

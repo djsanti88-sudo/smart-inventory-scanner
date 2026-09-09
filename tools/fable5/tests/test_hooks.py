@@ -16,30 +16,30 @@ from tools.fable5.hook_support import (
 
 
 PLAN_DIFF_CHECKED = """\
-diff --git a/docs/superpowers/plans/2026-07-19-master-plan.md b/docs/superpowers/plans/2026-07-19-master-plan.md
+diff --git a/.claude/plans/2026-07-19-master-plan.md b/.claude/plans/2026-07-19-master-plan.md
 index 1111111..2222222 100644
---- a/docs/superpowers/plans/2026-07-19-master-plan.md
-+++ b/docs/superpowers/plans/2026-07-19-master-plan.md
+--- a/.claude/plans/2026-07-19-master-plan.md
++++ b/.claude/plans/2026-07-19-master-plan.md
 @@ -10,7 +10,7 @@
 -- [ ] Ship phase 1
 +- [x] Ship phase 1
 """
 
 PLAN_DIFF_UNCHECKED = """\
-diff --git a/docs/superpowers/plans/2026-07-19-master-plan.md b/docs/superpowers/plans/2026-07-19-master-plan.md
+diff --git a/.claude/plans/2026-07-19-master-plan.md b/.claude/plans/2026-07-19-master-plan.md
 index 1111111..2222222 100644
---- a/docs/superpowers/plans/2026-07-19-master-plan.md
-+++ b/docs/superpowers/plans/2026-07-19-master-plan.md
+--- a/.claude/plans/2026-07-19-master-plan.md
++++ b/.claude/plans/2026-07-19-master-plan.md
 @@ -10,7 +10,7 @@
  Some context line unrelated to checkboxes.
 +Another plain added line, no checkbox here.
 """
 
 REVIEWS_DIFF_CHECKED = """\
-diff --git a/docs/reviews/LATEST.json b/docs/reviews/LATEST.json
+diff --git a/reports/fable5/LATEST.json b/reports/fable5/LATEST.json
 index 1111111..2222222 100644
---- a/docs/reviews/LATEST.json
-+++ b/docs/reviews/LATEST.json
+--- a/reports/fable5/LATEST.json
++++ b/reports/fable5/LATEST.json
 @@ -1,3 +1,3 @@
 -- [ ] should never matter here
 +- [x] should never matter here
@@ -63,7 +63,7 @@ class DetectPhaseCompletionTests(unittest.TestCase):
     def test_plain_added_line_is_not_detected(self) -> None:
         self.assertFalse(detect_phase_completion(PLAN_DIFF_UNCHECKED))
 
-    def test_reviews_path_is_ignored(self) -> None:
+    def test_latest_report_pointer_is_ignored(self) -> None:
         self.assertFalse(detect_phase_completion(REVIEWS_DIFF_CHECKED))
 
     def test_reports_path_is_ignored(self) -> None:
@@ -74,9 +74,9 @@ class DetectPhaseCompletionTests(unittest.TestCase):
 
     def test_removed_checkbox_line_is_not_detected(self) -> None:
         diff = """\
-diff --git a/docs/superpowers/plans/x.md b/docs/superpowers/plans/x.md
---- a/docs/superpowers/plans/x.md
-+++ b/docs/superpowers/plans/x.md
+diff --git a/.claude/plans/x.md b/.claude/plans/x.md
+--- a/.claude/plans/x.md
++++ b/.claude/plans/x.md
 @@ -1,2 +1,1 @@
 -- [x] Ship phase 1
 """
@@ -213,7 +213,7 @@ class SessionStartHookCliTests(unittest.TestCase):
     def test_latest_verdict_line_present(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            reviews_dir = root / "docs" / "reviews"
+            reviews_dir = root / "reports" / "fable5"
             reviews_dir.mkdir(parents=True)
             (reviews_dir / "LATEST.json").write_text(
                 json.dumps(
@@ -285,7 +285,7 @@ class SessionStartHookCliTests(unittest.TestCase):
     def test_all_three_fixtures_combine_to_four_lines_max(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            reviews_dir = root / "docs" / "reviews"
+            reviews_dir = root / "reports" / "fable5"
             reviews_dir.mkdir(parents=True)
             (reviews_dir / "LATEST.json").write_text(
                 json.dumps(
@@ -331,7 +331,7 @@ class StopHookCliTests(unittest.TestCase):
         subprocess.run(["git", "init", "-q"], cwd=root, check=True)
         subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
-        plans_dir = root / "docs" / "superpowers" / "plans"
+        plans_dir = root / ".claude" / "plans"
         plans_dir.mkdir(parents=True)
         (plans_dir / "plan.md").write_text("- [ ] Ship phase 1\n", encoding="utf-8")
         subprocess.run(["git", "add", "."], cwd=root, check=True)
@@ -369,7 +369,7 @@ class StopHookCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self._init_repo(root)
-            plan_path = root / "docs" / "superpowers" / "plans" / "plan.md"
+            plan_path = root / ".claude" / "plans" / "plan.md"
             plan_path.write_text("- [x] Ship phase 1\n", encoding="utf-8")
             subprocess.run(["git", "add", "."], cwd=root, check=True)
 
@@ -384,7 +384,7 @@ class StopHookCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self._init_repo(root)
-            plan_path = root / "docs" / "superpowers" / "plans" / "plan.md"
+            plan_path = root / ".claude" / "plans" / "plan.md"
             plan_path.write_text("- [ ] Ship phase 1\n- still unchecked\n", encoding="utf-8")
             subprocess.run(["git", "add", "."], cwd=root, check=True)
 
@@ -416,7 +416,7 @@ class StopHookCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self._init_repo(root)
-            plan_path = root / "docs" / "superpowers" / "plans" / "plan.md"
+            plan_path = root / ".claude" / "plans" / "plan.md"
             plan_path.write_text("- [x] Ship phase 1\n", encoding="utf-8")
             subprocess.run(["git", "add", "."], cwd=root, check=True)
             transcript_path = root / "transcript.jsonl"

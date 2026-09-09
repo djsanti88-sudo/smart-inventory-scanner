@@ -4,7 +4,7 @@ How an unknown scanned code receives an identity. Counting is deliberately outsi
 the scan store creates the provisional counted event before decode or network work begins. Decode can
 only enrich that event. It cannot hide it, remove it, or decide whether it counts.
 
-`src/server/decode/pipeline.ts` is the single server-side owner. The API boundary is
+`src/decoding/server/pipeline/pipeline.ts` is the single server-side owner. The API boundary is
 `src/app/api/ai-lookup/route.ts`. Client code must not import either module.
 
 ## Resolution order
@@ -38,9 +38,9 @@ lookup.
 
 ## Cache ownership
 
-- `src/services/ai/decodeCache.ts` owns process-local positive caching and same-key in-flight
+- `src/decoding/decodeCache.ts` owns process-local positive caching and same-key in-flight
   coalescing. Failed decodes do not become reusable cache hits.
-- `src/server/decodeCacheStore.ts` owns the platform-wide Turso/file positive cache.
+- `src/decoding/server/cache/decodeCacheStore.ts` owns the platform-wide Turso/file positive cache.
 - A persisted row is replayed only after all current deterministic sources miss. This lets corpus or
   master-catalog corrections supersede an older paid suggestion immediately.
 - Only usable GPT results are persisted with source tier `gpt_5_4_mini`.

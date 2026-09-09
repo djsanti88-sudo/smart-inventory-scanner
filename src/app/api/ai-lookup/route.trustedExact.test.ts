@@ -1,47 +1,47 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const runDecodePipeline = vi.fn();
-vi.mock("@/server/decode/pipeline", () => ({
+vi.mock("@/decoding/server/pipeline/pipeline", () => ({
   runDecodePipeline: (...args: unknown[]) => runDecodePipeline(...args),
   e2eMode: () => false,
 }));
 
 const resolveTrustedExactBarcodeDecision = vi.fn();
-vi.mock("@/server/tire-knowledge/TireKnowledgeProvider", () => ({
+vi.mock("@/decoding/server/knowledge/tire/TireKnowledgeProvider", () => ({
   resolveTrustedExactBarcodeDecision: (...args: unknown[]) => resolveTrustedExactBarcodeDecision(...args),
 }));
 
 const getTireExactIndexFingerprint = vi.fn();
 const hasBossHmacKeyConfigured = vi.fn(() => true);
-vi.mock("@/server/tire-knowledge/tireExactIndex", () => ({
+vi.mock("@/decoding/server/knowledge/tire/tireExactIndex", () => ({
   getTireExactIndexFingerprint: (...args: unknown[]) => getTireExactIndexFingerprint(...args),
   hasBossHmacKeyConfigured: () => hasBossHmacKeyConfigured(),
 }));
 
 const logServerEvent = vi.fn();
-vi.mock("@/server/log", () => ({
+vi.mock("@/decoding/server/log", () => ({
   logServerEvent: (...args: unknown[]) => logServerEvent(...args),
 }));
 
 const trustedExactCheck = vi.fn();
-vi.mock("@/services/security/trustedExactRateLimit", () => ({
+vi.mock("@/decoding/limits/trustedExactRateLimit", () => ({
   trustedExactRateLimiter: { check: (...args: unknown[]) => trustedExactCheck(...args) },
 }));
 
 const verifyIdToken = vi.fn();
 const memberGet = vi.fn();
-vi.mock("@/lib/firebaseAdmin", () => ({
+vi.mock("@/sync-database/cloud/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: (...args: unknown[]) => verifyIdToken(...args) }),
   getAdminDb: () => ({ doc: () => ({ get: (...args: unknown[]) => memberGet(...args) }) }),
 }));
 
 const decodeStorage = vi.fn();
-vi.mock("@/server/decode/storage", () => ({ decodeStorage: (...args: unknown[]) => decodeStorage(...args) }));
+vi.mock("@/decoding/server/pipeline/storage", () => ({ decodeStorage: (...args: unknown[]) => decodeStorage(...args) }));
 
 const legacyRateLimit = vi.fn();
 const killSwitch = vi.fn();
-vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
+vi.mock("@/decoding/limits/aiSpendGuard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/decoding/limits/aiSpendGuard")>();
   return {
     ...actual,
     killSwitchOn: () => killSwitch(),

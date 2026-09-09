@@ -37,9 +37,9 @@ const OWNER_100_CODES = [
   "029142342489", "029142646808", "029142652144", "029142713142", "029142714729",
 ];
 
-const idx = JSON.parse(fs.readFileSync("src/server/tire-knowledge/tireKnowledge.generated.json", "utf8"));
+const idx = JSON.parse(fs.readFileSync("src/decoding/server/knowledge/tire/tireKnowledge.generated.json", "utf8"));
 
-// Same variant scheme as src/services/upc/gtin.ts (lookupCandidates): raw code, leading-zero-stripped,
+// Same variant scheme as src/products/barcodes/gtin.ts (lookupCandidates): raw code, leading-zero-stripped,
 // and padded to 12/13/14 digits. Reimplemented inline (no imports) to keep this a plain, dependency-free
 // build-time script; matches lookupByExactBarcode's real candidate set for GTIN-shaped codes.
 const strip = (c) => c.replace(/^0+/, "") || "0";

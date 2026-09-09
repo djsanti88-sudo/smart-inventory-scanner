@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
-import { MockDb } from "@/services/mockDb";
+import { MockDb } from "@/sync-database/mock/mockDb";
 
 // OPTION 3 (owner): a NON-public code (SKU / vendor / internal / FNSKU / alphanumeric) auto-counts when the
 // app independently confirmed the exact code in a real/trusted source - "Gemini found it on Amazon = enough".

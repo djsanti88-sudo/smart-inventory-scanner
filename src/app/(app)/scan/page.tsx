@@ -2,21 +2,21 @@
 
 import { useEffect, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
-import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
-import { ScannerInput } from "@/components/ScannerInput";
-import { CameraScanButton } from "@/components/CameraScanButton";
-import { LiveScanFeed } from "@/components/LiveScanFeed";
-import { FinalCountTable } from "@/components/FinalCountTable";
-import { SyncStatusBar } from "@/components/SyncStatusBar";
-import { SyncStatusIndicator } from "@/components/SyncStatusIndicator";
-import { ExportMenu } from "@/components/ExportMenu";
-import { VarianceReport } from "@/components/VarianceReport";
-import { SessionLockControl } from "@/components/SessionLockControl";
-import { SessionsList } from "@/components/SessionsList";
-import { BusinessContextGate } from "@/components/BusinessContextGate";
+import { useIsPlatformOwner } from "@/users-businesses/roles/useAccessLevel";
+import { ScannerInput } from "@/scanning/ScannerInput";
+import { CameraScanButton } from "@/scanning/camera/CameraScanButton";
+import { LiveScanFeed } from "@/scanning/LiveScanFeed";
+import { FinalCountTable } from "@/inventory/FinalCountTable";
+import { SyncStatusBar } from "@/sync-database/SyncStatusBar";
+import { SyncStatusIndicator } from "@/sync-database/SyncStatusIndicator";
+import { ExportMenu } from "@/reports/export/ExportMenu";
+import { VarianceReport } from "@/reports/variance/VarianceReport.tsx";
+import { SessionLockControl } from "@/sessions/lock/SessionLockControl";
+import { SessionsList } from "@/sessions/SessionsList";
+import { BusinessContextGate } from "@/users-businesses/BusinessContextGate";
 import { planScanBatch } from "./planScan";
-import { resolveRawScan } from "@/services/resolver";
-import { computeMoatStats } from "@/services/moatStats";
+import { resolveRawScan } from "@/products/match/resolver";
+import { computeMoatStats } from "@/inventory/moatStats";
 
 export default function ScanPage() {
   const processScan = useScanStore((s) => s.processScan);

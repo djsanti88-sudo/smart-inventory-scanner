@@ -1,12 +1,12 @@
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { getAdminAuth, getAdminDb } from "@/sync-database/cloud/firebaseAdmin";
 import {
   provisionBusiness,
   type ProvisionIdentity,
-} from "@/server/business/provisioning";
+} from "@/users-businesses/provisioning/provisioning";
 import type {
   ProvisionRequest,
   ProvisionResponse,
-} from "@/services/auth/provisioningTypes";
+} from "@/authentication/service/provisioningTypes";
 
 export const runtime = "nodejs";
 

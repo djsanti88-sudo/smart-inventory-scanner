@@ -1,6 +1,6 @@
 // scripts/dt-harvest/lib/brandFamilies.drift.test.mjs
 // DRIFT GUARD (mandatory): scripts/dt-harvest/lib/brandFamilies.mjs is a hand-maintained
-// reimplementation of src/services/catalog/brandFamilies.ts (the .mjs harvest pipeline cannot
+// reimplementation of src/products/catalog/brandFamilies.ts (the .mjs harvest pipeline cannot
 // import the server-only TS module). Wrong or duplicated family data would cause a FALSE
 // product-identity merge - worse than leaving codes unrecovered. This test imports BOTH the .mjs
 // and the .ts source and asserts they agree on family membership for EVERY brand pair, so the two
@@ -14,7 +14,7 @@ import {
   sameBrandFamily as sameBrandFamilyMjs,
   FAMILIES as FAMILIES_MJS,
 } from "./brandFamilies.mjs";
-import { sameBrandFamily as sameBrandFamilyTs } from "@/services/catalog/brandFamilies";
+import { sameBrandFamily as sameBrandFamilyTs } from "../../../src/products/catalog/brandFamilies.ts";
 
 // Same normalization both sources use (kept local so this test does not depend on either export).
 function norm(b) {

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useScanStore, sanitizePersistedScanShape, DEFAULT_SETTINGS } from "@/stores/scanStore";
-import { getMockDb } from "@/services/mockDb";
+import { getMockDb } from "@/sync-database/mock/mockDb";
 import type { InventoryCount, Product } from "@/types";
 
 // TOP-LEVEL LAW regression guard, fast/store-level companion to
@@ -9,7 +9,7 @@ import type { InventoryCount, Product } from "@/types";
 // That E2E proved a REAL defect: seeding a wrong-SHAPE value into the app's IndexedDB persist record
 // (products: "not-an-array") at the CURRENT persist version (14, so zustand's `migrate` is skipped
 // entirely and the bad value flows straight into the default shallow merge) made
-// `collectAllIdentifierHits` (src/services/aliasMatcher.ts:160, `products.filter is not a function`)
+// `collectAllIdentifierHits` (src/products/match/aliasMatcher.ts:160, `products.filter is not a function`)
 // throw INSIDE processScan, so the scan was silently dropped - "0 scans", count 0.
 //
 // Two layers close this, and this file proves both, fast (no browser, no IndexedDB):
@@ -349,7 +349,7 @@ describe("FINDING 1: the safety net now covers session initialization (ensureAut
     expect(error).toHaveBeenCalled();
   });
   // NOTE: the direct "real Storage.getItem/setItem throws" fail-soft behavior is proven reliably at
-  // the unit level in src/services/deviceIdentity.test.ts (a plain fake Storage object, not jsdom's
+  // the unit level in src/sync-database/queue/deviceIdentity.test.ts (a plain fake Storage object, not jsdom's
   // Proxy-backed window.localStorage, which vi.spyOn cannot reliably intercept for this purpose - a
   // spy attempt here was flaky/no-signal in both the pre-fix and post-fix code and was removed rather
   // than kept as a false-confidence test). This describe block's other test proves the OUTER boundary

@@ -95,11 +95,41 @@ Every meaningful development or debugging session should leave Scanbin smarter. 
 
 ## Layout and boundaries
 
-- `src/app/` - App Router pages and API routes. `src/app/api/ai-lookup/route.ts` fronts the decode pipeline.
-- `src/components/` - client UI with co-located `.test.tsx`.
-- `src/stores/scanStore.ts` - large Zustand scan-state store. Search for symbols; do not browse it top to bottom.
-- `src/services/` - pure application services. No React or `next/*`. `inventory.ts` is the counting ledger; `inventory.replay.ts` rebuilds counts from the scan feed; `resolver.ts` is deterministic product matching; `db/` holds the sync targets (mock and Firestore).
-- `src/server/` - server-only: decode pipeline and counters (`decode/`), tire/retail knowledge corpus, positive decode cache, and SQLite/Turso stores. Client code must never import `@/server/*`; client-safe barcode-shape utilities live in `src/services/upc/`.
+`src/` is organized by **what the thing does**, one folder per workflow. Every folder has a `README.md`
+saying what belongs there and what to watch out for - read that first.
+
+- `src/app/` - App Router pages and API routes. Route entry points CANNOT move (Next.js resolves them
+  by folder location), so they stay thin and call into the feature folders.
+- `src/authentication/` - signing in/out, email verification, the logged-out guard.
+- `src/users-businesses/` - which shop you belong to, members, roles, account export/delete.
+- `src/scanning/` - capturing the scan (gun + camera) and cleaning the raw text.
+- `src/inventory/` - **the count ledger** (`ledger.ts`), replay, idempotency, final counts, cleanup.
+- `src/products/` - product identity: deterministic matching, aliases, catalog, barcodes, tires.
+- `src/decoding/` - the decode ladder, corpora and caches (`server/`), plus every spend cap and kill
+  switch (`limits/`). Corpus loaders build paths from `process.cwd()` segments - see its README.
+- `src/review/` - the Needs Review queue and the approve / correct / reassign operations.
+- `src/sessions/` - auto-session window, history, owner PIN lock.
+- `src/import/` - spreadsheet import: file reading, column inference, preview, apply.
+- `src/reconcile/` - matching counted stock against shop software, dollar variance.
+- `src/reports/` - CSV export (role-masked), variance reports, share links.
+- `src/sync-database/` - local persistence, Firestore, the mock backend, the pending queue.
+- `src/admin/` - platform-owner tools (the server half stays in `src/server/catalog/`).
+- `src/shared/` - privacy masking + key-safety guards, telemetry, text, net. Keep it small.
+- `src/user-interface/` - cross-app shell and generic UI only; feature UI lives with its feature.
+- `src/stores/` - the Zustand stores, including `scanStore.ts`. Search for symbols; do not browse it
+  top to bottom. Slated for decomposition.
+- `src/server/` - what remains server-only outside decoding: the platform master catalog and share
+  tokens. Client code must never import `@/server/*` or `@/decoding/server/*`.
+
+Boundaries here are enforced by tests, not convention: `shared/privacy/keySafety*.test.ts`,
+`decoding/server/knowledge/tire/importBoundary.test.ts`,
+`products/catalog/prefixIndexBundleBoundary.test.ts`, and the API-route import graph test.
+
+**Anything that identifies code by its PATH is a trap.** Vitest project globs, the CI
+`VITEST_EXTRA_EXCLUDE` list, security-guard directory allowlists, `process.cwd()` path segments, and
+the Git LFS rules in `.gitattributes` all name locations as strings. None are checked by the compiler,
+and each one fails SILENTLY - the suite stays green while covering less. When moving files, grep for
+the old path in all five.
 - Generated corpus and database artifacts are never hand-edited. Change the generator and rebuild.
 - API routes never import the client Firebase SDK (lint rule + import-graph tests).
 
@@ -149,7 +179,7 @@ Everything else, ports, env vars, paid and live warnings: `docs/COMMANDS.md`. Ch
 |---|---|
 | Detailed product invariants | `GUARDRAILS.md` |
 | Architecture + known traps | `docs/ARCHITECTURE.md` |
-| Business logic vs infrastructure seams, migration order | `docs/ARCHITECTURE_LAYERS.md` |
+| Business logic vs infrastructure seams, migration order | `docs/ARCHITECTURE.md` |
 | Commands, ports, env vars | `docs/COMMANDS.md` |
 | Decode pipeline | `docs/DECODER_ARCHITECTURE.md` |
 | Deployment / rollback | `docs/DEPLOY_TRUTH.md` |
