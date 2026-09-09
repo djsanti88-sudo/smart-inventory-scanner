@@ -7,9 +7,9 @@
 - Each captured scan event counts exactly once; retries never double-count. -> `npm run test:ledger`
 - Counting is deterministic, never AI. -> `src/inventory/ledger.ts`
 - Row state decides the controls: verified = Edit metadata only; suggested = Approve + Edit (plus Not this product); unidentified = Identify. -> `src/scanning/LiveScanFeed.tsx`, `src/stores/scanStore.rowControls.test.ts`
-- Three distinct operations: confirm identity creates a tenant alias, edit metadata changes product fields only, reassign uses the count-transfer path. -> `confirmRowIdentity` / `correctProduct` / `markWrong` in `src/stores/scanStore.ts`
+- Three distinct operations: confirm identity creates a tenant alias, edit metadata changes product fields only, reassign uses the count-transfer path. -> `confirmRowIdentity` / `correctProduct` / `markWrong` in `src/stores/scan/reviewSlice.ts`
 - A guess is never verified and never becomes an alias without human confirmation or app-verified evidence; it is shown immediately with an app-derived confidence band. -> `src/decoding/identityConfidenceBand.ts`
-- Original scan evidence is permanent; fixing a wrong scan moves the count, never deletes it. -> `markWrong` in `src/stores/scanStore.ts`
+- Original scan evidence is permanent; fixing a wrong scan moves the count, never deletes it. -> `markWrong` in `src/stores/scan/reviewSlice.ts`
 
 ## Shared decode cache and paid lookup
 - Positive identities are the only persisted decode-cache rows. A failed decode stores nothing, so no negative-result memory may be rebuilt. -> `src/decoding/server/cache/decodeCacheStore.ts`, `src/decoding/server/pipeline/pipeline.ts`

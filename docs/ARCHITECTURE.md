@@ -59,7 +59,7 @@ those two can no longer shrink silently. The other three must be checked by hand
    normalized candidates (AIM prefix, hyphens/spaces). Raw value is always preserved.
 3. **Resolve (deterministic, never AI)** - `src/products/match/resolver.ts` + `aliasMatcher.ts` +
    `codeTypeDetector.ts`. `known` ONLY from an approved alias or a verified product identifier.
-4. **Count (synchronous, before any network)** - `src/stores/scanStore.ts` `processScan` (~line 3181):
+4. **Count (synchronous, before any network)** - `src/stores/scan/scanSlice.ts` `processScan`:
    - Known and countable: `services/inventory.ts` `incrementInventoryCount` delegates to
      `applyScanEventOnce`; `InventoryCount.scanEventIds` dedupes so re-applying an event id is a
      no-op. `quantityDelta` (1, or 0 for non-countable rows) drives the delta.
@@ -110,7 +110,7 @@ suggested or Needs Review and never app-verifies itself. Full semantics live in
 
 | Store | File | localStorage | Notes |
 |---|---|---|---|
-| scanStore | `src/stores/scanStore.ts` (~9,200 lines) | key `sis-scan-v1`, version 7 | Role-aware partialize via `scanPersist.ts` |
+| scanStore | `src/stores/scanStore.ts` (~1,850 lines) + `src/stores/scan/*Slice.ts` | key `sis-scan-v1`, version 7 | Role-aware partialize via `scanPersist.ts` |
 | reconcileStore | `src/stores/reconcileStore.ts` | own key, version 1 | Strips raw CSV field before persist |
 
 - Migration (`scanStoreMigrate`): version < 5 hard-resets learned data to seed; >= 5 is additive only
@@ -219,7 +219,8 @@ gate; `proof:local` does not cover the whole repository.
    A free hit never touches the cap and a route-level pre-cap would be a regression.
 3. The count ledger is not in any file named "ledger": pure math in `services/inventory.ts`, stateful
    wiring in scanStore `processScan`/`markWrong`, proofs in `stores/ledgerInvariants.store.test.ts`.
-4. `scanStore.ts` is a ~9,200-line monolith. Grep for symbols; do not expect file-per-concern.
+4. `scanStore.ts` is ~1,850 lines and assembles slices from `src/stores/scan/`; see that folder's README.
+   Grep for symbols rather than reading top to bottom.
 5. "Every scan counts" is enforced by ORDERING (`ensureProvisionalCount` before any network), not by
    a named guard. Moving that call below an await is a law violation that no grep will catch.
 6. Brand-prefix conflict alone is advisory; only the evidence-weighted prefixFirewall hard-blocks,

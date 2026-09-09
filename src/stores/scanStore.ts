@@ -690,8 +690,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       trustedExactConfigGapReviewIds.clear();
     };
 
-    // LAYER B (persist-corruption defect, 2026-08-13): defense in depth for processScan, see its call
-    // site. Reuses the same field list + coercion rule as sanitizePersistedScanShape (LAYER A, the
+    // LAYER B (persist-corruption defect, 2026-08-13): defense in depth for processScan, whose sole
+    // call site is now src/stores/scan/scanSlice.ts - this function is defined here only so it can be
+    // handed to createScanSlice through ctx, since it must close over THIS store's set/get. Reuses the same field list + coercion rule as sanitizePersistedScanShape (LAYER A, the
     // persist `merge` sanitizer) but operates on the LIVE store state via get()/set(), so a wrong-shape
     // value that reached state through any path other than rehydration (test setup, a future bug) is
     // still repaired in place before it can throw inside resolveScan/ensureProvisionalCount/etc.

@@ -24,8 +24,8 @@
         "Barcodes and part numbers are TEXT. No numeric coercion at any layer."
       ],
       "traps": [
-        "scanStore.ts is ~8,800 lines. Grep for symbols; never read top to bottom.",
-        "Audited 2026-08-12: this file largely EARNS its size. Density here is documented history, not bloat."
+        "scanStore.ts is ~1,850 lines; the actions live in src/stores/scan/*Slice.ts. Grep for symbols.",
+        "A slice is a per-store-instance factory. Anything mutable crosses ctx as a reference or getter, never by value."
       ]
     },
     {
