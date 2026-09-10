@@ -41,11 +41,12 @@ name: CI
 # flake red on every CI run; the same coverage intent (CSV parsing edge cases, mapping inference, error
 # surfacing) is still exercised by non-fixture-dependent tests elsewhere in the import test suite.
 #
-# LOCAL-BACKUP-DATA NOTE (node:test leg): the tire-db-repair and boss-override suites read gitignored
-# local data under /backups/ (.gitignore). Since 2026-08-19 they self-skip VISIBLY when that data is
-# absent (scripts/lib/localDataSkip.mjs) and proof-all.mjs reports the skip count, so this job needs no
-# NODE_TEST_SKIP knob for them. Reproduce the full leg locally with `npm run proof:all` on a machine
-# that has /backups/.
+# LOCAL-BACKUP-DATA NOTE: scripts/lib/localDataSkip.mjs is the established pattern for a node:test
+# suite that reads gitignored local data under /backups/ -- it self-skips VISIBLY when that data is
+# absent and proof-all.mjs reports the skip count, so no NODE_TEST_SKIP knob is needed for it here.
+# (The tire-db-repair and boss-override suites that used this pattern were the shipped-migration
+# suites deleted 2026-09-08 -- see scripts/tire-db-repair/TURSO_PROMOTION_RUNBOOK.md; nothing in
+# NODE_TEST_SUITES currently uses it, but the pattern stays for the next suite that needs it.)
 
 on:
   push:

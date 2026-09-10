@@ -18,7 +18,7 @@ export default defineConfig({
     },
   },
   test: {
-    // Emulator-backed rules tests (src/services/db/firebase/*.rules.test.ts) do real Firestore I/O
+    // Emulator-backed rules tests (src/sync-database/cloud/*.rules.test.ts) do real Firestore I/O
     // against a single emulator; under parallel load on Windows the first op in a file can exceed the
     // 5s default. Generous timeouts keep them reliable without weakening assertions (fast pure unit
     // tests still complete in milliseconds).
@@ -40,22 +40,21 @@ export default defineConfig({
           // src/services/camera touches window.BarcodeDetector and HTMLVideoElement, which need a DOM -
           // excluded here and picked up by the "dom" project below instead. Same for the Zustand store
           // suites, which render/persist against browser storage.
-          // scripts/kkm-catalog and scripts/tire-db-repair/*.test.mjs are node:test suites run via
-          // `node --test`, not vitest - vitest's glob would otherwise collect them and fail with
-          // "No test suite found".
+          // scripts/kkm-catalog, refresh-tire-meta, and boss-workbook-reconcile-dryrun are node:test
+          // suites run via `node --test`, not vitest - vitest's glob would otherwise collect them and
+          // fail with "No test suite found". (The tire-db-repair migration suites that used to need
+          // the same exclusion were deleted 2026-09-08 - shipped one-off migrations, dead in every
+          // environment; see scripts/tire-db-repair/TURSO_PROMOTION_RUNBOOK.md for the rollback record.)
           exclude: [
             "src/scanning/camera/**",
             "src/stores/**",
             "scripts/kkm-catalog/**/*.test.mjs",
             "scripts/refresh-tire-meta.test.mjs",
             "scripts/boss-workbook-reconcile-dryrun.test.mjs",
-            "scripts/boss-override-2026-08-05.test.mjs",
-            "scripts/tire-db-repair/03_part_number_aliases.test.mjs",
-            "scripts/tire-db-repair/09_promote_preflight.test.mjs",
-            "scripts/tire-db-repair/10_promote_execute.test.mjs",
-            "scripts/tire-db-repair/11_twin_columns.test.mjs",
-            "scripts/tire-db-repair/model_styling.test.mjs",
-            "scripts/tire-db-repair/validate.test.mjs",
+            // Named *.test.mjs (not *.node-test.mjs) but uses node:test's own API -- matches
+            // this project's include glob and crashes vitest ("No test suite found") if not
+            // excluded. Caught 2026-09-09 re-verifying proof:all after this file was added.
+            "scripts/proof-scope.test.mjs",
           ],
         },
       },
