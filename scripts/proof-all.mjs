@@ -342,8 +342,19 @@ function main() {
   // leg already crashed and fails the gate below), fall back to treating NOTHING as
   // vitest-collected -- this runs MORE files under node:test, never fewer, which is the
   // safe direction when the ground-truth source itself is unavailable.
+  // VITEST_EXTRA_EXCLUDE names files that ARE vitest suites but were deliberately kept out of the
+  // vitest leg for this environment (CI excludes two that need local-only fixtures). They are absent
+  // from collectedByVitest for that reason alone, so without this subtraction the filter below would
+  // read "vitest did not collect it, therefore it must be a node:test suite" and hand a React .tsx
+  // file to `node --test`, which cannot run it. That failure is invisible locally, because the env
+  // var is only ever set in CI. "Not collected by vitest" and "belongs to node:test" are different
+  // questions; VITEST_EXTRA_EXCLUDE is exactly the case that separates them.
+  const vitestExcludedFiles = discovered.filter((f) =>
+    VITEST_EXTRA_EXCLUDE.some((pattern) => f === pattern || f.includes(pattern)),
+  );
   const nodeTestSuites = discovered.filter(
-    (f) => !(collectedByVitest ?? []).includes(f) && !declaredNotRunFiles.includes(f) && !teachSuites.includes(f)
+    (f) => !(collectedByVitest ?? []).includes(f) && !declaredNotRunFiles.includes(f)
+      && !teachSuites.includes(f) && !vitestExcludedFiles.includes(f)
   );
 
   // A NOT_RUN entry naming a file that no longer exists is the modern equivalent of the old
