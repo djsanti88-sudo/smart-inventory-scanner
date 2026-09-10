@@ -70,8 +70,9 @@ The driver runs these stages against `<WORK>`:
    run); writes one summary audit row per direction to `remaining_blank_fill_audit`
    (`action='twin_columns_backfill'`), not one row per tire. Provenance is not needed - the columns
    are derived from the row's own barcode, not from an external source. The pure derivation
-   function (`deriveTwinColumns`) is unit-tested in
-   `scripts/tire-db-repair/11_twin_columns.test.mjs` (`node --test`).
+   function (`deriveTwinColumns`) no longer has its own unit test - its test file was deleted
+   2026-09-08 as a shipped-migration suite (see the app-level runtime contract below for the
+   behavior it protects instead).
    Note: ~2,793 rows in the corpus already exist as pre-existing separate 12-digit/13-digit twin
    PAIRS (each is its own row with its own `canonical_product_uid`). This stage fills columns on
    each of those rows individually; deduplicating those pre-existing twin-pair ROWS is explicitly
@@ -220,14 +221,13 @@ Every run is time-boxed (default 4h hard stop via `--deadline`). Always end with
 
 ## Smoke tests (prove the glue scripts)
 ```
-node --test scripts/tire-db-repair/11_twin_columns.test.mjs \
-            .claude/skills/db-blank-filler/scripts/pipeline_driver.test.mjs \
+node --test .claude/skills/db-blank-filler/scripts/pipeline_driver.test.mjs \
             .claude/skills/db-blank-filler/scripts/turso_snapshot.test.mjs \
             .claude/skills/db-blank-filler/scripts/apply_pn_picks.test.mjs
 ```
-All must pass before trusting a run. They use a tiny in-temp fixture DB (or, for
-`11_twin_columns.test.mjs`, pure-function unit tests with no DB at all) and never touch the
-packaged deliverable or live Turso.
+All must pass before trusting a run. They use a tiny in-temp fixture DB and never touch the
+packaged deliverable or live Turso. (`11_twin_columns.test.mjs`, formerly listed here, was deleted
+2026-09-08 as a shipped-migration suite - see the note on `deriveTwinColumns` above.)
 
 `twin_complete.test.mjs` (the deprecated row-materialization script's own test) still passes if
 run directly, but is no longer part of the standard smoke-test set above since the script itself

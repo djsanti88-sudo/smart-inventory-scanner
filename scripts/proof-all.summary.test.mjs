@@ -204,6 +204,30 @@ describe("proof-all.mjs buildSummaryReport", () => {
     expect(found).toEqual(["scripts/foo.test.mjs", "scripts/sub/bar.test.ts"]);
   });
 
+  // REGRESSION (2026-09-08): TEST_FILE_RE used to require a DOT before "test"
+  // (/\.test\.(mjs|ts|tsx|js)$/), which made every *.node-test.mjs file invisible to this
+  // scan -- the exact silent-blind-spot class this file's header warns about. Six files used
+  // that hyphen convention; five had no runner at all and one had been red for months with
+  // nothing reporting it. This asserts both naming conventions are discovered so the widened
+  // regex cannot regress back to dot-only.
+  it("discoverTestFiles also finds hyphenated *.node-test.mjs files (not just dot *.test.mjs)", () => {
+    const fakeFs = {
+      "scripts": [
+        { name: "foo.test.mjs", isDirectory: () => false },
+        { name: "build-knowledge-db.node-test.mjs", isDirectory: () => false },
+        { name: "not-a-test.mjs", isDirectory: () => false },
+      ],
+    };
+    const fakeReaddir = (dir) => {
+      if (!(dir in fakeFs)) throw new Error(`ENOENT: ${dir}`);
+      return fakeFs[dir];
+    };
+
+    const found = discoverTestFiles(["scripts"], fakeReaddir);
+
+    expect(found).toEqual(["scripts/build-knowledge-db.node-test.mjs", "scripts/foo.test.mjs"]);
+  });
+
   // FINDING 2 (HIGH) -- a narrowed run must never exit 0 (success) unless the caller explicitly
   // acknowledges the narrowing, and the exit code for an unacknowledged narrowed run must be
   // distinguishable from both "clean pass" (0) and "real failure" (1).

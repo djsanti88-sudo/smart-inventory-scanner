@@ -30,51 +30,6 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const NODE_TEST_SUITES = [
-  // Wired to an npm script already.
-  "scripts/refresh-tire-meta.test.mjs",
-  "scripts/certify-boss-barcodes.node-test.mjs",
-  // ORPHANED before 2026-08-12: excluded from vitest.config.ts AND absent from every
-  // runner. They pass; they simply protected nothing. Adopted here.
-  "scripts/boss-workbook-reconcile-dryrun.test.mjs",
-  "scripts/boss-override-2026-08-05.test.mjs",
-  "scripts/kkm-catalog/init-db.test.mjs",
-  "scripts/tire-db-repair/03_part_number_aliases.test.mjs",
-  "scripts/tire-db-repair/09_promote_preflight.test.mjs",
-  "scripts/tire-db-repair/10_promote_execute.test.mjs",
-  "scripts/tire-db-repair/11_twin_columns.test.mjs",
-  "scripts/tire-db-repair/model_styling.test.mjs",
-  "scripts/tire-db-repair/validate.test.mjs",
-  // ORPHANED before 2026-08-16: `test:certify:boss-barcodes` wires up the certification
-  // file and e2e/boss-barcode-corpus/fixtures.test.mjs, but proof-all.mjs only ran the
-  // former -- fixtures.test.mjs (and its five siblings, which have no npm script at all)
-  // could go red while this gate reported green. The 2026-08-16 self-detection scan (see
-  // discoverTestFiles/findOrphanTestFiles below) is what actually caught this; these are
-  // adopted here as the fix, not just as a manually-found patch.
-  "e2e/boss-barcode-corpus/fixtures.test.mjs",
-  "e2e/boss-barcode-corpus/local-corpus-ui.contract.test.mjs",
-  "e2e/boss-barcode-corpus/local-sample.test.mjs",
-  "e2e/boss-barcode-corpus/production-server.test.mjs",
-  "e2e/boss-barcode-corpus/receipt.test.mjs",
-  "e2e/boss-barcode-corpus/reporter.test.mjs",
-  "e2e/boss-barcode-corpus/run.test.mjs",
-  // ORPHANED before 2026-08-16: e2e/boss-barcode-preview/ is a brand-new, still-untracked
-  // suite (Vercel Preview certification harness) with no npm script referencing its
-  // *.test.mjs files at all -- the same self-detection scan caught it too. One file in this
-  // directory (fixtures.test.mjs) needs a private, never-committed BOSS_RECONCILIATION_PATH
-  // and is declared in NOT_RUN below instead; the rest run cleanly with no external data.
-  "e2e/boss-barcode-preview/admin.test.mjs",
-  "e2e/boss-barcode-preview/calibration-barrier.test.mjs",
-  "e2e/boss-barcode-preview/config.test.mjs",
-  "e2e/boss-barcode-preview/finalize.test.mjs",
-  "e2e/boss-barcode-preview/persistence.test.mjs",
-  "e2e/boss-barcode-preview/receipt.test.mjs",
-  "e2e/boss-barcode-preview/reporter.test.mjs",
-  "e2e/boss-barcode-preview/run.test.mjs",
-  "e2e/boss-barcode-preview/terminal.test.mjs",
-  "e2e/boss-barcode-preview/vercel-inspect.test.mjs",
-];
-
 // Suites this gate deliberately does NOT run, with the reason and the real command.
 // Listed in the output every time so their absence is never invisible. `files`, when
 // present, names the exact discovered test file(s) this entry accounts for -- it is what
@@ -111,8 +66,9 @@ function run(label, cmd, args) {
   // node:test: "ℹ pass 12" / "ℹ fail 0"
   const nodePass = out.match(/^\s*.?\s*pass (\d+)$/m);
   const nodeFail = out.match(/^\s*.?\s*fail (\d+)$/m);
-  // node:test: "ℹ skipped 74" -- the local-data suites (scripts/lib/localDataSkip.mjs) skip VISIBLY
-  // when gitignored data is absent (fresh worktree, CI); surface it exactly like vitest's skips.
+  // node:test: "ℹ skipped 74" -- individual node:test cases can skip VISIBLY (an explicit
+  // { skip } option, or scripts/lib/localDataSkip.mjs when a suite needs gitignored local
+  // data); surface it exactly like vitest's skips so a skip is never mistaken for a pass.
   const nodeSkip = out.match(/^\s*.?\s*skipped (\d+)$/m);
 
   let detail = ok ? "ok" : `FAILED (exit ${r.status})`;
@@ -122,7 +78,7 @@ function run(label, cmd, args) {
     detail = `${nodePass[1]} passed`;
     if (nodeFail && Number(nodeFail[1]) > 0) detail += `, ${nodeFail[1]} FAILED`;
     skipped = Number(nodeSkip?.[1] ?? 0);
-    if (skipped) detail += `, ${skipped} skipped (local-only data absent)`;
+    if (skipped) detail += `, ${skipped} skipped`;
   }
 
   results.push({ label, ok, detail, skipped });
@@ -155,25 +111,41 @@ const NODE_TEST_SKIP = new Set(
 const PROOF_ALL_ACCEPT_NARROWED = process.env.PROOF_ALL_ACCEPT_NARROWED === "1";
 
 // ---------------------------------------------------------------------------------------
-// SELF-DETECTION (2026-08-16 clean-room review, HIGH)
+// SELF-DETECTION (2026-08-16 clean-room review, HIGH; COMPUTED 2026-09-09)
 //
-// The "missing" check further down only asks whether files ALREADY LISTED in
-// NODE_TEST_SUITES still exist on disk. That says nothing about a *.test.mjs/*.test.ts
-// file nobody ever added to any list -- vitest doesn't collect it (excluded or outside its
-// include globs), no node:test leg runs it, and it isn't named in NOT_RUN. It is invisible:
-// it can be red forever while this gate reports green. That is exactly the bug this gate
-// exists to end (see the file header).
+// This gate used to hand-maintain NODE_TEST_SUITES, a literal array naming every file
+// vitest can't collect. That list drifted from reality twice: it missed 9 files for months
+// (2026-08-12), then missed all six *.node-test.mjs files because TEST_FILE_RE only matched
+// the dot convention (2026-09-08) -- a hand list is exactly the kind of "identifies code by
+// naming it" trap AGENTS.md warns about, since nothing forces it to track the filesystem.
 //
-// The fix is a cheap filesystem walk (discoverTestFiles) reconciled against three sets
-// this run already knows: what vitest actually collected (read back from its own JSON
-// report -- ground truth, not a re-implementation of vitest.config.ts's glob rules), what
-// the node:test legs execute, and what NOT_RUN declares. Anything in none of the three is
-// an orphan: FAIL CLOSED and name it (findOrphanTestFiles).
+// The list is now COMPUTED instead of maintained: discoverTestFiles() walks scripts/, e2e/,
+// src/ for every *.test.(mjs|ts|tsx|js) file (including *.node-test.mjs and untracked
+// files), and the node:test leg runs whatever that walk finds MINUS what vitest itself
+// collected (read back from its own JSON report -- ground truth, not a re-implementation of
+// vitest.config.ts's globs) MINUS what NOT_RUN explicitly declares MINUS the teach-bot
+// suite (its own separate leg). A new *.test.mjs file dropped anywhere under those roots is
+// therefore run by construction, not "discovered and reported as an orphan to fix later."
+//
+// findOrphanTestFiles below is kept as a structural invariant check on that computation
+// (it should always return [] now) rather than a "did the developer forget to add this"
+// check -- if it ever finds something, that's a bug in the filter logic above, not a
+// missing list entry.
 // ---------------------------------------------------------------------------------------
 
 const DISCOVERY_ROOTS = ["scripts", "e2e", "src"];
 const DISCOVERY_SKIP_DIRS = new Set(["node_modules", ".next", ".git", "dist", "build", "backups", "coverage"]);
-const TEST_FILE_RE = /\.test\.(mjs|ts|tsx|js)$/;
+// Two naming conventions coexist in this repo: dot (`*.test.mjs`) and dot-plus-hyphen
+// (`*.node-test.mjs`, used for scripts that must run under `node --test` rather than
+// vitest). A regex that encodes only the dot convention is exactly the class of bug this
+// file's header describes -- it fails CLOSED but SILENTLY, so the scan itself reports
+// "0 orphaned files" while missing every `*.node-test.mjs` suite. Discovered 2026-09-08:
+// six such files were invisible to this scan (one already had a runner; five did not, and
+// one of those five had been red for months with nothing reporting it). The `(?:node-)?`
+// is deliberately narrow -- it matches only the ".node-test." infix actually used in this
+// repo, not an arbitrary "*-test.<ext>" suffix (which would also catch names like
+// "load-test.mjs" that are not part of either test convention and have no runner).
+const TEST_FILE_RE = /\.(?:node-)?test\.(mjs|ts|tsx|js)$/;
 
 /**
  * Cheap recursive filesystem walk -- no test execution, no vitest/node spawn. Finds every
@@ -272,14 +244,14 @@ export function buildSummaryReport({ results, missing, skippedByEnv, vitestExtra
 
   if (missing?.length) {
     lines.push(`\n  WARNING: ${missing.length} configured suite(s) no longer exist on disk:`);
-    for (const f of missing) lines.push(`    - ${f}  (remove it from NODE_TEST_SUITES or restore the file)`);
+    for (const f of missing) lines.push(`    - ${f}  (stale NOT_RUN entry -- update or remove it, or restore the file)`);
   }
 
   if (orphans?.length) {
     lines.push(`\n  !!! FAIL CLOSED: ${orphans.length} test file(s) discovered on disk but run by NO runner !!!`);
     lines.push(`  Not collected by vitest, not run by a node:test leg, not declared in NOT_RUN:`);
     for (const f of orphans) lines.push(`    - ${f}`);
-    lines.push(`  Fix: wire each one into an npm script + NODE_TEST_SUITES, or add it to NOT_RUN with why.`);
+    lines.push(`  Fix: this should be structurally impossible -- check the discovery/collection filter in main().`);
   }
 
   // Both CI-only opt-out knobs get the SAME loud treatment -- neither is a default, both are an
@@ -296,7 +268,7 @@ export function buildSummaryReport({ results, missing, skippedByEnv, vitestExtra
 
   lines.push("\nNOT RUN BY THIS GATE -- green above does NOT cover these:");
   for (const [name, why, cmd] of NOT_RUN) lines.push(`  - ${name}\n      ${why}; run: ${cmd}`);
-  if (totalSkipped) lines.push(`\n  ${totalSkipped} test(s) reported SKIPPED above (emulator-gated vitest suites; node:test suites whose gitignored local data is absent - scripts/lib/localDataSkip.mjs).`);
+  if (totalSkipped) lines.push(`\n  ${totalSkipped} test(s) reported SKIPPED above (emulator-gated vitest suites; node:test cases marked { skip }).`);
 
   if (failed.length) {
     lines.push(`\nRESULT: FAILED -- ${failed.length} leg(s): ${failed.map((f) => f.label).join(", ")}`);
@@ -357,9 +329,39 @@ function main() {
   const collectedByVitest = readVitestCollectedFiles(vitestReportPath, repoRootPosix());
   try { rmSync(reportDir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ }
 
-  const missing = NODE_TEST_SUITES.filter((f) => !existsSync(f));
-  const skippedByEnv = NODE_TEST_SUITES.filter((f) => existsSync(f) && NODE_TEST_SKIP.has(f));
-  const present = NODE_TEST_SUITES.filter((f) => existsSync(f) && !NODE_TEST_SKIP.has(f));
+  // Discovered once, reused for both the computed node:test suite list and the final
+  // reconciliation. teachSuites is computed here (not at its old call site further down) so
+  // it can be excluded from the main node:test set below -- it is its own separate leg.
+  const discovered = discoverTestFiles();
+  const teachSuites = discoverTestFiles(["e2e/teach"]);
+  const declaredNotRunFiles = NOT_RUN.flatMap((entry) => entry[3] ?? []);
+
+  // The computed node:test suite list (see SELF-DETECTION above): everything discovered
+  // that vitest did not collect, that NOT_RUN does not already account for, and that isn't
+  // the teach-bot leg. If vitest's own report is missing (collectedByVitest === null, its
+  // leg already crashed and fails the gate below), fall back to treating NOTHING as
+  // vitest-collected -- this runs MORE files under node:test, never fewer, which is the
+  // safe direction when the ground-truth source itself is unavailable.
+  // VITEST_EXTRA_EXCLUDE names files that ARE vitest suites but were deliberately kept out of the
+  // vitest leg for this environment (CI excludes two that need local-only fixtures). They are absent
+  // from collectedByVitest for that reason alone, so without this subtraction the filter below would
+  // read "vitest did not collect it, therefore it must be a node:test suite" and hand a React .tsx
+  // file to `node --test`, which cannot run it. That failure is invisible locally, because the env
+  // var is only ever set in CI. "Not collected by vitest" and "belongs to node:test" are different
+  // questions; VITEST_EXTRA_EXCLUDE is exactly the case that separates them.
+  const vitestExcludedFiles = discovered.filter((f) =>
+    VITEST_EXTRA_EXCLUDE.some((pattern) => f === pattern || f.includes(pattern)),
+  );
+  const nodeTestSuites = discovered.filter(
+    (f) => !(collectedByVitest ?? []).includes(f) && !declaredNotRunFiles.includes(f)
+      && !teachSuites.includes(f) && !vitestExcludedFiles.includes(f)
+  );
+
+  // A NOT_RUN entry naming a file that no longer exists is the modern equivalent of the old
+  // "missing" check (which used to ask the same question of NODE_TEST_SUITES entries).
+  const missing = declaredNotRunFiles.filter((f) => !existsSync(f));
+  const skippedByEnv = nodeTestSuites.filter((f) => NODE_TEST_SKIP.has(f));
+  const present = nodeTestSuites.filter((f) => !NODE_TEST_SKIP.has(f));
   // --test-concurrency=1 is deliberate. `node --test` runs files in PARALLEL by default,
   // and the tire-db-repair suites are heavy SQLite tests (~3 min each standalone). One of
   // them failed inside a parallel proof:all run on 2026-08-12 and then passed 61/61 three
@@ -370,26 +372,25 @@ function main() {
   // than a slow one: people learn to re-run red instead of reading it.
   if (present.length) run(`node:test (${present.length} vitest-excluded suites, serial)`, process.execPath, ["--test", "--test-concurrency=1", ...present]);
 
-  const teachSuites = discoverTestFiles(["e2e/teach"]);
   // Node 20 (the CI runner) does not expand glob patterns for --test; pass the discovered files
   // explicitly so the leg runs identically on every Node version.
   if (teachSuites.length) run(`teach bot suite (${teachSuites.length} files)`, process.execPath, ["--test", ...teachSuites]);
 
-  // SELF-DETECTION: reconcile the real filesystem against what any runner in this file
-  // actually knows about. NODE_TEST_SUITES is used in full here (not just `present`) --
-  // a suite temporarily narrowed out via NODE_TEST_SKIP is still DECLARED, so it must not
-  // be reported as an unknown orphan on top of being reported as narrowed.
-  // VITEST_EXTRA_EXCLUDE entries are DECLARED coverage reductions (reported loudly as NARROWED and
-  // gated by PROOF_ALL_ACCEPT_NARROWED) - the orphan scan must not double-report them as unknown.
-  const declaredNotRun = [...NOT_RUN.flatMap((entry) => entry[3] ?? []), ...VITEST_EXTRA_EXCLUDE];
-  const discovered = discoverTestFiles();
+  // SELF-DETECTION: now a structural invariant check on the computation above, not a "did
+  // someone forget to declare this" check -- nodeTestSuites was already defined as
+  // discovered-minus-vitest-minus-NOT_RUN-minus-teach, so this should always return [].
+  // A suite temporarily narrowed out via NODE_TEST_SKIP (skippedByEnv) is still part of
+  // nodeTestSuites, so it must not be reported as an unknown orphan on top of being
+  // reported as narrowed. VITEST_EXTRA_EXCLUDE entries are DECLARED coverage reductions
+  // (reported loudly as NARROWED and gated by PROOF_ALL_ACCEPT_NARROWED) -- the orphan scan
+  // must not double-report them as unknown either.
   const orphans = collectedByVitest === null
     ? [] // vitest's own leg already failed to produce a report; that failure alone fails the gate below -- don't pile on with a misleading "everything is an orphan" report.
     : findOrphanTestFiles({
         discovered,
         collectedByVitest,
-        executedByNodeTest: [...NODE_TEST_SUITES, ...teachSuites],
-        declaredNotRun,
+        executedByNodeTest: [...nodeTestSuites, ...teachSuites],
+        declaredNotRun: [...declaredNotRunFiles, ...VITEST_EXTRA_EXCLUDE],
       });
   results.push({
     label: "test-file discovery (self-detection scan)",

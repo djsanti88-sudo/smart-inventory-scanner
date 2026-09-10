@@ -1,3 +1,2 @@
-{"ok":true}
-not json
-{"ok":false}
+{"runId":"run-1","status":"completed"}
+{"runId":"run-2","status":"failed"}
